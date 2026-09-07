@@ -1,7 +1,25 @@
-//! Korean War map icon templates (1950–1953) for the IL-2 Korea map.
+//! frontlines.rs — Korean War map icon pack (1950–1953)
 //!
-//! Polylines and markers are authored in WGS84 and projected with `geo`.
-//! Generation clips everything to the user-drawn world AABB.
+//! Assembles the Map-mode `.Group`: dated front polyline, influence
+//! areas, salients, attack arrows, battle marks, and stamped
+//! fighter/ship/ground packs plus user reference groups. Polylines are
+//! authored in WGS84 (`frontlines/timeline.rs`) and projected with
+//! `geo`; generation clips everything to the user-drawn world AABB.
+//! It does not place individual units (`mapfighters` / `mapground` /
+//! `mapshipping` / `pack` / `recon` produce the packs this stamps).
+//!
+//! ## Public API
+//! * Timeline re-exports: `TIMELINE`, `TimelineMark`, `preview_front_xz`,
+//!   `front_xz`, `timeline_index`, `mark_for_battle`
+//! * `enum Season` / `YEARS` / `BATTLES` / `Battle`
+//! * `fn suggested_aircraft` / `snapshot_front_xz` / `timeline_preview` /
+//!   `preview_dots`
+//! * `struct FrontOptions` / `FrontPack` / `fn generate_front`
+//! * `MapFighterPack` / `MapShipPack` / `MapGroundPack` / `MapRefGroup`
+//! * `ARROW_TAIL_WIDTH` / `PLACE_MARGIN` / `AOI_GAP` / `fn attack_arrow_points`
+//!
+//! ## Used by
+//! * ui.rs (Map) — slider, preview strokes, Generate Base Map
 
 use std::path::PathBuf;
 

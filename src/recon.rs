@@ -1,22 +1,60 @@
-//! Random ground-unit recon placements.
+//! recon.rs — Army Generator: random ground-unit packs
 //!
-//! Clones each unit template into its own 10 km square (from 40000, 40000)
-//! so copies are easy to sort by type, then place by hand. At mission begin
-//! an aircraft-style mutex waterfall keeps exactly K copies (from the activate
-//! ratio) by firing the template's Mission Begin targets (`ENABLE / PULSE IN`
-//! → Zone IN). A win deactivates the remaining Outs in that chain so a later
-//! 100% timer cannot also fire. Losers are deleted so unused vehicles and
-//! blocks do not stay in the mission.
+//! Clones each ground-unit template into numbered copies
+//! (`{template} [n]`), parked on per-type 10 km grid squares, and builds
+//! the `Recon Randomizer` group: at Mission Begin an aircraft-style mutex
+//! waterfall (500 ms steps, equal odds — same pattern as `flights.rs`)
+//! lets exactly `wanted_winners(copies, activate %)` copies **per type**
+//! fire the template's own Mission Begin chain (`ENABLE / PULSE IN` →
+//! Zone IN); the win's `Out i` also arms `Keep i` (which cancels the
+//! copy's `Delete unused i`) while `Close_Remaining_Output(s)` cuts the
+//! rest of the chain, and the delayed `Delete unused n` → `Dump unused n`
+//! (MCU_Delete over the copy's Vehicle / Ship / Plane / Block / entities)
+//! removes the losers so unused units do not linger in the mission. Owns
+//! the whole loop around that: copy allocation from influence weights,
+//! template and pack inspection (checkzones, restore-start suggestions,
+//! route / weapon-range hints), recognition of editor-exported packs
+//! (`[n]` / `*n*` name suffixes), parking placed copies onto map spots
+//! (heading, road/rail via `mapnet`), AttackArea snapping, and the rework
+//! ops `strip_randomizer` / `restore_always_on` /
+//! `apply_randomizer(_typed)`. It does NOT author units or edit template
+//! logic — the randomizer only fires whatever the template's `Mission
+//! Begin` would have fired (Subtitle MCUs stay as authored) — and clone
+//! Mission Begins are disconnected because IL-2 fires them even with
+//! `Enabled = 0`, which is enough to break the HUD and End Mission.
 //!
-//! Clone Mission Begins are disconnected: IL-2 often fires them even when
-//! Enabled = 0, which is enough to break the HUD and End Mission. Subtitle
-//! MCUs are left as the template authored them.
+//! ## Public API
+//! * `struct ReconBuild` — build options: `activate_percent`,
+//!   `keep_positions`, `start_delay_s` (hold after Mission Begin),
+//!   `group_delay_s` (default 500 ms between type chains), `spawn_all`.
+//! * `struct ReconInput` — one plan: label, template root, trigger
+//!   `Zone IN` checkzone ids, copy count.
+//! * `fn generate_recon` / `fn generate_recon_ex` — the pack (`Random
+//!   Ground Units N`; `Army N` with `spawn_all`).
+//! * Allocation: `fn allocate_copies` (influence weights,
+//!   largest-remainder), `fn wanted_winners`, `TypeMix` / `fn allocate_mix`
+//!   (activate % per type).
+//! * Inspection: `fn inspect_unit` / `UnitPlanInfo` (+ `McuChoice`,
+//!   `RestoreChoice` / `RestoreKind`, `restore_start_choices`),
+//!   `fn inspect_placed_pack` / `PlacedPackInfo` / `PlacedTypeInfo`,
+//!   `fn looks_like_placed_pack`, `fn placed_copy_count`,
+//!   `fn copy_type_name`, `fn inspect_army_copies` / `ArmyCopyInfo`.
+//! * Parking: `fn park_recon_copies(_headed/_spots)`,
+//!   `fn park_army_group(_spots)`, `fn park_army_mixed`,
+//!   `fn snap_copy_attack_areas`, `fn snap_army_attack_areas`.
+//! * Rework: `fn strip_randomizer`, `fn restore_always_on`,
+//!   `fn apply_randomizer`, `fn apply_randomizer_typed`,
+//!   `fn combine_placed_packs`, `fn group_start_delays`.
+//! * Names: `RANDOMIZER_NAME` (`Recon Randomizer`), `DELAY_MCU_NAME`
+//!   (`Randomizer:DELAY`), `SUGGESTED_ZONE_NAMES` (`Zone IN`).
 //!
-//! After hand-placement, Rework Existing loads the exported pack, keeps
-//! copies where they sit, and rebuilds the randomizer. An optional start
-//! delay holds the first type chain after Mission Begin (so several Random
-//! Units groups in one mission can be staggered). A delay between types
-//! (default 500 ms) then spaces those chains so they do not all fire together.
+//! ## Used by
+//! * ui.rs (Army Generator) — Random Units generation, placed-pack rework
+//!   (export → place by hand → reload → rebuild), army preview parking.
+//! * ui.rs (Map) — map-mode ground packs (`park_army_mixed`,
+//!   `park_army_group_spots`, `inspect_army_copies`, attack-area snapping).
+//! * Consumes `duplicate`, `placement`, `mapnet`, `weapon_range`; clones
+//!   `template.rs` output (needs a `Zone IN` / `ENABLE / PULSE IN` chain).
 
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;

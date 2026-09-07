@@ -1,4 +1,26 @@
-//! Aircraft types, countries, 1950s-style numbers / tail codes / callsigns.
+//! aircraft.rs — fighter identity tables (types, countries, TCode, skills)
+//!
+//! Static Korea-war fighter data used by Fighter Pack and Template Builder.
+//! Owns the seven `AIRCRAFT_TYPES` (id/label/script/model), `COUNTRIES`
+//! (501/502/503/601), 1950s flight numbers and IL-2 TCode glyph encoding,
+//! callsigns (MiG-15bis on 501 → Honcho 12), skill helpers, and
+//! `plane_coalitions_for_country` (checkzones watch the *other* coalition:
+//! 500-series → `[2]`, 600-series → `[1]`). It does NOT own catalog models
+//! (`template` / `model_spec`) or payload/mod tables (`payloads`).
+//!
+//! ## Public API
+//! * `AIRCRAFT_TYPES` / `AircraftType` / `fn aircraft_by_id`
+//! * `COUNTRIES` — (id, label) for the country combo
+//! * `fn flight_number` / `flight_color` / `plane_display_name` — Red 12, …
+//! * `fn encode_tcode` / `encode_tcode_color` — IL-2 TCode / TCodeColor
+//! * `fn callsign_for` / `fn default_skill` / `loose_skill` / `pair_skills`
+//! * `fn plane_coalitions_for_country` — enemy-coalition string for Zone IN/OUT
+//!
+//! ## Used by
+//! * ui.rs (Fighter Pack) — type list, country combo, default skills, numbers
+//! * flights.rs — identity written onto cloned planes
+//! * template.rs — plane display names / TCode when a catalog plane is a fighter
+//! * frontlines.rs — `suggested_aircraft` looks up `AircraftType` by id
 
 pub struct AircraftType {
     pub id: &'static str,

@@ -1,7 +1,48 @@
-//! Schema-agnostic nom parser for IL-2 .Group nested-bracket files.
+//! # parser.rs — text → `Il2Entity` (nom, schema-agnostic)
 //!
-//! Unrecognized keys are stored as string properties. The parser never
-//! requires a known schema and does not use regular expressions.
+//! Nom-based parser for IL-2 `.Group` nested-bracket files. No regex, no
+//! required schema: block types and keys it does not recognize are kept
+//! verbatim as string properties, and numeric values are kept as text, so
+//! parse + serialize round-trips are lossless for any mission-editor file.
+//!
+//! ## Grammar (per file)
+//! * A block is `Ident { items }`; an item is a property, a nested block, or
+//!   a list item.
+//! * Properties: `Key = Value;` where Key is an identifier **or an integer**
+//!   (e.g. `Damaged` table rows like `-1 = 1;`) and Value is a quoted string,
+//!   an integer array `[1, 2]`, or bare text up to `;` (clock times
+//!   `13:0:0`, dotted dates `1.6.1951`, plain numbers).
+//! * List items: a quoted string terminated by `;` (e.g. `Trailers`) or an
+//!   unquoted `x, y;` coordinate pair (`MCU_TR_InfluenceArea.Boundary`).
+//!   Stored as properties with an empty key.
+//! * Files may start with a UTF-8 BOM; it is stripped.
+//!
+//! ## Value handling
+//! * Numeric values stay text (`parse_float` returns the literal) so
+//!   serialization reproduces original formatting (`1000.000` stays
+//!   `1000.000`).
+//! * `Index`, `Targets`, `Objects` are additionally lifted into typed fields
+//!   on `Il2Entity` (`index: Option<i32>`, `targets` / `objects: Vec<i32>`)
+//!   while remaining in the raw `properties` list.
+//!
+//! ## Public API
+//! * `parse_group_file` — a complete `.Group` file: exactly one top-level
+//!   block and no trailing garbage.
+//! * `parse_il2_document` — one or many top-level blocks (editor exports);
+//!   a single block is returned as-is, multiple blocks are wrapped in a
+//!   synthetic `Group` named "Airfield".
+//! * `parse_entity` — a single top-level block from an in-memory string.
+//! * Token parsers: `parse_identifier`, `parse_integer`, `parse_float`,
+//!   `parse_integer_array`.
+//!
+//! ## Used by
+//! * ui.rs — every load path (catalogs, fighter/bomber/recon templates,
+//!   reference and army groups).
+//! * recon / bombers / airfield — the `inspect_*` families operate on the
+//!   parsed root.
+//!
+//! Unit-tested with synthetic blocks and real `TemplateExamples/` fixtures.
+
 
 use nom::branch::alt;
 use nom::bytes::complete::take_till;

@@ -1,8 +1,21 @@
-//! Load Korea map catalog points from `References/` (and optional `templates/`).
+//! mapload.rs — Korea airfield/building points from `References/`
 //!
-//! Airfields and buildings come from `MCU_Waypoint` entries in
-//! `landscape_Korea_FullScene.Group` (MARKS groups) plus standalone
-//! airfield `.Group` files.
+//! Reads `MCU_Waypoint` entries in `landscape_Korea_FullScene.Group`
+//! MARKS groups (AIRFIELDS, CITIES, …) plus standalone `*AFB*` `.Group`
+//! files under `References/` (and optional `templates/`). Compiled and
+//! unit-tested; **not yet called from `ui.rs`**. Map labels currently
+//! use `geo::cities_on_map`; user-picked reference groups go through
+//! `frontlines::MapRefGroup`.
+//!
+//! ## Public API
+//! * `enum PointKind` — Airfield / Building
+//! * `struct MapPoint` / `struct MapCatalog`
+//! * `fn template_dirs` — existing `References/` and `templates/` folders
+//! * `fn load_catalog` / `fn load_catalog_from_dirs`
+//!
+//! ## Used by
+//! * Tests in this file (K13 AFB, FullScene MARKS)
+//! * Not wired into ui.rs as of the initial release
 
 use std::path::{Path, PathBuf};
 

@@ -1,4 +1,46 @@
-/// Schema-agnostic IL-2 .Group AST node.
+//! # ast.rs — `Il2Entity`: the schema-agnostic .Group AST
+//!
+//! The in-memory tree that every loaded or generated `.Group` file becomes.
+//! `parser` builds it, `serialize` emits it, and every generation module
+//! (template, pack, flights, bombers, recon, frontlines, airfield,
+//! duplicate) transforms it. Prefer the helpers below over writing raw
+//! property strings by hand.
+//!
+//! ## Dual representation (important)
+//! * `properties: Vec<(String, String)>` is the source of truth for
+//!   serialization: raw key/value text in file order, with original quoting
+//!   and decimal precision. `property(key)` returns the raw value (quotes
+//!   included); `name()` returns `Name` with quotes stripped.
+//! * `index`, `targets`, `objects` are typed mirrors of the `Index` /
+//!   `Targets` / `Objects` properties so the generation modules can
+//!   reallocate indices and reconnect MCU links without re-parsing text.
+//!   Mutating a typed field directly leaves the raw property stale — always
+//!   go through `set_targets` / `set_objects` / `append_target` /
+//!   `replace_target_id`, which keep both copies in sync.
+//!
+//! ## Formatting rules
+//! * Position writes (`translate_xz`, `set_ypos` here; `mapnet`'s
+//!   `set_xz` / `set_yori_abs` helpers) preserve the decimal precision of
+//!   the value they replace.
+//! * `set_existing_property` updates a key only if the prototype already
+//!   has it — ground units must not gain plane-only keys such as
+//!   `AiRTBDecision` / `StartType`.
+//! * `format_int_array` renders link arrays as `[1,2]` (empty is `[]`),
+//!   matching the editor's own format.
+//!
+//! ## Traversal & stats
+//! * `for_each` / `for_each_mut` — pre-order over the subtree (take `&mut F`
+//!   so the same closure can recurse).
+//! * `find_by_name` / `find_by_name_mut` / `find_all_by_name` — deep `Name`
+//!   lookups.
+//! * `max_index`, `collect_indexes`, `count_block_type` — subtree stats.
+//! * `pos_xz` / `first_xz` — this node's, or the first descendant's, X/Z
+//!   (group wrappers often carry none).
+//!
+//! ## Used by
+//! * parser.rs (build) and serialize.rs (emit) — the only I/O endpoints.
+//! * Every generation module, and the ui.rs slot structs (loaded files are
+//!   held as `Il2Entity` payloads).
 ///
 /// Unrecognized keys are stored as string properties and never cause a parse
 /// failure. MCU link arrays (`Targets`, `Objects`) and `Index` are lifted into

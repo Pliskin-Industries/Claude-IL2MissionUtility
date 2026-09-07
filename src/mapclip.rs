@@ -1,10 +1,27 @@
-//! Axis-aligned bounding box clipping for Korea map icons.
+//! mapclip.rs — AABB clipping and front/influence geometry
 //!
-//! Game axes: **XPos is north**, **ZPos is east**. In `geo_types` that is
-//! `Coord { x: XPos, y: ZPos }` so a `Rect` is an AABB in mission space.
+//! Map-editor math in mission X/Z. Game axes: **XPos is north**, **ZPos
+//! is east**; `geo` uses `Coord { x: XPos, y: ZPos }`. Owns the area of
+//! operations (`WorldAabb`), polyline/ring clipping, influence polygons
+//! (optionally stretched, minus salients), salient patches, front-band
+//! filters, and self-intersection tests. Polygon intersection uses
+//! `geo::BooleanOps`. It does not place units or write `.Group` icons
+//! (`frontlines` consumes these shapes).
 //!
-//! Polygon intersection uses `geo::BooleanOps` (the maintained successor of
-//! `geo-booleanop` / Martinez–Rueda).
+//! ## Public API
+//! * `struct WorldAabb` — `full_map`, `from_corners`, contains/clip helpers
+//! * Clip: `clip_polyline_to_aabb`, `clip_ring_to_aabb`,
+//!   `clip_linestring_to_rect`, `extend_front_to_aabb(_ex)`
+//! * Influence: `influence_polygons(_in/_stretched)`,
+//!   `influence_minus_salients`, `influence_fill_quads(_ex)`
+//! * Salients: `SalientPatch`, `apply_salients`, `detached_salient_patch`
+//! * Front: `snap_to_front`, `point_north_of_front`, `FRONT_PLACE_BAND`,
+//!   `can_extend_salient`, `can_extend_west_east`, `prepare_front`
+//! * `stroke_self_intersects` / `ring_self_intersects`
+//!
+//! ## Used by
+//! * ui.rs (Map) — drawing, salient/front edit constraints
+//! * frontlines.rs, mapfighters.rs, mapground.rs, mapshipping.rs
 
 use geo::{BooleanOps, Coord, LineString, Polygon, Rect};
 use geo_types::MultiPolygon;

@@ -1,9 +1,22 @@
-//! IL-2 group language sidecars (`.eng`, `.chs`, …).
+//! locale.rs — IL-2 group language sidecars (`.eng`, `.chs`, …)
 //!
-//! MCU_Icon / MCU_TR_Subtitle store numeric LC indexes. The actual strings live
-//! in a sidecar next to the `.Group`. Those files are UTF-16 LE with a BOM;
-//! the mission editor will not invent them on resave, so generated groups must
-//! carry the tables with them.
+//! MCU_Icon / MCU_TR_Subtitle store numeric LC indexes; the strings live
+//! in a sidecar next to the `.Group`. Files are UTF-16 LE with a BOM
+//! (UTF-16 BE and UTF-8 BOM are accepted on read). The mission editor
+//! will not invent them on resave, so every generate/export path that
+//! carries labels must write the tables. This module does not emit
+//! `.Group` text (`serialize` does).
+//!
+//! ## Public API
+//! * `LANG_EXTS` — eng, chs, fra, ger, rus, spa
+//! * `struct LocaleTable` — get/insert/merge/overlay/max_id
+//! * `fn parse_locale` / `fn serialize_locale`
+//! * `fn decode_locale_bytes` / `fn encode_locale_utf16le`
+//! * `fn has_sidecars` / `fn merge_template_sidecars` / `fn write_sidecars`
+//!
+//! ## Used by
+//! * ui.rs — `save_with_sidecars` and Map base-map overlay
+//! * frontlines.rs — generated icon labels merged into the output table
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

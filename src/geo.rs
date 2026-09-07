@@ -1,7 +1,24 @@
-//! Two-point Korea map projection (lat/lon → XPos/ZPos).
+//! geo.rs — Korea map geography (projection, cities, waterways, Yalu)
 //!
-//! A line that varies `XPos` runs north–south, so **XPos is north** and
-//! **ZPos is east**.
+//! Two-point Seoul–Sinuiju projection from WGS84 onto mission X/Z, plus
+//! the labels Map mode draws on the JPEG. A line that varies `XPos` runs
+//! north–south, so **XPos is north** and **ZPos is east**. Full map square
+//! is `MAP_MIN`/`MAP_MAX` = 0…499_200 (distinct from the parking grid in
+//! `placement`). City markers use hardcoded game X/Z so they sit on the
+//! map image; they are not re-projected. It does not clip strokes
+//! (`mapclip`) or place units (`mapfighters` / `mapground` / `mapshipping`).
+//!
+//! ## Public API
+//! * `MAP_MIN` / `MAP_MAX` — full Korea square
+//! * `fn latlon_to_xz` / `fn on_map`
+//! * `fn parallel_38_xz` / `fn parallel_line`
+//! * `MAJOR_CITIES` / `RefCity` / `fn cities_on_map`
+//! * `MAJOR_WATERWAYS` / `RefWaterway`
+//! * `YALU_LATLON` / `fn yalu_river_xz` / `fn yalu_x_at_z`
+//!
+//! ## Used by
+//! * ui.rs (Map) — city/water labels, battle lat/lon, map bounds
+//! * frontlines.rs, mapclip.rs, watermap.rs, mapground.rs, mapshipping.rs
 
 pub const MAP_MIN: f64 = 0.0;
 pub const MAP_MAX: f64 = 499_200.0;

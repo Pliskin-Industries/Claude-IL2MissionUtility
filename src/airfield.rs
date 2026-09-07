@@ -1,11 +1,22 @@
-//! Strip Freeflight / Task Editor player logic from an airfield group so it
-//! can be used in multiplayer.
+//! airfield.rs — strip Freeflight / Task Editor player logic for multiplayer
 //!
-//! IL-2 object-links a player plane into nearby MCU_CheckZone `Objects` lists
-//! (proximity). Those zones stay; the player id is removed and
-//! `PlaneCoalitions` is set to the friendly coalition (Western `[2]` for USA).
-//! The player aircraft, its entity, and the single-player graph hanging off
-//! them (takeoff, music, objectives, tiny CZ_PLAYER_OUT bubbles) are deleted.
+//! Takes an airfield exported from `_gen.mission` (or a helper-wrapped
+//! group) and removes the single-player object graph so the field works in
+//! a multiplayer mission. IL-2 object-links a player plane into nearby
+//! `MCU_CheckZone` `Objects` lists (proximity); those zones stay, the
+//! player id is dropped, and `PlaneCoalitions` is set to the friendly
+//! coalition. The player aircraft, its entity, and everything hanging off
+//! them (takeoff, music, objectives, tiny `CZ_PLAYER_OUT` bubbles) are
+//! deleted. It does not move the airfield or rewrite AI traffic.
+//!
+//! ## Public API
+//! * `EASTERN_PLANE_COALITIONS` (`[1]`) / `WESTERN_PLANE_COALITIONS` (`[2]`)
+//! * `struct AirfieldInfo` / `fn inspect_airfield` — preview before export
+//! * `struct PlayerPlaneInfo` — name + country of each player plane
+//! * `struct CleanReport` / `fn clean_airfield` — mutate in place
+//!
+//! ## Used by
+//! * ui.rs (Airfield) — inspect on load, clean + serialize on Export File
 
 use std::collections::{HashMap, HashSet};
 

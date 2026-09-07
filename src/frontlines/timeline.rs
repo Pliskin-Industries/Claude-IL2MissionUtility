@@ -1,7 +1,21 @@
-//! Dated Korean War front polylines for the Map slider.
+//! timeline.rs — dated Korean War front polylines for the Map slider
 //!
-//! Spacing is not uniform: weekly (or tighter) while the line is racing in 1950,
-//! monthly through mid-1951, then seasonal once the MLR freezes.
+//! Submodule of `frontlines`. Spacing is not uniform: weekly (or tighter)
+//! while the line is racing in 1950, monthly through mid-1951, then
+//! seasonal once the MLR freezes. Each `TimelineMark` is WGS84 vertices
+//! plus an optional UN east-coast pocket ring; `front_xz` projects via
+//! `geo::latlon_to_xz`. It does not clip to an AABB or paint icons
+//! (`frontlines::generate_front` / `mapclip` do that).
+//!
+//! ## Public API
+//! * `struct TimelineMark` — date, season, title/note, front, pocket
+//! * `TIMELINE` — the dated sequence
+//! * `fn timeline_index` / `fn mark_for_battle`
+//! * `fn front_xz` / `fn pocket_xz`
+//! * `fn preview_front_xz` / `fn preview_pocket_xz` — slider interpolation
+//!
+//! ## Used by
+//! * frontlines.rs (re-exported to ui.rs Map mode)
 
 use super::Season;
 use crate::geo::latlon_to_xz;

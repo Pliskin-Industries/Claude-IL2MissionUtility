@@ -1,4 +1,19 @@
-//! Place randomizer ship groups on water inside one coalition's AO.
+//! mapshipping.rs — park ship groups on coalition water
+//!
+//! Samples `watermap` water cells inside one coalition's influence area
+//! (leftovers go to the nearest friendly water outside the AABB). Aims
+//! headings at hashed objectives or randomizes them. It does not clone
+//! templates — `recon` parks copies onto `ShipSpot`s.
+//!
+//! ## Public API
+//! * `MAX_SHIPS` (64) / `SHIP_SPACING` (8 km) / `START_DELAY_S` /
+//!   `GROUP_DELAY_S`
+//! * `struct ShipSpot` / `struct MapShipLayout`
+//!   (`randomize_headings`, `aim_at_hashed_objectives`)
+//! * `fn place_ships` — `PlaceOpts` front-band + occupied filter
+//!
+//! ## Used by
+//! * ui.rs (Map) — ship preview pins and army mixed parking
 
 use geo::{Contains, Point};
 

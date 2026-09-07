@@ -1,4 +1,18 @@
-//! In-app user manual. Source of truth is `USER_MANUAL.md` at the repo root.
+//! help.rs — detached Help window (USER_MANUAL.md by topic)
+//!
+//! The only egui code outside `ui.rs`. Embeds `USER_MANUAL.md`, splits it
+//! on `##` headings, and opens a decorated native viewport with a topic
+//! combo. Owns no AST and no generation — it only displays the manual.
+//!
+//! ## Public API
+//! * `MANUAL` — the raw markdown
+//! * `enum HelpTopic` — Overview, each mode, Language, Import,
+//!   Troubleshooting (`title`, `ALL`)
+//! * `fn show_window` — immediate viewport; no-op while `open` is false
+//! * `fn section_for` — markdown slice for a topic
+//!
+//! ## Used by
+//! * ui.rs — Help buttons on every mode set `help_open` + `help_topic`
 
 use eframe::egui::{self, Color32, RichText, ViewportBuilder, ViewportId};
 

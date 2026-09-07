@@ -1,12 +1,21 @@
-//! Packed Korea terrain mask (`assets/combined_terrain.bin`).
+//! watermap.rs — packed Korea terrain mask (`assets/combined_terrain.bin`)
 //!
-//! File layout: `WMAP` + width:u32 LE + height:u32 LE + width*height bytes.
-//! Pixel (0,0) is the north-west corner of the mission square.
+//! File layout: `WMAP` + width:u32 LE + height:u32 LE + width×height
+//! bytes. Pixel (0,0) is the north-west corner of the mission square
+//! (`geo::MAP_MIN`/`MAP_MAX`). Each byte is a bitfield: water `& 1`,
+//! road `& 2` (reserved), open `& 4`. `WaterMap` is a historical alias
+//! for `TerrainMap`. It does not place units — ship/ground code queries
+//! `is_water_xz` / `is_open_xz`.
 //!
-//! Each byte is a bitfield:
-//! - water: `packed & 1 != 0`
-//! - road:  `packed & 2 != 0` (reserved for later)
-//! - open:  `packed & 4 != 0`
+//! ## Public API
+//! * `FLAG_WATER` / `FLAG_ROAD` / `FLAG_OPEN`
+//! * `struct TerrainMap` (`from_bytes`, `builtin`, cell / xz queries)
+//! * `type WaterMap = TerrainMap`
+//!
+//! ## Used by
+//! * ui.rs (Map) — `WaterMap::builtin()` for ship/ground preview
+//! * mapshipping.rs — stay in water
+//! * mapground.rs — stay on dry open land
 
 use crate::geo::{MAP_MAX, MAP_MIN};
 

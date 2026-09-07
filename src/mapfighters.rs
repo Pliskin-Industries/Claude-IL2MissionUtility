@@ -1,4 +1,21 @@
-//! Place fighter packs on the Korea map inside one coalition's influence area.
+//! mapfighters.rs — park fighter packs in one coalition's influence area
+//!
+//! Checkerboard placement of NodeGates packs inside the eastern or western
+//! AO (optionally filling the box). Caps at `MAX_PACKS` (8). Picks RTB
+//! corners on the friendly-rear edge of the AABB and maps a GUI country
+//! setpoint onto 500-series (east) or 601 (NATO). It does not clone
+//! groups or rebuild NodeGates — `pack::generate_pack_at` consumes the
+//! spots.
+//!
+//! ## Public API
+//! * `MAX_PACKS` — 8
+//! * `struct FighterSpot` / `struct MapFighterLayout`
+//! * `fn place_in_coalition` — waves × groups, spacing, optional AO fill
+//! * `fn rtb_ao_point` — rear-corner RTB (east parks north, NATO south)
+//! * `fn country_for_coalition` — 500-series or 501 east; 601 west
+//!
+//! ## Used by
+//! * ui.rs (Map) — fighter-pack preview pins and generate_pack_at positions
 
 use geo::{BoundingRect, Contains, Coord, LineString, MultiPolygon, Point, Polygon};
 

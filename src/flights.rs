@@ -1,5 +1,35 @@
-//! Rebuild Group 1's airplanes, randomizer, pairing, and related MCU links
-//! from GUI settings. The rest of the pack logic (zones, NodeGates) stays.
+//! flights.rs — fighter flight configuration
+//!
+//! Applies GUI flight composition to **Group 1** of a fighter-pack
+//! template in place: rebuilds `Airplanes` (cloned plane +
+//! `MCU_TR_Entity` pairs with identity, TCode and AILevel; per-seat XZ
+//! offsets; low-cover band 500–1500 m scaled by max altitude; +2000 m
+//! high-cover pair on 3/4-ships; 25–50 m lead/wing stacks), the
+//! equal-odds 500 ms randomizer waterfall, per-flight `Spawn` /
+//! `DeathCount` / `SpawnCount` MCUs, wing-cover MCUs chained off
+//! `MORE ORDERS`, and rewires `Logics` (attack areas, delete/deactivate
+//! targets, cooldown / reinforcement / delete-order timers, checkzone
+//! coalitions by country) and `RTB - 1`. Flight sizes cycle
+//! `max, max-1, …, 1`, so max 4 over 4 flights yields 4-, 3-, 2-, 1-ship
+//! elements rather than four 4-ships. Owns nothing outside Group 1 and
+//! `RTB - 1` — zones, NodeGates and the other groups are left for
+//! `pack.rs` to clone; it does not pick pack size or positions
+//! (`pack::generate_pack` / `generate_pack_at` do).
+//!
+//! ## Public API
+//! * `struct FlightConfig` — GUI inputs: flight count (clamped 1–10),
+//!   max per flight (clamped 1–8), aircraft `type_ids` + recommended
+//!   `type_skills` (0–4), country, cooldown / reinforcement /
+//!   delete-order seconds, altitude range. `Default`: 4 flights, max 4,
+//!   mig15bis + la11 (skills 3/2), country 501, 180/300/60 s,
+//!   1000–5500 m.
+//! * `fn configure_aircraft` — apply the config to a template root in place.
+//! * `fn flight_sizes` — size per flight (`max - (i % max)`; 4/4 → 4,3,2,1).
+//!
+//! ## Used by
+//! * ui.rs (Fighter Pack) — writes settings into the loaded/builtin template before pack generation; `flight_sizes` drives the UI summary.
+//! * ui.rs (Map) — flight packs placed on the map.
+
 
 use crate::aircraft::{
     aircraft_by_id, callsign_for, encode_tcode, encode_tcode_color, flight_color,

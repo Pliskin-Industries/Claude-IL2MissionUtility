@@ -1,4 +1,44 @@
-//! Serialize an `Il2Entity` AST back to IL-2 .Group text.
+//! # serialize.rs — `Il2Entity` → .Group text
+//!
+//! The only writer in the crate. Emits an `Il2Entity` tree in the IL-2
+//! editor's nested-bracket format: CRLF line endings, 2-space indent,
+//! `Key = Value;` properties. Every file the app saves (templates, fighter
+//! packs, exclusive-activation packs, army packs, base maps, cleaned
+//! airfields) goes through `serialize_group`.
+//!
+//! ## Formatting
+//! * CRLF (`\r\n`) and 2-space indent, matching the editor.
+//! * Sibling child blocks are separated by a blank line (each child's `}`
+//!   is followed by a blank line and an indented trailing-whitespace line —
+//!   the parser ignores whitespace; don't "clean it up" without re-running
+//!   the round-trip tests).
+//!
+//! ## Property emission (the dual-representation payoff)
+//! * `Index`, `Targets`, `Objects` are emitted from the **typed fields** on
+//!   `Il2Entity` (see ast.rs), so index reallocation and MCU link
+//!   reconnection done through the AST — e.g. by `duplicate.rs` — reach the
+//!   file without touching the raw property text.
+//! * `Targets`/`Objects` are always re-rendered compact (`[43590,43591]`,
+//!   empty `[]`) via `format_int_array`.
+//! * Empty-key properties (parser list items: `Trailers` script paths,
+//!   influence-area `Boundary` coordinate pairs) are emitted bare: `value;`.
+//! * Every other property is emitted verbatim — original quoting and
+//!   decimal precision preserved. That is what makes parse → mutate →
+//!   serialize lossless.
+//!
+//! ## Public API
+//! * `serialize_group(&Il2Entity) -> String` — the whole tree.
+//!
+//! ## Used by
+//! * ui.rs — every Generate/Export path (via `save_with_sidecars`, or a
+//!   direct `std::fs::write` for base maps and fighter packs).
+//! * The generation modules (template, pack, flights, bombers, recon,
+//!   frontlines, airfield) build the tree this writes.
+//!
+//! Round-trip tested with synthetic blocks and real `TemplateExamples/`
+//! fixtures, including the full parse → duplicate → override → serialize
+//! pipeline.
+
 
 use crate::ast::Il2Entity;
 

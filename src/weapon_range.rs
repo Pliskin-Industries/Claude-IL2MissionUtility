@@ -1,6 +1,26 @@
-//! Korea-war max / max-effective ranges for catalog systems (metres).
-//! Used to park groups within reach of a map objective and to size ground
-//! AttackArea engage radii.
+//! weapon_range.rs — catalog weapon ranges and army-unit classification
+//!
+//! Metres keyed by script type-id (artillery max range, armor/MG max
+//! effective). Used to size Template Builder AttackArea radii and to
+//! park Map/Army groups within reach of an objective. Classification
+//! (`ArmyUnitKind`) is inferred from the group (ships, trains, gun
+//! range, AttackArea), not from the UI icon. It does not write orders
+//! (`template`) or pick map spots (`mapground`).
+//!
+//! ## Public API
+//! * `UNKNOWN_ARTILLERY_M` (15 km) / `UNKNOWN_ARMOR_M` (2 km) /
+//!   `ARTILLERY_RANGE_MIN_M` (4.5 km)
+//! * `enum ArmyUnitKind` / `fn classify_army_unit`
+//! * `fn range_for_script` / `fn group_weapon_range`
+//! * `fn attack_area_radius_m` / `suggested_attack_area_m` /
+//!   `shortest_range_m` / `area_exceeds_range`
+//! * `fn is_ground_attack_area` / `group_has_ground_attack_area`
+//! * `fn snap_ground_attack_areas` — move ground AttackAreas onto X/Z
+//!
+//! ## Used by
+//! * template.rs — suggested AttackArea size per seat
+//! * ui.rs (Template, Map, Army) — range warnings, unit-kind labels
+//! * recon.rs / mapground.rs — classify + snap on park
 
 use crate::ast::Il2Entity;
 

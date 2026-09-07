@@ -1,4 +1,26 @@
-//! Park generated copies on a compact square grid from the lower left.
+//! placement.rs — parking grid and shared map-placement helpers
+//!
+//! Two jobs: (1) park generated copies on a compact 10 km square grid
+//! from the lower-left of the *usable* map (`MAP_MIN`/`MAP_MAX` =
+//! 40_000…470_000 — not `geo`'s full 0…499_200 square); (2) helpers
+//! the ship/ground/route placers share (`PlaceOpts`, headings, seeded
+//! picks, heading a whole group). Visual yaw (`apply_group_heading`)
+//! rotates objects with a `Model` about their centroid; timers and
+//! checkzones stay put. It does not clone trees (`duplicate`) or pick
+//! land vs water (`watermap` / `mapnet`).
+//!
+//! ## Public API
+//! * Grid: `MAP_MIN` / `MAP_MAX` / `GRID_STEP`, `grid_side`, `grid_xz(_at)`,
+//!   `template_square_origins`, `move_to_grid(_at)`, `move_anchor_to`
+//! * `fn apply_group_heading` — yaw visuals, 0 = north / +X
+//! * `struct PlaceOpts` / `UNIT_PLACE_SPACING` (4.5 km)
+//! * `fn heading_toward` / `heading_toward_nearest`
+//! * `fn mix_index` / `hashed_pick` / `subsample_favoring` / `subsample_spaced`
+//!
+//! ## Used by
+//! * pack.rs, bombers.rs, recon.rs — parking generated copies
+//! * ui.rs (Map) — `PlaceOpts` passed into ship/ground placement
+//! * mapground.rs, mapshipping.rs, mapnet.rs — headings and seeded picks
 
 use std::collections::HashSet;
 

@@ -1,7 +1,39 @@
-//! Fighter-pack generation: duplicate **Group 1** and rebuild **NodeGates**.
+//! pack.rs — fighter pack generation
 //!
-//! Aircraft composition is applied to Group 1 first (`configure_aircraft`);
-//! this module then clones that group N times and relinks NodeGates.
+//! Clones **Group 1** (plus its `RTB - 1` waypoint) N times from a
+//! configured fighter-pack template and rebuilds the `NodeGates` group so
+//! every copy is wired the way the shipped 3-pack and 5-pack are: each
+//! group gets a 6-timer cell (`nIN/OUT - ENABLE/DISABLE` plus two fanout
+//! timers named `n`), the group's Zone IN/OUT point at its own cell's OUT
+//! timers, the cell's IN timers point at the group's `Enable Spawner` /
+//! `ENABLE / PULSE IN` and `Delete Orders` / `Disable Spawner`, and the
+//! fanouts pulse the *other* cells' IN timers (mutual exclusion). Owns
+//! group/waypoint/gate cloning, fresh index allocation (from
+//! `root.max_index() + 1` through `duplicate::duplicate_template`), and
+//! parking — map grid or explicit positions — translating each group's
+//! tree, its RTB waypoint and its gate cell by one shared delta. It does
+//! NOT configure aircraft (`flights::configure_aircraft` runs first on
+//! Group 1) and leaves everything outside the pack root alone.
+//!
+//! ## Public API
+//! * `fn builtin_template` — parse the bundled
+//!   `Eastern_Fighters_Random_3pack_V6.Group` fallback (no template loaded).
+//! * `fn generate_pack` — N-pack from Group 1, groups parked on the map grid.
+//! * `fn generate_pack_at` — same, with each group's Zone IN parked on
+//!   `positions`; caller supplies the pack name.
+//! * `fn park_rtbs` — move each `RTB - N` waypoint onto `targets[n-1]`.
+//! * `fn inspect_pack` / `PackInfo` — summarize a loaded template (group
+//!   count, plane count, spawn choices, NodeGates). Tests only;
+//!   `#[allow(dead_code)]` from ui.rs's point of view.
+//! * `fn zone_in_radius` — Group 1 Zone IN radius (metres, default 16 km).
+//! * `fn group_anchor_xz` — world X/Z of a group's Zone IN (internal
+//!   parking; not called from ui.rs).
+//!
+//! ## Used by
+//! * ui.rs (Fighter Pack) — generate/export a linked pack from the configured template.
+//! * ui.rs (Map) — fighter packs at explicit positions (`generate_pack_at` + `park_rtbs`).
+//! * flights.rs tests — `builtin_template` + `generate_pack` round-trips.
+
 
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;

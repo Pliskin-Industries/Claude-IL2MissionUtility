@@ -1,4 +1,22 @@
-//! Place randomizer ground groups on dry open terrain inside one coalition's AO.
+//! mapground.rs — park ground groups on dry open terrain (or road/rail)
+//!
+//! Places Army Generator copies inside one coalition's influence area:
+//! armor/supply/artillery on open land (`watermap` open cells), trains
+//! and perfect columns on `mapnet` lines. Hashes each group toward an
+//! objective (AttackArea later snaps there) and records soft placement
+//! issues for the status line. It does not clone templates (`recon`
+//! parks the copies onto these spots).
+//!
+//! ## Public API
+//! * `MAX_GROUND` / `GROUND_SPACING` / `START_DELAY_S` / `GROUP_DELAY_S`
+//! * `ARTY_OBJECTIVE_RADIUS` — unknown-artillery fallback (15 km)
+//! * `enum GroundKind` / `struct GroundJob` / `struct GroundSpot`
+//! * `struct MapGroundLayout`
+//! * `fn place_ground` / `fn place_ground_jobs`
+//! * `fn numbered_ground_issues` — 1-based warnings for the UI
+//!
+//! ## Used by
+//! * ui.rs (Map, Army Generator) — preview pins and recon parking spots
 
 use geo::{Contains, Point};
 

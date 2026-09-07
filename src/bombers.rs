@@ -1,12 +1,26 @@
-//! Exclusive activation: link templates so only one plan can trigger at a time.
+//! bombers.rs — Exclusive Activation: only one plan can trigger at a time
 //!
-//! Each loaded `.Group` is cloned as its own plan. Trigger checkzones
-//! (`Zone IN`, `MISSION START`, or every checkzone except end/out) close
-//! the other plans through NodeGates. When the end timer fires — `END`,
-//! `MISSION END`, or a timer that pulses `MCU_Delete` / `MCU_Deactivate` on
-//! the template's units — the remaining plans' zones reopen. A good example
-//! is preplanned bomber flights. Multiple `Zone IN` MCUs in one template
-//! (B-29 corridor) count as a single plan.
+//! Clones each loaded `.Group` as its own plan and wires a NodeGates mutex
+//! so one plan's trigger checkzones close the others; the chosen end timer
+//! (`END`, `MISSION END`, or a timer that pulses Delete/Deactivate on the
+//! template's units) reopens the remaining zones. Multiple `Zone IN` MCUs
+//! in one template (B-29 corridor) count as a single plan. It does not
+//! author unit logic — templates come from Template Builder — and it does
+//! not configure aircraft (`flights` / Fighter Pack are a different mutex).
+//!
+//! ## Public API
+//! * `SUGGESTED_TRIGGER_NAMES` / `SUGGESTED_END_NAMES`
+//! * `struct BomberPlanInfo` / `fn inspect_plan` — checkzones, timers,
+//!   suggestions, cleanup/trigger warnings
+//! * `struct BomberInput` — one plan fed to the linker
+//! * `fn looks_like_exclusive_pack` / `fn extract_exclusive_plans`
+//! * `fn link_bomber_plans` / `fn link_bomber_plans_with` — `keep_positions`
+//!   skips the 10 km parking grid
+//! * `fn trigger_zone_warning` / `fn cleanup_coverage_warning`
+//!
+//! ## Used by
+//! * ui.rs (Exclusive Activation) — inspect on load, link on Generate;
+//!   extract + re-link when the user reloads an already-generated pack
 
 use std::collections::{HashMap, HashSet};
 

@@ -1,4 +1,24 @@
-//! Template duplication: unique Index reallocation and MCU pointer reconnection.
+//! duplicate.rs — unique Index reallocation and MCU pointer reconnection
+//!
+//! The cloner every generator uses. Copies an `Il2Entity` tree under a
+//! fresh Index range and rewires internal MCU links through the typed
+//! `targets`/`objects` fields plus `LinkTrId` / `MisObjID` / `TarId` /
+//! `CmdId`. IDs not in the old→new map are left alone so links that point
+//! *outside* the clone stay intact. It does not park copies (`placement`)
+//! and does not invent NodeGates (`pack` / `bombers` do that after clone).
+//!
+//! ## Public API
+//! * `fn reallocate_ids` — clone + sequential Indexes; returns old→new map
+//! * `fn reconnect_pointers` — apply that map to link arrays and ID keys
+//! * `fn duplicate_template` — reallocate then reconnect
+//! * `fn generate_groups` — N copies (first keeps original Indexes); tests
+//! * `fn apply_overrides` — `Country` on Plane/Vehicle/Ship; Script/Model
+//!   on Plane (ui.rs country combo after fighter/map generation)
+//!
+//! ## Used by
+//! * pack.rs, bombers.rs, recon.rs, template.rs, flights.rs, frontlines.rs
+//! * ui.rs — `apply_overrides` after generating a fighter pack or map pack
+//! * serialize.rs tests — parse → duplicate → override → serialize pipeline
 
 use std::collections::HashMap;
 
