@@ -39,7 +39,9 @@ Right now there are 6 tabs. Each one does one job:
     Load reference groups to import scenery blocks or specific airbases.  The AO box will automatically clip out the areas not in the zone with a 10km buffer. 
     Export → a base-map .group file with a defined front and reference units. Drop the group into the editor and build your mission on top of it.
 
-5. Template Builder — make your own unit group assign it orders
+   ![map.png](map.png)
+
+6. Template Builder — make your own unit group assign it orders
 
     Pick a unit type (plane / tank / train / ship) and set it up: seats, orders, waypoints, trigger distance.
     It generates one self-contained group: when units get close it triggers, spawns them, sends them on their orders, and cleans up after itself on zone out.
@@ -47,6 +49,8 @@ Right now there are 6 tabs. Each one does one job:
     Export → one template .Group you can reuse as you see fit.
 
 This mode was initially designed to take the work out of creating the flip-flop check zone logic, but it has evolved into a fairly nice way to assign orders in a logical tree like format.  (for example, formation -> waypoint -> attack -> mission complete).
+
+ ![template.png](template.png)
 
 6. Airfield — make a single-player airfield multiplayer-ready
 
