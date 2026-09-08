@@ -1,7 +1,53 @@
-//! Korea road and railroad polylines (mission-editor SVG) in world X/Z.
+//! # mapnet.rs — Korea road & railroad network
+//!
+//! Korea road and railroad polylines (mission-editor SVG) in world X/Z, plus
+//! everything needed to place, drag, and export ground groups parked on
+//! them.
 //!
 //! SVG X increases east (game Z); SVG Y increases south (game X decreases).
-//! The square is 9984 units across the 499_200 m map, so 50 m per SVG unit.
+//! The square is 9984 units across the 499_200 m map, so 50 m per SVG unit
+//! (`svg_to_world`).
+//!
+//! ## What this owns
+//! * Parsing `assets/roads.svg` / `assets/railroads.svg` into `Network`
+//!   (`PolyLine`s with cumulative arc length), lazily via `OnceLock`:
+//!   `roads()`, `railroads()`, `network_for()`.
+//! * `inspect_route` — detects an authored group that is a single road
+//!   column (perfect-column heuristic) or a train, and extracts a
+//!   `RouteLayout` (behind-unit gaps, ahead MCU_Waypoint hops, Zone IN
+//!   radius; defaults 19 km rail / 10 km road).
+//! * `place_route` — seeded, stochastic parking onto a line long enough and
+//!   overlapping the AO; keeps `NETWORK_SPACING` (2.5 km) from occupied
+//!   points and biases `lead_dist` toward vertices the `prefer` closure
+//!   likes (e.g. near the front).
+//! * Interactive editing: `snap_lead_to_pointer` (left-drag a group),
+//!   `snap_waypoint_to_pointer` (place one WP on any branch, including
+//!   behind the column), `align_heading_to_path` (right-drag heading; picks
+//!   forward/reverse to best match).
+//! * `sample_network` — recomputes unit + waypoint world positions from a
+//!   `NetworkSpot`; `column_waypoint_dists` — a two-WP column straddles the
+//!   Zone IN circle (one hop near each rim) when the path is long enough.
+//! * `park_route_copy` — writes final world positions back into the group:
+//!   vehicles, their LinkTrId targets, and MCU_Waypoints (ascending Index),
+//!   preserving the original XPos/ZPos/YOri decimal precision.
+//!
+//! ## Conventions
+//! * Trains always use rail; non-train groups ride roads only when
+//!   `inspect_route` accepts them as a column — otherwise `mapground`
+//!   places them on open ground.
+//! * `NetworkSpot.unit_xz[0]` is the lead. `reverse` means the column faces
+//!   against the polyline direction; it is re-chosen on every drag to keep
+//!   the user's heading.
+//! * Once a waypoint has an explicit position, `sample_network` leaves it
+//!   alone — WPs may sit on another branch or behind the column.
+//!
+//! ## Used by
+//! * ui.rs (Map mode) — network line drawing, unit/WP dragging, heading drag.
+//! * mapground.rs / recon.rs — `RouteLayout` on ground jobs; parking on export.
+//! * placement.rs — supplies `heading_toward`, `mix_index`, `move_anchor_to`.
+//!
+//! Unit-tested against the `TemplateExamples/` `.Group` fixtures.
+
 
 use std::sync::OnceLock;
 
@@ -157,6 +203,8 @@ pub struct RouteLayout {
     pub rail: bool,
     pub behind: Vec<f64>,
     pub wp_ahead: Vec<f64>,
+    /// Zone IN radius (metres). Two-WP columns try to straddle this circle.
+    pub zone_in_m: f64,
 }
 
 /// Live pose of a group parked on a polyline.
@@ -168,6 +216,7 @@ pub struct NetworkSpot {
     pub reverse: bool,
     pub behind: Vec<f64>,
     pub wp_ahead: Vec<f64>,
+    pub zone_in_m: f64,
     pub unit_xz: Vec<(f64, f64)>,
     pub waypoints: Vec<(f64, f64)>,
 }
@@ -281,11 +330,20 @@ pub fn inspect_route(root: &Il2Entity) -> Option<RouteLayout> {
     }
     let (behind, _) = column_gaps(&units);
     let wp_ahead = waypoint_ahead(root, &units);
+    let zone_in_m = inspect_zone_in(root).unwrap_or(if rail { 19_000.0 } else { 10_000.0 });
     Some(RouteLayout {
         rail,
         behind,
         wp_ahead,
+        zone_in_m,
     })
+}
+
+fn inspect_zone_in(root: &Il2Entity) -> Option<f64> {
+    root.find_by_name("Zone IN")
+        .and_then(|z| z.property("Zone"))
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|r| *r > 0.0)
 }
 
 struct RouteUnit {
@@ -424,6 +482,45 @@ fn route_need(route: &RouteLayout) -> (f64, f64) {
     (behind, ahead)
 }
 
+/// Distances along the polyline for each authored waypoint.
+///
+/// A single-column group with exactly two waypoints tries to sit one hop near
+/// the Zone IN rim ahead of the lead and the other near the opposite rim
+/// behind, when both points fall on the path. Otherwise hops stay in order
+/// ahead of the lead (the authored offsets).
+pub fn column_waypoint_dists(
+    zone_in_m: f64,
+    authored_ahead: &[f64],
+    lead_dist: f64,
+    reverse: bool,
+    line_len: f64,
+) -> Vec<f64> {
+    let ahead_at = |delta: f64| {
+        if reverse {
+            lead_dist - delta
+        } else {
+            lead_dist + delta
+        }
+    };
+    let dist_at = |delta: f64| {
+        if reverse {
+            lead_dist + delta
+        } else {
+            lead_dist - delta
+        }
+    };
+    let on_line = |d: f64| d >= 0.0 && d <= line_len;
+    if authored_ahead.len() == 2 && zone_in_m > 500.0 {
+        let edge = (zone_in_m - 200.0).max(500.0);
+        let ad = ahead_at(edge);
+        let bd = dist_at(edge);
+        if on_line(ad) && on_line(bd) {
+            return vec![ad, bd];
+        }
+    }
+    authored_ahead.iter().map(|&d| ahead_at(d)).collect()
+}
+
 /// Fill unit poses from a polyline. Existing waypoint world positions stay put
 /// so a WP can sit on another branch or behind the column.
 pub fn sample_network(
@@ -461,13 +558,6 @@ pub fn sample_network(
             pose.lead_dist - delta
         }
     };
-    let ahead_at = |delta: f64| {
-        if pose.reverse {
-            pose.lead_dist - delta
-        } else {
-            pose.lead_dist + delta
-        }
-    };
     let mut unit_xz = vec![(lead.0, lead.1)];
     for &d in &pose.behind {
         let p = line.at(dist_at(d))?;
@@ -476,8 +566,14 @@ pub fn sample_network(
     pose.unit_xz = unit_xz;
     if !pin_wps {
         let mut waypoints = Vec::new();
-        for &d in &pose.wp_ahead {
-            let p = line.at(ahead_at(d))?;
+        for d in column_waypoint_dists(
+            pose.zone_in_m,
+            &pose.wp_ahead,
+            pose.lead_dist,
+            pose.reverse,
+            total,
+        ) {
+            let p = line.at(d)?;
             waypoints.push((p.0, p.1));
         }
         pose.waypoints = waypoints;
@@ -575,6 +671,7 @@ fn place_route_filtered(
             reverse,
             behind: route.behind.clone(),
             wp_ahead: route.wp_ahead.clone(),
+            zone_in_m: route.zone_in_m,
             unit_xz: Vec::new(),
             waypoints: Vec::new(),
         };
@@ -760,6 +857,7 @@ mod tests {
         assert!((route.behind[0] - 138.0).abs() < 15.0);
         assert!(route.wp_ahead[0] > 4_000.0);
         assert!(route.wp_ahead[1] > route.wp_ahead[0]);
+        assert!((route.zone_in_m - 12_000.0).abs() < 0.5);
     }
 
     #[test]
@@ -794,6 +892,7 @@ mod tests {
             rail: true,
             behind: Vec::new(),
             wp_ahead: vec![2_000.0],
+            zone_in_m: 0.0,
         };
         let ((x, z, _, in_ao), pose) =
             place_route(&route, aabb, 7, 0, &[], |x, z| aabb.contains(x, z)).expect("rail spot");
@@ -851,6 +950,7 @@ mod tests {
             rail: false,
             behind: vec![80.0],
             wp_ahead: vec![1_200.0],
+            zone_in_m: 0.0,
         };
         let (_, mut pose) =
             place_route(&route, aabb, 5, 0, &[], |x, z| aabb.contains(x, z)).expect("column");
@@ -886,5 +986,80 @@ mod tests {
             assert_eq!(snap.line, oi);
             assert_eq!(pose.line, lead_line);
         }
+    }
+
+    #[test]
+    fn two_waypoints_straddle_zone_in_when_the_path_is_long_enough() {
+        let edge = 9_800.0;
+        let lead = 20_000.0;
+        let dists = column_waypoint_dists(10_000.0, &[4_000.0, 8_000.0], lead, false, 50_000.0);
+        assert_eq!(dists.len(), 2);
+        assert!((dists[0] - (lead + edge)).abs() < 0.01);
+        assert!((dists[1] - (lead - edge)).abs() < 0.01);
+
+        let short = column_waypoint_dists(10_000.0, &[4_000.0, 8_000.0], 500.0, false, 6_000.0);
+        assert!((short[0] - 4_500.0).abs() < 0.01);
+        assert!((short[1] - 8_500.0).abs() < 0.01);
+
+        let one = column_waypoint_dists(10_000.0, &[2_000.0], 1_000.0, false, 20_000.0);
+        assert_eq!(one, vec![3_000.0]);
+
+        let train = column_waypoint_dists(19_000.0, &[2_000.0, 4_000.0], 25_000.0, false, 80_000.0);
+        assert!((train[0] - 43_800.0).abs() < 0.01);
+        assert!((train[1] - 6_200.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn sample_network_straddles_two_wps_on_a_long_road() {
+        let net = roads();
+        let (li, line) = net
+            .lines
+            .iter()
+            .enumerate()
+            .find(|(_, l)| l.len() > 25_000.0)
+            .expect("Korea should have a road longer than 25 km");
+        let mut pose = NetworkSpot {
+            rail: false,
+            line: li,
+            lead_dist: line.len() * 0.5,
+            reverse: false,
+            behind: vec![80.0],
+            wp_ahead: vec![1_200.0, 2_400.0],
+            zone_in_m: 10_000.0,
+            unit_xz: Vec::new(),
+            waypoints: Vec::new(),
+        };
+        let (x, z, _) = sample_network(net, &mut pose).expect("pose");
+        assert_eq!(pose.waypoints.len(), 2);
+        let dists = column_waypoint_dists(
+            10_000.0,
+            &[1_200.0, 2_400.0],
+            pose.lead_dist,
+            false,
+            line.len(),
+        );
+        let edge = 9_800.0;
+        assert!(
+            (dists[0] - (pose.lead_dist + edge)).abs() < 0.01,
+            "path should be long enough to straddle, ahead={}",
+            dists[0]
+        );
+        assert!(
+            (dists[1] - (pose.lead_dist - edge)).abs() < 0.01,
+            "path should be long enough to straddle, behind={}",
+            dists[1]
+        );
+        let (ax, az, _) = line.at(dists[0]).unwrap();
+        let (bx, bz, _) = line.at(dists[1]).unwrap();
+        assert!((pose.waypoints[0].0 - ax).hypot(pose.waypoints[0].1 - az) < 1.0);
+        assert!((pose.waypoints[1].0 - bx).hypot(pose.waypoints[1].1 - bz) < 1.0);
+        assert!(
+            (pose.waypoints[0].0 - x).hypot(pose.waypoints[0].1 - z) > 4_000.0,
+            "ahead WP should be well past the authored 1.2 km hop"
+        );
+        assert!(
+            dists[0] > pose.lead_dist && dists[1] < pose.lead_dist,
+            "straddle WPs should sit on opposite sides of the lead"
+        );
     }
 }

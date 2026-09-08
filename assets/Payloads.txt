@@ -1,0 +1,377 @@
+Munition,Type,In-Game Description / Specs,Mass / Explosive
+AN-M64A1 500 lb,General Purpose HE Bomb,500-lb High Explosive aerial bomb,Full mass: 525 lbWarhead: 267 lb TNT
+AN-M65A1 1000 lb,General Purpose HE Bomb,"1,000-lb High Explosive aerial bomb","Full mass: ~1,000 lbHeavy demolition / GP"
+AN-M57A1 250 lb,General Purpose HE Bomb,250-lb High Explosive aerial bomb,Full mass: 260 lbWarhead: 129 lb TNT
+AN-M88 220 lb,Fragmentation Bomb,220-lb Fragmentation aerial bomb,Anti-personnel / soft targets
+M29A1 500 lb,Cluster Bomb,415-lb cluster munition assembly (90 × 4-lb M83 fragmentation parachuting bomblets),Cluster assembly
+M26A2 500 lb,Cluster Bomb,500-lb cluster munition assembly,Cluster assembly
+Napalm Tank 110 gal,Incendiary Bomb,Drop tank filled with Napalm incendiary mixture,Full mass: 858 lbWarhead: 110 gal napalm
+"HVAR 5""",HE Rocket,"High Velocity Aircraft Rocket, High Explosive",Gross mass: 139 lbWarhead: 41 lb (8 lb TNT)
+Drop Tank 165 gal,Fuel Tank,Wingtip drop fuel tank,"Full mass: 1,250 lb (Empty: 135 lb)"
+Drop Tank 265 gal,Fuel Tank,Large Misawa wingtip drop fuel tank,"Full mass: 1,941 lb (Empty: 150 lb)"
+AN-M66A2 2000 lb,General Purpose HE Bomb,2000-lb High Explosive aerial bomb,Heavy demolition / GP
+Drop Tank 230 gal,Fuel Tank,Drop Fuel Tank,"Full mass: 1,727 lb (Empty: 172 lb)"
+"Tiny Tim 12",Heavy Rocket,11.75-inch air-to-ground rocket,Anti-ship / heavy structural
+AN-M65A1 1000 lb,General Purpose HE Bomb,1000-lb High Explosive aerial bomb,Full mass: 990 lbWarhead: 558 lb TNT
+Drop Tank 120 gal,Fuel Tank,Drop Fuel Tank,Capacity: 120 gal
+Drop Tank 245 gal,Fuel Tank,Drop Fuel Tank,Capacity: 245 gal
+"HVAR SAP 5",Semi-Armor-Piercing Rocket,"High Velocity Aircraft Rocket, Semi-Armor Piercing",Gross mass: 139 lbWarhead: 41 lb (8 lb TNT)
+"ATAR 6.5",HEAT Rocket,"Anti-Tank Aircraft Rocket, HEAT",Gross mass: 140 lbWarhead: 24 lb (20 lb Compound B)
+Drop Tank 75 gal,Fuel Tank,Drop Fuel Tank,Capacity: 75 gal
+Drop Tank 110 gal,Fuel Tank,Drop Fuel Tank,Capacity: 110 gal (Full mass: 745 lb)
+
+F-80C-10
+Payload ID,Tanks / External Fuel,Primary Ordnance,Secondary Ordnance
+0,None,None (Clean),—
+1,None,Pylons only,—
+2,2× Drop Tank 165 gal,—,—
+3,2× Drop Tank 165 gal,"4× HVAR 5""",—
+4,2× Drop Tank 165 gal,"8× HVAR 5""",—
+5,2× Drop Tank 165 gal,2× AN-M64A1 500 lb HE,—
+6,2× Drop Tank 165 gal,2× AN-M64A1 500 lb HE,"4× HVAR 5"""
+7,2× Drop Tank 165 gal,2× AN-M64A1 500 lb HE,"8× HVAR 5"""
+8,2× Drop Tank 165 gal,2× AN-M64A1 500 lb HE,4× AN-M57A1 250 lb HE
+9,2× Drop Tank 165 gal,2× AN-M64A1 500 lb HE,4× AN-M88 220 lb Frag
+10,2× Drop Tank 165 gal,2× AN-M65A1 1000 lb HE,—
+11,2× Drop Tank 165 gal,2× AN-M65A1 1000 lb HE,"4× HVAR 5"""
+12,2× Drop Tank 165 gal,2× AN-M65A1 1000 lb HE,"8× HVAR 5"""
+13,2× Drop Tank 165 gal,2× AN-M65A1 1000 lb HE,4× AN-M57A1 250 lb HE
+14,2× Drop Tank 165 gal,2× AN-M65A1 1000 lb HE,4× AN-M88 220 lb Frag
+15,2× Drop Tank 165 gal,2× M29A1 500 lb Cluster,—
+16,2× Drop Tank 165 gal,2× M29A1 500 lb Cluster,"4× HVAR 5"""
+17,2× Drop Tank 165 gal,2× M29A1 500 lb Cluster,"8× HVAR 5"""
+18,2× Drop Tank 165 gal,2× M26A2 500 lb Cluster,—
+19,2× Drop Tank 165 gal,2× M26A2 500 lb Cluster,"4× HVAR 5"""
+20,2× Drop Tank 165 gal,2× M26A2 500 lb Cluster,"8× HVAR 5"""
+21,2× Drop Tank 165 gal,2× M29A1 500 lb Cluster,4× AN-M57A1 250 lb HE
+22,2× Drop Tank 165 gal,2× M29A1 500 lb Cluster,4× AN-M88 220 lb Frag
+23,2× Drop Tank 165 gal,2× M26A2 500 lb Cluster,4× AN-M57A1 250 lb HE
+24,2× Drop Tank 165 gal,2× M26A2 500 lb Cluster,4× AN-M88 220 lb Frag
+25,2× Drop Tank 165 gal,2× Napalm Tank 110 gal,—
+26,2× Drop Tank 165 gal,2× Napalm Tank 110 gal,"4× HVAR 5"""
+27,2× Drop Tank 165 gal,2× Napalm Tank 110 gal,"8× HVAR 5"""
+28,2× Drop Tank 165 gal,2× Napalm Tank 110 gal,4× AN-M57A1 250 lb HE
+29,2× Drop Tank 165 gal,2× Napalm Tank 110 gal,4× AN-M88 220 lb Frag
+30,2× Drop Tank 265 gal,—,—
+31,2× Drop Tank 265 gal,"4× HVAR 5""",—
+32,2× Drop Tank 265 gal,"8× HVAR 5""",—
+33,2× Drop Tank 265 gal,2× AN-M64A1 500 lb HE,—
+34,2× Drop Tank 265 gal,2× AN-M64A1 500 lb HE,"4× HVAR 5"""
+35,2× Drop Tank 265 gal,2× AN-M64A1 500 lb HE,"8× HVAR 5"""
+36,2× Drop Tank 265 gal,2× M29A1 500 lb Cluster,—
+37,2× Drop Tank 265 gal,2× M29A1 500 lb Cluster,"4× HVAR 5"""
+38,2× Drop Tank 265 gal,2× M29A1 500 lb Cluster,"8× HVAR 5"""
+39,2× Drop Tank 265 gal,2× M26A2 500 lb Cluster,—
+40,2× Drop Tank 265 gal,2× M26A2 500 lb Cluster,"4× HVAR 5"""
+41,2× Drop Tank 265 gal,2× M26A2 500 lb Cluster,"8× HVAR 5"""
+42,2× Drop Tank 265 gal,2× M29A1 500 lb Cluster,4× AN-M57A1 250 lb HE
+43,2× Drop Tank 265 gal,2× M29A1 500 lb Cluster,4× AN-M88 220 lb Frag
+44,2× Drop Tank 265 gal,2× M26A2 500 lb Cluster,4× AN-M57A1 250 lb HE
+45,2× Drop Tank 265 gal,2× M26A2 500 lb Cluster,4× AN-M88 220 lb Frag
+46,2× Drop Tank 265 gal,2× AN-M64A1 500 lb HE,4× AN-M57A1 250 lb HE
+47,2× Drop Tank 265 gal,2× AN-M64A1 500 lb HE,4× AN-M88 220 lb Frag
+48,2× Drop Tank 265 gal,2× AN-M65A1 1000 lb HE,—
+49,2× Drop Tank 265 gal,2× Napalm Tank 110 gal,—
+50,None,4× AN-M64A1 500 lb HE,—
+51,None,4× AN-M64A1 500 lb HE,"4× HVAR 5"""
+
+F-84E
+Payload ID,Tanks / External Fuel,Primary Ordnance,Secondary / Tertiary Ordnance
+0,None,None (Clean),—
+1,2× Drop Tank 230 gal,—,—
+2,2× Drop Tank 230 gal,Pylons only,—
+3,4× Drop Tank 230 gal,—,—
+4,2× Drop Tank 230 gal,2× AN-M64A1 500 lb HE,—
+5,2× Drop Tank 230 gal,2× AN-M65A1 1000 lb HE,—
+6,2× Drop Tank 230 gal,2× M29A1 500 lb Cluster,—
+7,2× Drop Tank 230 gal,2× M26A2 500 lb Cluster,—
+8,2× Drop Tank 230 gal,2× Napalm Tank 110 gal,—
+9,2× Drop Tank 230 gal,"2× Tiny Tim 12""",—
+10,2× Drop Tank 230 gal,"4× HVAR 5""",—
+11,4× Drop Tank 230 gal,"4× HVAR 5""",—
+12,2× Drop Tank 230 gal,"4× HVAR 5""",2× AN-M64A1 500 lb HE
+13,2× Drop Tank 230 gal,"4× HVAR 5""",2× AN-M65A1 1000 lb HE
+14,2× Drop Tank 230 gal,"4× HVAR 5""",2× M29A1 500 lb Cluster
+15,2× Drop Tank 230 gal,"4× HVAR 5""",2× M26A2 500 lb Cluster
+16,2× Drop Tank 230 gal,"4× HVAR 5""",2× Napalm Tank 110 gal
+17,2× Drop Tank 230 gal,"4× HVAR 5""","2× Tiny Tim 12"""
+18,2× Drop Tank 230 gal,"8× HVAR 5""",—
+19,2× Drop Tank 230 gal,"16× HVAR 5""",—
+20,2× Drop Tank 230 gal,"8× HVAR 5""",2× AN-M64A1 500 lb HE
+21,2× Drop Tank 230 gal,"8× HVAR 5""",2× AN-M65A1 1000 lb HE
+22,2× Drop Tank 230 gal,"8× HVAR 5""",2× M29A1 500 lb Cluster
+23,2× Drop Tank 230 gal,"8× HVAR 5""",2× M26A2 500 lb Cluster
+24,2× Drop Tank 230 gal,"8× HVAR 5""",2× Napalm Tank 110 gal
+25,2× Drop Tank 230 gal,"8× HVAR 5""","2× Tiny Tim 12"""
+26,2× Drop Tank 230 gal,"12× HVAR 5""",—
+27,2× Drop Tank 230 gal,"20× HVAR 5""",—
+28,2× Drop Tank 230 gal,"12× HVAR 5""",2× AN-M64A1 500 lb HE
+29,2× Drop Tank 230 gal,"12× HVAR 5""",2× AN-M65A1 1000 lb HE
+30,2× Drop Tank 230 gal,"12× HVAR 5""",2× M29A1 500 lb Cluster
+31,2× Drop Tank 230 gal,"12× HVAR 5""",2× M26A2 500 lb Cluster
+32,2× Drop Tank 230 gal,"12× HVAR 5""",2× Napalm Tank 110 gal
+33,2× Drop Tank 230 gal,"12× HVAR 5""","2× Tiny Tim 12"""
+34,None,"24× HVAR 5""",—
+35,None,"16× HVAR 5""",2× AN-M64A1 500 lb HE
+36,None,"16× HVAR 5""",2× AN-M65A1 1000 lb HE
+37,None,"16× HVAR 5""",2× M29A1 500 lb Cluster
+38,None,"16× HVAR 5""",2× M26A2 500 lb Cluster
+39,None,"16× HVAR 5""",2× Napalm Tank 110 gal
+40,None,"16× HVAR 5""","2× Tiny Tim 12"""
+41,None,"32× HVAR 5""",—
+42,None,"24× HVAR 5""",2× AN-M64A1 500 lb HE
+43,None,"24× HVAR 5""",2× AN-M65A1 1000 lb HE
+44,None,"24× HVAR 5""",2× M29A1 500 lb Cluster
+45,None,"24× HVAR 5""",2× M26A2 500 lb Cluster
+46,None,"24× HVAR 5""",2× Napalm Tank 110 gal
+47,None,"24× HVAR 5""","2× Tiny Tim 12"""
+48,2× Drop Tank 230 gal,4× AN-M57A1 250 lb HE,—
+49,4× Drop Tank 230 gal,4× AN-M57A1 250 lb HE,—
+50,2× Drop Tank 230 gal,4× AN-M57A1 250 lb HE,2× AN-M64A1 500 lb HE
+51,2× Drop Tank 230 gal,4× AN-M57A1 250 lb HE,2× AN-M65A1 1000 lb HE
+52,2× Drop Tank 230 gal,4× AN-M57A1 250 lb HE,2× M29A1 500 lb Cluster
+53,2× Drop Tank 230 gal,4× AN-M57A1 250 lb HE,2× M26A2 500 lb Cluster
+54,2× Drop Tank 230 gal,4× AN-M57A1 250 lb HE,2× Napalm Tank 110 gal
+55,2× Drop Tank 230 gal,4× AN-M57A1 250 lb HE,"2× Tiny Tim 12"""
+56,2× Drop Tank 230 gal,4× AN-M57A1 250 lb HE,"8× HVAR 5"""
+57,None,"16× HVAR 5""",4× AN-M57A1 250 lb HE
+58,None,"20× HVAR 5""",4× AN-M57A1 250 lb HE
+59,2× Drop Tank 230 gal,4× AN-M88 220 lb Frag,—
+60,4× Drop Tank 230 gal,4× AN-M88 220 lb Frag,—
+61,2× Drop Tank 230 gal,4× AN-M88 220 lb Frag,2× AN-M64A1 500 lb HE
+62,2× Drop Tank 230 gal,4× AN-M88 220 lb Frag,2× AN-M65A1 1000 lb HE
+63,2× Drop Tank 230 gal,4× AN-M88 220 lb Frag,2× M29A1 500 lb Cluster
+64,2× Drop Tank 230 gal,4× AN-M88 220 lb Frag,2× M26A2 500 lb Cluster
+65,2× Drop Tank 230 gal,4× AN-M88 220 lb Frag,2× Napalm Tank 110 gal
+66,2× Drop Tank 230 gal,4× AN-M88 220 lb Frag,"2× Tiny Tim 12"""
+67,2× Drop Tank 230 gal,4× AN-M88 220 lb Frag,"8× HVAR 5"""
+68,None,"16× HVAR 5""",4× AN-M88 220 lb Frag
+69,None,"20× HVAR 5""",4× AN-M88 220 lb Frag
+70,2× Drop Tank 230 gal,"8× HVAR 5""",2× AN-M26A1 Chute Flare
+
+F-86A-5
+Payload ID,Tanks / External Fuel,Primary Ordnance,Secondary Ordnance
+0,None,None (Clean),—
+1,2× Drop Tank 120 gal,—,—
+2,2× Drop Tank 120 gal,"2× HVAR 5""",—
+3,2× Drop Tank 120 gal,"4× HVAR 5""",—
+4,2× Drop Tank 245 gal,—,—
+5,None,"8× HVAR 5""",—
+6,None,"16× HVAR 5""",—
+7,None,2× AN-M64A1 500 lb HE,—
+8,None,2× M26A2 500 lb Cluster,—
+9,None,2× M29A1 500 lb Cluster,—
+10,None,2× AN-M65A1 1000 lb HE,—
+11,None,2× Napalm Tank 110 gal,—
+12,None,2× AN-M26A1 Chute Flare,—
+
+F-51
+Payload ID,Tanks / External Fuel,Primary Ordnance,Secondary Ordnance
+0,None,None (Clean),—
+1,None,2× AN-M64A1 500 lb HE,—
+2,None,2× AN-M65A1 1000 lb HE,—
+3,None,2× M26A2 500 lb Cluster,—
+4,None,2× M29A1 500 lb Cluster,—
+5,None,2× AN-M26A1 Chute Flare,—
+6,None,2× Napalm Tank 110 gal,—
+7,2× Drop Tank 75 gal,—,—
+8,2× Drop Tank 110 gal,—,—
+9,None,"6× HVAR 5""",—
+10,None,"10× HVAR 5""",—
+11,None,"4× HVAR 5""",2× AN-M64A1 500 lb HE
+12,None,"6× HVAR 5""",2× AN-M64A1 500 lb HE
+13,None,"4× HVAR 5""",2× AN-M65A1 1000 lb HE
+14,None,"6× HVAR 5""",2× AN-M65A1 1000 lb HE
+15,None,"4× HVAR 5""",2× M26A2 500 lb Cluster
+16,None,"6× HVAR 5""",2× M26A2 500 lb Cluster
+17,None,"4× HVAR 5""",2× M29A1 500 lb Cluster
+18,None,"6× HVAR 5""",2× M29A1 500 lb Cluster
+19,None,"4× HVAR 5""",2× AN-M26A1 Chute Flare
+20,None,"6× HVAR 5""",2× AN-M26A1 Chute Flare
+21,None,"4× HVAR 5""",2× Napalm Tank 110 gal
+22,None,"6× HVAR 5""",2× Napalm Tank 110 gal
+23,2× Drop Tank 75 gal,"4× HVAR 5""",—
+24,2× Drop Tank 75 gal,"6× HVAR 5""",—
+25,2× Drop Tank 110 gal,"4× HVAR 5""",—
+26,2× Drop Tank 110 gal,"6× HVAR 5""",—
+27,None,"6× HVAR SAP 5""",—
+28,None,"10× HVAR SAP 5""",—
+29,None,"4× HVAR SAP 5""",2× AN-M64A1 500 lb HE
+30,None,"6× HVAR SAP 5""",2× AN-M64A1 500 lb HE
+31,None,"4× HVAR SAP 5""",2× AN-M65A1 1000 lb HE
+32,None,"6× HVAR SAP 5""",2× AN-M65A1 1000 lb HE
+33,None,"4× HVAR SAP 5""",2× M26A2 500 lb Cluster
+34,None,"6× HVAR SAP 5""",2× M26A2 500 lb Cluster
+35,None,"4× HVAR SAP 5""",2× M29A1 500 lb Cluster
+36,None,"6× HVAR SAP 5""",2× M29A1 500 lb Cluster
+37,None,"4× HVAR SAP 5""",2× AN-M26A1 Chute Flare
+38,None,"6× HVAR SAP 5""",2× AN-M26A1 Chute Flare
+39,None,"4× HVAR SAP 5""",2× Napalm Tank 110 gal
+40,None,"6× HVAR SAP 5""",2× Napalm Tank 110 gal
+41,2× Drop Tank 75 gal,"4× HVAR SAP 5""",—
+42,2× Drop Tank 75 gal,"6× HVAR SAP 5""",—
+43,2× Drop Tank 110 gal,"4× HVAR SAP 5""",—
+44,2× Drop Tank 110 gal,"6× HVAR SAP 5""",—
+45,None,"6× ATAR 6.5""",—
+46,None,"10× ATAR 6.5""",—
+47,None,"4× ATAR 6.5""",2× AN-M64A1 500 lb HE
+48,None,"6× ATAR 6.5""",2× AN-M64A1 500 lb HE
+49,None,"4× ATAR 6.5""",2× AN-M65A1 1000 lb HE
+50,None,"6× ATAR 6.5""",2× AN-M65A1 1000 lb HE
+51,None,"4× ATAR 6.5""",2× M26A2 500 lb Cluster
+52,None,"6× ATAR 6.5""",2× M26A2 500 lb Cluster
+53,None,"4× ATAR 6.5""",2× M29A1 500 lb Cluster
+54,None,"6× ATAR 6.5""",2× M29A1 500 lb Cluster
+55,None,"4× ATAR 6.5""",2× AN-M26A1 Chute Flare
+56,None,"6× ATAR 6.5""",2× AN-M26A1 Chute Flare
+57,None,"4× ATAR 6.5""",2× Napalm Tank 110 gal
+58,None,"6× ATAR 6.5""",2× Napalm Tank 110 gal
+59,2× Drop Tank 75 gal,"4× ATAR 6.5""",—
+60,2× Drop Tank 75 gal,"6× ATAR 6.5""",—
+61,2× Drop Tank 110 gal,"4× ATAR 6.5""",—
+62,2× Drop Tank 110 gal,"6× ATAR 6.5""",—
+63,None,Pylons only,—
+
+Soviet Payloads
+Munition,Type,In-Game Description / Specs,Mass / Explosive
+Drop Tank 250 L,Fuel Tank,Drop Fuel Tank,"Capacity: 250 L (Full mass: 218.5 kg, Empty mass: 16 kg)"
+FAB-100sc,General Purpose HE Bomb,100 kg high-explosive fragmentation bomb,~100 kg
+SAB-100-55,Illumination Bomb,Illumination parachute bomb,~100 kg class
+M-8 82 mm,HE Rocket,"High explosive aerial rocket, model of 1942",Start mass: 7.9 kg
+M-13UK 132 mm,HE Rocket,"High explosive aerial spinning rocket with improved accuracy, model of 1944",Start mass: 42.5 kg
+FAB-50sc,General Purpose HE Bomb,High explosive aerial bomb with cast iron body,~50 kg class
+FAB-100sc,General Purpose HE Bomb,"High explosive aerial bomb with cast iron body, model of 1943",Full mass: 123.3 kg
+FAB-250 M43,General Purpose HE Bomb,"High explosive aerial bomb with welded body, model of 1943",Full mass: 227 kg
+PTAB-2.5-1.5,HEAT Submunition,"High explosive anti-tank submunition, model of 1943",Full mass: 1.5 kg
+PTAB-10-2.5,HEAT Submunition,"High explosive anti-tank submunition, model of 1943",Full mass: 2.6 kg
+AO-2.5sc,Fragmentation Submunition,"Fragmentation aerial submunition with cast iron body, model of 1940",Full mass: 2.7 kg
+AO-10sc,Fragmentation Submunition,Fragmentation aerial submunition,~10 kg class
+AO-10sc,Fragmentation Submunition,"Fragmentation aerial submunition with cast iron body, model of 1941",Full mass: 9 kgWarhead: 840 g K-2
+AO-25sl,Fragmentation Submunition,"Fragmentation aerial submunition with cast steel body, model of 1941",Full mass: 25.6 kg
+SAB-100-55,Illumination Flare Bomb,"Aerial parachute illumination flare bomb, model of 1942",Full mass: 54.2 kg
+FAB-500 M44,General Purpose HE Bomb,"High explosive aerial bomb, model of 1944",~500 kg class
+FAB-1000 M43,General Purpose HE Bomb,"High explosive aerial bomb with welded body, model of 1943","Full mass: 1,077 kgWarhead: 670 kg TNT"
+FAB-2000 M44,General Purpose HE Bomb,"High explosive aerial bomb, model of 1944","~2,000 kg heavy demolition"
+
+MiG-15bis
+Payload ID,Tanks / External Fuel,Primary Ordnance,Secondary Ordnance
+0,None,None (Clean),—
+1,2× Drop Tank 250 L,—,—
+2,None,2× FAB-100sc,—
+3,None,2× SAB-100-55,—
+
+IL-10
+Payload ID,Primary Ordnance,Secondary Ordnance,Tertiary Ordnance
+0,None (Clean),—,—
+1,2× FAB-50sc,—,—
+2,4× M-8 82 mm,2× FAB-50sc,—
+3,4× M-13UK 132 mm,2× FAB-50sc,—
+4,2× FAB-100sc,2× FAB-50sc,—
+5,4× M-8 82 mm,2× FAB-100sc,2× FAB-50sc
+6,4× M-13UK 132 mm,2× FAB-100sc,2× FAB-50sc
+7,2× FAB-100sc,—,—
+8,4× M-8 82 mm,2× FAB-100sc,—
+9,4× M-13UK 132 mm,2× FAB-100sc,—
+10,4× FAB-100sc,—,—
+11,4× M-8 82 mm,4× FAB-100sc,—
+12,4× M-13UK 132 mm,4× FAB-100sc,—
+13,2× FAB-250 M43,—,—
+14,4× M-8 82 mm,2× FAB-250 M43,—
+15,4× M-13UK 132 mm,2× FAB-250 M43,—
+16,144× PTAB-2.5-1.5,—,—
+17,4× M-8 82 mm,144× PTAB-2.5-1.5,—
+18,4× M-13UK 132 mm,144× PTAB-2.5-1.5,—
+19,2× FAB-100sc,144× PTAB-2.5-1.5,—
+20,4× M-8 82 mm,2× FAB-100sc,144× PTAB-2.5-1.5
+21,4× M-13UK 132 mm,2× FAB-100sc,144× PTAB-2.5-1.5
+22,60× PTAB-10-2.5,2× FAB-100sc,—
+23,4× M-8 82 mm,60× PTAB-10-2.5,2× FAB-100sc
+24,4× M-13UK 132 mm,60× PTAB-10-2.5,2× FAB-100sc
+25,128× AO-2.5sc,—,—
+26,48× AO-10sc,—,—
+27,12× AO-25sl,—,—
+28,4× M-8 82 mm,128× AO-2.5sc,—
+29,4× M-13UK 132 mm,128× AO-2.5sc,—
+30,4× M-8 82 mm,48× AO-10sc,—
+31,4× M-13UK 132 mm,48× AO-10sc,—
+32,4× M-8 82 mm,12× AO-25sl,—
+33,4× M-13UK 132 mm,12× AO-25sl,—
+34,2× FAB-100sc,128× AO-2.5sc,—
+35,48× AO-10sc,2× FAB-100sc,—
+36,12× AO-25sl,2× FAB-100sc,—
+37,4× M-8 82 mm,12× AO-25sl,2× FAB-100sc
+38,160× AO-2.5sc,—,—
+39,4× M-8 82 mm,160× AO-2.5sc,—
+40,60× AO-10sc,—,—
+41,4× M-8 82 mm,60× AO-10sc,—
+42,2× SAB-100-55,—,—
+43,4× M-8 82 mm,2× SAB-100-55,—
+44,4× M-13UK 132 mm,2× SAB-100-55,—
+45,2× SAB-100-55,2× FAB-50sc,—
+46,4× M-8 82 mm,2× SAB-100-55,2× FAB-50sc
+47,4× M-13UK 132 mm,2× SAB-100-55,2× FAB-50sc
+48,2× SAB-100-55,2× FAB-100sc,—
+49,4× M-8 82 mm,2× SAB-100-55,2× FAB-100sc
+50,4× M-13UK 132 mm,2× SAB-100-55,2× FAB-100sc
+51,2× SAB-100-55,144× PTAB-2.5-1.5,—
+52,4× M-13UK 132 mm,2× SAB-100-55,144× PTAB-2.5-1.5
+53,60× PTAB-10-2.5,2× SAB-100-55,—
+54,4× M-13UK 132 mm,60× PTAB-10-2.5,2× SAB-100-55
+55,2× SAB-100-55,128× AO-2.5sc,—
+56,48× AO-10sc,2× SAB-100-55,—
+57,12× AO-25sl,2× SAB-100-55,—
+58,4× M-8 82 mm,12× AO-25sl,2× SAB-100-55
+
+B-29
+Payload ID,Bomb Bay Ordnance,Secondary Ordnance
+0,None (Clean),—
+1,32× AN-M64A1 500 lb HE,—
+2,12× AN-M65A1 1000 lb HE,—
+3,8× AN-M66A2 2000 lb HE,—
+
+Tu-2
+Payload ID,Internal / External Ordnance,Secondary Ordnance
+0,None (Clean),—
+1,9× FAB-100sc,—
+2,2× FAB-250 M43,9× FAB-100sc
+3,4× FAB-250 M43,—
+4,6× FAB-250 M43,—
+5,8× FAB-250 M43,—
+6,2× FAB-500 M44,—
+7,4× FAB-500 M44,—
+8,6× FAB-500 M44,—
+9,1× FAB-1000 M43,—
+10,2× FAB-1000 M43,—
+11,3× FAB-1000 M43,—
+12,1× FAB-2000 M44,—
+13,2× FAB-2000 M44,—
+14,9× SAB-100-55,—
+
+C-47B
+Modification,Binary ID,Description
+1,1,Empty
+1,11,Cargo
+1,101,Ambulance
+1,10001,Flare
+
+Li-2t
+Modification,Binary ID,Description
+1,1,Empty
+1,11,Cargo
+1,101,Ambulance
+
+
+Yak-9p
+Modification,Binary ID,Description
+1,11,Horizon
+2,101,Gunsight
+3,1001,Mirror
+4,10001,Aerobatic 
+
+F-51D
+Modification,Binary ID,Description
+1,11,K-14C Gunsite
+2,101,Tail Warning Radar
+3,1001,Mirror
+4,10001,150 Grade Fuel
+5,100001,Aerobatic

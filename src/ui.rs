@@ -1,5 +1,44 @@
-//! Native egui front-end. Talks to pack / flights / serialize only through
-//! their public APIs — no AST parsing lives here.
+//! # ui.rs — egui front-end for the IL-2 Group Generator
+//!
+//! The GUI entry point. Boots the eframe window, holds all UI state in
+//! [`GroupGeneratorApp`], and routes the six mode tabs (Template, Army
+//! Generator, Fighter Pack, Exclusive Activation, Airfield, Map) to their
+//! panels. The detached Help viewport lives in [`crate::help`]; this file
+//! is otherwise the only egui code.
+//!
+//! Presentation only: no AST parsing and no group generation live here. This
+//! file talks to the rest of the crate strictly through public APIs —
+//! [`crate::parser`] loads files, [`crate::template`] / [`crate::pack`] /
+//! [`crate::flights`] / [`crate::bombers`] / [`crate::recon`] /
+//! [`crate::frontlines`] / [`crate::airfield`] build them, and
+//! [`crate::serialize`] writes them. Anything that needs the AST does so in
+//! those modules, not here.
+//!
+//! ## Layout of this file
+//! * `run()` — eframe bootstrap (window size, readable style).
+//! * Mode enums: [`AppMode`], [`ReconSubmode`], [`MapDrawingMode`],
+//!   [`DrawnMark`].
+//! * Slot structs: [`BomberSlot`], [`ReconSlot`], [`MapArmySlot`] — a loaded
+//!   file plus the per-file selections the user makes (triggers, unit kind,
+//!   reposition).
+//! * [`GroupGeneratorApp`] — all state plus `eframe::App::update`; one method
+//!   per panel/section (`template_*`, `recon_*`, `fighter_*`, `map_*`, …).
+//! * Free functions — shared widgets (order/event tree chips, tree line
+//!   painting, icon buttons), map coordinate conversions (`uv_to_world`,
+//!   `world_to_uv`, `world_to_pos`), drawing primitives (lines, labels,
+//!   arrows, salient anchors), asset loading (SVG icons, Korea map JPEGs),
+//!   and `save_with_sidecars` (writes the group file plus merged
+//!   translation sidecars).
+//!
+//! ## Conventions
+//! * World coordinates are game meters: X is north (up on the map), Z is
+//!   east. The map image uses UV and the screen uses `Pos2`; convert only
+//!   through the functions at the bottom of this file.
+//! * Drawn-mark undo/redo: `drawn_marks` is the stack of what exists; the
+//!   `redo_*` stacks mirror it for Ctrl-Y. Any new drawing clears the redo
+//!   stacks.
+//! * `status` (`Status`) is the single bottom line: `Info`/`Warn` are soft
+//!   placement notes (orange), `Error` is a hard failure.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -63,13 +102,15 @@ use crate::template::{
     copy_seat_attributes, flight_lead_of, formation_label, formations_for, generate_template,
     has_linked_wingmen, is_follower, lead_indexes, load_catalog, load_catalog_as_user_added,
     insert_goto_waypoint_after, merge_catalog, move_seat, next_waypoint_number,
-    normalize_order_chain, order_seat_indexes, order_tree_layout, place_offset, receives_orders,
-    refresh_attack_areas_for_seat, remap_event_then, remap_index_vec, remap_seat_index,
-    set_report_following, used_waypoint_count, waypoint_display_altitude, BringUp, CatalogUnit,
-    EntityEvent, EventHook, EventThen, FlightRole, OrderKind, OrderSpec, OrderTreeNode,
-    PlaceLayout, TemplateOptions, TemplateSeat, UnitKind as CatalogKind, ZoneCoalition,
-    DEFAULT_TIME_ON_TARGET_S, PLACEMENT_SPACING, attack_area_range_limit, carriage_label,
-    catalog_carriage_scripts,
+    normalize_order_chain, order_seat_indexes, order_tree_layout, path_waypoint_display_m,
+    place_offset, receives_orders, refresh_attack_areas_for_seat, remap_event_then,
+    remap_index_vec, remap_seat_index, replace_seat_unit, set_report_following,
+    used_waypoint_count, waypoint_area_m, waypoint_display_altitude, zone_defaults,
+    zone_mix_for_seats, visual_range_m, near_visual_range, AIR_ZONE_IN_M, AIR_ZONE_OUT_M,
+    TRAIN_ZONE_IN_M, BringUp, CatalogUnit, EntityEvent, EventHook, EventThen, FlightRole,
+    OrderKind, OrderSpec, OrderTreeNode, PlaceLayout, PlaneStart, TemplateOptions, TemplateSeat,
+    UnitKind as CatalogKind, ZoneCoalition, ZoneMix, DEFAULT_TIME_ON_TARGET_S, PLACEMENT_SPACING,
+    WAYPOINT_SPACING_M, attack_area_range_limit, carriage_label, catalog_carriage_scripts,
 };
 use crate::weapon_range::{self, ArmyUnitKind};
 
@@ -356,6 +397,8 @@ struct GroupGeneratorApp {
     tpl_per_group: u32,
     tpl_zone_in: f32,
     tpl_zone_out: f32,
+    /// Last mix that wrote Zone IN / Out defaults. User edits stick until this changes.
+    tpl_zone_mix: Option<ZoneMix>,
     tpl_wp_spacing: f32,
     tpl_wp_speed: f32,
     tpl_wp_altitude: f32,
@@ -502,25 +545,7 @@ fn draw_tree_add_buttons(
 }
 
 fn default_template_seats() -> Vec<TemplateSeat> {
-    let cat = bundled_catalog();
-    let unit = cat
-        .iter()
-        .find(|u| u.kind == CatalogKind::Plane && u.script.contains("mig15bis"))
-        .or_else(|| cat.iter().find(|u| u.kind == CatalogKind::Plane))
-        .cloned();
-    let Some(unit) = unit else {
-        return Vec::new();
-    };
-    (0..4)
-        .map(|i| {
-            let mut seat = TemplateSeat::new(unit.clone());
-            seat.number_in_formation = i as i32;
-            if i == 0 {
-                seat.orders.push(OrderSpec::for_kind(CatalogKind::Plane));
-            }
-            seat
-        })
-        .collect()
+    Vec::new()
 }
 
 fn country_short(country: i32) -> String {
@@ -1278,15 +1303,16 @@ impl Default for GroupGeneratorApp {
             tpl_preview_from_catalog: false,
             tpl_model_tex: HashMap::new(),
             tpl_seats: default_template_seats(),
-            tpl_select: Some(TplSelect::Seat(0)),
+            tpl_select: None,
             tpl_bring_up: BringUp::Activate,
             tpl_spawn_reset: false,
             tpl_spawn_cooldown_min: 5.0,
             tpl_place_layout: PlaceLayout::InvertedVee,
             tpl_per_group: 4,
-            tpl_zone_in: 7_500.0,
-            tpl_zone_out: 8_500.0,
-            tpl_wp_spacing: 4_000.0,
+            tpl_zone_in: AIR_ZONE_IN_M,
+            tpl_zone_out: AIR_ZONE_OUT_M,
+            tpl_zone_mix: Some(ZoneMix::Air),
+            tpl_wp_spacing: WAYPOINT_SPACING_M,
             tpl_wp_speed: 100.0,
             tpl_wp_altitude: 0.0,
             tpl_zone_coalition: ZoneCoalition::Western,
@@ -1368,6 +1394,7 @@ impl GroupGeneratorApp {
     }
 
     fn template_panel(&mut self, ui: &mut egui::Ui) {
+        self.sync_template_zone_defaults();
         self.page_header(ui, "Template Builder", HelpTopic::Template);
         ui.label(
             RichText::new(
@@ -1585,13 +1612,21 @@ impl GroupGeneratorApp {
                         }
                     });
             });
+            let visual = visual_range_m(self.template_zone_mix());
             ui.horizontal(|ui| {
-                ui.label("Zone IN (visual range)");
+                ui.label("Zone IN");
                 ui.add(
-                    egui::Slider::new(&mut self.tpl_zone_in, 500.0..=25_000.0)
+                    egui::Slider::new(&mut self.tpl_zone_in, 500.0..=40_000.0)
                         .suffix(" m")
                         .logarithmic(true),
                 );
+                if near_visual_range(self.tpl_zone_in, visual) {
+                    ui.label(
+                        RichText::new("visual range")
+                            .small()
+                            .color(Color32::from_rgb(210, 180, 70)),
+                    );
+                }
             });
             if self.tpl_zone_out < self.tpl_zone_in + 200.0 {
                 self.tpl_zone_out = self.tpl_zone_in + 200.0;
@@ -1599,10 +1634,17 @@ impl GroupGeneratorApp {
             ui.horizontal(|ui| {
                 ui.label("Zone Out");
                 ui.add(
-                    egui::Slider::new(&mut self.tpl_zone_out, 700.0..=30_000.0)
+                    egui::Slider::new(&mut self.tpl_zone_out, 700.0..=50_000.0)
                         .suffix(" m")
                         .logarithmic(true),
                 );
+                if near_visual_range(self.tpl_zone_out, visual) {
+                    ui.label(
+                        RichText::new("visual range")
+                            .small()
+                            .color(Color32::from_rgb(210, 180, 70)),
+                    );
+                }
             });
         });
     }
@@ -1617,25 +1659,37 @@ impl GroupGeneratorApp {
                 } else {
                     format!("{n} from Goto WP orders")
                 });
-                ui.label("Spacing");
-                ui.add(
-                    egui::DragValue::new(&mut self.tpl_wp_spacing)
-                        .range(200.0..=20_000.0)
-                        .suffix(" m"),
-                );
                 ui.label("Speed");
                 ui.add(
                     egui::DragValue::new(&mut self.tpl_wp_speed)
                         .range(10.0..=900.0)
-                        .suffix(" m/s"),
+                        .suffix(" km/h"),
+                )
+                .on_hover_text(
+                    "MCU Speed in km/h. Defaults to 90% of the slowest unit’s cruise, rounded to 10 km/h.",
                 );
                 ui.label("Altitude");
-                ui.add(
-                    egui::DragValue::new(&mut self.tpl_wp_altitude)
-                        .range(0.0..=8_000.0)
-                        .suffix(" m"),
-                )
-                .on_hover_text("YPos for path waypoints. 0 m uses the first plane’s spawn altitude.");
+                let max_alt = self
+                    .tpl_seats
+                    .iter()
+                    .filter(|s| s.unit.is_air())
+                    .map(|s| model_spec::ceiling_m(&s.unit.script))
+                    .fold(8_000.0_f32, f32::max);
+                let mut shown_alt =
+                    path_waypoint_display_m(&self.tpl_seats, self.tpl_wp_altitude);
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut shown_alt)
+                            .range(0.0..=max_alt)
+                            .suffix(" m"),
+                    )
+                    .on_hover_text(
+                        "Follows aircraft altitude until you enter a value. 0 m with airborne planes follows spawn height on export.",
+                    )
+                    .changed()
+                {
+                    self.tpl_wp_altitude = shown_alt;
+                }
             });
         });
     }
@@ -1654,6 +1708,15 @@ impl GroupGeneratorApp {
         let mut move_order: Option<(usize, usize, i32)> = None;
         let mut move_seat_dir: Option<(usize, i32)> = None;
         let mut clicked = None;
+        let mut change_unit: Option<(usize, CatalogUnit)> = None;
+
+        if self.tpl_seats.is_empty() {
+            ui.label(
+                RichText::new("No units yet — pick a model above and Add unit.")
+                    .italics()
+                    .small(),
+            );
+        }
 
         for si in 0..self.tpl_seats.len() {
             ui.horizontal_top(|ui| {
@@ -1668,16 +1731,37 @@ impl GroupGeneratorApp {
                 } else {
                     format!("{} ({role})", self.tpl_seats[si].unit.label())
                 };
-                if centered_fill_button(
+                let current_script = self.tpl_seats[si].unit.script.clone();
+                let kind = self.tpl_seats[si].unit.kind;
+                let mut models: Vec<CatalogUnit> = self
+                    .tpl_catalog
+                    .iter()
+                    .filter(|u| u.kind == kind)
+                    .cloned()
+                    .collect();
+                models.sort_by(|a, b| a.label().cmp(b.label()));
+                let response = centered_fill_button(
                     ui,
                     &label,
                     if unit_sel { selected_fill } else { unit_fill },
                     Vec2::new(140.0, 24.0),
                 )
-                .clicked()
-                {
+                .on_hover_text("Click to change model (same kind)");
+                if response.clicked() {
                     clicked = Some(TplSelect::Seat(si));
                 }
+                egui::Popup::menu(&response).show(|ui| {
+                    ui.set_max_height(280.0);
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for unit in &models {
+                            let selected = unit.script.eq_ignore_ascii_case(&current_script);
+                            if ui.selectable_label(selected, unit.label()).clicked() {
+                                change_unit = Some((si, unit.clone()));
+                                ui.close();
+                            }
+                        }
+                    });
+                });
                 let this_seat = matches!(
                     self.tpl_select,
                     Some(TplSelect::Seat(s) | TplSelect::Order { seat: s, .. } | TplSelect::Event { seat: s, .. })
@@ -1861,6 +1945,19 @@ impl GroupGeneratorApp {
                 swap_tpl_select(&mut self.tpl_select, si, dest);
             }
         }
+        if let Some((si, unit)) = change_unit {
+            if si < self.tpl_seats.len() {
+                replace_seat_unit(&mut self.tpl_seats[si], unit);
+                if self.tpl_seats[si].unit.is_air() {
+                    let ceil = model_spec::ceiling_m(&self.tpl_seats[si].unit.script);
+                    self.tpl_seats[si].altitude = self.tpl_seats[si].altitude.min(ceil);
+                }
+                refresh_attack_areas_for_seat(&mut self.tpl_seats, si);
+                self.sync_template_waypoint_speed();
+                self.tpl_select = Some(TplSelect::Seat(si));
+                self.tpl_preview_from_catalog = false;
+            }
+        }
         if let Some(si) = remove_seat {
             self.tpl_seats.remove(si);
             for seat in &mut self.tpl_seats {
@@ -1876,6 +1973,7 @@ impl GroupGeneratorApp {
                 }
             }
             clamp_tpl_select(&mut self.tpl_select, &self.tpl_seats);
+            self.sync_template_waypoint_speed();
         }
     }
 
@@ -2118,12 +2216,46 @@ impl GroupGeneratorApp {
                 if self.tpl_seats[si].unit.is_air() {
                     ui.horizontal(|ui| {
                         ui.label("Altitude");
+                        let ceiling = model_spec::ceiling_m(&self.tpl_seats[si].unit.script);
                         ui.add(
-                            egui::Slider::new(&mut self.tpl_seats[si].altitude, 50.0..=8000.0)
+                            egui::Slider::new(&mut self.tpl_seats[si].altitude, 0.0..=ceiling)
                                 .suffix(" m")
-                                .logarithmic(true),
+                                .integer(),
+                        );
+                        if self.tpl_seats[si].altitude <= 0.0 {
+                            self.tpl_seats[si].altitude = 0.0;
+                        }
+                        self.tpl_seats[si].start_type = PlaneStart::stored_for_altitude(
+                            self.tpl_seats[si].start_type,
+                            self.tpl_seats[si].altitude,
                         );
                     });
+                    if self.tpl_seats[si].altitude <= 0.0 {
+                        ui.horizontal(|ui| {
+                            ui.label("Engine");
+                            let current = PlaneStart::from_i32(self.tpl_seats[si].start_type);
+                            for start in PlaneStart::GROUND {
+                                if ui
+                                    .selectable_label(current == start, start.label())
+                                    .on_hover_text(match start {
+                                        PlaneStart::Running => {
+                                            "On the runway, engines running (StartType 1)."
+                                        }
+                                        PlaneStart::Warm => {
+                                            "Parked with a warm engine (StartType 3)."
+                                        }
+                                        PlaneStart::Cold => {
+                                            "Parked cold and dark (StartType 2)."
+                                        }
+                                        PlaneStart::Air => "",
+                                    })
+                                    .clicked()
+                                {
+                                    self.tpl_seats[si].start_type = start.as_i32();
+                                }
+                            }
+                        });
+                    }
                 }
                 ui.horizontal(|ui| {
                     ui.label("Number in formation");
@@ -2162,30 +2294,6 @@ impl GroupGeneratorApp {
                 if self.tpl_seats[si].unit.is_train() {
                     self.draw_train_carriages(ui, si);
                 }
-                ui.horizontal(|ui| {
-                    ui.label(format!("Model: {}", self.tpl_seats[si].unit.label()));
-                    let picked = self.displayed_catalog().get(self.tpl_add_pick).cloned();
-                    if let Some(picked) = picked {
-                        if !picked
-                            .script
-                            .eq_ignore_ascii_case(&self.tpl_seats[si].unit.script)
-                            && ui
-                                .button(format!("Change to {}", picked.label()))
-                                .clicked()
-                        {
-                            let was_train = self.tpl_seats[si].unit.is_train();
-                            self.tpl_seats[si].unit = picked.clone();
-                            if picked.is_train() {
-                                self.tpl_seats[si].carriages = picked.default_carriages();
-                            } else if was_train {
-                                self.tpl_seats[si].carriages.clear();
-                            }
-                            self.tpl_seats[si].payload_id = 0;
-                            self.tpl_seats[si].mod_mask = "1".into();
-                            refresh_attack_areas_for_seat(&mut self.tpl_seats, si);
-                        }
-                    }
-                });
             }
             Some(TplSelect::Order { seat, order })
                 if seat < self.tpl_seats.len() && order < self.tpl_seats[seat].orders.len() =>
@@ -2330,16 +2438,36 @@ impl GroupGeneratorApp {
                         if self.tpl_seats[seat].unit.is_air() {
                             ui.horizontal(|ui| {
                                 ui.label("Altitude");
-                                ui.add(
-                                    egui::DragValue::new(
-                                        &mut self.tpl_seats[seat].orders[order].altitude,
-                                    )
-                                    .range(0.0..=8_000.0)
-                                    .suffix(" m"),
-                                )
-                                .on_hover_text(
-                                    "YPos for this hop. 0 m uses the Waypoints section altitude.",
+                                let hop_ceiling =
+                                    model_spec::ceiling_m(&self.tpl_seats[seat].unit.script);
+                                let inherited = path_waypoint_display_m(
+                                    &self.tpl_seats,
+                                    self.tpl_wp_altitude,
                                 );
+                                let mut shown =
+                                    if self.tpl_seats[seat].orders[order].altitude > 0.0 {
+                                        self.tpl_seats[seat].orders[order].altitude
+                                    } else {
+                                        inherited
+                                    };
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut shown)
+                                            .range(0.0..=hop_ceiling)
+                                            .suffix(" m"),
+                                    )
+                                    .on_hover_text(
+                                        "Follows the Waypoints altitude until you enter a value.",
+                                    )
+                                    .changed()
+                                {
+                                    self.tpl_seats[seat].orders[order].altitude =
+                                        if (shown - inherited).abs() < 0.5 {
+                                            0.0
+                                        } else {
+                                            shown
+                                        };
+                                }
                             });
                         }
                         ui.label(
@@ -2830,6 +2958,7 @@ impl GroupGeneratorApp {
                     append_seat(&mut self.tpl_seats, unit, self.tpl_per_group);
                     self.tpl_select = Some(TplSelect::Seat(self.tpl_seats.len() - 1));
                     self.tpl_preview_from_catalog = false;
+                    self.sync_template_waypoint_speed();
                 }
             }
             if !self.tpl_seats.is_empty()
@@ -2856,8 +2985,8 @@ impl GroupGeneratorApp {
         let has_payloads = loadout.is_some_and(|a| a.has_payloads());
         let has_mods = loadout.is_some_and(|a| a.has_mods());
 
-        ui.horizontal(|ui| {
-            if has_payloads {
+        if has_payloads {
+            ui.horizontal(|ui| {
                 ui.label("Payload");
                 let current = self.tpl_seats[si].payload_id;
                 let selected_text = payloads::payload_preview(&script, current);
@@ -2878,17 +3007,34 @@ impl GroupGeneratorApp {
                             }
                         }
                     });
-            } else if self.tpl_seats[si].unit.is_air() && !has_mods {
+            });
+            if let Some(ac) = payloads::catalog().for_script(&script) {
+                if let Some(p) = ac.payload(self.tpl_seats[si].payload_id) {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(p.description(payloads::catalog()))
+                                .small()
+                                .weak(),
+                        )
+                        .wrap(),
+                    );
+                }
+            }
+        } else if self.tpl_seats[si].unit.is_air() && !has_mods {
+            ui.horizontal(|ui| {
                 ui.label("Payload");
                 ui.add(egui::DragValue::new(&mut self.tpl_seats[si].payload_id).range(0..=99));
-            }
+            });
+        }
 
-            if has_mods {
+        if has_mods {
+            ui.horizontal(|ui| {
+                ui.label("Modifications");
                 let preview = payloads::mods_preview(&script, &self.tpl_seats[si].mod_mask);
                 let label = if preview == "—" {
-                    "Modifications".to_string()
+                    "Select…".to_string()
                 } else {
-                    format!("Mods: {preview}")
+                    preview
                 };
                 ui.menu_button(label, |ui| {
                     ui.set_min_width(220.0);
@@ -2927,22 +3073,7 @@ impl GroupGeneratorApp {
                         self.tpl_seats[si].mod_mask = payloads::encode_mod_mask(mask);
                     }
                 });
-            }
-        });
-
-        if has_payloads {
-            if let Some(ac) = payloads::catalog().for_script(&script) {
-                if let Some(p) = ac.payload(self.tpl_seats[si].payload_id) {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(p.description(payloads::catalog()))
-                                .small()
-                                .weak(),
-                        )
-                        .wrap(),
-                    );
-                }
-            }
+            });
         }
     }
 
@@ -2975,6 +3106,7 @@ impl GroupGeneratorApp {
         caption: &str,
         payload_line: Option<&str>,
         mods_line: Option<&str>,
+        status_line: Option<&str>,
     ) {
         ui.label(
             RichText::new(caption)
@@ -2999,6 +3131,9 @@ impl GroupGeneratorApp {
         ui.add_space(4.0);
         ui.add(egui::Label::new(format!("Type: {}", class.label())).wrap());
         ui.add(egui::Label::new(format!("Cruise speed: {cruise}")).wrap());
+        if let Some(status) = status_line {
+            ui.add(egui::Label::new(RichText::new(status).strong()).wrap());
+        }
         if let Some(spec) = model_spec::spec_for(&unit.script) {
             if spec.ceiling_m > 0.0 {
                 let ft = spec.ceiling_m * 3.280_84;
@@ -3174,6 +3309,31 @@ impl GroupGeneratorApp {
         self.status = Status::Info(format!("Appended {n} prototype(s) to User Added."));
     }
 
+    fn sync_template_waypoint_speed(&mut self) {
+        self.tpl_wp_speed = model_spec::suggested_waypoint_speed_kmh(
+            self.tpl_seats.iter().map(|s| s.unit.script.as_str()),
+        );
+    }
+
+    fn template_zone_mix(&self) -> ZoneMix {
+        zone_mix_for_seats(&self.tpl_seats)
+            .or(self.tpl_zone_mix)
+            .unwrap_or(ZoneMix::Air)
+    }
+
+    fn sync_template_zone_defaults(&mut self) {
+        let Some(mix) = zone_mix_for_seats(&self.tpl_seats) else {
+            return;
+        };
+        if self.tpl_zone_mix == Some(mix) {
+            return;
+        }
+        let (zone_in, zone_out) = zone_defaults(mix);
+        self.tpl_zone_in = zone_in;
+        self.tpl_zone_out = zone_out;
+        self.tpl_zone_mix = Some(mix);
+    }
+
     fn generate_unit_template(&mut self) {
         if self.tpl_zone_out < self.tpl_zone_in + 200.0 {
             self.tpl_zone_out = self.tpl_zone_in + 200.0;
@@ -3196,7 +3356,7 @@ impl GroupGeneratorApp {
             allow_multiple_spawns: self.tpl_spawn_reset,
             spawn_cooldown_min: self.tpl_spawn_cooldown_min,
             waypoint_count: used_waypoint_count(&self.tpl_seats),
-            waypoint_spacing: self.tpl_wp_spacing,
+            waypoint_spacing: WAYPOINT_SPACING_M,
             waypoint_speed: self.tpl_wp_speed,
             waypoint_altitude: self.tpl_wp_altitude,
             zone_coalition: self.tpl_zone_coalition,
@@ -3246,6 +3406,21 @@ impl GroupGeneratorApp {
             load.as_ref()
                 .map(|(_, mask)| payloads::mods_preview(&u.script, mask))
         });
+        let status_line = if self.tpl_preview_from_catalog {
+            None
+        } else {
+            match self.tpl_select {
+                Some(
+                    TplSelect::Seat(s)
+                    | TplSelect::Order { seat: s, .. }
+                    | TplSelect::Event { seat: s, .. },
+                ) if s < self.tpl_seats.len() && self.tpl_seats[s].unit.is_air() => Some(
+                    PlaneStart::from_i32(self.tpl_seats[s].start_type)
+                        .preview_status(self.tpl_seats[s].altitude),
+                ),
+                _ => None,
+            }
+        };
         let unit = preview.map(|(u, _, _)| u);
         let (pr, _) = ui.allocate_exact_size(Vec2::new(preview_w, height), Sense::hover());
         let panel_fill = ui.visuals().panel_fill;
@@ -3277,6 +3452,7 @@ impl GroupGeneratorApp {
                         &caption,
                         payload_line.as_deref(),
                         mods_line.as_deref(),
+                        status_line.as_deref(),
                     );
                 });
             },
@@ -3402,6 +3578,9 @@ impl GroupGeneratorApp {
         };
 
         let origin = to_screen(0.0, 0.0);
+        let visual = visual_range_m(self.template_zone_mix());
+        let vis_on_in = (self.tpl_zone_in - visual).abs() < 50.0;
+        let vis_on_out = (self.tpl_zone_out - visual).abs() < 50.0;
         painter.circle_stroke(
             origin,
             (self.tpl_zone_in * scale).max(2.0),
@@ -3412,17 +3591,31 @@ impl GroupGeneratorApp {
             (self.tpl_zone_out * scale).max(2.0),
             Stroke::new(1.5_f32, Color32::from_rgb(170, 90, 80)),
         );
+        if !vis_on_in && !vis_on_out {
+            painter.circle_stroke(
+                origin,
+                (visual * scale).max(2.0),
+                Stroke::new(1.2_f32, Color32::from_rgb(210, 180, 70)),
+            );
+            painter.text(
+                to_screen(0.0, visual as f64),
+                Align2::LEFT_CENTER,
+                "visual",
+                FontId::proportional(11.0),
+                Color32::from_rgb(210, 180, 70),
+            );
+        }
         painter.text(
             to_screen(0.0, self.tpl_zone_in as f64),
             Align2::LEFT_CENTER,
-            "IN",
+            if vis_on_in { "IN · visual" } else { "IN" },
             FontId::proportional(11.0),
             Color32::from_rgb(110, 190, 140),
         );
         painter.text(
             to_screen(0.0, self.tpl_zone_out as f64),
             Align2::LEFT_CENTER,
-            "OUT",
+            if vis_on_out { "OUT · visual" } else { "OUT" },
             FontId::proportional(11.0),
             Color32::from_rgb(200, 130, 120),
         );
@@ -3635,7 +3828,10 @@ impl GroupGeneratorApp {
         if let Some(i) = hover {
             let seat = &self.tpl_seats[i];
             let alt = if seat.unit.is_air() {
-                format!(" · {:.0} m", seat.altitude)
+                format!(
+                    " · {}",
+                    PlaneStart::from_i32(seat.start_type).preview_status(seat.altitude)
+                )
             } else {
                 String::new()
             };
@@ -3659,9 +3855,10 @@ impl GroupGeneratorApp {
                 rect.min + Vec2::new(10.0, 28.0),
                 Align2::LEFT_TOP,
                 format!(
-                    "WP {num} · {:.0} m north of origin · {:.0} m alt · Area 200 m",
+                    "WP {num} · {:.0} m north of origin · {:.0} m alt · Area {} m",
                     (num as f32) * self.tpl_wp_spacing,
-                    waypoint_display_altitude(&self.tpl_seats, num, self.tpl_wp_altitude)
+                    waypoint_display_altitude(&self.tpl_seats, num, self.tpl_wp_altitude),
+                    waypoint_area_m(&self.tpl_seats)
                 ),
                 FontId::proportional(13.0),
                 Color32::from_rgb(180, 230, 240),
@@ -3672,11 +3869,21 @@ impl GroupGeneratorApp {
             rect.min + Vec2::new(10.0, 8.0),
             Align2::LEFT_TOP,
             format!(
-                "{} · {} / group · 150 m   Zone IN {:.1} km · Out {:.1} km   N up · scroll zoom · right-drag pan",
+                "{} · {} / group · 150 m   Zone IN {:.1} km{} · Out {:.1} km{}   N up · scroll zoom · right-drag pan",
                 self.tpl_place_layout.label(),
                 self.tpl_per_group,
                 self.tpl_zone_in / 1000.0,
-                self.tpl_zone_out / 1000.0
+                if near_visual_range(self.tpl_zone_in, visual_range_m(self.template_zone_mix())) {
+                    " · visual"
+                } else {
+                    ""
+                },
+                self.tpl_zone_out / 1000.0,
+                if near_visual_range(self.tpl_zone_out, visual_range_m(self.template_zone_mix())) {
+                    " · visual"
+                } else {
+                    ""
+                },
             ),
             FontId::proportional(11.0),
             Color32::from_rgb(170, 170, 180),
@@ -5614,6 +5821,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                             rail: true,
                             behind: Vec::new(),
                             wp_ahead: Vec::new(),
+                            zone_in_m: TRAIN_ZONE_IN_M as f64,
                         }),
                     }
                 } else {

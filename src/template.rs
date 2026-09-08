@@ -1,8 +1,54 @@
-//! Build a memory-efficient unit template: proximity checkzones, activate or
-//! spawn, formation placement, per-unit orders, and waypoints.
+//! template.rs — Template Builder core
 //!
-//! Generated names other modes look for: `Zone IN`, `ENABLE / PULSE IN`,
-//! `MISSION END`. This mode never writes `NodeGates`.
+//! Builds one proximity-triggered unit group from `TemplateOptions`:
+//! `Logic` (Zone IN / Zone Out checkzones, `ENABLE / PULSE IN` pulse,
+//! Activate or Spawn bring-up with optional `DeathCount` → `COOLDOWN`
+//! repeat, and the `MISSION END` cleanup hub — `Force Complete - High`,
+//! optional `RTB DELAY` → `RTB East/West n`, then deactivate → delete),
+//! `Units` (cloned object + `MCU_TR_Entity` pairs, wingmen target-linked
+//! to their lead), `Orders` (command MCUs), and `Waypoints` (`WP n` path
+//! hops). Owns the seat model and its bookkeeping — catalog loading
+//! (`bundled_catalog` from `assets/Models.Group` + user groups), order
+//! chain normalization and index remapping, Goto WP insertion,
+//! attack-area suggestions from `weapon_range`, and the order tree layout
+//! the GUI draws. It does NOT write `NodeGates` (fighter packs are linked
+//! by `pack.rs`), does not own payload/mod data (the seat only holds
+//! `payload_id` / `mod_mask` — `payloads.rs` owns the catalog), and does
+//! not lay out the `WP n` path (hops sit at 4 km along +X from the fixed
+//! 40 km origin; the path is hand-authored after generation).
+//!
+//! ## Public API
+//! * `struct TemplateOptions` + `fn generate_template` — the build.
+//! * Seats: `TemplateSeat`, `CatalogUnit`, `FlightRole`, `PlaneStart`,
+//!   `append_seat`, `replace_seat_unit`, `copy_seat_attributes`,
+//!   `move_seat`, `apply_formation_numbers`, `last_lead_index`,
+//!   `remap_seat_index` / `remap_index_vec` / `remap_event_then`.
+//! * Orders / events: `OrderSpec` (`for_kind` / `for_unit`), `OrderKind`,
+//!   `EntityEvent`, `EventHook` / `EventThen`, `normalize_order_chain`,
+//!   `insert_goto_waypoint_after`, `set_report_following`,
+//!   `used_waypoint_count` / `next_waypoint_number`,
+//!   `order_tree_columns` / `order_tree_layout`.
+//! * Zones: `ZoneCoalition`, `ZoneMix`, `zone_defaults`, `visual_range_m`,
+//!   `near_visual_range`, `zone_mix_for_seats`, AIR/GROUND/TRAIN zone
+//!   constants.
+//! * Placement / formations: `PlaceLayout`, `place_offset`,
+//!   `finger_four_offset`, `PLACEMENT_SPACING`, `AIR_FORMATIONS` /
+//!   `GROUND_FORMATIONS`, `formation_label` / `formation_density`.
+//! * Waypoint / attack helpers: `waypoint_area_m`,
+//!   `path_waypoint_display_m`, `waypoint_display_altitude`,
+//!   `DEFAULT_TIME_ON_TARGET_S`, `apply_suggested_attack_area`,
+//!   `refresh_attack_areas_for_seat`, `attack_area_range_limit`,
+//!   `DEFAULT_ATTACK_AREA_M`.
+//! * Catalog: `bundled_catalog`, `builtin_plane_catalog`, `load_catalog`,
+//!   `load_catalog_as_user_added`, `merge_catalog`,
+//!   `catalog_carriage_scripts`, `carriage_label`.
+//!
+//! ## Used by
+//! * ui.rs (Template mode) — the whole builder (catalog, seats, order
+//!   tree, zones, waypoints). Generate → `serialize_group`.
+//! * bombers.rs (Exclusive mode) — `inspect_plan` / cleanup validation
+//!   reads the generated `MISSION END` / `Trigger Delete` graph.
+
 
 use crate::aircraft::{
     callsign_for, encode_tcode, encode_tcode_color, flight_color, flight_number,
@@ -26,11 +72,71 @@ const RTB_DELAY: f64 = 0.5;
 const DELAYED_END_TIME: f64 = 2.0;
 const RTB_DEACTIVATE_DELAY: f64 = 60.0;
 const DELETE_WAIT: f64 = 0.5;
-const WAYPOINT_AREA_M: &str = "200";
 pub const DEFAULT_TIME_ON_TARGET_S: f32 = 180.0;
 /// World spacing between seats in a placement group. Not a UI control.
 pub const PLACEMENT_SPACING: f32 = 150.0;
+/// Path waypoint spacing along +X (north). Authored by hand after generate.
+pub const WAYPOINT_SPACING_M: f32 = 4_000.0;
 pub const DEFAULT_ATTACK_AREA_M: f32 = 3000.0;
+/// MCU_Waypoint Area for aircraft path hops.
+pub const PLANE_WAYPOINT_AREA_M: &str = "300";
+/// MCU_Waypoint Area for ground / ship / train path hops.
+pub const GROUND_WAYPOINT_AREA_M: &str = "100";
+
+/// Airborne Zone IN / visual-range combat bubble (metres).
+pub const AIR_ZONE_IN_M: f32 = 16_000.0;
+pub const AIR_ZONE_OUT_M: f32 = 35_000.0;
+/// Ground (vehicle / ship / fixed) Zone IN / visual-range combat bubble.
+pub const GROUND_ZONE_IN_M: f32 = 10_000.0;
+pub const GROUND_ZONE_OUT_M: f32 = 19_000.0;
+/// Train-only (or primarily train) Zone IN / visual-range combat bubble.
+pub const TRAIN_ZONE_IN_M: f32 = 19_000.0;
+pub const TRAIN_ZONE_OUT_M: f32 = 30_000.0;
+/// Slider / schematic slack for the visual-range flag.
+pub const VISUAL_RANGE_SLACK_M: f32 = 800.0;
+
+/// Which Zone IN / Out pair the current seat mix should use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoneMix {
+    Air,
+    Ground,
+    Train,
+}
+
+/// Default Zone IN and Zone Out for a mix. Empty seats keep the last pair.
+pub fn zone_defaults(mix: ZoneMix) -> (f32, f32) {
+    match mix {
+        ZoneMix::Air => (AIR_ZONE_IN_M, AIR_ZONE_OUT_M),
+        ZoneMix::Ground => (GROUND_ZONE_IN_M, GROUND_ZONE_OUT_M),
+        ZoneMix::Train => (TRAIN_ZONE_IN_M, TRAIN_ZONE_OUT_M),
+    }
+}
+
+/// Recommended visual-range radius for the mix (same as that mix’s Zone IN).
+pub fn visual_range_m(mix: ZoneMix) -> f32 {
+    zone_defaults(mix).0
+}
+
+pub fn near_visual_range(value: f32, visual: f32) -> bool {
+    (value - visual).abs() <= VISUAL_RANGE_SLACK_M
+}
+
+/// Air wins if any plane is present. Otherwise trains win when they are at
+/// least half the seats. Empty mix is `None` so user edits stay put.
+pub fn zone_mix_for_seats(seats: &[TemplateSeat]) -> Option<ZoneMix> {
+    if seats.is_empty() {
+        return None;
+    }
+    if seats.iter().any(|s| s.unit.is_air()) {
+        return Some(ZoneMix::Air);
+    }
+    let trains = seats.iter().filter(|s| s.unit.is_train()).count();
+    if trains > 0 && trains * 2 >= seats.len() {
+        Some(ZoneMix::Train)
+    } else {
+        Some(ZoneMix::Ground)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnitKind {
@@ -71,7 +177,6 @@ impl UnitKind {
             UnitKind::Ship => "Ship",
         }
     }
-
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +274,40 @@ impl OrderKind {
                 | OrderKind::OnTookOff
                 | OrderKind::OnLanded
         )
+    }
+
+    /// Timers / RTB that are not command MCUs: Time on Target, Mission Complete,
+    /// RTB on Zone Out.
+    pub fn is_special(self) -> bool {
+        matches!(
+            self,
+            OrderKind::TimeOnTarget | OrderKind::MissionComplete | OrderKind::RtbOnZoneOut
+        )
+    }
+
+    pub fn is_command(self) -> bool {
+        !self.is_report() && !self.is_special()
+    }
+
+    pub fn commands(kind: UnitKind) -> impl Iterator<Item = OrderKind> {
+        Self::available(kind)
+            .iter()
+            .copied()
+            .filter(|k| k.is_command())
+    }
+
+    pub fn reports(kind: UnitKind) -> impl Iterator<Item = OrderKind> {
+        Self::available(kind)
+            .iter()
+            .copied()
+            .filter(|k| k.is_report())
+    }
+
+    pub fn specials(kind: UnitKind) -> impl Iterator<Item = OrderKind> {
+        Self::available(kind)
+            .iter()
+            .copied()
+            .filter(|k| k.is_special())
     }
 
     /// OnReport Type. CmdId is the spawner or the matching command MCU.
@@ -626,6 +765,8 @@ pub struct OrderSpec {
     pub attack_seat: Option<usize>,
     pub attack_group: bool,
     pub waypoint: u32,
+    /// Altitude for this Goto WP hop. 0 = use the template waypoint altitude.
+    pub altitude: f32,
     /// Other seats that receive this same command MCU (Objects). Empty = this unit only.
     pub shared_with: Vec<usize>,
 }
@@ -649,6 +790,7 @@ impl Default for OrderSpec {
             attack_seat: None,
             attack_group: true,
             waypoint: 1,
+            altitude: 0.0,
             shared_with: Vec::new(),
         }
     }
@@ -763,6 +905,78 @@ pub enum FlightRole {
     Follows(usize),
 }
 
+/// IL-2 `StartType` for aircraft.
+///
+/// `0` air, `1` runway (engines running), `2` parking cold, `3` parking warm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaneStart {
+    Air,
+    Running,
+    Cold,
+    Warm,
+}
+
+impl PlaneStart {
+    pub const GROUND: [PlaneStart; 3] = [Self::Running, Self::Warm, Self::Cold];
+
+    pub fn from_i32(v: i32) -> Self {
+        match v {
+            1 => Self::Running,
+            2 => Self::Cold,
+            3 => Self::Warm,
+            _ => Self::Air,
+        }
+    }
+
+    pub fn as_i32(self) -> i32 {
+        match self {
+            Self::Air => 0,
+            Self::Running => 1,
+            Self::Cold => 2,
+            Self::Warm => 3,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Air => "Airstart",
+            Self::Running => "Running",
+            Self::Warm => "Warm",
+            Self::Cold => "Cold",
+        }
+    }
+
+    /// Status line for the model preview.
+    pub fn preview_status(self, altitude: f32) -> String {
+        if altitude > 0.0 {
+            format!("Airstart · {:.0} m", altitude)
+        } else {
+            match self {
+                Self::Air | Self::Running => "Engine running".into(),
+                Self::Warm => "Warm start".into(),
+                Self::Cold => "Cold start".into(),
+            }
+        }
+    }
+
+    /// Airborne is always airstart. On the ground, Air becomes Running.
+    pub fn stored_for_altitude(stored: i32, altitude: f32) -> i32 {
+        if altitude > 0.0 {
+            Self::Air.as_i32()
+        } else {
+            match Self::from_i32(stored) {
+                Self::Air => Self::Running.as_i32(),
+                other => other.as_i32(),
+            }
+        }
+    }
+
+    /// Value written on a Plane. Airborne always `0`; ground never writes air.
+    pub fn written_for_altitude(stored: i32, altitude: f32) -> i32 {
+        Self::stored_for_altitude(stored, altitude)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TemplateSeat {
     pub unit: CatalogUnit,
@@ -778,6 +992,8 @@ pub struct TemplateSeat {
     pub formation_count: u32,
     pub fuel: f32,
     pub payload_id: i32,
+    /// IL-2 `ModMask` as a binary-looking decimal string (`1`, `11`, `10101`, …).
+    pub mod_mask: String,
     pub vulnerable: bool,
     pub engageable: bool,
     pub limit_ammo: bool,
@@ -799,11 +1015,15 @@ impl TemplateSeat {
         let number_in_formation = prop_i32(&unit.object, "NumberInFormation", 0);
         let fuel = prop_f32(&unit.object, "Fuel", 1.0).clamp(0.0, 1.0);
         let payload_id = prop_i32(&unit.object, "PayloadId", 0);
+        let mod_mask = prop_mod_mask(&unit.object);
         let vulnerable = prop_bool(&unit.object, "Vulnerable", true);
         let engageable = prop_bool(&unit.object, "Engageable", true);
         let limit_ammo = prop_bool(&unit.object, "LimitAmmo", true);
         let ai_rtb = prop_bool(&unit.object, "AiRTBDecision", false);
-        let start_type = prop_i32(&unit.object, "StartType", 0);
+        let start_type = PlaneStart::stored_for_altitude(
+            prop_i32(&unit.object, "StartType", 0),
+            altitude,
+        );
         let carriages = if unit.is_train() {
             unit.default_carriages()
         } else {
@@ -817,6 +1037,7 @@ impl TemplateSeat {
             formation_count: 0,
             fuel,
             payload_id,
+            mod_mask,
             vulnerable,
             engageable,
             limit_ammo,
@@ -841,8 +1062,9 @@ pub fn last_lead_index(seats: &[TemplateSeat]) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-/// Copy country / skill / fuel / payload / flags from `from` onto every other
-/// seat. Role, model, orders, and formation index are left alone.
+/// Copy country / skill / fuel / flags from `from` onto every other seat.
+/// Payload and modifications copy only onto the same model (same script).
+/// Role, model, orders, and formation index are left alone.
 pub fn copy_seat_attributes(seats: &mut [TemplateSeat], from: usize) {
     if from >= seats.len() {
         return;
@@ -855,21 +1077,28 @@ pub fn copy_seat_attributes(seats: &mut [TemplateSeat], from: usize) {
         seat.country = src.country;
         seat.skill = src.skill;
         seat.fuel = src.fuel;
-        seat.payload_id = src.payload_id;
         seat.vulnerable = src.vulnerable;
         seat.engageable = src.engageable;
         seat.limit_ammo = src.limit_ammo;
         seat.ai_rtb = src.ai_rtb;
         seat.start_type = src.start_type;
+        if same_unit_model(&src.unit, &seat.unit) {
+            seat.payload_id = src.payload_id;
+            seat.mod_mask = src.mod_mask.clone();
+        }
         if src.unit.is_air() && seat.unit.is_air() {
             seat.altitude = src.altitude;
+        }
+        if seat.unit.is_air() {
+            seat.start_type = PlaneStart::stored_for_altitude(seat.start_type, seat.altitude);
         }
     }
 }
 
 /// Append a unit. Each unit keeps its own country (nation) from the catalog.
 /// Skill / fuel flags are copied from the last seat and altitude from the last
-/// plane (new planes sit near that height).
+/// plane (new planes sit near that height). Payload and modifications are
+/// inherited from the last seat of the same model.
 /// If a Lead is already set, the new unit follows it and `#` in formation
 /// is numbered 1, 2, 3, …
 pub fn append_seat(seats: &mut Vec<TemplateSeat>, unit: CatalogUnit, per_group: u32) {
@@ -880,23 +1109,32 @@ pub fn append_seat(seats: &mut Vec<TemplateSeat>, unit: CatalogUnit, per_group: 
         .find(|s| s.unit.is_air())
         .map(|s| s.altitude);
     let follow_lead = last_lead_index(seats);
+    let same_model = seats
+        .iter()
+        .rev()
+        .find(|s| same_unit_model(&s.unit, &unit))
+        .cloned();
     let prev = seats.last().cloned();
     let mut seat = TemplateSeat::new(unit);
     if let Some(p) = prev {
         // Keep the unit's own country from the catalog (its own nation).
         seat.skill = p.skill;
         seat.fuel = p.fuel;
-        seat.payload_id = p.payload_id;
         seat.vulnerable = p.vulnerable;
         seat.engageable = p.engageable;
         seat.limit_ammo = p.limit_ammo;
         seat.ai_rtb = p.ai_rtb;
         seat.start_type = p.start_type;
     }
+    if let Some(p) = same_model {
+        seat.payload_id = p.payload_id;
+        seat.mod_mask = p.mod_mask.clone();
+    }
     if seat.unit.is_air() {
         if let Some(alt) = last_plane_alt {
             seat.altitude = alt;
         }
+        seat.start_type = PlaneStart::stored_for_altitude(seat.start_type, seat.altitude);
     } else {
         seat.altitude = 0.0;
     }
@@ -912,6 +1150,34 @@ pub fn append_seat(seats: &mut Vec<TemplateSeat>, unit: CatalogUnit, per_group: 
     } else {
         seat.number_in_formation = (index as u32 % per) as i32;
         seats.push(seat);
+    }
+}
+
+/// Swap the model on an existing seat. Payload / mods reset; country, skill,
+/// altitude, and start type stay. Same-kind swaps only (Planes stay Planes).
+pub fn replace_seat_unit(seat: &mut TemplateSeat, unit: CatalogUnit) {
+    let was_train = seat.unit.is_train();
+    seat.unit = unit;
+    if seat.unit.is_train() {
+        seat.carriages = seat.unit.default_carriages();
+    } else if was_train {
+        seat.carriages.clear();
+    }
+    seat.payload_id = 0;
+    seat.mod_mask = "1".into();
+    if !seat.unit.is_air() {
+        seat.altitude = 0.0;
+    } else {
+        seat.start_type = PlaneStart::stored_for_altitude(seat.start_type, seat.altitude);
+    }
+}
+
+/// Path waypoint `Area` in metres: 300 for any aircraft, 100 for ground-only.
+pub fn waypoint_area_m(seats: &[TemplateSeat]) -> &'static str {
+    if seats.iter().any(|s| s.unit.is_air()) {
+        PLANE_WAYPOINT_AREA_M
+    } else {
+        GROUND_WAYPOINT_AREA_M
     }
 }
 
@@ -933,6 +1199,17 @@ fn prop_bool(obj: &Il2Entity, key: &str, default: bool) -> bool {
         Some("1") => true,
         _ => default,
     }
+}
+
+fn prop_mod_mask(obj: &Il2Entity) -> String {
+    obj.property("ModMask")
+        .map(|s| s.trim_matches('"').trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "1".into())
+}
+
+fn same_unit_model(a: &CatalogUnit, b: &CatalogUnit) -> bool {
+    script_type_id(&a.script).eq_ignore_ascii_case(script_type_id(&b.script))
 }
 
 /// Assign NumberInFormation for a lead and its followers: 0, 1, 2, …
@@ -1138,40 +1415,213 @@ pub fn normalize_order_chain(
     new_keep
 }
 
+/// One hop for the order tree: a command plus its following report and TOT.
+fn take_order_hop(orders: &[OrderSpec], i: &mut usize) -> Vec<usize> {
+    if orders[*i].kind.is_wp_parallel() {
+        let mut col = vec![*i];
+        *i += 1;
+        while *i < orders.len() {
+            let k = orders[*i].kind;
+            if k.is_wp_parallel() || k.is_report() {
+                col.push(*i);
+                *i += 1;
+                continue;
+            }
+            break;
+        }
+        return col;
+    }
+    let mut col = vec![*i];
+    *i += 1;
+    if *i < orders.len() {
+        if let Some(follows) = orders[*i].kind.report_follows() {
+            if orders[col[0]].kind == follows {
+                col.push(*i);
+                *i += 1;
+            }
+        }
+    }
+    // TOT belongs with this hop unless an Attack cluster follows (then TOT
+    // stacks with the attack instead).
+    if *i < orders.len() && orders[*i].kind == OrderKind::TimeOnTarget {
+        let attack_next = *i + 1 < orders.len()
+            && matches!(
+                orders[*i + 1].kind,
+                OrderKind::Attack | OrderKind::AttackArea
+            );
+        if !attack_next {
+            col.push(*i);
+            *i += 1;
+        }
+    }
+    col
+}
+
 /// Columns of the order tree. Sequential hops stay in line; Attack / AttackArea
-/// / Time on Target that sit together are stacked as a parallel branch.
+/// / Time on Target that sit together are stacked as a parallel branch. A TOT
+/// that follows a waypoint (or other hop) with no attack sits in that hop's
+/// column. Leading reports (OnSpawned) attach to the next hop so they stack
+/// on that command instead of sitting in a spine-less column.
 pub fn order_tree_columns(orders: &[OrderSpec]) -> Vec<Vec<usize>> {
     let mut cols = Vec::new();
     let mut i = 0;
     while i < orders.len() {
-        if orders[i].kind.is_wp_parallel() {
-            let mut col = vec![i];
-            i += 1;
-            while i < orders.len() {
-                let k = orders[i].kind;
-                if k.is_wp_parallel() || k.is_report() {
-                    col.push(i);
-                    i += 1;
-                    continue;
-                }
-                break;
+        if orders[i].kind.is_report() {
+            let start = i;
+            while i < orders.len() && orders[i].kind.is_report() {
+                i += 1;
             }
-            cols.push(col);
+            let reports: Vec<usize> = (start..i).collect();
+            if i < orders.len() {
+                let mut col = take_order_hop(orders, &mut i);
+                let mut merged = reports;
+                merged.append(&mut col);
+                cols.push(merged);
+            } else if let Some(prev) = cols.last_mut() {
+                prev.extend(reports);
+            } else {
+                cols.push(reports);
+            }
             continue;
         }
-        let mut col = vec![i];
-        i += 1;
-        if i < orders.len() {
-            if let Some(follows) = orders[i].kind.report_follows() {
-                if orders[col[0]].kind == follows {
-                    col.push(i);
-                    i += 1;
-                }
-            }
-        }
-        cols.push(col);
+        cols.push(take_order_hop(orders, &mut i));
     }
     cols
+}
+
+/// One cell in the order tree: an order, or an event hooked to that column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrderTreeNode {
+    Order(usize),
+    Event(usize),
+}
+
+fn is_stack_satellite(kind: OrderKind) -> bool {
+    kind == OrderKind::TimeOnTarget
+}
+
+fn column_has_order(col: &[OrderTreeNode], oi: usize) -> bool {
+    col.iter()
+        .any(|n| matches!(n, OrderTreeNode::Order(i) if *i == oi))
+}
+
+/// Visual columns: events above reports above the spine hop, then TOT below.
+/// Events that pulse an order sit on the previous hop (OnPlaneTookOff over
+/// Take Off, OnBingoBombs over AttackArea). Reports that wait on a command
+/// sit on that hop (OnTookOff over Take Off). Force Complete events sit in a
+/// trailing column.
+pub fn order_tree_layout(orders: &[OrderSpec], events: &[EventHook]) -> Vec<Vec<OrderTreeNode>> {
+    let cols = order_tree_columns(orders);
+    let mut laid: Vec<Vec<OrderTreeNode>> = cols
+        .iter()
+        .map(|col| {
+            let mut reports = Vec::new();
+            let mut primary = Vec::new();
+            let mut stacked = Vec::new();
+            for &i in col {
+                if orders[i].kind.is_report() {
+                    reports.push(OrderTreeNode::Order(i));
+                } else if is_stack_satellite(orders[i].kind) {
+                    stacked.push(OrderTreeNode::Order(i));
+                } else {
+                    primary.push(OrderTreeNode::Order(i));
+                }
+            }
+            let mut out = reports;
+            out.append(&mut primary);
+            out.append(&mut stacked);
+            out
+        })
+        .collect();
+
+    let mut placed = vec![false; events.len()];
+    for (ei, hook) in events.iter().enumerate() {
+        let EventThen::Order(oi) = hook.then else {
+            continue;
+        };
+        let Some(ci) = laid.iter().position(|col| column_has_order(col, oi)) else {
+            continue;
+        };
+        let host = if ci > 0 { ci - 1 } else { ci };
+        let at = laid[host]
+            .iter()
+            .position(|n| match n {
+                OrderTreeNode::Order(i) => !is_stack_satellite(orders[*i].kind),
+                OrderTreeNode::Event(_) => false,
+            })
+            .unwrap_or(0);
+        laid[host].insert(at, OrderTreeNode::Event(ei));
+        placed[ei] = true;
+    }
+    let trailing: Vec<_> = events
+        .iter()
+        .enumerate()
+        .filter(|(ei, _)| !placed[*ei])
+        .map(|(ei, _)| OrderTreeNode::Event(ei))
+        .collect();
+    if !trailing.is_empty() {
+        laid.push(trailing);
+    }
+    for col in &mut laid {
+        sort_events_longest_first(col, events);
+        sort_reports_longest_first(col, orders);
+    }
+    laid
+}
+
+fn event_label_len(node: OrderTreeNode, events: &[EventHook]) -> usize {
+    match node {
+        OrderTreeNode::Event(ei) => events.get(ei).map(|h| h.kind.label().len()).unwrap_or(0),
+        OrderTreeNode::Order(_) => 0,
+    }
+}
+
+/// Longest event chip on top so S-feeds into the trunk don't cross.
+fn sort_events_longest_first(col: &mut [OrderTreeNode], events: &[EventHook]) {
+    let n = col
+        .iter()
+        .take_while(|n| matches!(n, OrderTreeNode::Event(_)))
+        .count();
+    if n > 1 {
+        col[..n].sort_by(|a, b| event_label_len(*b, events).cmp(&event_label_len(*a, events)));
+    }
+}
+
+fn report_label_len(node: OrderTreeNode, orders: &[OrderSpec]) -> usize {
+    match node {
+        OrderTreeNode::Order(oi) => orders
+            .get(oi)
+            .filter(|o| o.kind.is_report())
+            .map(|o| o.kind.label().len())
+            .unwrap_or(0),
+        OrderTreeNode::Event(_) => 0,
+    }
+}
+
+fn top_report_range(col: &[OrderTreeNode], orders: &[OrderSpec]) -> (usize, usize) {
+    let start = col
+        .iter()
+        .take_while(|n| matches!(n, OrderTreeNode::Event(_)))
+        .count();
+    let n = col[start..]
+        .iter()
+        .take_while(|n| {
+            matches!(
+                n,
+                OrderTreeNode::Order(i) if orders.get(*i).is_some_and(|o| o.kind.is_report())
+            )
+        })
+        .count();
+    (start, n)
+}
+
+/// Longest report chip on top, same idea as stacked events.
+fn sort_reports_longest_first(col: &mut [OrderTreeNode], orders: &[OrderSpec]) {
+    let (start, n) = top_report_range(col, orders);
+    if n > 1 {
+        col[start..start + n]
+            .sort_by(|a, b| report_label_len(*b, orders).cmp(&report_label_len(*a, orders)));
+    }
 }
 
 /// Set or insert the command that follows a report in the chain.
@@ -1320,6 +1770,8 @@ pub struct TemplateOptions {
     pub waypoint_count: u32,
     pub waypoint_spacing: f32,
     pub waypoint_speed: f32,
+    /// Path waypoint YPos. 0 = use the first plane's spawn altitude.
+    pub waypoint_altitude: f32,
     pub zone_coalition: ZoneCoalition,
 }
 
@@ -1327,8 +1779,8 @@ impl Default for TemplateOptions {
     fn default() -> Self {
         Self {
             name: "Unit Template".into(),
-            zone_in: 7_500.0,
-            zone_out: 8_500.0,
+            zone_in: AIR_ZONE_IN_M,
+            zone_out: AIR_ZONE_OUT_M,
             spacing: PLACEMENT_SPACING,
             seats: Vec::new(),
             place_layout: PlaceLayout::InvertedVee,
@@ -1337,8 +1789,9 @@ impl Default for TemplateOptions {
             allow_multiple_spawns: false,
             spawn_cooldown_min: 5.0,
             waypoint_count: 0,
-            waypoint_spacing: 4_000.0,
+            waypoint_spacing: WAYPOINT_SPACING_M,
             waypoint_speed: 100.0,
+            waypoint_altitude: 0.0,
             zone_coalition: ZoneCoalition::Western,
         }
     }
@@ -1699,7 +2152,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     let zone_out = opts.zone_out.max(opts.zone_in + 200.0) as f64;
     let spacing = opts.spacing.max(10.0) as f64;
     let per_group = opts.per_group.max(1) as usize;
-    let path_altitude = first_plane_altitude(&opts.seats);
+    let path_altitude = path_waypoint_altitude(opts);
     let coalitions = opts.zone_coalition.plane_coalitions();
     let wants_rtb = opts
         .seats
@@ -2091,19 +2544,21 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
             ORIGIN_X + (w as f64 + 1.0) * opts.waypoint_spacing as f64,
             ORIGIN_Z,
         );
-        wp.set_property("Area", WAYPOINT_AREA_M);
+        wp.set_property("Area", waypoint_area_m(&opts.seats));
         wp.set_property("Speed", format!("{:.0}", opts.waypoint_speed.max(10.0)));
         wp.set_property("Priority", "1");
         wp.set_objects(lead_entity_ids.clone());
         if seats_have_planes(&opts.seats) {
-            wp.set_property("YPos", format!("{:.3}", path_altitude));
+            let y = hop_waypoint_altitude(&opts.seats, (w as u32) + 1)
+                .map(|a| a as f64)
+                .unwrap_or(path_altitude);
+            wp.set_property("YPos", format!("{y:.3}"));
         }
         waypoints.push(wp);
     }
 
     if uses_goto {
         let mut wp_objects: Vec<Vec<i32>> = vec![Vec::new(); waypoints.len()];
-        let mut wp_alt: Vec<Option<f64>> = vec![None; waypoints.len()];
         for (si, seat) in opts.seats.iter().enumerate() {
             if !receives_orders(&opts.seats, si) {
                 continue;
@@ -2120,16 +2575,10 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                 if !wp_objects[idx].contains(&eid) {
                     wp_objects[idx].push(eid);
                 }
-                if seat.unit.is_air() && wp_alt[idx].is_none() {
-                    wp_alt[idx] = Some(seat.altitude as f64);
-                }
             }
         }
         for (i, wp) in waypoints.iter_mut().enumerate() {
             wp.set_objects(wp_objects[i].clone());
-            if let Some(y) = wp_alt[i] {
-                wp.set_property("YPos", format!("{y:.3}"));
-            }
         }
     }
 
@@ -2653,13 +3102,17 @@ fn place_unit(
     );
     object.set_existing_property("Fuel", format!("{}", seat.fuel.clamp(0.0, 1.0)));
     object.set_existing_property("PayloadId", seat.payload_id.to_string());
+    object.set_existing_property("ModMask", seat.mod_mask.clone());
     object.set_existing_property("Vulnerable", i32::from(seat.vulnerable).to_string());
     object.set_existing_property("Engageable", i32::from(seat.engageable).to_string());
     object.set_existing_property("LimitAmmo", i32::from(seat.limit_ammo).to_string());
     // Planes only. Writing these on a Vehicle makes the mission editor stop
     // parsing the rest of the group (one unit, no entity, no followers).
     object.set_existing_property("AiRTBDecision", i32::from(seat.ai_rtb).to_string());
-    object.set_existing_property("StartType", seat.start_type.to_string());
+    object.set_existing_property(
+        "StartType",
+        PlaneStart::written_for_altitude(seat.start_type, seat.altitude).to_string(),
+    );
     if spec.is_train() {
         set_train_carriages(&mut object, &seat.carriages);
     }
@@ -2748,6 +3201,47 @@ fn first_plane_altitude(seats: &[TemplateSeat]) -> f64 {
         .find(|s| s.unit.is_air())
         .map(|s| s.altitude as f64)
         .unwrap_or(1000.0)
+}
+
+/// Path YPos shown in the UI: explicit template altitude, else the first plane.
+pub fn path_waypoint_display_m(seats: &[TemplateSeat], template_alt: f32) -> f32 {
+    if template_alt > 0.0 {
+        template_alt
+    } else {
+        first_plane_altitude(seats) as f32
+    }
+}
+
+fn path_waypoint_altitude(opts: &TemplateOptions) -> f64 {
+    path_waypoint_display_m(&opts.seats, opts.waypoint_altitude) as f64
+}
+
+fn hop_waypoint_altitude(seats: &[TemplateSeat], wp_n: u32) -> Option<f32> {
+    let n = wp_n.max(1);
+    for seat in seats {
+        if !seat.unit.is_air() {
+            continue;
+        }
+        for order in &seat.orders {
+            if order.kind == OrderKind::GotoWaypoint
+                && order.waypoint.max(1) == n
+                && order.altitude > 0.0
+            {
+                return Some(order.altitude);
+            }
+        }
+    }
+    None
+}
+
+/// YPos for WP `wp_n`: hop override, else the template path altitude, else the
+/// first plane’s spawn height.
+pub fn waypoint_display_altitude(seats: &[TemplateSeat], wp_n: u32, template_alt: f32) -> f32 {
+    if let Some(a) = hop_waypoint_altitude(seats, wp_n) {
+        a
+    } else {
+        path_waypoint_display_m(seats, template_alt)
+    }
 }
 
 fn wire_other_unit(
@@ -3292,6 +3786,69 @@ mod tests {
                 unit.script
             );
         }
+    }
+
+    #[test]
+    fn zone_defaults_follow_air_ground_train_mix() {
+        assert_eq!(zone_defaults(ZoneMix::Air), (16_000.0, 35_000.0));
+        assert_eq!(zone_defaults(ZoneMix::Ground), (10_000.0, 19_000.0));
+        assert_eq!(zone_defaults(ZoneMix::Train), (19_000.0, 30_000.0));
+        assert_eq!(visual_range_m(ZoneMix::Air), 16_000.0);
+        assert_eq!(visual_range_m(ZoneMix::Ground), 10_000.0);
+        assert_eq!(visual_range_m(ZoneMix::Train), 19_000.0);
+        assert!(near_visual_range(16_000.0, 16_000.0));
+        assert!(near_visual_range(16_400.0, 16_000.0));
+        assert!(!near_visual_range(18_000.0, 16_000.0));
+        assert!(near_visual_range(10_200.0, 10_000.0));
+        assert!(near_visual_range(18_500.0, 19_000.0));
+        assert!(zone_mix_for_seats(&[]).is_none());
+
+        let plane = builtin_plane_catalog()
+            .into_iter()
+            .find(|u| u.script.contains("mig15bis"))
+            .unwrap();
+        let vehicle = bundled_catalog()
+            .into_iter()
+            .find(|u| u.kind == UnitKind::Vehicle)
+            .unwrap();
+        let train = bundled_catalog()
+            .into_iter()
+            .find(|u| u.kind == UnitKind::Train)
+            .unwrap();
+        assert_eq!(
+            zone_mix_for_seats(&[TemplateSeat::new(plane.clone())]),
+            Some(ZoneMix::Air)
+        );
+        assert_eq!(
+            zone_mix_for_seats(&[TemplateSeat::new(vehicle.clone())]),
+            Some(ZoneMix::Ground)
+        );
+        assert_eq!(
+            zone_mix_for_seats(&[TemplateSeat::new(train.clone())]),
+            Some(ZoneMix::Train)
+        );
+        assert_eq!(
+            zone_mix_for_seats(&[
+                TemplateSeat::new(train.clone()),
+                TemplateSeat::new(vehicle.clone()),
+            ]),
+            Some(ZoneMix::Train)
+        );
+        assert_eq!(
+            zone_mix_for_seats(&[
+                TemplateSeat::new(train.clone()),
+                TemplateSeat::new(vehicle.clone()),
+                TemplateSeat::new(vehicle.clone()),
+            ]),
+            Some(ZoneMix::Ground)
+        );
+        assert_eq!(
+            zone_mix_for_seats(&[TemplateSeat::new(plane), TemplateSeat::new(train)]),
+            Some(ZoneMix::Air)
+        );
+        let opts = TemplateOptions::default();
+        assert!((opts.zone_in - AIR_ZONE_IN_M).abs() < f32::EPSILON);
+        assert!((opts.zone_out - AIR_ZONE_OUT_M).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -4018,6 +4575,69 @@ mod tests {
     }
 
     #[test]
+    fn copy_and_append_inherit_payload_mods_on_same_type() {
+        let mig = builtin_plane_catalog()
+            .into_iter()
+            .find(|u| u.script.contains("mig15bis"))
+            .unwrap();
+        let sabre = builtin_plane_catalog()
+            .into_iter()
+            .find(|u| u.script.contains("f86a5"))
+            .unwrap();
+        let mut seats = vec![
+            TemplateSeat::new(mig.clone()),
+            TemplateSeat::new(mig.clone()),
+            TemplateSeat::new(sabre.clone()),
+        ];
+        seats[0].payload_id = 2;
+        seats[0].mod_mask = "11".into();
+        seats[0].country = 601;
+        copy_seat_attributes(&mut seats, 0);
+        assert_eq!(seats[1].payload_id, 2);
+        assert_eq!(seats[1].mod_mask, "11");
+        assert_eq!(seats[1].country, 601);
+        assert_eq!(seats[2].payload_id, 0, "different type keeps its payload");
+        assert_eq!(seats[2].mod_mask, "1");
+        assert_eq!(seats[2].country, 601);
+
+        append_seat(&mut seats, mig, 4);
+        let last = seats.last().unwrap();
+        assert_eq!(last.payload_id, 2);
+        assert_eq!(last.mod_mask, "11");
+        append_seat(&mut seats, sabre, 4);
+        let last = seats.last().unwrap();
+        assert_eq!(last.payload_id, 0);
+        assert_eq!(last.mod_mask, "1");
+    }
+
+    #[test]
+    fn generated_plane_writes_payload_and_mod_mask() {
+        let mig = builtin_plane_catalog()
+            .into_iter()
+            .find(|u| u.script.contains("mig15bis"))
+            .unwrap();
+        let mut opts = TemplateOptions::default();
+        opts.waypoint_count = 0;
+        let mut seat = TemplateSeat::new(mig);
+        seat.payload_id = 2;
+        seat.mod_mask = "10101".into();
+        opts.seats = vec![seat];
+        let pack = generate_template(&opts).unwrap();
+        let mut seen = false;
+        pack.for_each(&mut |e| {
+            if e.block_type == "Plane" {
+                assert_eq!(e.property("PayloadId"), Some("2"));
+                assert_eq!(e.property("ModMask"), Some("10101"));
+                seen = true;
+            }
+        });
+        assert!(seen);
+        let text = crate::serialize::serialize_group(&pack);
+        assert!(text.contains("PayloadId = 2;"));
+        assert!(text.contains("ModMask = 10101;"));
+    }
+
+    #[test]
     fn move_seat_swaps_and_remaps_follows() {
         let vehicle = catalog_vehicle();
         let mut seats = Vec::new();
@@ -4382,7 +5002,7 @@ mod tests {
     }
 
     #[test]
-    fn path_waypoints_use_200m_area_and_attack_area_defaults_to_3000() {
+    fn path_waypoints_use_300m_area_for_planes_and_attack_area_defaults_to_3000() {
         let mut opts = four_migs();
         opts.seats[0].orders.insert(
             0,
@@ -4394,9 +5014,64 @@ mod tests {
         );
         let pack = generate_template(&opts).unwrap();
         let wp1 = pack.find_by_name("WP 1").unwrap();
-        assert_eq!(wp1.property("Area"), Some("200"));
+        assert_eq!(wp1.property("Area"), Some("300"));
         let area = pack.find_by_name("AttackArea").unwrap();
         assert_eq!(area.property("AttackArea"), Some("3000"));
+    }
+
+    #[test]
+    fn ground_path_waypoints_use_100m_area() {
+        let vehicle = catalog_vehicle();
+        let mut seat = TemplateSeat::new(vehicle);
+        seat.orders = vec![OrderSpec {
+            kind: OrderKind::GotoWaypoint,
+            waypoint: 1,
+            ..OrderSpec::default()
+        }];
+        let mut opts = TemplateOptions::default();
+        opts.seats = vec![seat];
+        let pack = generate_template(&opts).unwrap();
+        let wp1 = pack.find_by_name("WP 1").unwrap();
+        assert_eq!(wp1.property("Area"), Some("100"));
+    }
+
+    #[test]
+    fn airborne_plane_writes_airstart_even_if_ground_start_was_selected() {
+        let mut opts = one_mig();
+        opts.seats[0].altitude = 2500.0;
+        opts.seats[0].start_type = PlaneStart::Cold.as_i32();
+        let pack = generate_template(&opts).unwrap();
+        pack.for_each(&mut |e| {
+            if e.block_type == "Plane" {
+                assert_eq!(e.property("StartType"), Some("0"));
+                assert_eq!(e.property("YPos").unwrap(), "2500.000");
+            }
+        });
+    }
+
+    #[test]
+    fn ground_plane_writes_cold_warm_or_running_start() {
+        for (start, expected) in [
+            (PlaneStart::Running, "1"),
+            (PlaneStart::Cold, "2"),
+            (PlaneStart::Warm, "3"),
+            (PlaneStart::Air, "1"),
+        ] {
+            let mut opts = one_mig();
+            opts.seats[0].altitude = 0.0;
+            opts.seats[0].start_type = start.as_i32();
+            let pack = generate_template(&opts).unwrap();
+            pack.for_each(&mut |e| {
+                if e.block_type == "Plane" {
+                    assert_eq!(
+                        e.property("StartType"),
+                        Some(expected),
+                        "start {start:?} should write {expected}"
+                    );
+                    assert_eq!(e.property("YPos").unwrap(), "0.000");
+                }
+            });
+        }
     }
 
     #[test]
@@ -4700,6 +5375,300 @@ mod tests {
         assert_eq!(
             order_tree_columns(&after_attack),
             vec![vec![0], vec![1, 2]]
+        );
+        let events = vec![
+            EventHook {
+                kind: EntityEvent::OnPlaneBingoBombs,
+                then: EventThen::Order(1),
+            },
+            EventHook {
+                kind: EntityEvent::OnKilled,
+                then: EventThen::ForceComplete,
+            },
+        ];
+        assert_eq!(
+            order_tree_layout(&after_attack, &events),
+            vec![
+                vec![OrderTreeNode::Event(0), OrderTreeNode::Order(0)],
+                vec![OrderTreeNode::Order(1), OrderTreeNode::Order(2)],
+                vec![OrderTreeNode::Event(1)],
+            ]
+        );
+        let after_tot_then_wp = vec![
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 1,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::AttackArea,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::TimeOnTarget,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 2,
+                ..OrderSpec::default()
+            },
+        ];
+        let bingo_next = vec![EventHook {
+            kind: EntityEvent::OnPlaneBingoBombs,
+            then: EventThen::Order(3),
+        }];
+        assert_eq!(
+            order_tree_layout(&after_tot_then_wp, &bingo_next),
+            vec![
+                vec![OrderTreeNode::Order(0)],
+                vec![
+                    OrderTreeNode::Event(0),
+                    OrderTreeNode::Order(1),
+                    OrderTreeNode::Order(2),
+                ],
+                vec![OrderTreeNode::Order(3)],
+            ]
+        );
+        let takeoff_then = vec![
+            OrderSpec {
+                kind: OrderKind::TakeOff,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::Formation,
+                ..OrderSpec::default()
+            },
+        ];
+        let took_off = vec![EventHook {
+            kind: EntityEvent::OnPlaneTookOff,
+            then: EventThen::Order(1),
+        }];
+        assert_eq!(
+            order_tree_layout(&takeoff_then, &took_off),
+            vec![
+                vec![OrderTreeNode::Event(0), OrderTreeNode::Order(0)],
+                vec![OrderTreeNode::Order(1)],
+            ]
+        );
+        let two_events = vec![
+            EventHook {
+                kind: EntityEvent::OnPlaneBingoBombs,
+                then: EventThen::Order(3),
+            },
+            EventHook {
+                kind: EntityEvent::OnPlaneCriticalDamage,
+                then: EventThen::Order(3),
+            },
+        ];
+        assert_eq!(
+            order_tree_layout(&after_tot_then_wp, &two_events),
+            vec![
+                vec![OrderTreeNode::Order(0)],
+                vec![
+                    OrderTreeNode::Event(1),
+                    OrderTreeNode::Event(0),
+                    OrderTreeNode::Order(1),
+                    OrderTreeNode::Order(2),
+                ],
+                vec![OrderTreeNode::Order(3)],
+            ]
+        );
+    }
+
+    #[test]
+    fn order_tree_stacks_reports_above_commands() {
+        let spawned_then_form = vec![
+            OrderSpec {
+                kind: OrderKind::OnSpawned,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::Formation,
+                ..OrderSpec::default()
+            },
+        ];
+        assert_eq!(
+            order_tree_columns(&spawned_then_form),
+            vec![vec![0, 1]]
+        );
+        assert_eq!(
+            order_tree_layout(&spawned_then_form, &[]),
+            vec![vec![OrderTreeNode::Order(0), OrderTreeNode::Order(1)]]
+        );
+        let takeoff_report = vec![
+            OrderSpec {
+                kind: OrderKind::TakeOff,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::OnTookOff,
+                ..OrderSpec::default()
+            },
+        ];
+        assert_eq!(
+            order_tree_layout(&takeoff_report, &[]),
+            vec![vec![OrderTreeNode::Order(1), OrderTreeNode::Order(0)]]
+        );
+        let attack_report = vec![
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 1,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::AttackArea,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::OnAreaAttacked,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::TimeOnTarget,
+                ..OrderSpec::default()
+            },
+        ];
+        assert_eq!(
+            order_tree_layout(&attack_report, &[]),
+            vec![
+                vec![OrderTreeNode::Order(0)],
+                vec![
+                    OrderTreeNode::Order(2),
+                    OrderTreeNode::Order(1),
+                    OrderTreeNode::Order(3),
+                ],
+            ]
+        );
+        let spawned_and_area = vec![
+            OrderSpec {
+                kind: OrderKind::OnSpawned,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::AttackArea,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::OnAreaAttacked,
+                ..OrderSpec::default()
+            },
+        ];
+        assert_eq!(
+            order_tree_layout(&spawned_and_area, &[]),
+            vec![vec![
+                OrderTreeNode::Order(2),
+                OrderTreeNode::Order(0),
+                OrderTreeNode::Order(1),
+            ]]
+        );
+        let bingo = vec![EventHook {
+            kind: EntityEvent::OnPlaneBingoBombs,
+            then: EventThen::Order(1),
+        }];
+        assert_eq!(
+            order_tree_layout(&attack_report, &bingo),
+            vec![
+                vec![OrderTreeNode::Event(0), OrderTreeNode::Order(0)],
+                vec![
+                    OrderTreeNode::Order(2),
+                    OrderTreeNode::Order(1),
+                    OrderTreeNode::Order(3),
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn waypoint_uses_template_and_hop_altitude() {
+        let mut opts = one_mig();
+        opts.waypoint_altitude = 2500.0;
+        opts.seats[0].altitude = 1000.0;
+        opts.seats[0].orders = vec![
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 1,
+                altitude: 0.0,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 2,
+                altitude: 3200.0,
+                ..OrderSpec::default()
+            },
+        ];
+        let pack = generate_template(&opts).unwrap();
+        let wp1 = pack.find_by_name("WP 1").unwrap();
+        let wp2 = pack.find_by_name("WP 2").unwrap();
+        assert_eq!(wp1.property("YPos").unwrap(), "2500.000");
+        assert_eq!(wp2.property("YPos").unwrap(), "3200.000");
+    }
+
+    #[test]
+    fn waypoint_display_follows_plane_until_overridden() {
+        let mut opts = one_mig();
+        opts.waypoint_altitude = 0.0;
+        opts.seats[0].altitude = 4200.0;
+        opts.seats[0].orders = vec![
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 1,
+                altitude: 0.0,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 2,
+                altitude: 1800.0,
+                ..OrderSpec::default()
+            },
+        ];
+        assert_eq!(
+            path_waypoint_display_m(&opts.seats, opts.waypoint_altitude),
+            4200.0
+        );
+        assert_eq!(
+            waypoint_display_altitude(&opts.seats, 1, opts.waypoint_altitude),
+            4200.0
+        );
+        assert_eq!(
+            waypoint_display_altitude(&opts.seats, 2, opts.waypoint_altitude),
+            1800.0
+        );
+        opts.waypoint_altitude = 900.0;
+        assert_eq!(
+            waypoint_display_altitude(&opts.seats, 1, opts.waypoint_altitude),
+            900.0
+        );
+        assert_eq!(
+            waypoint_display_altitude(&opts.seats, 2, opts.waypoint_altitude),
+            1800.0
+        );
+        let pack = generate_template(&opts).unwrap();
+        assert_eq!(
+            pack.find_by_name("WP 1").unwrap().property("YPos").unwrap(),
+            "900.000"
+        );
+        assert_eq!(
+            pack.find_by_name("WP 2").unwrap().property("YPos").unwrap(),
+            "1800.000"
+        );
+    }
+
+    #[test]
+    fn ground_spawn_stores_engine_running() {
+        assert_eq!(
+            PlaneStart::stored_for_altitude(PlaneStart::Air.as_i32(), 0.0),
+            PlaneStart::Running.as_i32()
+        );
+        assert_eq!(
+            PlaneStart::stored_for_altitude(PlaneStart::Cold.as_i32(), 0.0),
+            PlaneStart::Cold.as_i32()
+        );
+        assert_eq!(
+            PlaneStart::stored_for_altitude(PlaneStart::Running.as_i32(), 2500.0),
+            PlaneStart::Air.as_i32()
         );
     }
 

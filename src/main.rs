@@ -1,3 +1,10 @@
+//! IL-2 Group Generator — binary crate for IL-2 Sturmovik: Great Battles
+//! (Korea map).
+//!
+//! Declares every `src/` module and boots the egui app via [`ui::run`].
+//! There is no `lib.rs`. See `docs/src-guide.md` for the per-file map.
+//! Parsing lives in [`parser`] → [`ast`]; writing in [`serialize`].
+
 mod aircraft;
 mod airfield;
 mod ast;
@@ -18,6 +25,7 @@ mod model_spec;
 mod pack;
 mod placement;
 mod parser;
+mod payloads;
 mod recon;
 mod serialize;
 mod template;

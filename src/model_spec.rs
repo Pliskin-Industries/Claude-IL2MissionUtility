@@ -1,7 +1,22 @@
-//! Per-model type, cruise speed, ceiling, notes, and preview image lookup.
+//! model_spec.rs — per-model class, cruise, ceiling, notes, preview PNG
 //!
-//! The AST stays schema-agnostic; this table is a UI overlay keyed by the
-//! script filename (type-id), not by parsing extra Group keys.
+//! UI overlay keyed by script filename (type-id). The AST stays
+//! schema-agnostic; this table is not Group parsing. Preview bytes are
+//! baked by `build.rs` from `assets/models/*.png` (`PLACEHOLDER_PNG`
+//! when a model has no picture). It does not own payloads (`payloads`)
+//! or fighter-pack identity (`aircraft`).
+//!
+//! ## Public API
+//! * `enum ModelClass` / `struct ModelSpec`
+//! * `fn spec_for` / `fn class_for` / `fn classes_in`
+//! * `fn ceiling_m` / `fn format_cruise` / `fn suggested_waypoint_speed_kmh`
+//! * `fn script_id` — filename stem from a Script path
+//! * `fn png_for_script` / `PLACEHOLDER_PNG` (from generated `model_images.rs`)
+//!
+//! ## Used by
+//! * ui.rs (Template, Fighter Pack, Map) — class filters, pictures, ceilings
+//! * template.rs — cruise → default waypoint speed; class for zone mix
+//! * payloads.rs — `script_id` to match `Payloads.txt` rows
 
 include!(concat!(env!("OUT_DIR"), "/model_images.rs"));
 
@@ -315,6 +330,33 @@ pub fn format_cruise(kmh: Option<f32>) -> String {
     }
 }
 
+/// Service ceiling in metres. Unknown or ground units fall back to `8000`.
+pub fn ceiling_m(script: &str) -> f32 {
+    spec_for(script)
+        .map(|s| s.ceiling_m)
+        .filter(|c| *c > 0.0)
+        .unwrap_or(8_000.0)
+}
+
+/// 90% of the slowest moving unit’s cruise, rounded to 10 km/h (minimum 10).
+/// Stationary and unknown cruise values are ignored. `100` if none apply.
+pub fn suggested_waypoint_speed_kmh<'a>(scripts: impl IntoIterator<Item = &'a str>) -> f32 {
+    let mut min_cruise: Option<f32> = None;
+    for script in scripts {
+        if let Some(spec) = spec_for(script) {
+            if let Some(cruise) = spec.cruise_kmh {
+                if cruise > 0.0 {
+                    min_cruise = Some(min_cruise.map_or(cruise, |m| m.min(cruise)));
+                }
+            }
+        }
+    }
+    match min_cruise {
+        Some(c) => ((c * 0.9 / 10.0).round() * 10.0).max(10.0),
+        None => 100.0,
+    }
+}
+
 pub fn png_for_script(script: &str) -> &'static [u8] {
     model_png(&script_id(script))
 }
@@ -364,6 +406,21 @@ mod tests {
         // Non-aircraft should be 0.0
         assert_eq!(spec_for("t34-85").unwrap().ceiling_m, 0.0);
         assert_eq!(spec_for("boforsl60").unwrap().ceiling_m, 0.0);
+        assert_eq!(ceiling_m("mig15bis"), 15000.0);
+        assert_eq!(ceiling_m("t34-85"), 8_000.0);
+    }
+
+    #[test]
+    fn waypoint_speed_is_90_percent_rounded_to_10() {
+        assert_eq!(suggested_waypoint_speed_kmh(["mig15bis"]), 770.0); // 850 * 0.9 → 765 → 770
+        assert_eq!(suggested_waypoint_speed_kmh(["t34-85"]), 50.0); // 55 * 0.9 → 50
+        assert_eq!(
+            suggested_waypoint_speed_kmh(["mig15bis", "t34-85"]),
+            50.0,
+            "slowest moving unit sets the default"
+        );
+        assert_eq!(suggested_waypoint_speed_kmh(["m1919"]), 100.0); // stationary ignored
+        assert_eq!(suggested_waypoint_speed_kmh(None::<&str>), 100.0);
     }
 
     #[test]
