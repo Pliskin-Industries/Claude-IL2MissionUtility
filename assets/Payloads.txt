@@ -375,3 +375,149 @@ Modification,Binary ID,Description
 3,1001,Mirror
 4,10001,150 Grade Fuel
 5,100001,Aerobatic
+
+Trains 
+Modification,Binary ID,Description
+0,0,None
+1,10,Hospital
+2,100,Heated Boxcars
+2,1000,Ammo in Boxcars
+3,10000,Covered Wagons
+3,100000,Coal in Wagons
+3,1000000,Boxes in Wagons
+4,10000000,Covered platforms
+4,100000000,Logs on platforms
+4,1000000000,Boxes on platforms
+4,10000000000,GMC CCKW on platforms
+4,100000000000,M4A3E8 on platforms
+4,1000000000000,GAZ-63 on platforms
+4,10000000000000,T-34-85 on platforms
+
+GAZ-63
+0,0,None
+1,10,Canvas top
+2,100,Soldiers
+2,1000,Ammo
+2,10000,Cargo
+2,100000,Barrels
+2,1000000,Generator
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+GAZ-55
+0,0,None
+1,10,Ambulance
+2,100,Soldiers
+
+GAZ-67B
+0,0,None
+1,10,Canvas top
+2,100,Soldiers
+2,1000,Ammo
+2,10000,Cargo
+2,100000,Barrels
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+BA-64B
+0,0,None
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+StudebakerUS6
+0,0,None
+1,10,Canvas top
+2,100,Soldiers
+2,1000,Ammo
+2,10000,Cargo
+2,100000,Barrels
+2,1000000,P20 control
+2,10000000,P8 control
+2,100000000,ZPU Vz.53 turret
+2,1000000000,61k turret
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+Dodge WC52
+0,0,None
+1,10,Canvas top
+1,1000000,Canvas Frame
+2,100,Soldiers
+2,1000,Ammo
+2,10000,Cargo
+2,100000,Barrels
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+Dodge WC54
+0,0,None
+1,10,Ambulance
+2,100,Soldiers
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+GMC-CCKW
+0,0,None
+1,10,Canvas top
+2,100,Soldiers
+2,1000,Ammo
+2,10000,Cargo
+2,100000,Barrels
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+GMC-Refueler
+0,0,None
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+M16-MGMC
+0,0,None
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+M3A1-Halftrack
+0,0,None
+2,100,Soldiers
+2,1000,Ammo
+2,10000,Cargo
+2,100000,Barrels
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer
+
+u7144
+0,0,None
+1,10,Gasoline
+1,100,JP-4 Jet Fuel
+
+Willys MB
+0,0,None
+1,10,Canvas top
+2,100,Soldiers
+2,1000,Ammo
+2,10000,Cargo
+2,100000,Barrels
+3,1000000000000,Trailer canvas on top
+4,10000000000000,Ammo trailer
+4,100000000000000,Cargo trailer
+4,1000000000000000,Barrel trailer

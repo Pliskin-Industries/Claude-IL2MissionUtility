@@ -36,7 +36,8 @@
 //!   `GROUND_FORMATIONS`, `formation_label` / `formation_density`.
 //! * Waypoint / attack helpers: `waypoint_area_m`,
 //!   `path_waypoint_display_m`, `waypoint_display_altitude`,
-//!   `DEFAULT_TIME_ON_TARGET_S`, `apply_suggested_attack_area`,
+//!   `DEFAULT_TIME_ON_TARGET_S`, `DEFAULT_TIMER_S`, `apply_suggested_attack_area`,
+//!   `priority_label`, `order_chip_detail`, `AttackAreaTarget`,
 //!   `refresh_attack_areas_for_seat`, `attack_area_range_limit`,
 //!   `DEFAULT_ATTACK_AREA_M`.
 //! * Catalog: `bundled_catalog`, `builtin_plane_catalog`, `load_catalog`,
@@ -57,6 +58,7 @@ use crate::aircraft::{
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;
 use crate::parser::parse_il2_document;
+use crate::payloads;
 use crate::weapon_range;
 
 const ORIGIN_X: f64 = 40_000.0;
@@ -73,6 +75,8 @@ const DELAYED_END_TIME: f64 = 2.0;
 const RTB_DEACTIVATE_DELAY: f64 = 60.0;
 const DELETE_WAIT: f64 = 0.5;
 pub const DEFAULT_TIME_ON_TARGET_S: f32 = 180.0;
+/// Configurable pause (`MCU_Timer`) between sequential orders.
+pub const DEFAULT_TIMER_S: f32 = 5.0;
 /// World spacing between seats in a placement group. Not a UI control.
 pub const PLACEMENT_SPACING: f32 = 150.0;
 /// Path waypoint spacing along +X (north). Authored by hand after generate.
@@ -191,6 +195,7 @@ pub enum OrderKind {
     Formation,
     GotoWaypoint,
     TimeOnTarget,
+    Timer,
     MissionComplete,
     Land,
     TakeOff,
@@ -213,6 +218,7 @@ const AIR_ORDERS: &[OrderKind] = &[
     OrderKind::Formation,
     OrderKind::GotoWaypoint,
     OrderKind::TimeOnTarget,
+    OrderKind::Timer,
     OrderKind::MissionComplete,
     OrderKind::Land,
     OrderKind::TakeOff,
@@ -234,6 +240,7 @@ const GROUND_ORDERS: &[OrderKind] = &[
     OrderKind::Formation,
     OrderKind::GotoWaypoint,
     OrderKind::TimeOnTarget,
+    OrderKind::Timer,
     OrderKind::MissionComplete,
     OrderKind::OnSpawned,
     OrderKind::OnTargetAttacked,
@@ -253,6 +260,7 @@ impl OrderKind {
             OrderKind::Formation => "Formation",
             OrderKind::GotoWaypoint => "Goto WP",
             OrderKind::TimeOnTarget => "Time on Target",
+            OrderKind::Timer => "Timer",
             OrderKind::MissionComplete => "Mission Complete",
             OrderKind::Land => "Land",
             OrderKind::TakeOff => "Take Off",
@@ -276,12 +284,26 @@ impl OrderKind {
         )
     }
 
-    /// Timers / RTB that are not command MCUs: Time on Target, Mission Complete,
-    /// RTB on Zone Out.
+    /// Timers / RTB that are not command MCUs: Time on Target, Timer, Mission
+    /// Complete, RTB on Zone Out.
     pub fn is_special(self) -> bool {
         matches!(
             self,
-            OrderKind::TimeOnTarget | OrderKind::MissionComplete | OrderKind::RtbOnZoneOut
+            OrderKind::TimeOnTarget
+                | OrderKind::Timer
+                | OrderKind::MissionComplete
+                | OrderKind::RtbOnZoneOut
+        )
+    }
+
+    pub fn has_priority(self) -> bool {
+        matches!(
+            self,
+            OrderKind::Attack
+                | OrderKind::AttackArea
+                | OrderKind::Cover
+                | OrderKind::ForceComplete
+                | OrderKind::Land
         )
     }
 
@@ -374,6 +396,7 @@ impl OrderKind {
             OrderKind::Formation => Some("MCU_CMD_Formation"),
             OrderKind::GotoWaypoint
             | OrderKind::TimeOnTarget
+            | OrderKind::Timer
             | OrderKind::MissionComplete
             | OrderKind::RtbOnZoneOut => None,
             OrderKind::Land => Some("MCU_CMD_Land"),
@@ -823,6 +846,140 @@ impl OrderSpec {
         }
         order
     }
+
+    pub fn attack_area_target(&self) -> AttackAreaTarget {
+        if self.attack_g_targets {
+            AttackAreaTarget::GroundTargets
+        } else if self.attack_ground {
+            AttackAreaTarget::Ground
+        } else {
+            AttackAreaTarget::Air
+        }
+    }
+
+    pub fn set_attack_area_target(&mut self, target: AttackAreaTarget) {
+        self.attack_air = target == AttackAreaTarget::Air;
+        self.attack_ground = target == AttackAreaTarget::Ground;
+        self.attack_g_targets = target == AttackAreaTarget::GroundTargets;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttackAreaTarget {
+    Air,
+    Ground,
+    GroundTargets,
+}
+
+impl AttackAreaTarget {
+    pub const ALL: [AttackAreaTarget; 3] = [
+        AttackAreaTarget::Air,
+        AttackAreaTarget::Ground,
+        AttackAreaTarget::GroundTargets,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AttackAreaTarget::Air => "Attack Air Targets",
+            AttackAreaTarget::Ground => "Attack Ground",
+            AttackAreaTarget::GroundTargets => "Attack Ground Targets",
+        }
+    }
+
+    pub fn short(self) -> &'static str {
+        match self {
+            AttackAreaTarget::Air => "Air",
+            AttackAreaTarget::Ground => "Ground",
+            AttackAreaTarget::GroundTargets => "Gnd tgt",
+        }
+    }
+}
+
+pub fn priority_label(priority: i32) -> &'static str {
+    match priority {
+        0 => "Low",
+        2 => "High",
+        _ => "Medium",
+    }
+}
+
+/// Second line for a colored order chip: enough to check the tree at a glance.
+pub fn order_chip_detail(order: &OrderSpec, unit_kind: UnitKind) -> String {
+    let pri = || priority_label(order.priority);
+    let time = |s: f32| {
+        if s >= 60.0 && (s % 60.0).abs() < 0.05 {
+            format!("{}m", (s / 60.0).round() as i32)
+        } else if (s.fract()).abs() < 0.05 {
+            format!("{}s", s.round() as i32)
+        } else {
+            format!("{s:.1}s")
+        }
+    };
+    let area = |m: f32| {
+        if m >= 1000.0 {
+            format!("{:.0}km", m / 1000.0)
+        } else {
+            format!("{:.0}m", m)
+        }
+    };
+    match order.kind {
+        OrderKind::Attack => {
+            let tgt = order
+                .attack_seat
+                .map(|i| format!("S{}", i + 1))
+                .unwrap_or_else(|| "no tgt".into());
+            format!("{tgt} · {}", pri())
+        }
+        OrderKind::AttackArea => {
+            format!(
+                "{} · {} · {} · {}",
+                order.attack_area_target().short(),
+                area(order.attack_area),
+                time(order.time_s),
+                pri()
+            )
+        }
+        OrderKind::Cover => {
+            let tgt = order
+                .cover_lead
+                .map(|i| format!("S{}", i + 1))
+                .unwrap_or_else(|| "no tgt".into());
+            format!("{tgt} · {}", pri())
+        }
+        OrderKind::ForceComplete | OrderKind::Land => pri().to_string(),
+        OrderKind::GotoWaypoint => {
+            if order.altitude > 0.0 {
+                format!("WP {} · {:.0}m", order.waypoint.max(1), order.altitude)
+            } else {
+                format!("WP {}", order.waypoint.max(1))
+            }
+        }
+        OrderKind::Formation => formation_label(order.formation_type, unit_kind),
+        OrderKind::TimeOnTarget | OrderKind::Timer => time(order.time_s),
+        OrderKind::Behaviour => format!("F{}", order.behaviour_filter),
+        OrderKind::Flare => format!("C{}", order.flare_color),
+        OrderKind::Effect => {
+            if order.effect_start {
+                "Start".into()
+            } else {
+                "Stop".into()
+            }
+        }
+        OrderKind::TakeOff => String::new(),
+        OrderKind::MissionComplete => "END".into(),
+        OrderKind::RtbOnZoneOut => "Zone Out".into(),
+        OrderKind::OnSpawned
+        | OrderKind::OnTargetAttacked
+        | OrderKind::OnAreaAttacked
+        | OrderKind::OnTookOff
+        | OrderKind::OnLanded => {
+            if order.delay_s > 0.05 {
+                time(order.delay_s)
+            } else {
+                String::new()
+            }
+        }
+    }
 }
 
 /// Highest WP number referenced by a Goto WP order (0 if none).
@@ -1015,7 +1172,11 @@ impl TemplateSeat {
         let number_in_formation = prop_i32(&unit.object, "NumberInFormation", 0);
         let fuel = prop_f32(&unit.object, "Fuel", 1.0).clamp(0.0, 1.0);
         let payload_id = prop_i32(&unit.object, "PayloadId", 0);
-        let mod_mask = prop_mod_mask(&unit.object);
+        let mod_mask = if payloads::empty_mod_mask(&unit.script) == 0 {
+            payloads::default_mod_mask_str(&unit.script)
+        } else {
+            prop_mod_mask(&unit.object)
+        };
         let vulnerable = prop_bool(&unit.object, "Vulnerable", true);
         let engageable = prop_bool(&unit.object, "Engageable", true);
         let limit_ammo = prop_bool(&unit.object, "LimitAmmo", true);
@@ -1164,7 +1325,7 @@ pub fn replace_seat_unit(seat: &mut TemplateSeat, unit: CatalogUnit) {
         seat.carriages.clear();
     }
     seat.payload_id = 0;
-    seat.mod_mask = "1".into();
+    seat.mod_mask = payloads::default_mod_mask_str(&seat.unit.script);
     if !seat.unit.is_air() {
         seat.altitude = 0.0;
     } else {
@@ -2437,10 +2598,9 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
             } else {
                 left_order(branch, row)
             };
-            let wait = if order.kind == OrderKind::TimeOnTarget {
-                order.time_s.max(0.0) as f64
-            } else {
-                order.delay_s.max(0.0) as f64
+            let wait = match order.kind {
+                OrderKind::TimeOnTarget | OrderKind::Timer => order.time_s.max(0.0) as f64,
+                _ => order.delay_s.max(0.0) as f64,
             };
             let delay = timer(
                 &format!("{} {}", order.kind.label(), si + 1),
@@ -2458,6 +2618,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     source_index: orig_i,
                     time_on_target: false,
                     mission_complete: false,
+                    pause: false,
                 });
                 continue;
             }
@@ -2470,6 +2631,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     source_index: orig_i,
                     time_on_target: false,
                     mission_complete: false,
+                    pause: false,
                 });
                 continue;
             }
@@ -2482,6 +2644,20 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     source_index: orig_i,
                     time_on_target: true,
                     mission_complete: false,
+                    pause: false,
+                });
+                continue;
+            }
+            if order.kind == OrderKind::Timer {
+                steps.push(EmittedOrder {
+                    delay,
+                    cmd: None,
+                    goto_wp: None,
+                    report: None,
+                    source_index: orig_i,
+                    time_on_target: false,
+                    mission_complete: false,
+                    pause: true,
                 });
                 continue;
             }
@@ -2494,6 +2670,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     source_index: orig_i,
                     time_on_target: false,
                     mission_complete: true,
+                    pause: false,
                 });
                 continue;
             }
@@ -2506,6 +2683,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     source_index: orig_i,
                     time_on_target: false,
                     mission_complete: false,
+                    pause: false,
                 });
                 continue;
             };
@@ -2527,6 +2705,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                 source_index: orig_i,
                 time_on_target: false,
                 mission_complete: false,
+                pause: false,
             });
         }
         emitted.push(steps);
@@ -2867,6 +3046,7 @@ struct EmittedOrder {
     source_index: usize,
     time_on_target: bool,
     mission_complete: bool,
+    pause: bool,
 }
 
 fn is_attack_emitted(step: &EmittedOrder) -> bool {
@@ -2949,7 +3129,7 @@ fn wp_owns_next(steps: &[EmittedOrder], goto_oi: usize, next_oi: usize) -> bool 
         return false;
     }
     let s = &steps[next_oi];
-    if is_attack_emitted(s) || s.time_on_target {
+    if is_attack_emitted(s) || s.time_on_target || s.pause {
         return true;
     }
     if s.mission_complete {
@@ -3036,6 +3216,10 @@ fn wire_waypoint_chain(waypoints: &mut [Il2Entity], emitted: &[Vec<EmittedOrder>
                     pulse_from_wp(&mut extra, idx, &later.delay);
                     saw_tot = true;
                     continue;
+                }
+                if later.pause {
+                    pulse_from_wp(&mut extra, idx, &later.delay);
+                    break;
                 }
                 break;
             }
@@ -3304,7 +3488,7 @@ fn build_order(
         }
         OrderKind::Cover => {
             cmd.set_property("CoverGroup", "0");
-            cmd.set_property("Priority", "2");
+            cmd.set_property("Priority", order.priority.to_string());
         }
         OrderKind::Effect => {
             cmd.set_property("ActionType", i32::from(!order.effect_start).to_string());
@@ -3313,7 +3497,7 @@ fn build_order(
             cmd.set_property("Color", order.flare_color.to_string());
         }
         OrderKind::ForceComplete => {
-            cmd.set_property("Priority", "2");
+            cmd.set_property("Priority", order.priority.to_string());
             cmd.set_property("EmergencyOrdnanceDrop", "0");
         }
         OrderKind::Formation => {
@@ -3327,6 +3511,7 @@ fn build_order(
         }
         OrderKind::GotoWaypoint
         | OrderKind::TimeOnTarget
+        | OrderKind::Timer
         | OrderKind::MissionComplete
         | OrderKind::RtbOnZoneOut => {}
         OrderKind::Land => {
@@ -3729,6 +3914,81 @@ mod tests {
             !text.contains("carpassenger.txt"),
             "unselected cars must not be written"
         );
+        pack.for_each(&mut |e| {
+            if e.block_type == "Train" {
+                assert_eq!(
+                    e.property("ModMask"),
+                    Some("0"),
+                    "stock train ModMask is 0, not aircraft 1"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn generate_train_writes_selected_carriage_mod_mask() {
+        let train = bundled_catalog()
+            .into_iter()
+            .find(|u| u.kind == UnitKind::Train)
+            .expect("train in catalog");
+        let box_car = train
+            .prototype_carriages()
+            .into_iter()
+            .find(|s| script_type_id(s) == "carbox")
+            .expect("box car");
+        let mut seat = TemplateSeat::new(train);
+        assert_eq!(seat.mod_mask, "0");
+        seat.carriages.push(box_car);
+        seat.mod_mask = "100".into();
+        let mut opts = TemplateOptions::default();
+        opts.waypoint_count = 0;
+        opts.per_group = 1;
+        opts.seats = vec![seat];
+        let pack = generate_template(&opts).unwrap();
+        pack.for_each(&mut |e| {
+            if e.block_type == "Train" {
+                assert_eq!(e.property("ModMask"), Some("100"));
+            }
+        });
+    }
+
+    #[test]
+    fn generate_vehicle_writes_stock_mod_mask_zero() {
+        let gaz = bundled_catalog()
+            .into_iter()
+            .find(|u| u.script.to_ascii_lowercase().contains("gaz63.txt"))
+            .expect("GAZ-63 in catalog");
+        let mut seat = TemplateSeat::new(gaz);
+        assert_eq!(seat.mod_mask, "0");
+        seat.mod_mask = "100".into();
+        let mut opts = TemplateOptions::default();
+        opts.waypoint_count = 0;
+        opts.per_group = 1;
+        opts.seats = vec![seat];
+        let pack = generate_template(&opts).unwrap();
+        pack.for_each(&mut |e| {
+            if e.block_type == "Vehicle" {
+                assert_eq!(e.property("ModMask"), Some("100"));
+            }
+        });
+        let stock = bundled_catalog()
+            .into_iter()
+            .find(|u| u.script.to_ascii_lowercase().contains("gaz63.txt"))
+            .unwrap();
+        let mut opts = TemplateOptions::default();
+        opts.waypoint_count = 0;
+        opts.per_group = 1;
+        opts.seats = vec![TemplateSeat::new(stock)];
+        let pack = generate_template(&opts).unwrap();
+        pack.for_each(&mut |e| {
+            if e.block_type == "Vehicle" {
+                assert_eq!(
+                    e.property("ModMask"),
+                    Some("0"),
+                    "stock vehicle ModMask is 0, not aircraft 1"
+                );
+            }
+        });
     }
 
     #[test]
@@ -4409,6 +4669,111 @@ mod tests {
     }
 
     #[test]
+    fn timer_order_pauses_the_chain() {
+        let mut opts = one_mig();
+        opts.waypoint_count = 0;
+        opts.seats[0].orders = vec![
+            OrderSpec {
+                kind: OrderKind::Formation,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::Timer,
+                time_s: 12.0,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::AttackArea,
+                attack_air: true,
+                attack_ground: false,
+                attack_g_targets: false,
+                ..OrderSpec::default()
+            },
+        ];
+        let pack = generate_template(&opts).unwrap();
+        let pause = pack.find_by_name("Timer 1").unwrap();
+        assert_eq!(pause.block_type, "MCU_Timer");
+        assert_eq!(pause.property("Time"), Some("12"));
+        let form = pack.find_by_name("Formation 1").unwrap();
+        let area = pack.find_by_name("AttackArea 1").unwrap();
+        assert!(form.targets.contains(&pause.index.unwrap()));
+        assert!(pause.targets.contains(&area.index.unwrap()));
+        assert_eq!(pack.count_block_type("MCU_CMD_AttackArea"), 1);
+    }
+
+    #[test]
+    fn attack_area_writes_exclusive_target_mode_and_priority() {
+        let mut opts = one_mig();
+        opts.waypoint_count = 0;
+        opts.seats[0].orders = vec![OrderSpec {
+            kind: OrderKind::AttackArea,
+            attack_air: false,
+            attack_ground: false,
+            attack_g_targets: true,
+            priority: 2,
+            ..OrderSpec::default()
+        }];
+        let pack = generate_template(&opts).unwrap();
+        let area = pack.find_by_name("AttackArea").unwrap();
+        assert_eq!(area.property("AttackAir"), Some("0"));
+        assert_eq!(area.property("AttackGround"), Some("0"));
+        assert_eq!(area.property("AttackGTargets"), Some("1"));
+        assert_eq!(area.property("Priority"), Some("2"));
+    }
+
+    #[test]
+    fn cover_and_force_complete_use_order_priority() {
+        let mig = builtin_plane_catalog()
+            .into_iter()
+            .find(|u| u.script.contains("mig15bis"))
+            .unwrap();
+        let mut opts = TemplateOptions::default();
+        opts.waypoint_count = 0;
+        let mut a = TemplateSeat::new(mig.clone());
+        let b = TemplateSeat::new(mig);
+        a.orders = vec![
+            OrderSpec {
+                kind: OrderKind::Cover,
+                cover_lead: Some(1),
+                priority: 0,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::ForceComplete,
+                priority: 1,
+                ..OrderSpec::default()
+            },
+        ];
+        opts.seats = vec![a, b];
+        let pack = generate_template(&opts).unwrap();
+        let cover = pack.find_by_name("Cover").unwrap();
+        assert_eq!(cover.property("Priority"), Some("0"));
+        let force = pack.find_by_name("Force Complete").expect("seat Force Complete MCU");
+        assert_eq!(force.property("Priority"), Some("1"));
+    }
+
+    #[test]
+    fn order_chip_detail_summarizes_attack_area() {
+        let mut order = OrderSpec {
+            kind: OrderKind::AttackArea,
+            attack_air: false,
+            attack_ground: true,
+            attack_g_targets: false,
+            attack_area: 1000.0,
+            time_s: 600.0,
+            priority: 1,
+            ..OrderSpec::default()
+        };
+        let text = order_chip_detail(&order, UnitKind::Plane);
+        assert!(text.contains("Ground"), "{text}");
+        assert!(text.contains("1km") || text.contains("1000"), "{text}");
+        assert!(text.contains("Medium"), "{text}");
+        order.kind = OrderKind::Timer;
+        order.time_s = 12.0;
+        assert_eq!(order_chip_detail(&order, UnitKind::Plane), "12s");
+    }
+
+    #[test]
     fn per_seat_altitude_and_formation_index() {
         let mut opts = four_migs();
         opts.seats[0].altitude = 1200.0;
@@ -4996,8 +5361,15 @@ mod tests {
         assert!(OrderKind::available(UnitKind::Plane).contains(&OrderKind::OnTookOff));
         assert!(OrderKind::available(UnitKind::Plane).contains(&OrderKind::TakeOff));
         assert!(OrderKind::available(UnitKind::Plane).contains(&OrderKind::TimeOnTarget));
+        assert!(OrderKind::Attack.has_priority());
+        assert!(OrderKind::AttackArea.has_priority());
+        assert!(OrderKind::Cover.has_priority());
+        assert!(OrderKind::ForceComplete.has_priority());
+        assert!(OrderKind::Land.has_priority());
+        assert!(!OrderKind::Timer.has_priority());
         assert!(OrderKind::available(UnitKind::Plane).contains(&OrderKind::MissionComplete));
         assert!(OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::TimeOnTarget));
+        assert!(OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::Timer));
         assert!(OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::MissionComplete));
     }
 

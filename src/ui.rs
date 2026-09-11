@@ -111,6 +111,7 @@ use crate::template::{
     OrderKind, OrderSpec, OrderTreeNode, PlaceLayout, PlaneStart, TemplateOptions, TemplateSeat,
     UnitKind as CatalogKind, ZoneCoalition, ZoneMix, DEFAULT_TIME_ON_TARGET_S, PLACEMENT_SPACING,
     WAYPOINT_SPACING_M, attack_area_range_limit, carriage_label, catalog_carriage_scripts,
+    AttackAreaTarget, DEFAULT_TIMER_S, order_chip_detail, priority_label,
 };
 use crate::weapon_range::{self, ArmyUnitKind};
 
@@ -429,6 +430,12 @@ fn order_spec_for_added_kind(unit: &CatalogUnit, kind: OrderKind, next_wp: u32) 
     if kind == OrderKind::TimeOnTarget {
         spec.time_s = DEFAULT_TIME_ON_TARGET_S;
     }
+    if kind == OrderKind::Timer {
+        spec.time_s = DEFAULT_TIMER_S;
+    }
+    if kind == OrderKind::Cover || kind == OrderKind::ForceComplete {
+        spec.priority = 2;
+    }
     spec
 }
 
@@ -454,6 +461,12 @@ fn apply_order_kind(seats: &mut [TemplateSeat], seat: usize, order: usize, k: Or
     }
     if k == OrderKind::TimeOnTarget {
         seats[seat].orders[order].time_s = DEFAULT_TIME_ON_TARGET_S;
+    }
+    if k == OrderKind::Timer {
+        seats[seat].orders[order].time_s = DEFAULT_TIMER_S;
+    }
+    if k == OrderKind::Cover || k == OrderKind::ForceComplete {
+        seats[seat].orders[order].priority = 2;
     }
     if k == OrderKind::AttackArea {
         apply_suggested_attack_area(seats, seat, order);
@@ -515,7 +528,7 @@ fn draw_tree_add_buttons(
                     }
                 })
                 .response
-                .on_hover_text("Add Time on Target, Mission Complete, or RTB");
+                .on_hover_text("Add Time on Target, Timer, Mission Complete, or RTB");
                 ui.menu_button("+ Report", |ui| {
                     for k in OrderKind::reports(unit_kind) {
                         if ui.button(k.label()).clicked() {
@@ -640,6 +653,152 @@ fn order_chip_label(oi: usize, kind: OrderKind, extra: usize) -> String {
     }
 }
 
+fn draw_two_line_chip(
+    ui: &mut egui::Ui,
+    title: &str,
+    detail: &str,
+    fill: Color32,
+    min_size: Vec2,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(min_size, Sense::click());
+    let visuals = ui.style().interact(&response);
+    ui.painter().rect(
+        rect,
+        visuals.corner_radius,
+        fill,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let title_font = ui
+        .style()
+        .text_styles
+        .get(&TextStyle::Button)
+        .cloned()
+        .unwrap_or_else(|| FontId::proportional(12.0));
+    let detail_font = FontId::proportional(10.0);
+    let color = visuals.text_color();
+    let c = rect.center();
+    if detail.is_empty() {
+        ui.painter()
+            .text(c, Align2::CENTER_CENTER, title, title_font, color);
+    } else {
+        ui.painter().text(
+            Pos2::new(c.x, c.y - 7.0),
+            Align2::CENTER_CENTER,
+            title,
+            title_font,
+            color,
+        );
+        ui.painter().text(
+            Pos2::new(c.x, c.y + 8.0),
+            Align2::CENTER_CENTER,
+            detail,
+            detail_font,
+            color,
+        );
+    }
+    response
+}
+
+const TREE_ARROW_SLOT: f32 = 18.0;
+const TREE_CHIP_H: f32 = 40.0;
+const TREE_CHIP_W: f32 = 148.0;
+
+fn order_chip_size(_kind: OrderKind) -> Vec2 {
+    Vec2::new(TREE_CHIP_W, TREE_CHIP_H)
+}
+
+fn draw_priority_combo(ui: &mut egui::Ui, id: String, priority: &mut i32) {
+    ui.label("Priority");
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(priority_label(*priority))
+        .width(100.0)
+        .show_ui(ui, |ui| {
+            for (v, label) in [(0, "Low"), (1, "Medium"), (2, "High")] {
+                ui.selectable_value(priority, v, label);
+            }
+        });
+}
+
+fn draw_carriage_style(
+    ui: &mut egui::Ui,
+    salt: String,
+    train_script: &str,
+    car_script: &str,
+    mask: &mut String,
+) {
+    let Some(slot_n) = payloads::train_carriage_slot(car_script) else {
+        return;
+    };
+    let Some(ac) = payloads::catalog().for_script(train_script) else {
+        return;
+    };
+    let Some(slot) = ac.mod_slots.iter().find(|s| s.number == slot_n) else {
+        return;
+    };
+    if !payloads::slot_has_choices(slot) {
+        return;
+    }
+    let mut bits = payloads::parse_mod_mask_for(train_script, mask);
+    let choices: Vec<&payloads::ModOption> = slot
+        .options
+        .iter()
+        .filter(|o| payloads::extra_bits(&o.binary_id) != 0)
+        .collect();
+    if choices.len() == 1 {
+        let opt = choices[0];
+        let mut on = payloads::option_selected(bits, opt);
+        if ui.checkbox(&mut on, &opt.description).changed() {
+            bits = payloads::set_toggle_for(train_script, bits, opt, on);
+            *mask = payloads::encode_mod_mask(bits);
+        }
+        return;
+    }
+    let selected = payloads::exclusive_selection(bits, slot);
+    let label = selected
+        .map(|o| o.description.as_str())
+        .unwrap_or("None");
+    egui::ComboBox::from_id_salt(salt)
+        .selected_text(label)
+        .width(180.0)
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(selected.is_none(), "None").clicked() {
+                bits = payloads::clear_exclusive_for(train_script, bits, slot);
+                *mask = payloads::encode_mod_mask(bits);
+            }
+            for opt in &choices {
+                let is_on = selected.is_some_and(|s| s.binary_id == opt.binary_id);
+                if ui.selectable_label(is_on, &opt.description).clicked() {
+                    bits = payloads::select_exclusive_for(train_script, bits, slot, opt);
+                    *mask = payloads::encode_mod_mask(bits);
+                }
+            }
+        });
+}
+
+fn sync_train_mask_to_carriages(seat: &mut TemplateSeat) {
+    let script = seat.unit.script.clone();
+    let Some(ac) = payloads::catalog().for_script(&script) else {
+        return;
+    };
+    let mut used = [false; 16];
+    for car in &seat.carriages {
+        if let Some(n) = payloads::train_carriage_slot(car) {
+            if (n as usize) < used.len() {
+                used[n as usize] = true;
+            }
+        }
+    }
+    let mut mask = payloads::parse_mod_mask_for(&script, &seat.mod_mask);
+    for slot in &ac.mod_slots {
+        let n = slot.number as usize;
+        if n < used.len() && !used[n] && payloads::slot_has_choices(slot) {
+            mask = payloads::clear_exclusive_for(&script, mask, slot);
+        }
+    }
+    seat.mod_mask = payloads::encode_mod_mask(mask);
+}
+
 fn centered_fill_button(ui: &mut egui::Ui, label: &str, fill: Color32, min_size: Vec2) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(min_size, Sense::click());
     let visuals = ui.style().interact(&response);
@@ -666,14 +825,6 @@ fn centered_fill_button(ui: &mut egui::Ui, label: &str, fill: Color32, min_size:
     response
 }
 
-fn order_chip_size(kind: OrderKind) -> Vec2 {
-    let wide = kind.is_report() || kind.is_special();
-    Vec2::new(if wide { 140.0 } else { 92.0 }, 24.0)
-}
-
-const TREE_ARROW_SLOT: f32 = 18.0;
-const TREE_CHIP_H: f32 = 24.0;
-
 fn tree_arrow_slot(ui: &mut egui::Ui, show: bool, left: bool, enabled: bool) -> bool {
     if show {
         let mut clicked = false;
@@ -696,6 +847,7 @@ fn draw_template_order_chip(
     n_orders: usize,
     kind: OrderKind,
     extra: usize,
+    detail: &str,
     selected: bool,
     selected_fill: Color32,
     order_fill: Color32,
@@ -724,13 +876,12 @@ fn draw_template_order_chip(
             "Starts with Attack / Time on Target from the waypoint, not after a delay."
         } else if kind == OrderKind::MissionComplete {
             "On waypoint arrival (or when Time on Target expires) pulses MISSION END."
+        } else if kind == OrderKind::Timer {
+            "MCU_Timer pause between the previous order and the next."
         } else {
             ""
         };
-        let chip = egui::Button::new(text)
-            .fill(fill)
-            .min_size(order_chip_size(kind));
-        let resp = ui.add(chip);
+        let resp = draw_two_line_chip(ui, &text, detail, fill, order_chip_size(kind));
         if !hover.is_empty() {
             resp.clone().on_hover_text(hover);
         }
@@ -765,7 +916,7 @@ fn draw_template_event_chip(
         ui.add_space(TREE_ARROW_SLOT);
         let chip = egui::Button::new(kind.label())
             .fill(if selected { selected_fill } else { event_fill })
-            .min_size(Vec2::new(110.0, 24.0));
+            .min_size(Vec2::new(TREE_CHIP_W, TREE_CHIP_H));
         let resp = ui.add(chip);
         if resp.clicked() {
             *clicked = Some(TplSelect::Event { seat: si, event: ei });
@@ -1039,6 +1190,7 @@ fn draw_tree_node_chip(
     ui: &mut egui::Ui,
     si: usize,
     node: OrderTreeNode,
+    unit_kind: CatalogKind,
     orders: &[OrderSpec],
     events: &[EventHook],
     select: Option<TplSelect>,
@@ -1060,6 +1212,7 @@ fn draw_tree_node_chip(
                 select,
                 Some(TplSelect::Order { seat, order }) if seat == si && order == oi
             );
+            let detail = order_chip_detail(&orders[oi], unit_kind);
             draw_template_order_chip(
                 ui,
                 si,
@@ -1067,6 +1220,7 @@ fn draw_tree_node_chip(
                 orders.len(),
                 kind,
                 extra,
+                &detail,
                 selected,
                 selected_fill,
                 order_fill,
@@ -1101,8 +1255,7 @@ fn draw_order_tree_columns(
     ui: &mut egui::Ui,
     si: usize,
     columns: &[Vec<OrderTreeNode>],
-    orders: &[OrderSpec],
-    events: &[EventHook],
+    seats: &[TemplateSeat],
     select: Option<TplSelect>,
     selected_fill: Color32,
     order_fill: Color32,
@@ -1117,6 +1270,9 @@ fn draw_order_tree_columns(
     if columns.is_empty() {
         return;
     }
+    let unit_kind = seats[si].unit.kind;
+    let orders = &seats[si].orders;
+    let events = &seats[si].events;
     let line_idx = ui.painter().add(egui::Shape::Noop);
     let mut geom: Vec<Vec<(OrderTreeNode, Rect)>> = Vec::new();
     let max_events = columns.iter().map(|c| event_prefix_len(c)).max().unwrap_or(0);
@@ -1143,6 +1299,7 @@ fn draw_order_tree_columns(
                             ui,
                             si,
                             *node,
+                            unit_kind,
                             orders,
                             events,
                             select,
@@ -1168,6 +1325,7 @@ fn draw_order_tree_columns(
                             ui,
                             si,
                             *node,
+                            unit_kind,
                             orders,
                             events,
                             select,
@@ -1789,8 +1947,7 @@ impl GroupGeneratorApp {
                         ui,
                         si,
                         &columns,
-                        &self.tpl_seats[si].orders,
-                        &self.tpl_seats[si].events,
+                        &self.tpl_seats,
                         self.tpl_select,
                         selected_fill,
                         order_fill,
@@ -1982,7 +2139,7 @@ impl GroupGeneratorApp {
         ui.label(RichText::new("Carriages").strong());
         ui.label(
             RichText::new(
-                "The locomotive is the selected train. Add, remove, or reorder cars. Tender first is typical.",
+                "The locomotive is the selected train. Add, remove, or reorder cars. Tender first is typical. Carriage styles (Hospital, boxcars, wagons, platforms) are also on Modifications above.",
             )
             .italics()
             .small(),
@@ -2001,6 +2158,15 @@ impl GroupGeneratorApp {
             ui.horizontal(|ui| {
                 ui.label(format!("{}.", ci + 1));
                 ui.label(carriage_label(&self.tpl_seats[si].carriages[ci]));
+                let train_script = self.tpl_seats[si].unit.script.clone();
+                let car_script = self.tpl_seats[si].carriages[ci].clone();
+                draw_carriage_style(
+                    ui,
+                    format!("tpl_car_mod_{si}_{ci}"),
+                    &train_script,
+                    &car_script,
+                    &mut self.tpl_seats[si].mod_mask,
+                );
                 ui.add_enabled_ui(ci > 0, |ui| {
                     if move_row_button(ui, true).on_hover_text("Move carriage up").clicked() {
                         move_at = Some((ci, -1));
@@ -2025,6 +2191,7 @@ impl GroupGeneratorApp {
         if let Some(ci) = remove_at {
             if ci < self.tpl_seats[si].carriages.len() {
                 self.tpl_seats[si].carriages.remove(ci);
+                sync_train_mask_to_carriages(&mut self.tpl_seats[si]);
             }
         }
         let mut choices = self.tpl_seats[si].unit.prototype_carriages();
@@ -2386,12 +2553,10 @@ impl GroupGeneratorApp {
                                 &mut self.tpl_seats[seat].orders[order].attack_group,
                                 "Attack group",
                             );
-                            ui.label("Priority");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.tpl_seats[seat].orders[order].priority,
-                                )
-                                .range(0..=2),
+                            draw_priority_combo(
+                                ui,
+                                format!("tpl_atk_pri_{seat}_{order}"),
+                                &mut self.tpl_seats[seat].orders[order].priority,
                             );
                         });
                     }
@@ -2496,10 +2661,32 @@ impl GroupGeneratorApp {
                             "Timer from the previous order (or Time on Target) pulses MISSION END: Force Complete, RTB if that order is on a unit, then deactivate / delete. Put Land or Force Complete before this if the flight should receive those commands first.",
                         );
                     }
+                    OrderKind::Timer => {
+                        ui.label(
+                            "MCU_Timer pause in the order chain. The previous order pulses this timer; when it expires the next order runs.",
+                        );
+                        ui.horizontal(|ui| {
+                            ui.label("Pause");
+                            ui.add(
+                                egui::DragValue::new(
+                                    &mut self.tpl_seats[seat].orders[order].time_s,
+                                )
+                                .range(0.0..=3600.0)
+                                .suffix(" s"),
+                            );
+                        });
+                    }
                     OrderKind::ForceComplete => {
                         ui.label(
                             "MCU_CMD_ForceComplete on this unit (or shared Objects). Mission Complete pulses the shared MISSION END hub instead.",
                         );
+                        ui.horizontal(|ui| {
+                            draw_priority_combo(
+                                ui,
+                                format!("tpl_fc_pri_{seat}_{order}"),
+                                &mut self.tpl_seats[seat].orders[order].priority,
+                            );
+                        });
                     }
                     OrderKind::RtbOnZoneOut => {
                         ui.label(
@@ -2509,6 +2696,29 @@ impl GroupGeneratorApp {
                     OrderKind::AttackArea => {
                         let ground = self.tpl_seats[seat].orders[order].attack_ground
                             || self.tpl_seats[seat].orders[order].attack_g_targets;
+                        ui.horizontal(|ui| {
+                            ui.label("Attack");
+                            let current = self.tpl_seats[seat].orders[order].attack_area_target();
+                            egui::ComboBox::from_id_salt(format!("tpl_aa_tgt_{seat}_{order}"))
+                                .selected_text(current.label())
+                                .width(200.0)
+                                .show_ui(ui, |ui| {
+                                    for t in AttackAreaTarget::ALL {
+                                        if ui
+                                            .selectable_label(current == t, t.label())
+                                            .clicked()
+                                        {
+                                            self.tpl_seats[seat].orders[order]
+                                                .set_attack_area_target(t);
+                                        }
+                                    }
+                                });
+                            draw_priority_combo(
+                                ui,
+                                format!("tpl_aa_pri_{seat}_{order}"),
+                                &mut self.tpl_seats[seat].orders[order].priority,
+                            );
+                        });
                         ui.horizontal(|ui| {
                             ui.label("Area");
                             ui.add(
@@ -2534,18 +2744,6 @@ impl GroupGeneratorApp {
                                 )
                                 .range(0.0..=3600.0)
                                 .suffix(" s"),
-                            );
-                            ui.checkbox(
-                                &mut self.tpl_seats[seat].orders[order].attack_air,
-                                "Air",
-                            );
-                            ui.checkbox(
-                                &mut self.tpl_seats[seat].orders[order].attack_ground,
-                                "Ground",
-                            );
-                            ui.checkbox(
-                                &mut self.tpl_seats[seat].orders[order].attack_g_targets,
-                                "Ground targets",
                             );
                         });
                         let area = self.tpl_seats[seat].orders[order].attack_area;
@@ -2659,6 +2857,13 @@ impl GroupGeneratorApp {
                                 RichText::new("Add another unit to cover.")
                                     .italics(),
                             );
+                            ui.horizontal(|ui| {
+                                draw_priority_combo(
+                                    ui,
+                                    format!("tpl_cover_pri_{seat}_{order}"),
+                                    &mut self.tpl_seats[seat].orders[order].priority,
+                                );
+                            });
                         } else {
                             ui.horizontal(|ui| {
                                 ui.label("Cover");
@@ -2687,17 +2892,20 @@ impl GroupGeneratorApp {
                                             );
                                         }
                                     });
+                                draw_priority_combo(
+                                    ui,
+                                    format!("tpl_cover_pri_{seat}_{order}"),
+                                    &mut self.tpl_seats[seat].orders[order].priority,
+                                );
                             });
                         }
                     }
                     OrderKind::Land => {
                         ui.horizontal(|ui| {
-                            ui.label("Priority");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.tpl_seats[seat].orders[order].priority,
-                                )
-                                .range(0..=2),
+                            draw_priority_combo(
+                                ui,
+                                format!("tpl_land_pri_{seat}_{order}"),
+                                &mut self.tpl_seats[seat].orders[order].priority,
                             );
                         });
                     }
@@ -3028,6 +3236,7 @@ impl GroupGeneratorApp {
         }
 
         if has_mods {
+            let is_train = self.tpl_seats[si].unit.is_train();
             ui.horizontal(|ui| {
                 ui.label("Modifications");
                 let preview = payloads::mods_preview(&script, &self.tpl_seats[si].mod_mask);
@@ -3037,34 +3246,62 @@ impl GroupGeneratorApp {
                     preview
                 };
                 ui.menu_button(label, |ui| {
-                    ui.set_min_width(220.0);
+                    ui.set_min_width(240.0);
                     ui.label(
-                        RichText::new("More than one mod may be selected when the aircraft has several slots.")
-                            .small()
-                            .weak(),
+                        RichText::new(if is_train {
+                            "Stock is none (ModMask 0). Hospital is on or off. Boxcars, wagons, and platforms each pick one style."
+                        } else if payloads::empty_mod_mask(&script) == 0 {
+                            "Stock is none (ModMask 0). Equipment, cargo, and trailer slots each pick one option."
+                        } else {
+                            "More than one mod may be selected when the aircraft has several slots."
+                        })
+                        .small()
+                        .weak(),
                     );
                     let ac = payloads::catalog().for_script(&script).unwrap();
-                    let mut mask = payloads::parse_mod_mask(&self.tpl_seats[si].mod_mask);
+                    let mut mask = payloads::parse_mod_mask_for(&script, &self.tpl_seats[si].mod_mask);
                     let mut changed = false;
-                    for (slot_i, slot) in ac.mod_slots.iter().enumerate() {
-                        if slot_i > 0 {
+                    let mut shown = 0usize;
+                    for slot in &ac.mod_slots {
+                        if !payloads::slot_has_choices(slot) {
+                            continue;
+                        }
+                        if shown > 0 {
                             ui.separator();
                         }
-                        let exclusive = slot.options.len() > 1;
+                        shown += 1;
+                        let exclusive = payloads::slot_choice_count(slot) > 1;
                         if exclusive {
-                            ui.label(RichText::new(format!("Slot {}", slot.number)).small().weak());
-                            for opt in &slot.options {
-                                let selected = payloads::exclusive_selection(mask, slot)
-                                    .is_some_and(|s| s.binary_id == opt.binary_id);
-                                if ui.radio(selected, &opt.description).clicked() {
-                                    mask = payloads::select_exclusive(mask, slot, opt);
+                            let title = payloads::mod_slot_title(&script, slot.number);
+                            ui.label(RichText::new(title).small().weak());
+                            let has_none = slot
+                                .options
+                                .iter()
+                                .any(|o| payloads::extra_bits(&o.binary_id) == 0);
+                            if !has_none {
+                                let none_on = payloads::exclusive_selection(mask, slot).is_none();
+                                if ui.radio(none_on, "None").clicked() {
+                                    mask = payloads::clear_exclusive_for(&script, mask, slot);
                                     changed = true;
                                 }
                             }
-                        } else if let Some(opt) = slot.options.first() {
+                            for opt in &slot.options {
+                                if payloads::extra_bits(&opt.binary_id) == 0 {
+                                    continue;
+                                }
+                                let selected = payloads::exclusive_selection(mask, slot)
+                                    .is_some_and(|s| s.binary_id == opt.binary_id);
+                                if ui.radio(selected, &opt.description).clicked() {
+                                    mask = payloads::select_exclusive_for(&script, mask, slot, opt);
+                                    changed = true;
+                                }
+                            }
+                        } else if let Some(opt) = slot.options.iter().find(|o| {
+                            payloads::extra_bits(&o.binary_id) != 0
+                        }) {
                             let mut on = payloads::option_selected(mask, opt);
                             if ui.checkbox(&mut on, &opt.description).changed() {
-                                mask = payloads::set_toggle(mask, opt, on);
+                                mask = payloads::set_toggle_for(&script, mask, opt, on);
                                 changed = true;
                             }
                         }

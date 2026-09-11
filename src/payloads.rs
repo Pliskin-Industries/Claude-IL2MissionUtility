@@ -6,12 +6,17 @@
 //! the ModMask bit helpers. Updating the text file and rebuilding picks
 //! up new aircraft. It does not write Plane properties (`template` does).
 //!
+//! Aircraft `ModMask` keeps bit 0 set (`1`, `11`, `10101`, …). Train
+//! and vehicle masks start at `0` (stock / None) and must not force that bit.
+//!
 //! ## Public API
 //! * `fn catalog` / `struct PayloadCatalog` (`for_script`, munition lookup)
 //! * `PayloadOption` / `ModSlot` / `ModOption` / `Munition` / `AircraftLoadout`
 //! * `fn payload_preview` / `fn mods_preview` — one-line UI text
-//! * `fn parse_mod_mask` / `fn encode_mod_mask`
+//! * `fn parse_mod_mask` / `fn encode_mod_mask` / `fn parse_mod_mask_for`
 //! * `fn select_exclusive` / `fn set_toggle` / `fn option_selected`
+//! * `fn is_train_script` / `fn is_vehicle_script` / `fn empty_mod_mask`
+//! * `fn train_carriage_slot` / `fn mod_slot_title` / `fn slot_choice_count`
 //!
 //! ## Used by
 //! * ui.rs (Template) — payload combo, mod checkboxes, preview lines
@@ -69,11 +74,18 @@ pub struct ModOption {
 
 impl PayloadCatalog {
     pub fn for_script(&self, script: &str) -> Option<&AircraftLoadout> {
+        if is_train_script(script) {
+            return self
+                .aircraft
+                .iter()
+                .find(|ac| normalize_key(&ac.name) == "trains");
+        }
         let id = script_id(script);
         self.aircraft
             .iter()
-            .filter(|ac| matches_aircraft(&ac.name, &id))
-            .max_by_key(|ac| normalize_key(&ac.name).len())
+            .filter_map(|ac| match_score(&ac.name, &id).map(|score| (score, ac)))
+            .max_by_key(|(score, ac)| (*score, normalize_key(&ac.name).len()))
+            .map(|(_, ac)| ac)
     }
 
     pub fn munition_for_cell(&self, cell: &str) -> Option<&Munition> {
@@ -173,9 +185,105 @@ pub fn payload_preview(script: &str, payload_id: i32) -> String {
     }
 }
 
+pub fn is_train_script(script: &str) -> bool {
+    script_path_contains(script, "\\trains\\")
+}
+
+pub fn is_vehicle_script(script: &str) -> bool {
+    script_path_contains(script, "\\vehicles\\")
+}
+
+fn script_path_contains(script: &str, needle: &str) -> bool {
+    script
+        .replace('/', "\\")
+        .to_ascii_lowercase()
+        .contains(needle)
+}
+
+fn loadout_is_zero_base(ac: &AircraftLoadout) -> bool {
+    ac.mod_slots.iter().any(|s| {
+        s.options
+            .iter()
+            .any(|o| o.binary_id.trim() == "0" || o.description.eq_ignore_ascii_case("none") && extra_bits(&o.binary_id) == 0)
+    })
+}
+
+/// Aircraft empty mask is `1` (bit 0). Trains and vehicles empty/stock is `0`.
+pub fn empty_mod_mask(script: &str) -> u64 {
+    if is_train_script(script) || is_vehicle_script(script) {
+        return 0;
+    }
+    if catalog().for_script(script).is_some_and(loadout_is_zero_base) {
+        0
+    } else {
+        1
+    }
+}
+
+pub fn default_mod_mask_str(script: &str) -> String {
+    encode_mod_mask(empty_mod_mask(script))
+}
+
+/// Carriage script → train ModMask slot from `Payloads.txt` (Hospital,
+/// boxcars, wagons, platforms). Other cars have no style bits.
+pub fn train_carriage_slot(script: &str) -> Option<u32> {
+    match script_id(script).as_str() {
+        "carpassenger" => Some(1),
+        "carbox" => Some(2),
+        "cargondola" => Some(3),
+        "carplatform" => Some(4),
+        _ => None,
+    }
+}
+
+pub fn slot_has_choices(slot: &ModSlot) -> bool {
+    slot.options.iter().any(|o| extra_bits(&o.binary_id) != 0)
+}
+
+/// Train ModMask slot titles from `Payloads.txt`.
+pub fn train_slot_title(number: u32) -> Option<&'static str> {
+    match number {
+        1 => Some("Hospital"),
+        2 => Some("Boxcars"),
+        3 => Some("Wagons"),
+        4 => Some("Platforms"),
+        _ => None,
+    }
+}
+
+fn vehicle_slot_title(number: u32) -> Option<&'static str> {
+    match number {
+        1 => Some("Equipment"),
+        2 => Some("Cargo"),
+        3 => Some("Trailer canvas"),
+        4 => Some("Trailer"),
+        _ => None,
+    }
+}
+
+pub fn mod_slot_title(script: &str, number: u32) -> String {
+    let named = if is_train_script(script) {
+        train_slot_title(number)
+    } else if is_vehicle_script(script) {
+        vehicle_slot_title(number)
+    } else {
+        None
+    };
+    named
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| format!("Slot {number}"))
+}
+
+pub fn slot_choice_count(slot: &ModSlot) -> usize {
+    slot.options
+        .iter()
+        .filter(|o| extra_bits(&o.binary_id) != 0)
+        .count()
+}
+
 pub fn mods_preview(script: &str, mod_mask: &str) -> String {
     let Some(ac) = catalog().for_script(script) else {
-        return if is_default_mask(mod_mask) {
+        return if is_default_mask_for(script, mod_mask) {
             "—".into()
         } else {
             mod_mask.to_string()
@@ -184,7 +292,7 @@ pub fn mods_preview(script: &str, mod_mask: &str) -> String {
     if !ac.has_mods() {
         return "—".into();
     }
-    let bits = parse_mod_mask(mod_mask);
+    let bits = parse_mod_mask_for(script, mod_mask);
     let mut labels = Vec::new();
     for slot in &ac.mod_slots {
         for opt in &slot.options {
@@ -205,11 +313,19 @@ pub fn mods_preview(script: &str, mod_mask: &str) -> String {
 }
 
 pub fn parse_mod_mask(s: &str) -> u64 {
+    parse_mod_mask_or(s, 1)
+}
+
+pub fn parse_mod_mask_for(script: &str, s: &str) -> u64 {
+    parse_mod_mask_or(s, empty_mod_mask(script))
+}
+
+fn parse_mod_mask_or(s: &str, empty: u64) -> u64 {
     let s = s.trim().trim_matches('"');
     if s.is_empty() {
-        return 1;
+        return empty;
     }
-    u64::from_str_radix(s, 2).unwrap_or(1)
+    u64::from_str_radix(s, 2).unwrap_or(empty)
 }
 
 pub fn encode_mod_mask(bits: u64) -> String {
@@ -228,18 +344,43 @@ pub fn slot_bits(slot: &ModSlot) -> u64 {
 
 /// Select `option` in an exclusive slot, clearing the other options in that slot.
 pub fn select_exclusive(mask: u64, slot: &ModSlot, option: &ModOption) -> u64 {
-    (mask & !slot_bits(slot)) | extra_bits(&option.binary_id) | 1
+    select_exclusive_empty(mask, slot, option, 1)
+}
+
+pub fn select_exclusive_for(
+    script: &str,
+    mask: u64,
+    slot: &ModSlot,
+    option: &ModOption,
+) -> u64 {
+    select_exclusive_empty(mask, slot, option, empty_mod_mask(script))
+}
+
+fn select_exclusive_empty(mask: u64, slot: &ModSlot, option: &ModOption, empty: u64) -> u64 {
+    (mask & !slot_bits(slot)) | extra_bits(&option.binary_id) | empty
+}
+
+pub fn clear_exclusive_for(script: &str, mask: u64, slot: &ModSlot) -> u64 {
+    (mask & !slot_bits(slot)) | empty_mod_mask(script)
 }
 
 pub fn set_toggle(mask: u64, option: &ModOption, on: bool) -> u64 {
+    set_toggle_empty(mask, option, on, 1)
+}
+
+pub fn set_toggle_for(script: &str, mask: u64, option: &ModOption, on: bool) -> u64 {
+    set_toggle_empty(mask, option, on, empty_mod_mask(script))
+}
+
+fn set_toggle_empty(mask: u64, option: &ModOption, on: bool, empty: u64) -> u64 {
     let extra = extra_bits(&option.binary_id);
     if extra == 0 {
-        return mask | 1;
+        return empty;
     }
     if on {
-        mask | extra | 1
+        mask | extra | empty
     } else {
-        (mask & !extra) | 1
+        (mask & !extra) | empty
     }
 }
 
@@ -252,15 +393,16 @@ pub fn option_selected(mask: u64, option: &ModOption) -> bool {
     }
 }
 
-/// Exclusive slot: which option is active. Empty (binary `1`) when no extra bits are set.
+/// Exclusive slot: which option is active. Empty (binary `1` for aircraft,
+/// `0` for trains / vehicles) when no extra bits are set. Does not pick
+/// the first option as a stand-in for “none”.
 pub fn exclusive_selection<'a>(mask: u64, slot: &'a ModSlot) -> Option<&'a ModOption> {
     let current = mask & slot_bits(slot);
     if current == 0 {
         return slot
             .options
             .iter()
-            .find(|o| extra_bits(&o.binary_id) == 0)
-            .or_else(|| slot.options.first());
+            .find(|o| extra_bits(&o.binary_id) == 0);
     }
     slot.options
         .iter()
@@ -276,8 +418,13 @@ pub fn exclusive_selection<'a>(mask: u64, slot: &'a ModSlot) -> Option<&'a ModOp
         })
 }
 
-fn is_default_mask(s: &str) -> bool {
-    matches!(s.trim(), "" | "1" | "0")
+fn is_default_mask_for(script: &str, s: &str) -> bool {
+    let t = s.trim();
+    if empty_mod_mask(script) == 0 {
+        t.is_empty() || t == "0"
+    } else {
+        t.is_empty() || t == "1"
+    }
 }
 
 fn is_blank_ordnance(s: &str) -> bool {
@@ -311,16 +458,57 @@ fn normalize_key(s: &str) -> String {
         .collect()
 }
 
-fn matches_aircraft(header: &str, script_id: &str) -> bool {
-    let h = normalize_key(header);
-    if h.is_empty() {
+fn looks_like_mod_row(fields: &[String]) -> bool {
+    if fields.len() < 2 {
         return false;
     }
-    if script_id == h {
-        return true;
+    if fields[0].parse::<u32>().is_err() {
+        return false;
     }
-    // F-51 → f51d, B-29 → simpleb29
-    script_id.starts_with(&h) || script_id.contains(&h)
+    let binary = fields[1].as_str();
+    !binary.is_empty() && binary.chars().all(|c| c == '0' || c == '1')
+}
+
+/// Higher is a better header→script match. Exact beats prefix; prefix of a
+/// longer script (GMC-CCKW vs gmc-cckw-refueler) loses to a token match
+/// that covers more of the id (GMC-Refueler).
+fn match_score(header: &str, script_id: &str) -> Option<u32> {
+    let h = normalize_key(header);
+    if h.is_empty() {
+        return None;
+    }
+    let covered = if script_id == h {
+        h.len()
+    } else if script_id.starts_with(&h) {
+        // F-51 → f51d (short series suffix). Reject vehicle variants
+        // (studebakerus6 → studebakerus6-bm13 / refueler / tanker).
+        let leftover = script_id.len() - h.len();
+        if leftover <= 2 {
+            h.len()
+        } else {
+            header_token_coverage(header, script_id)?
+        }
+    } else if script_id.contains(&h) || h.contains(script_id) {
+        h.len().min(script_id.len())
+    } else {
+        header_token_coverage(header, script_id)?
+    };
+    let denom = script_id.len().max(1);
+    Some((covered * 1000 / denom * 100 + covered) as u32)
+}
+
+fn header_token_coverage(header: &str, script_id: &str) -> Option<usize> {
+    let tokens: Vec<String> = header
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| t.len() >= 2)
+        .map(normalize_key)
+        .filter(|t| !t.is_empty())
+        .collect();
+    if tokens.len() >= 2 && tokens.iter().all(|t| script_id.contains(t)) {
+        Some(tokens.iter().map(|t| t.len()).sum())
+    } else {
+        None
+    }
 }
 
 fn parse_csv_line(line: &str) -> Vec<String> {
@@ -397,6 +585,18 @@ fn parse_payloads(src: &str) -> PayloadCatalog {
             let idx = ensure_aircraft(&mut cat, &name);
             mode = Mode::Mods(idx);
             continue;
+        }
+        if matches!(mode, Mode::None) {
+            if let Some(name) = pending_title.as_deref() {
+                if !name.is_empty()
+                    && !is_section_banner(name)
+                    && looks_like_mod_row(&fields)
+                {
+                    let name = pending_title.take().unwrap();
+                    let idx = ensure_aircraft(&mut cat, &name);
+                    mode = Mode::Mods(idx);
+                }
+            }
         }
         match mode {
             Mode::Munitions => {
@@ -661,5 +861,150 @@ mod tests {
         assert!(preview.contains("Radar"), "{preview}");
         assert!(preview.contains("Fuel") || preview.contains("150"), "{preview}");
         assert_eq!(payload_preview("f51d.txt", 0), "Clean");
+    }
+
+    #[test]
+    fn both_train_types_share_the_trains_mod_table() {
+        let east = catalog()
+            .for_script(r"LuaScripts\WorldObjects\Trains\type475-1.txt")
+            .expect("type475-1");
+        let west = catalog()
+            .for_script(r"LuaScripts\WorldObjects\Trains\usatc-s160.txt")
+            .expect("usatc-s160");
+        assert!(east.has_mods());
+        assert_eq!(east.mod_slots.len(), west.mod_slots.len());
+        let platforms = east
+            .mod_slots
+            .iter()
+            .find(|s| s.number == 4)
+            .expect("platform slot");
+        assert!(platforms
+            .options
+            .iter()
+            .any(|o| o.description.contains("T-34-85")));
+        assert_eq!(train_carriage_slot("carbox.txt"), Some(2));
+        assert_eq!(train_carriage_slot("carplatform.txt"), Some(4));
+        assert_eq!(train_carriage_slot("type475-1-tender.txt"), None);
+        assert_eq!(train_slot_title(2), Some("Boxcars"));
+        assert_eq!(train_slot_title(4), Some("Platforms"));
+        assert!(slot_choice_count(platforms) > 1);
+    }
+
+    #[test]
+    fn train_mod_mask_stays_zero_until_a_carriage_style_is_chosen() {
+        let script = r"LuaScripts\WorldObjects\Trains\type475-1.txt";
+        assert_eq!(empty_mod_mask(script), 0);
+        assert_eq!(default_mod_mask_str(script), "0");
+        assert_eq!(parse_mod_mask_for(script, ""), 0);
+        assert_eq!(parse_mod_mask_for(script, "0"), 0);
+        assert_eq!(mods_preview(script, "0"), "—");
+        let ac = catalog().for_script(script).unwrap();
+        let boxcars = ac.mod_slots.iter().find(|s| s.number == 2).unwrap();
+        let heated = boxcars
+            .options
+            .iter()
+            .find(|o| o.description.contains("Heated"))
+            .unwrap();
+        let mask = select_exclusive_for(script, 0, boxcars, heated);
+        assert_eq!(encode_mod_mask(mask), "100");
+        assert_eq!(mask & 1, 0, "train masks must not force aircraft bit 0");
+        let cleared = clear_exclusive_for(script, mask, boxcars);
+        assert_eq!(cleared, 0);
+        let hospital = ac
+            .mod_slots
+            .iter()
+            .find(|s| s.number == 1)
+            .unwrap()
+            .options
+            .first()
+            .unwrap();
+        let on = set_toggle_for(script, 0, hospital, true);
+        assert_eq!(encode_mod_mask(on), "10");
+        assert_eq!(set_toggle_for(script, on, hospital, false), 0);
+    }
+
+    #[test]
+    fn vehicle_mod_tables_default_to_zero_and_match_scripts() {
+        let gaz = catalog()
+            .for_script(r"LuaScripts\WorldObjects\vehicles\gaz63.txt")
+            .expect("GAZ-63");
+        assert!(gaz.has_mods());
+        assert!(gaz
+            .mod_slots
+            .iter()
+            .any(|s| s.options.iter().any(|o| o.description == "Canvas top")));
+        assert!(gaz
+            .mod_slots
+            .iter()
+            .any(|s| s.options.iter().any(|o| o.description.contains("Generator"))));
+        let script = r"LuaScripts\WorldObjects\vehicles\gaz63.txt";
+        assert_eq!(empty_mod_mask(script), 0);
+        assert_eq!(default_mod_mask_str(script), "0");
+        assert_eq!(mods_preview(script, "0"), "—");
+        let cargo = gaz.mod_slots.iter().find(|s| s.number == 2).unwrap();
+        let soldiers = cargo
+            .options
+            .iter()
+            .find(|o| o.description == "Soldiers")
+            .unwrap();
+        let mask = select_exclusive_for(script, 0, cargo, soldiers);
+        assert_eq!(encode_mod_mask(mask), "100");
+        assert_eq!(mask & 1, 0, "vehicle masks must not force aircraft bit 0");
+
+        let truck = catalog()
+            .for_script(r"LuaScripts\WorldObjects\vehicles\gmc-cckw.txt")
+            .expect("GMC-CCKW");
+        let tanker = catalog()
+            .for_script(r"LuaScripts\WorldObjects\vehicles\gmc-cckw-refueler.txt")
+            .expect("GMC-Refueler");
+        assert_ne!(truck.name, tanker.name);
+        assert!(truck
+            .mod_slots
+            .iter()
+            .any(|s| s.options.iter().any(|o| o.description == "Canvas top")));
+        assert!(!tanker
+            .mod_slots
+            .iter()
+            .any(|s| s.options.iter().any(|o| o.description == "Canvas top")));
+
+        let jeep = catalog()
+            .for_script("willysmb.txt")
+            .expect("Willys MB");
+        assert!(jeep.has_mods());
+        let dodge = catalog()
+            .for_script("dodgewc52.txt")
+            .expect("Dodge WC52");
+        assert!(dodge
+            .mod_slots
+            .iter()
+            .any(|s| s.options.iter().any(|o| o.description.contains("Canvas Frame"))));
+        assert!(catalog().for_script("u7144.txt").unwrap().has_mods());
+        assert!(catalog().for_script("ba64b.txt").unwrap().has_mods());
+        assert!(catalog().for_script("m3a1-halftrack.txt").unwrap().has_mods());
+        let stude = catalog()
+            .for_script(r"LuaScripts\WorldObjects\vehicles\studebakerus6.txt")
+            .expect("StudebakerUS6");
+        assert!(stude.has_mods());
+        assert!(stude.mod_slots.iter().any(|s| {
+            s.options.iter().any(|o| o.description.contains("ZPU"))
+        }));
+        assert!(stude.mod_slots.iter().any(|s| {
+            s.options.iter().any(|o| o.description.contains("P20"))
+        }));
+        assert!(
+            catalog()
+                .for_script(r"LuaScripts\WorldObjects\vehicles\studebakerus6-bm13.txt")
+                .is_none(),
+            "BM-13 must not inherit cargo-truck mods"
+        );
+        assert!(
+            catalog()
+                .for_script(r"LuaScripts\WorldObjects\vehicles\studebakerus6-refueler.txt")
+                .is_none()
+        );
+        assert_eq!(empty_mod_mask(r"LuaScripts\WorldObjects\vehicles\studebakerus6.txt"), 0);
+        assert_eq!(mod_slot_title(script, 2), "Cargo");
+        assert_eq!(empty_mod_mask("gaz63.txt"), 0);
+        assert_eq!(empty_mod_mask("f51d.txt"), 1);
     }
 }
