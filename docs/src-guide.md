@@ -188,12 +188,17 @@ polygon (checkerboard, waves × groups, optional AO fill, 8-pack cap).
 
 ### `mapground.rs` — ground unit placement
 `place_ground` / `place_ground_jobs` park armor/supply/artillery on
-dry open terrain and trains/columns on roads or rails (`mapnet`).
+dry open terrain, infantry on any dry land (not water), and trains/columns on roads or rails (`mapnet`).
 `GroundKind`, `GroundJob` (optional `RouteLayout` + weapon range),
 `GroundSpot` (pos, heading, network pose, hashed objective, in-AO,
 soft `issue`), `MapGroundLayout`, `START_DELAY_S` / `GROUP_DELAY_S`,
 `ARTY_OBJECTIVE_RADIUS` (unknown-artillery fallback),
-`numbered_ground_issues` (UI warnings). **Map mode, Army Generator.**
+`numbered_ground_issues` (UI warnings), `attack_across_front` (AttackArea
+past the FLOT when no objective is marked), `layout_path_waypoints`
+(off-road Goto WP hops toward the objective or front, staying on dry land
+when possible). Infantry parks in the front band
+and faces the closest objective, or the front when none are marked.
+Other front-band groups also face the front when no objective is set. **Map mode, Army Generator.**
 
 ### `mapload.rs` — Korea reference-point catalog
 Loads airfield and building points from `References/` (and optional
@@ -218,8 +223,9 @@ parking (2.5 km `NETWORK_SPACING`, AO bias, `prefer` hook), interactive
 snapping (`snap_lead_to_pointer`, `snap_waypoint_to_pointer` — a WP may
 sit on another branch or behind the column — `align_heading_to_path`),
 two-WP Zone IN straddle logic (`column_waypoint_dists`,
-`sample_network`), and `park_route_copy` (writes final positions into
-the group, preserving decimal precision). Unit-tested against
+`sample_network`), `park_route_copy` (writes column positions into
+the group, preserving decimal precision), and `inspect_path_waypoints` /
+`park_path_waypoints` for off-road Goto WP hops. Unit-tested against
 `TemplateExamples/` fixtures. **Map mode, Army Generator.**
 
 ### `mapshipping.rs` — ship placement
@@ -235,7 +241,8 @@ Per-script UI overlay (the AST stays schema-agnostic): `ModelClass` /
 `ModelSpec`, `spec_for`, `class_for` / `classes_in`, `ceiling_m`,
 `format_cruise`, `suggested_waypoint_speed_kmh` (90 % of the slowest
 moving unit, rounded to 10 km/h), `script_id`, and preview lookup
-(`png_for_script`, `PLACEHOLDER_PNG` from `build.rs`).
+(`png_for_script`, `PLACEHOLDER_PNG` from `build.rs`). Infantry squads
+all use `assets/models/infantry.png`.
 **Template, Fighter Pack, Map.**
 
 ### `payloads.rs` — payloads & modifications
@@ -322,9 +329,13 @@ and `ENABLE / PULSE IN`; weapon-range + `mapnet` route hints;
 editor `*n*` suffixes; `inspect_army_copies` via
 `weapon_range::classify_army_unit`), parking placed copies onto map
 spots (`park_recon_copies(_headed/_spots)` — road/rail via
-`mapnet::park_route_copy`; `park_army_group(_spots)`, `park_army_mixed`
+`mapnet::park_route_copy`; off-road Goto WP hops via
+`mapnet::park_path_waypoints`; `park_army_group(_spots)`, `park_army_mixed`
 ships + ground), AttackArea snapping (`snap_copy_attack_areas` /
-`snap_army_attack_areas` via `weapon_range::snap_ground_attack_areas`),
+`snap_army_attack_areas` / `snap_placed_attack_areas` /
+`snap_army_placed_attack_areas` via
+`weapon_range::snap_ground_attack_areas`; no-objective groups fire
+across the front along heading),
 and rework on exported packs (`combine_placed_packs`, `strip_randomizer`,
 `restore_always_on` — rewires each copy's Mission Begin to a chosen
 start MCU and renames `Ground Units N`; `apply_randomizer` /
@@ -366,7 +377,8 @@ pairs (wingmen target-linked to their lead; `AiRTBDecision` /
 on a Vehicle breaks mission-editor parsing); `Orders` = command MCUs
 (one MCU shared across `shared_with` seats; ground AttackArea sits at
 the group origin); `Waypoints` = `WP n` hops along +X at 4 km (300 m
-area for planes, 100 m ground, per-hop altitude override). Goto WP
+area for planes, 100 m ground, unclamped speed, 0 m altitude for
+ground, per-hop altitude/priority override). Goto WP
 delays pulse only the WP MCU; on arrival the WP pulses Attack /
 AttackArea and Time on Target in parallel (list order doesn't matter),
 and TOT expiry continues the chain. Seat model + bookkeeping:
@@ -401,7 +413,8 @@ effective). `range_for_script`, `group_weapon_range`,
 `shortest_range_m` / `area_exceeds_range` (Template Builder
 AttackArea sizing, capped at 3000 m in the GUI), `ArmyUnitKind` +
 `classify_army_unit` (Ship / Train / Artillery / MobileArtillery /
-Armor / Supply — used by Map and Army), `snap_ground_attack_areas`.
+Armor / Supply / Infantry — used by Map and Army), `snap_ground_attack_areas`.
+`is_infantry_script` / `group_is_infantry` detect squads.
 Fallbacks: `UNKNOWN_ARTILLERY_M` = 15 km, `UNKNOWN_ARMOR_M` = 2 km,
 `ARTILLERY_RANGE_MIN_M` = 4.5 km. **Template, Map, Army Generator.**
 

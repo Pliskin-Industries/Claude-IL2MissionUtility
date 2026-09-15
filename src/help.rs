@@ -340,6 +340,7 @@ mod tests {
         assert!(s.contains("Modifier Set Value"));
         assert!(s.contains("finger-four"));
         assert!(s.contains("Planes"));
+        assert!(s.contains("Infantry"));
         assert!(s.contains("light flak"));
         assert!(s.contains("cruise speed"));
         assert!(s.contains("MCU_TR_Entity"));
@@ -373,6 +374,8 @@ mod tests {
         assert!(s.contains("Remove random logic"));
         assert!(s.contains("30"));
         assert!(s.contains("Train"));
+        assert!(s.contains("Infantry"));
+        assert!(s.contains("EasternInfantry.svg"));
     }
 
     #[test]
@@ -400,6 +403,7 @@ mod tests {
         assert!(s.contains("4.5 km"));
         assert!(s.contains("direction.svg"));
         assert!(s.contains("EasternTrain.svg"));
+        assert!(s.contains("EasternInfantry.svg"));
         assert!(s.contains("another branch"));
         assert!(s.contains("Model"));
         assert!(s.contains("LinkTrId"));

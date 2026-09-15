@@ -41,7 +41,9 @@
 //!   `fn copy_type_name`, `fn inspect_army_copies` / `ArmyCopyInfo`.
 //! * Parking: `fn park_recon_copies(_headed/_spots)`,
 //!   `fn park_army_group(_spots)`, `fn park_army_mixed`,
-//!   `fn snap_copy_attack_areas`, `fn snap_army_attack_areas`.
+//!   `fn snap_copy_attack_areas`, `fn snap_army_attack_areas`,
+//!   `fn snap_placed_attack_areas`, `fn snap_army_placed_attack_areas`
+//!   (off-road Goto WP hops use `mapnet::park_path_waypoints`).
 //! * Rework: `fn strip_randomizer`, `fn restore_always_on`,
 //!   `fn apply_randomizer`, `fn apply_randomizer_typed`,
 //!   `fn combine_placed_packs`, `fn group_start_delays`.
@@ -58,9 +60,12 @@
 
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;
-use crate::mapground::GroundSpot;
+use crate::mapground::{attack_across_front, GroundKind, GroundSpot};
 use crate::mapnet;
 use crate::placement;
+use crate::weapon_range::{
+    group_has_ground_attack_area, group_weapon_range, UNKNOWN_ARMOR_M, UNKNOWN_ARTILLERY_M,
+};
 
 /// Same 500 ms stagger as the fighter-pack randomizer. 100 ms is too tight.
 const WATERFALL_STEP_S: f64 = 0.5;
@@ -123,6 +128,8 @@ pub struct UnitPlanInfo {
     pub weapon_range_m: Option<f64>,
     /// Train, or a perfect vehicle column (road). `None` = open-ground placement.
     pub route: Option<crate::mapnet::RouteLayout>,
+    /// Goto WP hop distances when the group is not a road/rail column.
+    pub wp_ahead: Vec<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -470,6 +477,12 @@ pub fn inspect_unit(root: &Il2Entity) -> Result<UnitPlanInfo, String> {
     if checkzones.is_empty() {
         return Err("template has no MCU_CheckZone (need Zone IN)".into());
     }
+    let route = mapnet::inspect_route(root);
+    let wp_ahead = if route.is_some() {
+        Vec::new()
+    } else {
+        mapnet::inspect_path_waypoints(root)
+    };
     Ok(UnitPlanInfo {
         name: root.name().unwrap_or("Ground unit").to_string(),
         vehicle_count: root.count_block_type("Vehicle")
@@ -484,12 +497,19 @@ pub fn inspect_unit(root: &Il2Entity) -> Result<UnitPlanInfo, String> {
         checkzones,
         restore_starts: restore_start_choices(root),
         weapon_range_m: crate::weapon_range::group_weapon_range(root),
-        route: mapnet::inspect_route(root),
+        route,
+        wp_ahead,
     })
 }
 
 fn fallback_unit_info(root: &Il2Entity, name: &str) -> UnitPlanInfo {
     let checkzones = collect_checkzones(root);
+    let route = mapnet::inspect_route(root);
+    let wp_ahead = if route.is_some() {
+        Vec::new()
+    } else {
+        mapnet::inspect_path_waypoints(root)
+    };
     UnitPlanInfo {
         name: name.to_string(),
         vehicle_count: root.count_block_type("Vehicle")
@@ -504,7 +524,8 @@ fn fallback_unit_info(root: &Il2Entity, name: &str) -> UnitPlanInfo {
         checkzones,
         restore_starts: restore_start_choices(root),
         weapon_range_m: crate::weapon_range::group_weapon_range(root),
-        route: mapnet::inspect_route(root),
+        route,
+        wp_ahead,
     }
 }
 
@@ -711,6 +732,9 @@ fn park_one_ground_copy(child: &mut Il2Entity, spot: &GroundSpot) {
     crate::placement::apply_group_heading(child, spot.heading_deg);
     let from = child.first_xz().unwrap_or((0.0, 0.0));
     crate::placement::move_anchor_to(child, from, (spot.x, spot.z));
+    if !spot.waypoints.is_empty() {
+        mapnet::park_path_waypoints(child, &spot.waypoints);
+    }
 }
 
 /// Park each placed copy from a map preview, following roads/rails when set.
@@ -745,6 +769,57 @@ pub fn snap_copy_attack_areas(root: &mut Il2Entity, objectives: &[Option<(f64, f
     }
 }
 
+fn attack_area_point(
+    entity: &Il2Entity,
+    spot: &GroundSpot,
+    front: &[(f64, f64)],
+    eastern: bool,
+) -> Option<(f64, f64)> {
+    if let Some(p) = spot.objective {
+        return Some(p);
+    }
+    if !group_has_ground_attack_area(entity) {
+        return None;
+    }
+    let range = group_weapon_range(entity).unwrap_or(match spot.kind {
+        GroundKind::Artillery => UNKNOWN_ARTILLERY_M,
+        _ => UNKNOWN_ARMOR_M,
+    });
+    attack_across_front((spot.x, spot.z), spot.heading_deg, front, range, eastern)
+}
+
+/// Snap ground AttackArea MCUs onto hashed objectives, or across the front
+/// along each group's heading when none are marked.
+pub fn snap_placed_attack_areas(
+    root: &mut Il2Entity,
+    spots: &[GroundSpot],
+    front: &[(f64, f64)],
+    eastern: bool,
+) {
+    let packed = pack_root_mut(root);
+    if looks_like_pack_here(packed) && !top_level_copies(packed).is_empty() {
+        let mut i = 0usize;
+        for child in &mut packed.children {
+            if !is_placed_copy(child) {
+                continue;
+            }
+            let Some(spot) = spots.get(i) else {
+                break;
+            };
+            if let Some((x, z)) = attack_area_point(child, spot, front, eastern) {
+                crate::weapon_range::snap_ground_attack_areas(child, x, z);
+            }
+            i += 1;
+        }
+        return;
+    }
+    if let Some(spot) = spots.first() {
+        if let Some((x, z)) = attack_area_point(packed, spot, front, eastern) {
+            crate::weapon_range::snap_ground_attack_areas(packed, x, z);
+        }
+    }
+}
+
 /// One unit group inside a loaded army (a template, or one numbered copy).
 #[derive(Clone, Debug)]
 pub struct ArmyCopyInfo {
@@ -753,6 +828,7 @@ pub struct ArmyCopyInfo {
     pub x: f64,
     pub z: f64,
     pub route: Option<crate::mapnet::RouteLayout>,
+    pub wp_ahead: Vec<f64>,
 }
 
 fn army_copy_refs(root: &Il2Entity) -> Vec<&Il2Entity> {
@@ -771,12 +847,19 @@ pub fn inspect_army_copies(root: &Il2Entity) -> Vec<ArmyCopyInfo> {
         .into_iter()
         .map(|copy| {
             let (x, z) = copy.first_xz().unwrap_or((0.0, 0.0));
+            let route = crate::mapnet::inspect_route(copy);
+            let wp_ahead = if route.is_some() {
+                Vec::new()
+            } else {
+                crate::mapnet::inspect_path_waypoints(copy)
+            };
             ArmyCopyInfo {
                 kind: crate::weapon_range::classify_army_unit(copy),
                 range_m: crate::weapon_range::group_weapon_range(copy),
                 x,
                 z,
-                route: mapnet::inspect_route(copy),
+                route,
+                wp_ahead,
             }
         })
         .collect()
@@ -863,6 +946,46 @@ pub fn snap_army_attack_areas(root: &mut Il2Entity, objectives: &[Option<(f64, f
     }
     if let Some(Some((x, z))) = objectives.first().copied() {
         crate::weapon_range::snap_ground_attack_areas(packed, x, z);
+    }
+}
+
+/// Like [`snap_army_attack_areas`], filling empty objectives by aiming across the front.
+pub fn snap_army_placed_attack_areas(
+    root: &mut Il2Entity,
+    copies: &[ArmyCopyInfo],
+    spots: &[GroundSpot],
+    front: &[(f64, f64)],
+    eastern: bool,
+) {
+    let packed = pack_root_mut(root);
+    let mut gi = 0usize;
+    let mut apply = |child: &mut Il2Entity, kind: crate::weapon_range::ArmyUnitKind| {
+        if kind == crate::weapon_range::ArmyUnitKind::Ship {
+            return;
+        }
+        let Some(spot) = spots.get(gi) else {
+            return;
+        };
+        gi += 1;
+        if let Some((x, z)) = attack_area_point(child, spot, front, eastern) {
+            crate::weapon_range::snap_ground_attack_areas(child, x, z);
+        }
+    };
+    if looks_like_pack_here(packed) && !top_level_copies(packed).is_empty() {
+        let mut ci = 0usize;
+        for child in &mut packed.children {
+            if !is_placed_copy(child) {
+                continue;
+            }
+            if let Some(copy) = copies.get(ci) {
+                apply(child, copy.kind);
+            }
+            ci += 1;
+        }
+        return;
+    }
+    if let Some(copy) = copies.first() {
+        apply(packed, copy.kind);
     }
 }
 
@@ -1637,6 +1760,27 @@ mod tests {
         .expect("debug")
     }
 
+    fn tanks_with_path_waypoints() -> Il2Entity {
+        let mut root = parse_group_file(include_str!(
+            "../TemplateExamples/GroundUnits/DropIns/DPRK Tank Company.Group"
+        ))
+        .expect("tanks");
+        let mut lead = None;
+        root.for_each(&mut |e| {
+            if lead.is_none() && e.block_type == "Vehicle" {
+                lead = e.pos_xz();
+            }
+        });
+        let (x, z) = lead.expect("tank");
+        let mut next = 80_000i32;
+        for (i, d) in [4_000.0, 8_000.0].iter().enumerate() {
+            let mut wp = synthesize_mcu("MCU_Waypoint", &mut next, &format!("WP {}", i + 1));
+            set_pos(&mut wp, x + d, 0.0, z);
+            root.children.push(wp);
+        }
+        root
+    }
+
     #[test]
     fn allocate_splits_by_weight() {
         assert_eq!(allocate_copies(&[1, 1, 1, 1, 1], 100), vec![20, 20, 20, 20, 20]);
@@ -2242,5 +2386,75 @@ mod tests {
         let b = pack.find_by_name("DPRK Truck Run [2]").unwrap().first_xz().unwrap();
         assert!((a.0 - 110_000.0).abs() < 1.0);
         assert!((b.0 - 120_000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn snap_placed_attack_area_crosses_the_front_without_an_objective() {
+        let mut tmpl = bm13();
+        let front = vec![(140_000.0, 80_000.0), (140_000.0, 220_000.0)];
+        let from = (145_000.0, 150_000.0);
+        let heading = 180.0;
+        let spot = GroundSpot::at(
+            from.0,
+            from.1,
+            true,
+            heading,
+            GroundKind::Artillery,
+            None,
+        );
+        park_army_group(&mut tmpl, &[from], &[heading]);
+        snap_placed_attack_areas(&mut tmpl, &[spot], &front, true);
+        let mut area_xz = None;
+        tmpl.for_each(&mut |e| {
+            if crate::weapon_range::is_ground_attack_area(e) {
+                area_xz = e.first_xz();
+            }
+        });
+        let (ax, az) = area_xz.expect("ground AttackArea");
+        assert!(
+            ax < 140_000.0,
+            "AttackArea should sit south of the front, got x={ax}"
+        );
+        let d = (ax - from.0).hypot(az - from.1);
+        assert!(d <= 8_470.0 + 1.0, "AttackArea is {d} m from the guns");
+        assert!((az - 150_000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn park_orients_offroad_waypoints_along_heading() {
+        let mut tmpl = tanks_with_path_waypoints();
+        let dists = mapnet::inspect_path_waypoints(&tmpl);
+        assert_eq!(dists.len(), 2);
+        assert!((dists[0] - 4_000.0).abs() < 250.0);
+        assert!((dists[1] - 8_000.0).abs() < 250.0);
+        let copies = inspect_army_copies(&tmpl);
+        assert_eq!(copies.len(), 1);
+        assert_eq!(copies[0].wp_ahead.len(), 2);
+
+        let mut spot = GroundSpot::at(
+            145_000.0,
+            150_000.0,
+            true,
+            180.0,
+            GroundKind::Armor,
+            None,
+        );
+        spot.wp_ahead = dists;
+        spot.waypoints = vec![(141_000.0, 150_000.0), (137_000.0, 150_000.0)];
+        park_army_group_spots(&mut tmpl, &[spot]);
+        let mut got = Vec::new();
+        tmpl.for_each(&mut |e| {
+            if e.block_type == "MCU_Waypoint" {
+                if let Some(p) = e.pos_xz() {
+                    got.push(p);
+                }
+            }
+        });
+        got.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        assert_eq!(got.len(), 2);
+        assert!((got[0].0 - 141_000.0).abs() < 1.0);
+        assert!((got[1].0 - 137_000.0).abs() < 1.0);
+        assert!((got[0].1 - 150_000.0).abs() < 1.0);
+        assert!((got[1].1 - 150_000.0).abs() < 1.0);
     }
 }

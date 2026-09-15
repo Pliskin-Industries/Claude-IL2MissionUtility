@@ -5,7 +5,7 @@
 //! (`geo::MAP_MIN`/`MAP_MAX`). Each byte is a bitfield: water `& 1`,
 //! road `& 2` (reserved), open `& 4`. `WaterMap` is a historical alias
 //! for `TerrainMap`. It does not place units — ship/ground code queries
-//! `is_water_xz` / `is_open_xz`.
+//! `is_water_xz` / `is_open_xz` / `is_land_xz`.
 //!
 //! ## Public API
 //! * `FLAG_WATER` / `FLAG_ROAD` / `FLAG_OPEN`
@@ -15,7 +15,7 @@
 //! ## Used by
 //! * ui.rs (Map) — `WaterMap::builtin()` for ship/ground preview
 //! * mapshipping.rs — stay in water
-//! * mapground.rs — stay on dry open land
+//! * mapground.rs — armor/supply/artillery on dry open land; infantry on any dry land
 
 use crate::geo::{MAP_MAX, MAP_MIN};
 
@@ -86,6 +86,12 @@ impl TerrainMap {
         b & FLAG_OPEN != 0 && b & FLAG_WATER == 0
     }
 
+    /// Dry cell (not water). Forests, hills, and clearings all count.
+    #[inline]
+    pub fn is_land_cell(&self, x: u32, y: u32) -> bool {
+        self.cell(x, y) & FLAG_WATER == 0
+    }
+
     #[inline]
     pub fn is_road_cell(&self, x: u32, y: u32) -> bool {
         self.cell(x, y) & FLAG_ROAD != 0
@@ -115,6 +121,11 @@ impl TerrainMap {
         self.world_to_cell(x, z)
             .is_some_and(|(gx, gy)| self.is_open_cell(gx, gy))
     }
+
+    pub fn is_land_xz(&self, x: f64, z: f64) -> bool {
+        self.world_to_cell(x, z)
+            .is_some_and(|(gx, gy)| self.is_land_cell(gx, gy))
+    }
 }
 
 #[cfg(test)]
@@ -139,6 +150,10 @@ mod tests {
         assert!(map.is_open_cell(0, 1));
         assert!(!map.is_open_cell(1, 1), "water+open should not host ground");
         assert!(map.is_water_cell(1, 1));
+        assert!(map.is_land_cell(0, 0), "unmarked dry cell is land");
+        assert!(map.is_land_cell(0, 1));
+        assert!(!map.is_land_cell(1, 0));
+        assert!(!map.is_land_cell(1, 1));
         assert!(!map.is_water_cell(2, 0));
     }
 

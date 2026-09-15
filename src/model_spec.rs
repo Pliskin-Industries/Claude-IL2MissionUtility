@@ -3,8 +3,9 @@
 //! UI overlay keyed by script filename (type-id). The AST stays
 //! schema-agnostic; this table is not Group parsing. Preview bytes are
 //! baked by `build.rs` from `assets/models/*.png` (`PLACEHOLDER_PNG`
-//! when a model has no picture). It does not own payloads (`payloads`)
-//! or fighter-pack identity (`aircraft`).
+//! when a model has no picture; infantry squads all use `infantry.png`).
+//! It does not own payloads (`payloads`) or fighter-pack identity
+//! (`aircraft`).
 //!
 //! ## Public API
 //! * `enum ModelClass` / `struct ModelSpec`
@@ -358,6 +359,9 @@ pub fn suggested_waypoint_speed_kmh<'a>(scripts: impl IntoIterator<Item = &'a st
 }
 
 pub fn png_for_script(script: &str) -> &'static [u8] {
+    if class_for(script) == ModelClass::Infantry {
+        return model_png("infantry");
+    }
     model_png(&script_id(script))
 }
 
@@ -459,5 +463,26 @@ mod tests {
     fn known_model_png_is_nonempty() {
         assert!(!png_for_script("mig15bis.txt").is_empty());
         assert!(!model_png("no-such-model").is_empty());
+    }
+
+    #[test]
+    fn infantry_squads_share_infantry_png() {
+        let shared = model_png("infantry");
+        assert!(!shared.is_empty());
+        assert!(!std::ptr::eq(shared, PLACEHOLDER_PNG));
+        for id in [
+            "squad-mg-1950-dprk",
+            "squad-mg-1950-prc",
+            "squad-mg-1950-usa",
+            "squad-rifle-1950-dprk",
+            "squad-rifle-1950-prc",
+            "squad-rifle-1950-usa",
+            "squad-smg-1950-dprk",
+            "squad-smg-1950-prc",
+            "squad-smg-1950-usa",
+        ] {
+            assert_eq!(class_for(id), ModelClass::Infantry);
+            assert!(std::ptr::eq(png_for_script(id), shared));
+        }
     }
 }

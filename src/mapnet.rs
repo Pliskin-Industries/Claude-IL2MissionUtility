@@ -30,6 +30,8 @@
 //! * `park_route_copy` — writes final world positions back into the group:
 //!   vehicles, their LinkTrId targets, and MCU_Waypoints (ascending Index),
 //!   preserving the original XPos/ZPos/YOri decimal precision.
+//! * `inspect_path_waypoints` / `park_path_waypoints` — off-road Goto WP hops
+//!   (not RTB) so `mapground` can aim them at an objective or the front.
 //!
 //! ## Conventions
 //! * Trains always use rail; non-train groups ride roads only when
@@ -318,6 +320,21 @@ fn heading_diff(a: f64, b: f64) -> f64 {
     if d > 180.0 { 360.0 - d } else { d }
 }
 
+fn is_rtb_waypoint(entity: &Il2Entity) -> bool {
+    entity.name().is_some_and(|n| n.starts_with("RTB"))
+}
+
+/// Path `MCU_Waypoint` distances (metres) ahead of the lead visual, along facing.
+/// Skips RTB hops. Empty when the group has no Goto WP path.
+pub fn inspect_path_waypoints(root: &Il2Entity) -> Vec<f64> {
+    let units = collect_route_units(root);
+    if !units.is_empty() {
+        return waypoint_ahead(root, &units);
+    }
+    let origin = root.first_xz().unwrap_or((0.0, 0.0));
+    waypoint_ahead_from(root, origin, 0.0)
+}
+
 /// Vehicles / trains with a Model, plus MCU_Waypoint distances along facing.
 pub fn inspect_route(root: &Il2Entity) -> Option<RouteLayout> {
     let rail = root.count_block_type("Train") > 0;
@@ -460,13 +477,17 @@ fn waypoint_ahead(root: &Il2Entity, units: &[RouteUnit]) -> Vec<f64> {
         .collect();
     keyed.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     let lead = keyed[0].1;
+    waypoint_ahead_from(root, (lead.x, lead.z), heading)
+}
+
+fn waypoint_ahead_from(root: &Il2Entity, origin: (f64, f64), heading_deg: f64) -> Vec<f64> {
     let mut dists = Vec::new();
     root.for_each(&mut |e| {
-        if e.block_type != "MCU_Waypoint" {
+        if e.block_type != "MCU_Waypoint" || is_rtb_waypoint(e) {
             return;
         }
         let Some((x, z)) = e.pos_xz() else { return };
-        let (along, _) = project_along(x, z, (lead.x, lead.z), heading);
+        let (along, _) = project_along(x, z, origin, heading_deg);
         let d = along.abs();
         if d >= 50.0 {
             dists.push(d);
@@ -749,6 +770,33 @@ fn set_yori_abs(entity: &mut Il2Entity, heading: f64) {
     entity.set_property("YOri", format!("{:.decimals$}", heading.rem_euclid(360.0)));
 }
 
+/// Move path `MCU_Waypoint` hops (not RTB) onto `waypoints`, matching Index order.
+pub fn park_path_waypoints(root: &mut Il2Entity, waypoints: &[(f64, f64)]) {
+    if waypoints.is_empty() {
+        return;
+    }
+    let mut wp_ids = Vec::new();
+    root.for_each(&mut |e| {
+        if e.block_type == "MCU_Waypoint" && !is_rtb_waypoint(e) {
+            if let Some(id) = e.index {
+                wp_ids.push(id);
+            }
+        }
+    });
+    wp_ids.sort_unstable();
+    root.for_each_mut(&mut |e| {
+        if e.block_type != "MCU_Waypoint" {
+            return;
+        }
+        let Some(id) = e.index else { return };
+        if let Some(pi) = wp_ids.iter().position(|&w| w == id) {
+            if let Some(&(x, z)) = waypoints.get(pi) {
+                set_xz(e, x, z);
+            }
+        }
+    });
+}
+
 /// Translate the group so the lead visual sits on the path, then snap each
 /// vehicle/train and MCU_Waypoint onto `unit_xz` / `waypoints`.
 pub fn park_route_copy(
@@ -858,6 +906,7 @@ mod tests {
         assert!(route.wp_ahead[0] > 4_000.0);
         assert!(route.wp_ahead[1] > route.wp_ahead[0]);
         assert!((route.zone_in_m - 12_000.0).abs() < 0.5);
+        assert_eq!(inspect_path_waypoints(&root), route.wp_ahead);
     }
 
     #[test]
@@ -878,11 +927,13 @@ mod tests {
         ))
         .unwrap();
         assert!(inspect_route(&tanks).is_none());
+        assert!(inspect_path_waypoints(&tanks).is_empty());
         let ml20 = parse_group_file(include_str!(
             "../TemplateExamples/GroundUnits/DropIns/DPRK ML20 Arty.Group"
         ))
         .unwrap();
         assert!(inspect_route(&ml20).is_none());
+        assert!(inspect_path_waypoints(&ml20).is_empty());
     }
 
     #[test]

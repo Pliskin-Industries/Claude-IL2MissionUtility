@@ -1,6 +1,6 @@
 [package]
 name = "il2_mission_utility"
-version = "0.2.0-alpha"
+version = "0.3.0-alpha"
 edition = "2024"
 description = "Native desktop utility to generate, duplicate, and link IL-2 Sturmovik .Group mission files"
 

@@ -11,6 +11,7 @@
 //! * `UNKNOWN_ARTILLERY_M` (15 km) / `UNKNOWN_ARMOR_M` (2 km) /
 //!   `ARTILLERY_RANGE_MIN_M` (4.5 km)
 //! * `enum ArmyUnitKind` / `fn classify_army_unit`
+//! * `fn is_infantry_script` / `fn group_is_infantry`
 //! * `fn range_for_script` / `fn group_weapon_range`
 //! * `fn attack_area_radius_m` / `suggested_attack_area_m` /
 //!   `shortest_range_m` / `area_exceeds_range`
@@ -77,6 +78,7 @@ pub enum ArmyUnitKind {
     Armor,
     Supply,
     Artillery,
+    Infantry,
     Train,
     MobileArtillery,
 }
@@ -88,6 +90,7 @@ impl ArmyUnitKind {
             Self::Armor => "Armor",
             Self::Supply => "Supply",
             Self::Artillery => "Artillery",
+            Self::Infantry => "Infantry",
             Self::Train => "Train",
             Self::MobileArtillery => "Mobile artillery",
         }
@@ -103,6 +106,32 @@ fn type_id(script: &str) -> String {
         .trim_end_matches(".txt")
         .trim_matches('"')
         .to_ascii_lowercase()
+}
+
+/// Squads (`squad-mg-1950-dprk`, …) and any script/model under `infantry`.
+pub fn is_infantry_script(script: &str) -> bool {
+    let key = type_id(script);
+    key.starts_with("squad-") || script.to_ascii_lowercase().contains("infantry")
+}
+
+/// True when every `Vehicle` with a Script is infantry (and at least one is).
+pub fn group_is_infantry(root: &Il2Entity) -> bool {
+    let mut any = false;
+    let mut other = false;
+    root.for_each(&mut |e| {
+        if e.block_type != "Vehicle" {
+            return;
+        }
+        let Some(script) = e.property("Script") else {
+            return;
+        };
+        if is_infantry_script(script) {
+            any = true;
+        } else {
+            other = true;
+        }
+    });
+    any && !other
 }
 
 /// Max range for a single Script / Model path, if known.
@@ -203,12 +232,13 @@ pub fn group_has_ground_attack_area(root: &Il2Entity) -> bool {
     found
 }
 
-/// Infer Ship / Armor / Supply / Artillery / Train from objects, scripts, and AttackArea.
+/// Infer Ship / Armor / Supply / Artillery / Infantry / Train from objects, scripts, and AttackArea.
 ///
 /// A ground-target AttackArea plus a long (or unknown) gun is artillery.
 /// Known short-range guns are armor even when the area hunts air only.
 /// A long gun without a ground area (a Katyusha in a truck column) stays supply.
 /// A perfect column of artillery is mobile artillery (parked on roads).
+/// Infantry squads (even MG) stay infantry rather than armor.
 /// `Train` objects always classify as trains (parked on rails).
 pub fn classify_army_unit(root: &Il2Entity) -> ArmyUnitKind {
     if root.count_block_type("Ship") > 0 {
@@ -216,6 +246,9 @@ pub fn classify_army_unit(root: &Il2Entity) -> ArmyUnitKind {
     }
     if root.count_block_type("Train") > 0 {
         return ArmyUnitKind::Train;
+    }
+    if group_is_infantry(root) {
+        return ArmyUnitKind::Infantry;
     }
     let range = group_weapon_range(root);
     let hunts_ground = group_has_ground_attack_area(root);
@@ -251,6 +284,19 @@ pub fn snap_ground_attack_areas(entity: &mut Il2Entity, x: f64, z: f64) {
 mod tests {
     use super::*;
     use crate::ast::Il2Entity;
+
+    #[test]
+    fn infantry_scripts_are_detected() {
+        assert!(is_infantry_script(
+            r#"LuaScripts\WorldObjects\vehicles\squad-rifle-1950-dprk.txt"#
+        ));
+        assert!(is_infantry_script(
+            r"graphics\vehicles\infantry\squad-mg-1950-usa.mgm"
+        ));
+        assert!(!is_infantry_script(
+            r#"LuaScripts\WorldObjects\vehicles\t34-85.txt"#
+        ));
+    }
 
     #[test]
     fn known_scripts_match_published_ranges() {
@@ -400,6 +446,20 @@ mod tests {
 
         let train = group_with(None, "Train", false);
         assert_eq!(classify_army_unit(&train), ArmyUnitKind::Train);
+
+        let rifle = group_with(
+            Some(r#"LuaScripts\WorldObjects\vehicles\squad-rifle-1950-dprk.txt"#),
+            "Vehicle",
+            false,
+        );
+        assert_eq!(classify_army_unit(&rifle), ArmyUnitKind::Infantry);
+
+        let mg = group_with(
+            Some(r#"LuaScripts\WorldObjects\vehicles\squad-mg-1950-usa.txt"#),
+            "Vehicle",
+            true,
+        );
+        assert_eq!(classify_army_unit(&mg), ArmyUnitKind::Infantry);
     }
 
     #[test]

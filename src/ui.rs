@@ -92,8 +92,8 @@ use crate::recon::{
     allocate_copies, allocate_mix, apply_randomizer_typed, combine_placed_packs, generate_recon_ex,
     inspect_army_copies, inspect_placed_pack, inspect_unit, looks_like_placed_pack,
     park_army_mixed, park_recon_copies_headed, park_recon_copies_spots,
-    restore_always_on, snap_army_attack_areas,
-    snap_copy_attack_areas, wanted_winners, ArmyCopyInfo, ReconBuild, ReconInput, RestoreKind,
+    restore_always_on, snap_army_placed_attack_areas, snap_placed_attack_areas,
+    wanted_winners, ArmyCopyInfo, ReconBuild, ReconInput, RestoreKind,
     TypeMix, UnitPlanInfo, SUGGESTED_ZONE_NAMES,
 };
 use crate::serialize::serialize_group;
@@ -105,7 +105,8 @@ use crate::template::{
     normalize_order_chain, order_seat_indexes, order_tree_layout, path_waypoint_display_m,
     place_offset, receives_orders, refresh_attack_areas_for_seat, remap_event_then,
     remap_index_vec, remap_seat_index, replace_seat_unit, set_report_following,
-    used_waypoint_count, waypoint_area_m, waypoint_display_altitude, zone_defaults,
+    used_waypoint_count, waypoint_area_m, waypoint_display_altitude, waypoint_display_priority,
+    zone_defaults,
     zone_mix_for_seats, visual_range_m, near_visual_range, AIR_ZONE_IN_M, AIR_ZONE_OUT_M,
     TRAIN_ZONE_IN_M, BringUp, CatalogUnit, EntityEvent, EventHook, EventThen, FlightRole,
     OrderKind, OrderSpec, OrderTreeNode, PlaceLayout, PlaneStart, TemplateOptions, TemplateSeat,
@@ -179,11 +180,19 @@ enum UnitKind {
     Armor,
     Supply,
     Artillery,
+    Infantry,
     Train,
 }
 
 impl UnitKind {
-    const ALL: [Self; 5] = [Self::Ship, Self::Armor, Self::Supply, Self::Artillery, Self::Train];
+    const ALL: [Self; 6] = [
+        Self::Ship,
+        Self::Armor,
+        Self::Supply,
+        Self::Artillery,
+        Self::Infantry,
+        Self::Train,
+    ];
 
     fn label(self) -> &'static str {
         match self {
@@ -191,6 +200,7 @@ impl UnitKind {
             Self::Armor => "Armor",
             Self::Supply => "Supply",
             Self::Artillery => "Artillery",
+            Self::Infantry => "Infantry",
             Self::Train => "Train",
         }
     }
@@ -199,6 +209,7 @@ impl UnitKind {
         match self {
             Self::Ship => "water",
             Self::Train => "railroad",
+            Self::Infantry => "dry land",
             Self::Armor | Self::Supply | Self::Artillery => "open ground or road column",
         }
     }
@@ -209,7 +220,8 @@ impl UnitKind {
             Self::Armor => 1,
             Self::Supply => 2,
             Self::Artillery => 3,
-            Self::Train => 4,
+            Self::Infantry => 4,
+            Self::Train => 5,
         }
     }
 
@@ -223,6 +235,7 @@ impl UnitKind {
             ArmyUnitKind::Armor => Self::Armor,
             ArmyUnitKind::Supply => Self::Supply,
             ArmyUnitKind::Artillery | ArmyUnitKind::MobileArtillery => Self::Artillery,
+            ArmyUnitKind::Infantry => Self::Infantry,
             ArmyUnitKind::Train => Self::Train,
         }
     }
@@ -233,6 +246,7 @@ impl UnitKind {
             Self::Armor => Some(GroundKind::Armor),
             Self::Supply => Some(GroundKind::Supply),
             Self::Artillery => Some(GroundKind::Artillery),
+            Self::Infantry => Some(GroundKind::Infantry),
             Self::Train => Some(GroundKind::Train),
         }
     }
@@ -315,6 +329,8 @@ struct GroupGeneratorApp {
     recon_percent: u32,
     recon_keep_positions: bool,
     recon_import_kind: UnitKind,
+    /// Eastern (red) vs NATO (teal) icons on the Army Generator page.
+    recon_eastern: bool,
     recon_group_delay_ms: u32,
     recon_start_delay_s: u32,
     recon_strip_randomizer: bool,
@@ -366,6 +382,8 @@ struct GroupGeneratorApp {
     arty_tex_nato: Option<TextureHandle>,
     train_tex_east: Option<TextureHandle>,
     train_tex_nato: Option<TextureHandle>,
+    infantry_tex_east: Option<TextureHandle>,
+    infantry_tex_nato: Option<TextureHandle>,
     east_objectives: Vec<(f64, f64)>,
     nato_objectives: Vec<(f64, f64)>,
     objective_drag: Option<(bool, usize)>,
@@ -384,6 +402,8 @@ struct GroupGeneratorApp {
     tpl_catalog: Vec<CatalogUnit>,
     tpl_kind: CatalogKind,
     tpl_class: Option<ModelClass>,
+    /// When Kind is Infantry, filter the grid by catalog Country.
+    tpl_country: Option<i32>,
     tpl_add_pick: usize,
     /// When true, the formation-view card shows the catalog pick (adding a unit).
     /// Otherwise it follows the highlighted seat.
@@ -403,6 +423,7 @@ struct GroupGeneratorApp {
     tpl_wp_spacing: f32,
     tpl_wp_speed: f32,
     tpl_wp_altitude: f32,
+    tpl_wp_priority: i32,
     tpl_zone_coalition: ZoneCoalition,
     tpl_view_zoom: f32,
     tpl_view_pan: Vec2,
@@ -1388,6 +1409,7 @@ impl Default for GroupGeneratorApp {
             recon_percent: 50,
             recon_keep_positions: false,
             recon_import_kind: UnitKind::Armor,
+            recon_eastern: true,
             recon_group_delay_ms: 500,
             recon_start_delay_s: 0,
             recon_strip_randomizer: false,
@@ -1439,6 +1461,8 @@ impl Default for GroupGeneratorApp {
             arty_tex_nato: None,
             train_tex_east: None,
             train_tex_nato: None,
+            infantry_tex_east: None,
+            infantry_tex_nato: None,
             east_objectives: Vec::new(),
             nato_objectives: Vec::new(),
             objective_drag: None,
@@ -1457,6 +1481,7 @@ impl Default for GroupGeneratorApp {
             tpl_catalog: bundled_catalog(),
             tpl_kind: CatalogKind::Plane,
             tpl_class: None,
+            tpl_country: None,
             tpl_add_pick: 0,
             tpl_preview_from_catalog: false,
             tpl_model_tex: HashMap::new(),
@@ -1473,6 +1498,7 @@ impl Default for GroupGeneratorApp {
             tpl_wp_spacing: WAYPOINT_SPACING_M,
             tpl_wp_speed: 100.0,
             tpl_wp_altitude: 0.0,
+            tpl_wp_priority: 1,
             tpl_zone_coalition: ZoneCoalition::Western,
             tpl_view_zoom: 1.0,
             tpl_view_pan: Vec2::ZERO,
@@ -1601,6 +1627,7 @@ impl GroupGeneratorApp {
                     self.tpl_path = None;
                     self.tpl_catalog = bundled_catalog();
                     self.tpl_class = None;
+                    self.tpl_country = None;
                     self.tpl_add_pick = 0;
                     self.tpl_preview_from_catalog = false;
                 }
@@ -1627,6 +1654,7 @@ impl GroupGeneratorApp {
                     {
                         self.tpl_kind = kind;
                         self.tpl_class = None;
+                        self.tpl_country = None;
                         self.tpl_add_pick = 0;
                         self.tpl_preview_from_catalog = true;
                     }
@@ -1818,35 +1846,48 @@ impl GroupGeneratorApp {
                     format!("{n} from Goto WP orders")
                 });
                 ui.label("Speed");
-                ui.add(
-                    egui::DragValue::new(&mut self.tpl_wp_speed)
-                        .range(10.0..=900.0)
-                        .suffix(" km/h"),
-                )
-                .on_hover_text(
-                    "MCU Speed in km/h. Defaults to 90% of the slowest unit’s cruise, rounded to 10 km/h.",
-                );
+                ui.add(egui::DragValue::new(&mut self.tpl_wp_speed).suffix(" km/h"))
+                    .on_hover_text(
+                        "MCU Speed in km/h. No editor limit. Defaults to 90% of the slowest unit’s cruise, rounded to 10 km/h.",
+                    );
                 ui.label("Altitude");
                 let max_alt = self
                     .tpl_seats
                     .iter()
                     .filter(|s| s.unit.is_air())
                     .map(|s| model_spec::ceiling_m(&s.unit.script))
-                    .fold(8_000.0_f32, f32::max);
+                    .fold(0.0_f32, f32::max);
                 let mut shown_alt =
                     path_waypoint_display_m(&self.tpl_seats, self.tpl_wp_altitude);
+                let alt_range = if max_alt > 0.0 {
+                    0.0..=max_alt
+                } else {
+                    0.0..=f32::MAX
+                };
                 if ui
                     .add(
                         egui::DragValue::new(&mut shown_alt)
-                            .range(0.0..=max_alt)
+                            .range(alt_range)
                             .suffix(" m"),
                     )
                     .on_hover_text(
-                        "Follows aircraft altitude until you enter a value. 0 m with airborne planes follows spawn height on export.",
+                        "0 m for ground units. Aircraft follow spawn height until you enter a value.",
                     )
                     .changed()
                 {
                     self.tpl_wp_altitude = shown_alt;
+                }
+                let mut pri = self.tpl_wp_priority;
+                draw_priority_combo(ui, "tpl_wp_pri".into(), &mut pri);
+                if pri != self.tpl_wp_priority {
+                    self.tpl_wp_priority = pri;
+                    for seat in &mut self.tpl_seats {
+                        for order in &mut seat.orders {
+                            if order.kind == OrderKind::GotoWaypoint {
+                                order.priority = pri;
+                            }
+                        }
+                    }
                 }
             });
         });
@@ -2048,6 +2089,11 @@ impl GroupGeneratorApp {
                     self.tpl_seats[si]
                         .orders
                         .push(order_spec_for_added_kind(&unit, kind, next_wp));
+                    if kind == OrderKind::GotoWaypoint {
+                        if let Some(spec) = self.tpl_seats[si].orders.last_mut() {
+                            spec.priority = self.tpl_wp_priority;
+                        }
+                    }
                     let oi = self.tpl_seats[si].orders.len() - 1;
                     if kind == OrderKind::AttackArea {
                         apply_suggested_attack_area(&mut self.tpl_seats, si, oi);
@@ -2597,8 +2643,18 @@ impl GroupGeneratorApp {
                                     seat,
                                     order,
                                 );
+                                if let Some(spec) = self.tpl_seats[seat].orders.get_mut(idx) {
+                                    spec.priority = self.tpl_wp_priority;
+                                }
                                 self.tpl_select = Some(TplSelect::Order { seat, order: idx });
                             }
+                        });
+                        ui.horizontal(|ui| {
+                            draw_priority_combo(
+                                ui,
+                                format!("tpl_goto_pri_{seat}_{order}"),
+                                &mut self.tpl_seats[seat].orders[order].priority,
+                            );
                         });
                         if self.tpl_seats[seat].unit.is_air() {
                             ui.horizontal(|ui| {
@@ -2772,7 +2828,7 @@ impl GroupGeneratorApp {
                         } else if ground {
                             ui.label(
                                 RichText::new(
-                                    "Ground / ground-target AttackArea sits on the group origin here. Generate on the Map moves it onto the hashed objective.",
+                                    "Ground / ground-target AttackArea sits on the group origin here. Generate on the Map moves it onto the hashed objective, or across the front along the unit's heading when none is marked.",
                                 )
                                 .italics()
                                 .small(),
@@ -3108,32 +3164,65 @@ impl GroupGeneratorApp {
     }
 
     fn draw_template_model_browser(&mut self, ui: &mut egui::Ui) {
-        let classes = self.classes_for_kind(self.tpl_kind);
-        if self.tpl_class.is_some_and(|c| !classes.contains(&c)) {
-            self.tpl_class = None;
-        }
-        if !classes.is_empty() {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Type").strong());
-                if ui
-                    .selectable_label(self.tpl_class.is_none(), "All")
-                    .clicked()
-                {
-                    self.tpl_class = None;
-                    self.tpl_add_pick = 0;
-                    self.tpl_preview_from_catalog = true;
-                }
-                for class in classes {
+        if self.tpl_kind == CatalogKind::Infantry {
+            let countries = self.countries_for_infantry();
+            if self.tpl_country.is_some_and(|c| !countries.contains(&c)) {
+                self.tpl_country = None;
+            }
+            if !countries.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Country").strong());
                     if ui
-                        .selectable_label(self.tpl_class == Some(class), class.label())
+                        .selectable_label(self.tpl_country.is_none(), "All")
                         .clicked()
                     {
-                        self.tpl_class = Some(class);
+                        self.tpl_country = None;
                         self.tpl_add_pick = 0;
                         self.tpl_preview_from_catalog = true;
                     }
-                }
-            });
+                    for country in countries {
+                        if ui
+                            .selectable_label(
+                                self.tpl_country == Some(country),
+                                country_short(country),
+                            )
+                            .clicked()
+                        {
+                            self.tpl_country = Some(country);
+                            self.tpl_add_pick = 0;
+                            self.tpl_preview_from_catalog = true;
+                        }
+                    }
+                });
+            }
+        } else {
+            let classes = self.classes_for_kind(self.tpl_kind);
+            if self.tpl_class.is_some_and(|c| !classes.contains(&c)) {
+                self.tpl_class = None;
+            }
+            if !classes.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Type").strong());
+                    if ui
+                        .selectable_label(self.tpl_class.is_none(), "All")
+                        .clicked()
+                    {
+                        self.tpl_class = None;
+                        self.tpl_add_pick = 0;
+                        self.tpl_preview_from_catalog = true;
+                    }
+                    for class in classes {
+                        if ui
+                            .selectable_label(self.tpl_class == Some(class), class.label())
+                            .clicked()
+                        {
+                            self.tpl_class = Some(class);
+                            self.tpl_add_pick = 0;
+                            self.tpl_preview_from_catalog = true;
+                        }
+                    }
+                });
+            }
         }
 
         let models = self.displayed_catalog();
@@ -3432,7 +3521,11 @@ impl GroupGeneratorApp {
     }
 
     fn model_texture(&mut self, ctx: &egui::Context, script: &str) -> TextureHandle {
-        let id = model_spec::script_id(script);
+        let id = if model_spec::class_for(script) == ModelClass::Infantry {
+            "infantry".to_string()
+        } else {
+            model_spec::script_id(script)
+        };
         if let Some(tex) = self.tpl_model_tex.get(&id) {
             return tex.clone();
         }
@@ -3455,15 +3548,33 @@ impl GroupGeneratorApp {
         )
     }
 
+    fn countries_for_infantry(&self) -> Vec<i32> {
+        let mut ids: Vec<i32> = self
+            .tpl_catalog
+            .iter()
+            .filter(|u| u.kind == CatalogKind::Infantry)
+            .map(|u| u.country())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
     fn displayed_catalog(&self) -> Vec<CatalogUnit> {
         let mut models: Vec<CatalogUnit> = self
             .tpl_catalog
             .iter()
             .filter(|u| u.kind == self.tpl_kind)
             .filter(|u| {
-                self.tpl_class
-                    .map(|c| model_spec::class_for(&u.script) == c)
-                    .unwrap_or(true)
+                if self.tpl_kind == CatalogKind::Infantry {
+                    self.tpl_country
+                        .map(|c| u.country() == c)
+                        .unwrap_or(true)
+                } else {
+                    self.tpl_class
+                        .map(|c| model_spec::class_for(&u.script) == c)
+                        .unwrap_or(true)
+                }
             })
             .cloned()
             .collect();
@@ -3495,7 +3606,7 @@ impl GroupGeneratorApp {
         let cat = load_catalog(&root);
         if cat.is_empty() {
             self.status = Status::Error(
-                "Catalog has no Plane / Vehicle / Train / Ship / Fixed prototypes. Use subgroups named Planes, Vehicles, Trains, Ships, Fixed Units / Fixed Objects, or User Added.".into(),
+                "Catalog has no Plane / Vehicle / Infantry / Train / Ship / Fixed prototypes. Use subgroups named Planes, Vehicles, Infantry, Trains, Ships, Fixed Units / Fixed Objects, or User Added.".into(),
             );
             return;
         }
@@ -3503,6 +3614,7 @@ impl GroupGeneratorApp {
         self.tpl_catalog = cat;
         self.tpl_path = Some(path);
         self.tpl_class = None;
+        self.tpl_country = None;
         self.tpl_add_pick = 0;
         self.tpl_preview_from_catalog = true;
         self.status = Status::Info(format!("Loaded {n} prototype(s) from the catalog."));
@@ -3532,7 +3644,7 @@ impl GroupGeneratorApp {
         let extra = load_catalog_as_user_added(&root);
         if extra.is_empty() {
             self.status = Status::Error(
-                "That group has no Plane / Vehicle / Train / Ship / Fixed prototypes to add.".into(),
+                "That group has no Plane / Vehicle / Infantry / Train / Ship / Fixed prototypes to add.".into(),
             );
             return;
         }
@@ -3540,6 +3652,7 @@ impl GroupGeneratorApp {
         merge_catalog(&mut self.tpl_catalog, extra);
         self.tpl_kind = CatalogKind::UserAdded;
         self.tpl_class = None;
+        self.tpl_country = None;
         self.tpl_add_pick = 0;
         self.tpl_preview_from_catalog = true;
         self.tpl_path = Some(path);
@@ -3596,6 +3709,7 @@ impl GroupGeneratorApp {
             waypoint_spacing: WAYPOINT_SPACING_M,
             waypoint_speed: self.tpl_wp_speed,
             waypoint_altitude: self.tpl_wp_altitude,
+            waypoint_priority: self.tpl_wp_priority,
             zone_coalition: self.tpl_zone_coalition,
         };
         let pack = match generate_template(&opts) {
@@ -4027,7 +4141,7 @@ impl GroupGeneratorApp {
                         color,
                     );
                 }
-                CatalogKind::Vehicle | CatalogKind::Fixed => {
+                CatalogKind::Vehicle | CatalogKind::Infantry | CatalogKind::Fixed => {
                     painter.rect_filled(
                         Rect::from_center_size(*p, Vec2::splat(r * 1.6)),
                         2.0,
@@ -4092,9 +4206,14 @@ impl GroupGeneratorApp {
                 rect.min + Vec2::new(10.0, 28.0),
                 Align2::LEFT_TOP,
                 format!(
-                    "WP {num} · {:.0} m north of origin · {:.0} m alt · Area {} m",
+                    "WP {num} · {:.0} m north of origin · {:.0} m alt · {} · Area {} m",
                     (num as f32) * self.tpl_wp_spacing,
                     waypoint_display_altitude(&self.tpl_seats, num, self.tpl_wp_altitude),
+                    priority_label(waypoint_display_priority(
+                        &self.tpl_seats,
+                        num,
+                        self.tpl_wp_priority,
+                    )),
                     waypoint_area_m(&self.tpl_seats)
                 ),
                 FontId::proportional(13.0),
@@ -5108,6 +5227,20 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                 egui::TextureOptions::LINEAR,
             ));
         }
+        if self.infantry_tex_east.is_none() {
+            self.infantry_tex_east = Some(ctx.load_texture(
+                "eastern_infantry",
+                load_fighter_svg(include_bytes!("../assets/EasternInfantry.svg")),
+                egui::TextureOptions::LINEAR,
+            ));
+        }
+        if self.infantry_tex_nato.is_none() {
+            self.infantry_tex_nato = Some(ctx.load_texture(
+                "nato_infantry",
+                load_fighter_svg(include_bytes!("../assets/NatoInfantry.svg")),
+                egui::TextureOptions::LINEAR,
+            ));
+        }
         if self.map_rx.is_some() {
             let mut disconnected = false;
             while let Some(rx) = self.map_rx.as_ref() {
@@ -5274,6 +5407,9 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                                 spot.apply_sampled(pose);
                             } else {
                                 spot.heading_deg = requested;
+                                if let Ok(terrain) = crate::watermap::WaterMap::builtin() {
+                                    spot.layout_offroad_waypoints(terrain);
+                                }
                             }
                         }
                     }
@@ -5513,8 +5649,17 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                                     let pose = mapnet::snap_lead_to_pointer(net, x, z, keep);
                                     spot.apply_sampled(pose);
                                 } else {
+                                    let dx = x - spot.x;
+                                    let dz = z - spot.z;
                                     spot.x = x;
                                     spot.z = z;
+                                    for wp in &mut spot.waypoints {
+                                        wp.0 += dx;
+                                        wp.1 += dz;
+                                    }
+                                    if let Ok(terrain) = crate::watermap::WaterMap::builtin() {
+                                        spot.refresh_path_water_issue(terrain);
+                                    }
                                 }
                             }
                         } else if let Some((eastern, i)) = self.objective_drag {
@@ -5562,10 +5707,20 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             painter.text(rect.min + Vec2::new(10.0, 10.0), Align2::LEFT_TOP, text, FontId::proportional(16.0), Color32::from_rgb(255, 255, 100));
         } else if let Some((hit, wi)) = self.wp_selected {
             let n = hit.spot_i() + 1;
-            let text = format!(
-                "PLACE UNIT {n} WP{}\nClick a road or railroad — any branch, including behind the column.\nRight-click to cancel.",
-                wi + 1
-            );
+            let text = if self
+                .ground_spot_mut(hit)
+                .is_some_and(|s| s.network.is_some())
+            {
+                format!(
+                    "PLACE UNIT {n} WP{}\nClick a road or railroad — any branch, including behind the column.\nRight-click to cancel.",
+                    wi + 1
+                )
+            } else {
+                format!(
+                    "PLACE UNIT {n} WP{}\nClick dry land toward the objective (or the front).\nRight-click to cancel.",
+                    wi + 1
+                )
+            };
             painter.text(rect.min + Vec2::new(11.0, 11.0), Align2::LEFT_TOP, &text, FontId::proportional(16.0), Color32::from_rgb(20, 20, 24));
             painter.text(rect.min + Vec2::new(10.0, 10.0), Align2::LEFT_TOP, &text, FontId::proportional(16.0), Color32::from_rgb(255, 255, 100));
         }
@@ -5744,6 +5899,11 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         if let Some(spot) = self.ground_spot_mut(hit) {
             if let Some(net) = spot.network.as_mut() {
                 mapnet::snap_waypoint_to_pointer(net, wi, x, z);
+            } else if wi < spot.waypoints.len() {
+                spot.waypoints[wi] = (x, z);
+                if let Ok(terrain) = crate::watermap::WaterMap::builtin() {
+                    spot.refresh_path_water_issue(terrain);
+                }
             }
         }
     }
@@ -5896,8 +6056,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         let mut best_d = 12.0_f32;
         let consider = |layout: &MapGroundLayout, hit: GroundHit, best: &mut Option<(GroundHit, usize)>, best_d: &mut f32| {
             for (i, s) in layout.spots.iter().enumerate() {
-                let Some(net) = &s.network else { continue };
-                for (wi, &(x, z)) in net.waypoints.iter().enumerate() {
+                for (wi, &(x, z)) in s.path_waypoints().iter().enumerate() {
                     let d = world_to_pos(map_rect, x, z).distance(pointer);
                     if d < *best_d {
                         *best_d = d;
@@ -5965,11 +6124,12 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
     }
 
     fn reaim_map_ground(&mut self) {
+        let front = self.map_front_xz();
         if let Some(layout) = &mut self.map_ground_east {
-            layout.aim_at_objectives(&self.east_objectives);
+            layout.aim_at_objectives_or_front(&self.east_objectives, &front);
         }
         if let Some(layout) = &mut self.map_ground_nato {
-            layout.aim_at_objectives(&self.nato_objectives);
+            layout.aim_at_objectives_or_front(&self.nato_objectives, &front);
         }
         let east_obj = self.east_objectives.clone();
         let nato_obj = self.nato_objectives.clone();
@@ -5980,19 +6140,57 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                 } else {
                     nato_obj.as_slice()
                 };
-                layout.aim_at_objectives(objs);
+                layout.aim_at_objectives_or_front(objs, &front);
+            }
+        }
+        self.relayout_offroad_waypoints();
+    }
+
+    fn relayout_offroad_waypoints(&mut self) {
+        let Ok(terrain) = crate::watermap::WaterMap::builtin() else {
+            return;
+        };
+        if let Some(layout) = &mut self.map_ground_east {
+            layout.layout_offroad_waypoints(terrain);
+        }
+        if let Some(layout) = &mut self.map_ground_nato {
+            layout.layout_offroad_waypoints(terrain);
+        }
+        for army in &mut self.map_armies {
+            if let Some(layout) = &mut army.ground {
+                layout.layout_offroad_waypoints(terrain);
             }
         }
     }
 
-    fn type_icons_east(&self) -> [Option<TextureHandle>; 5] {
-        [
-            self.ship_tex_east.clone(),
-            self.armor_tex_east.clone(),
-            self.supply_tex_east.clone(),
-            self.arty_tex_east.clone(),
-            self.train_tex_east.clone(),
-        ]
+    fn map_front_xz(&self) -> Vec<(f64, f64)> {
+        if self.custom_front_xz.is_empty() {
+            preview_front_xz(self.front_t)
+        } else {
+            self.custom_front_xz.clone()
+        }
+    }
+
+    fn type_icons(&self, eastern: bool) -> [Option<TextureHandle>; 6] {
+        if eastern {
+            [
+                self.ship_tex_east.clone(),
+                self.armor_tex_east.clone(),
+                self.supply_tex_east.clone(),
+                self.arty_tex_east.clone(),
+                self.infantry_tex_east.clone(),
+                self.train_tex_east.clone(),
+            ]
+        } else {
+            [
+                self.ship_tex_nato.clone(),
+                self.armor_tex_nato.clone(),
+                self.supply_tex_nato.clone(),
+                self.arty_tex_nato.clone(),
+                self.infantry_tex_nato.clone(),
+                self.train_tex_nato.clone(),
+            ]
+        }
     }
 
     fn unit_tex(&self, eastern: bool, kind: UnitKind) -> Option<&TextureHandle> {
@@ -6005,13 +6203,15 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             (false, UnitKind::Supply) => self.supply_tex_nato.as_ref(),
             (true, UnitKind::Artillery) => self.arty_tex_east.as_ref(),
             (false, UnitKind::Artillery) => self.arty_tex_nato.as_ref(),
+            (true, UnitKind::Infantry) => self.infantry_tex_east.as_ref(),
+            (false, UnitKind::Infantry) => self.infantry_tex_nato.as_ref(),
             (true, UnitKind::Train) => self.train_tex_east.as_ref(),
             (false, UnitKind::Train) => self.train_tex_nato.as_ref(),
         }
     }
 
     fn unit_kind_picker(&mut self, ui: &mut egui::Ui) {
-        let icons = self.type_icons_east();
+        let icons = self.type_icons(self.recon_eastern);
         for kind in UnitKind::ALL {
             ui.vertical(|ui| {
                 if unit_kind_icon_button(
@@ -6045,6 +6245,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             (GroundKind::Armor, UnitKind::Armor),
             (GroundKind::Supply, UnitKind::Supply),
             (GroundKind::Artillery, UnitKind::Artillery),
+            (GroundKind::Infantry, UnitKind::Infantry),
             (GroundKind::Train, UnitKind::Train),
         ] {
             for (slot, n) in self.recon_slots.iter().zip(copies.iter()) {
@@ -6071,31 +6272,38 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                     slot.info.weapon_range_m.or(match gkind {
                         GroundKind::Artillery => Some(ARTY_OBJECTIVE_RADIUS),
                         GroundKind::Armor => Some(crate::weapon_range::UNKNOWN_ARMOR_M),
-                        GroundKind::Supply | GroundKind::Train => None,
+                        GroundKind::Supply | GroundKind::Train | GroundKind::Infantry => None,
                     })
+                };
+                let wp_ahead = if route.is_some() {
+                    Vec::new()
+                } else {
+                    slot.info.wp_ahead.clone()
                 };
                 jobs.extend(std::iter::repeat(GroundJob {
                     kind,
                     range_m,
                     route,
+                    wp_ahead,
                 }).take(*n));
             }
         }
         jobs
     }
 
-    fn recon_copy_split(&self) -> (usize, [usize; 4]) {
+    fn recon_copy_split(&self) -> (usize, [usize; 5]) {
         let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
         let copies = allocate_copies(&weights, self.recon_total as usize);
         let mut ships = 0usize;
-        let mut ground = [0usize; 4];
+        let mut ground = [0usize; 5];
         for (slot, n) in self.recon_slots.iter().zip(copies) {
             match slot.kind {
                 UnitKind::Ship => ships += n,
                 UnitKind::Armor => ground[0] += n,
                 UnitKind::Supply => ground[1] += n,
                 UnitKind::Artillery => ground[2] += n,
-                UnitKind::Train => ground[3] += n,
+                UnitKind::Infantry => ground[3] += n,
+                UnitKind::Train => ground[4] += n,
             }
         }
         (ships, ground)
@@ -6122,7 +6330,8 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             (GroundKind::Armor, ground[0]),
             (GroundKind::Supply, ground[1]),
             (GroundKind::Artillery, ground[2]),
-            (GroundKind::Train, ground[3]),
+            (GroundKind::Infantry, ground[3]),
+            (GroundKind::Train, ground[4]),
         ] {
             if n > 0 {
                 parts.push(if self.recon_strip_randomizer {
@@ -6155,6 +6364,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             GroundKind::Armor => UnitKind::Armor,
             GroundKind::Supply => UnitKind::Supply,
             GroundKind::Artillery => UnitKind::Artillery,
+            GroundKind::Infantry => UnitKind::Infantry,
             GroundKind::Train => UnitKind::Train,
         };
         self.unit_tex(eastern, unit)
@@ -6237,13 +6447,14 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             GroundHit::Army { slot, .. } => GroundHit::Army { slot, i },
         };
         for (i, spot) in layout.spots.iter().enumerate() {
-                if let Some(net) = &spot.network {
-                    let wp_color = if net.rail {
-                        Color32::from_rgb(30, 30, 32)
-                    } else {
-                        Color32::from_rgb(140, 28, 28)
+                let wps = spot.path_waypoints();
+                if !wps.is_empty() {
+                    let wp_color = match &spot.network {
+                        Some(net) if net.rail => Color32::from_rgb(30, 30, 32),
+                        Some(_) => Color32::from_rgb(140, 28, 28),
+                        None => Color32::from_rgb(90, 70, 40),
                     };
-                    for (wi, &(wx, wz)) in net.waypoints.iter().enumerate() {
+                    for (wi, &(wx, wz)) in wps.iter().enumerate() {
                         let wpos = world_to_pos(map_rect, wx, wz);
                         let selected = self.wp_selected == Some((hit_for(i), wi));
                         let r = if selected { 7.0 } else { 5.0 };
@@ -6455,7 +6666,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                     }
                     if open_n > 0 && objectives.is_empty() {
                         notes.push(format!(
-                            "{open_n} {side} ground groups kept north heading — mark a {side} objective to aim them."
+                            "{open_n} {side} ground groups facing the front — mark a {side} objective to aim them at a target."
                         ));
                     } else if open_n > 0 {
                         notes.push(format!(
@@ -6497,10 +6708,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                         self.map_ground_nato.as_ref()
                     };
                     if let Some(full) = merged {
-                        warnings.extend(numbered_ground_issues(
-                            &full.spots,
-                            objectives.is_empty(),
-                        ));
+                        warnings.extend(numbered_ground_issues(&full.spots));
                     }
                     self.ground_drag = None;
                     self.ground_heading_drag = None;
@@ -6514,7 +6722,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             }
         }
 
-        notes.push("Left-drag to move, right-drag to set heading. Click a WP, then click a road or rail to place it.".into());
+        notes.push("Left-drag to move, right-drag to set heading. Click a WP, then click a road, rail, or dry land to place it.".into());
         self.wp_drag = None;
         self.wp_selected = None;
         self.set_place_status(notes, warnings);
@@ -6721,13 +6929,19 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                     c.range_m.or(match gkind {
                         GroundKind::Artillery => Some(ARTY_OBJECTIVE_RADIUS),
                         GroundKind::Armor => Some(weapon_range::UNKNOWN_ARMOR_M),
-                        GroundKind::Supply | GroundKind::Train => None,
+                        GroundKind::Supply | GroundKind::Train | GroundKind::Infantry => None,
                     })
+                };
+                let wp_ahead = if route.is_some() {
+                    Vec::new()
+                } else {
+                    c.wp_ahead.clone()
                 };
                 Some(GroundJob {
                     kind: gkind,
                     range_m,
                     route,
+                    wp_ahead,
                 })
             })
             .collect();
@@ -6819,10 +7033,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                     layout.eastern = eastern;
                     warnings.extend(skip_only_warnings(&layout.warnings));
                     notes.push(format!("{} {side} ground groups.", layout.spots.len()));
-                    warnings.extend(numbered_ground_issues(
-                        &layout.spots,
-                        objectives.is_empty(),
-                    ));
+                    warnings.extend(numbered_ground_issues(&layout.spots));
                     placed_ground = layout.spots;
                 }
                 Err(err) => {
@@ -6851,7 +7062,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                 })
             };
         }
-        notes.push("Left-drag to move, right-drag to set heading. Click a WP, then click a road or rail to place it.".into());
+        notes.push("Left-drag to move, right-drag to set heading. Click a WP, then click a road, rail, or dry land to place it.".into());
         self.ground_drag = None;
         self.ground_heading_drag = None;
         self.wp_drag = None;
@@ -6883,22 +7094,13 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             }
             let mut root = slot.entity.clone();
             park_army_mixed(&mut root, &slot.copies, &ship_poses, ground_spots);
-            let objectives: Vec<Option<(f64, f64)>> = {
-                let mut gi = 0usize;
-                slot.copies
-                    .iter()
-                    .map(|c| {
-                        if c.kind == ArmyUnitKind::Ship {
-                            None
-                        } else {
-                            let obj = ground_spots.get(gi).and_then(|s| s.objective);
-                            gi += 1;
-                            obj
-                        }
-                    })
-                    .collect()
-            };
-            snap_army_attack_areas(&mut root, &objectives);
+            snap_army_placed_attack_areas(
+                &mut root,
+                &slot.copies,
+                ground_spots,
+                &self.map_front_xz(),
+                slot.eastern,
+            );
             let country = country_for_coalition(slot.eastern, self.country);
             apply_overrides(&mut root, "", country);
             let side = if slot.eastern { "Eastern" } else { "NATO" };
@@ -6997,6 +7199,8 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             (GroundKind::Armor, UnitKind::Armor),
             (GroundKind::Supply, UnitKind::Supply),
             (GroundKind::Artillery, UnitKind::Artillery),
+            (GroundKind::Infantry, UnitKind::Infantry),
+            (GroundKind::Train, UnitKind::Train),
         ];
         let mut inputs = Vec::new();
         for (gkind, ukind) in kinds {
@@ -7045,9 +7249,12 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             },
         )?;
         park_recon_copies_spots(&mut root, &layout.spots);
-        let attack_at: Vec<Option<(f64, f64)>> =
-            layout.spots.iter().map(|s| s.objective).collect();
-        snap_copy_attack_areas(&mut root, &attack_at);
+        snap_placed_attack_areas(
+            &mut root,
+            &layout.spots,
+            &self.map_front_xz(),
+            layout.eastern,
+        );
         let country = country_for_coalition(layout.eastern, self.country);
         apply_overrides(&mut root, "", country);
         let side = if layout.eastern { "Eastern" } else { "NATO" };
@@ -7352,10 +7559,21 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
         ui.add_space(8.0);
 
         self.ensure_map_assets(ui.ctx());
+        ui.label(RichText::new("Army").strong());
+        ui.label(
+            RichText::new(
+                "Eastern or NATO artwork for the type icons on this page. Map Place Eastern / Place NATO still picks the coalition that parks along the front.",
+            )
+        );
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.recon_eastern, true, "Eastern");
+            ui.selectable_value(&mut self.recon_eastern, false, "NATO");
+        });
+        ui.add_space(6.0);
         ui.label(RichText::new("Import as").strong());
         ui.label(
             RichText::new(
-                "Default type for newly added templates. Each template keeps its own icon — click the icons on a template to change it. Map draws that same type: Ship on water, Train on railroad, Armor / Supply / Artillery on open ground."
+                "Default type for newly added templates. Each template keeps its own icon — click the icons on a template to change it. Map draws that same type: Ship on water, Train on railroad, Armor / Supply / Artillery on open ground, Infantry on dry land (not water)."
             )
         );
         ui.horizontal(|ui| {
@@ -7403,7 +7621,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             );
         }
 
-        let kind_icons = self.type_icons_east();
+        let kind_icons = self.type_icons(self.recon_eastern);
         recon_slot_list(
             ui,
             &mut self.recon_slots,
@@ -8090,6 +8308,8 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             || info.route.as_ref().is_some_and(|r| r.rail)
         {
             UnitKind::Train
+        } else if crate::weapon_range::group_is_infantry(&entity) {
+            UnitKind::Infantry
         } else {
             self.recon_import_kind
         };
@@ -9306,15 +9526,16 @@ fn apply_readable_style(ctx: &egui::Context) {
 }
 
 fn army_mix_label(copies: &[ArmyCopyInfo]) -> String {
-    let mut counts = [0usize; 6];
+    let mut counts = [0usize; 7];
     for c in copies {
         let i = match c.kind {
             ArmyUnitKind::Ship => 0,
             ArmyUnitKind::Armor => 1,
             ArmyUnitKind::Supply => 2,
             ArmyUnitKind::Artillery => 3,
-            ArmyUnitKind::Train => 4,
-            ArmyUnitKind::MobileArtillery => 5,
+            ArmyUnitKind::Infantry => 4,
+            ArmyUnitKind::Train => 5,
+            ArmyUnitKind::MobileArtillery => 6,
         };
         counts[i] += 1;
     }
@@ -9324,8 +9545,9 @@ fn army_mix_label(copies: &[ArmyCopyInfo]) -> String {
         (ArmyUnitKind::Armor, counts[1]),
         (ArmyUnitKind::Supply, counts[2]),
         (ArmyUnitKind::Artillery, counts[3]),
-        (ArmyUnitKind::Train, counts[4]),
-        (ArmyUnitKind::MobileArtillery, counts[5]),
+        (ArmyUnitKind::Infantry, counts[4]),
+        (ArmyUnitKind::Train, counts[5]),
+        (ArmyUnitKind::MobileArtillery, counts[6]),
     ] {
         if n > 0 {
             parts.push(format!("{}×{n}", kind.label()));
@@ -9359,7 +9581,7 @@ fn recon_slot_list(
     ui: &mut egui::Ui,
     slots: &mut Vec<ReconSlot>,
     influence_label: Option<&str>,
-    kind_icons: Option<[Option<TextureHandle>; 5]>,
+    kind_icons: Option<[Option<TextureHandle>; 6]>,
 ) {
     let mut remove = None;
     for i in 0..slots.len() {

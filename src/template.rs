@@ -36,6 +36,7 @@
 //!   `GROUND_FORMATIONS`, `formation_label` / `formation_density`.
 //! * Waypoint / attack helpers: `waypoint_area_m`,
 //!   `path_waypoint_display_m`, `waypoint_display_altitude`,
+//!   `waypoint_display_priority`,
 //!   `DEFAULT_TIME_ON_TARGET_S`, `DEFAULT_TIMER_S`, `apply_suggested_attack_area`,
 //!   `priority_label`, `order_chip_detail`, `AttackAreaTarget`,
 //!   `refresh_attack_areas_for_seat`, `attack_area_range_limit`,
@@ -146,6 +147,7 @@ pub fn zone_mix_for_seats(seats: &[TemplateSeat]) -> Option<ZoneMix> {
 pub enum UnitKind {
     Plane,
     Vehicle,
+    Infantry,
     Train,
     Ship,
     Fixed,
@@ -153,9 +155,10 @@ pub enum UnitKind {
 }
 
 impl UnitKind {
-    pub const ALL: [UnitKind; 6] = [
+    pub const ALL: [UnitKind; 7] = [
         UnitKind::Plane,
         UnitKind::Vehicle,
+        UnitKind::Infantry,
         UnitKind::Train,
         UnitKind::Ship,
         UnitKind::Fixed,
@@ -166,6 +169,7 @@ impl UnitKind {
         match self {
             UnitKind::Plane => "Planes",
             UnitKind::Vehicle => "Vehicles",
+            UnitKind::Infantry => "Infantry",
             UnitKind::Train => "Trains",
             UnitKind::Ship => "Ships",
             UnitKind::Fixed => "Fixed Units",
@@ -176,7 +180,9 @@ impl UnitKind {
     fn object_type(self) -> &'static str {
         match self {
             UnitKind::Plane => "Plane",
-            UnitKind::Vehicle | UnitKind::Fixed | UnitKind::UserAdded => "Vehicle",
+            UnitKind::Vehicle | UnitKind::Infantry | UnitKind::Fixed | UnitKind::UserAdded => {
+                "Vehicle"
+            }
             UnitKind::Train => "Train",
             UnitKind::Ship => "Ship",
         }
@@ -304,6 +310,7 @@ impl OrderKind {
                 | OrderKind::Cover
                 | OrderKind::ForceComplete
                 | OrderKind::Land
+                | OrderKind::GotoWaypoint
         )
     }
 
@@ -645,6 +652,11 @@ impl CatalogUnit {
         self.kind == UnitKind::Train
     }
 
+    /// Country written on the prototype (`Country = 501`, …). Defaults to USSR.
+    pub fn country(&self) -> i32 {
+        prop_i32(&self.object, "Country", 501)
+    }
+
     /// Carriage scripts listed on this prototype (catalog order).
     pub fn prototype_carriages(&self) -> Vec<String> {
         train_carriages(&self.object)
@@ -949,9 +961,14 @@ pub fn order_chip_detail(order: &OrderSpec, unit_kind: UnitKind) -> String {
         OrderKind::ForceComplete | OrderKind::Land => pri().to_string(),
         OrderKind::GotoWaypoint => {
             if order.altitude > 0.0 {
-                format!("WP {} · {:.0}m", order.waypoint.max(1), order.altitude)
+                format!(
+                    "WP {} · {:.0}m · {}",
+                    order.waypoint.max(1),
+                    order.altitude,
+                    pri()
+                )
             } else {
-                format!("WP {}", order.waypoint.max(1))
+                format!("WP {} · {}", order.waypoint.max(1), pri())
             }
         }
         OrderKind::Formation => formation_label(order.formation_type, unit_kind),
@@ -1931,8 +1948,10 @@ pub struct TemplateOptions {
     pub waypoint_count: u32,
     pub waypoint_spacing: f32,
     pub waypoint_speed: f32,
-    /// Path waypoint YPos. 0 = use the first plane's spawn altitude.
+    /// Path waypoint YPos. 0 = ground, or the first plane's spawn altitude.
     pub waypoint_altitude: f32,
+    /// MCU_Waypoint Priority (0 Low / 1 Medium / 2 High).
+    pub waypoint_priority: i32,
     pub zone_coalition: ZoneCoalition,
 }
 
@@ -1953,6 +1972,7 @@ impl Default for TemplateOptions {
             waypoint_spacing: WAYPOINT_SPACING_M,
             waypoint_speed: 100.0,
             waypoint_altitude: 0.0,
+            waypoint_priority: 1,
             zone_coalition: ZoneCoalition::Western,
         }
     }
@@ -2058,12 +2078,17 @@ pub fn builtin_plane_catalog() -> Vec<CatalogUnit> {
         .collect()
 }
 
-/// Planes, vehicles, trains, ships, and fixed objects from the bundled catalogs.
+/// Planes, vehicles, infantry, trains, ships, and fixed objects from the bundled catalogs.
 pub fn bundled_catalog() -> Vec<CatalogUnit> {
     let mut cat = match parse_il2_document(include_str!("../assets/Models.Group")) {
         Ok(root) => load_catalog(&root),
         Err(_) => Vec::new(),
     };
+    // infantry.Group carries the correct Country on each squad (Models.Group
+    // stamps every vehicle 601). Overlay so Template Builder can group by nation.
+    if let Ok(root) = parse_il2_document(include_str!("../TemplateExamples/infantry.Group")) {
+        overlay_catalog(&mut cat, load_catalog(&root));
+    }
     for plane in builtin_plane_catalog() {
         if let Some(existing) = cat
             .iter_mut()
@@ -2083,10 +2108,12 @@ pub fn bundled_catalog() -> Vec<CatalogUnit> {
 }
 
 /// Read a catalog `.Group`. Preferred layout is subgroups named
-/// `Planes` / `All Planes`, `Vehicles` / `All Vehicles`, `Trains` /
-/// `All Trains`, `Ships` / `All Ships`, `Fixed` / `Fixed Units` /
+/// `Planes` / `All Planes`, `Vehicles` / `All Vehicles`, `Infantry`,
+/// `Trains` / `All Trains`, `Ships` / `All Ships`, `Fixed` / `Fixed Units` /
 /// `Fixed Objects`, and `User Added`. Loose Plane / Vehicle /
-/// Train / Ship blocks at any depth are also collected.
+/// Train / Ship blocks at any depth are also collected. Infantry are
+/// `Vehicle` objects (squad scripts / `infantry` model path) shown as their
+/// own kind even though the editor writes them as vehicles.
 pub fn load_catalog(root: &Il2Entity) -> Vec<CatalogUnit> {
     let mut out = Vec::new();
     collect_kind_group(root, "Planes", UnitKind::Plane, &mut out);
@@ -2094,6 +2121,8 @@ pub fn load_catalog(root: &Il2Entity) -> Vec<CatalogUnit> {
     collect_kind_group(root, "Aircraft", UnitKind::Plane, &mut out);
     collect_kind_group(root, "Vehicles", UnitKind::Vehicle, &mut out);
     collect_kind_group(root, "All Vehicles", UnitKind::Vehicle, &mut out);
+    collect_kind_group(root, "Infantry", UnitKind::Infantry, &mut out);
+    collect_kind_group(root, "All Infantry", UnitKind::Infantry, &mut out);
     collect_kind_group(root, "Trains", UnitKind::Train, &mut out);
     collect_kind_group(root, "All Trains", UnitKind::Train, &mut out);
     collect_kind_group(root, "Ships", UnitKind::Ship, &mut out);
@@ -2104,6 +2133,8 @@ pub fn load_catalog(root: &Il2Entity) -> Vec<CatalogUnit> {
     collect_user_added_group(root, &mut out);
     if out.is_empty() {
         collect_loose(root, &mut out);
+    } else {
+        collect_objects(root, UnitKind::Infantry, &mut out);
     }
     out
 }
@@ -2132,6 +2163,20 @@ pub fn merge_catalog(into: &mut Vec<CatalogUnit>, extra: Vec<CatalogUnit>) {
     }
 }
 
+/// Replace matching prototypes (same script) so a later catalog can correct
+/// Country / name; append anything new.
+fn overlay_catalog(into: &mut Vec<CatalogUnit>, extra: Vec<CatalogUnit>) {
+    for unit in extra {
+        if let Some(existing) = into.iter_mut().find(|e| {
+            e.script.eq_ignore_ascii_case(&unit.script)
+        }) {
+            *existing = unit;
+        } else {
+            into.push(unit);
+        }
+    }
+}
+
 fn collect_user_added_group(root: &Il2Entity, out: &mut Vec<CatalogUnit>) {
     let mut groups = Vec::new();
     find_groups_named(root, "User Added", &mut groups);
@@ -2139,6 +2184,7 @@ fn collect_user_added_group(root: &Il2Entity, out: &mut Vec<CatalogUnit>) {
         let mut tmp = Vec::new();
         collect_objects(g, UnitKind::Plane, &mut tmp);
         collect_objects(g, UnitKind::Vehicle, &mut tmp);
+        collect_objects(g, UnitKind::Infantry, &mut tmp);
         collect_objects(g, UnitKind::Train, &mut tmp);
         collect_objects(g, UnitKind::Ship, &mut tmp);
         collect_objects(g, UnitKind::Fixed, &mut tmp);
@@ -2173,6 +2219,7 @@ fn find_groups_named<'a>(e: &'a Il2Entity, name: &str, out: &mut Vec<&'a Il2Enti
 fn collect_loose(root: &Il2Entity, out: &mut Vec<CatalogUnit>) {
     collect_objects(root, UnitKind::Plane, out);
     collect_objects(root, UnitKind::Vehicle, out);
+    collect_objects(root, UnitKind::Infantry, out);
     collect_objects(root, UnitKind::Train, out);
     collect_objects(root, UnitKind::Ship, out);
     collect_objects(root, UnitKind::Fixed, out);
@@ -2204,7 +2251,13 @@ fn collect_objects(root: &Il2Entity, kind: UnitKind, out: &mut Vec<CatalogUnit>)
     if kind == UnitKind::Vehicle {
         objects.retain(|o| {
             !o.property("Script")
-                .is_some_and(|s| is_fixed_script(s))
+                .is_some_and(|s| is_fixed_script(s) || weapon_range::is_infantry_script(s))
+        });
+    }
+    if kind == UnitKind::Infantry {
+        objects.retain(|o| {
+            o.property("Script")
+                .is_some_and(weapon_range::is_infantry_script)
         });
     }
     for obj in objects {
@@ -2555,12 +2608,10 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
             };
             let mut wp = mcu("MCU_Waypoint", &name, &mut next_id, x, z);
             wp.set_property("Area", "1000");
-            wp.set_property("Speed", format!("{:.0}", opts.waypoint_speed.max(10.0)));
+            wp.set_property("Speed", format!("{:.0}", opts.waypoint_speed));
             wp.set_property("Priority", "2");
             wp.set_objects(objects);
-            if seats_have_planes(&opts.seats) {
-                wp.set_property("YPos", format!("{:.3}", path_altitude));
-            }
+            wp.set_property("YPos", format!("{:.3}", path_altitude));
             rtb_waypoints.push(wp);
         }
     }
@@ -2724,15 +2775,16 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
             ORIGIN_Z,
         );
         wp.set_property("Area", waypoint_area_m(&opts.seats));
-        wp.set_property("Speed", format!("{:.0}", opts.waypoint_speed.max(10.0)));
-        wp.set_property("Priority", "1");
+        wp.set_property("Speed", format!("{:.0}", opts.waypoint_speed));
+        wp.set_property(
+            "Priority",
+            hop_waypoint_priority(&opts.seats, (w as u32) + 1, opts.waypoint_priority).to_string(),
+        );
         wp.set_objects(lead_entity_ids.clone());
-        if seats_have_planes(&opts.seats) {
-            let y = hop_waypoint_altitude(&opts.seats, (w as u32) + 1)
-                .map(|a| a as f64)
-                .unwrap_or(path_altitude);
-            wp.set_property("YPos", format!("{y:.3}"));
-        }
+        let y = hop_waypoint_altitude(&opts.seats, (w as u32) + 1)
+            .map(|a| a as f64)
+            .unwrap_or(path_altitude);
+        wp.set_property("YPos", format!("{y:.3}"));
         waypoints.push(wp);
     }
 
@@ -3384,15 +3436,18 @@ fn first_plane_altitude(seats: &[TemplateSeat]) -> f64 {
         .iter()
         .find(|s| s.unit.is_air())
         .map(|s| s.altitude as f64)
-        .unwrap_or(1000.0)
+        .unwrap_or(0.0)
 }
 
-/// Path YPos shown in the UI: explicit template altitude, else the first plane.
+/// Path YPos shown in the UI: explicit template altitude, else the first plane
+/// (aircraft) or 0 m (ground-only).
 pub fn path_waypoint_display_m(seats: &[TemplateSeat], template_alt: f32) -> f32 {
     if template_alt > 0.0 {
         template_alt
-    } else {
+    } else if seats_have_planes(seats) {
         first_plane_altitude(seats) as f32
+    } else {
+        template_alt
     }
 }
 
@@ -3418,8 +3473,25 @@ fn hop_waypoint_altitude(seats: &[TemplateSeat], wp_n: u32) -> Option<f32> {
     None
 }
 
+fn hop_waypoint_priority(seats: &[TemplateSeat], wp_n: u32, fallback: i32) -> i32 {
+    let n = wp_n.max(1);
+    for seat in seats {
+        for order in &seat.orders {
+            if order.kind == OrderKind::GotoWaypoint && order.waypoint.max(1) == n {
+                return order.priority.clamp(0, 2);
+            }
+        }
+    }
+    fallback.clamp(0, 2)
+}
+
+/// Priority for WP `wp_n`: first Goto WP hop, else `fallback`.
+pub fn waypoint_display_priority(seats: &[TemplateSeat], wp_n: u32, fallback: i32) -> i32 {
+    hop_waypoint_priority(seats, wp_n, fallback)
+}
+
 /// YPos for WP `wp_n`: hop override, else the template path altitude, else the
-/// first plane’s spawn height.
+/// first plane’s spawn height (0 m when the group is ground-only).
 pub fn waypoint_display_altitude(seats: &[TemplateSeat], wp_n: u32, template_alt: f32) -> f32 {
     if let Some(a) = hop_waypoint_altitude(seats, wp_n) {
         a
@@ -3871,6 +3943,26 @@ mod tests {
         assert_eq!(tender.len(), 1, "default consist is the tender, got {tender:?}");
         assert!(script_type_id(&tender[0]).contains("tender"));
         assert!(tender.len() < cars.len());
+    }
+
+    #[test]
+    fn bundled_catalog_splits_infantry_by_country() {
+        let cat = bundled_catalog();
+        let infantry: Vec<_> = cat.iter().filter(|u| u.kind == UnitKind::Infantry).collect();
+        assert_eq!(infantry.len(), 9, "nine Korea squads");
+        assert!(
+            !cat.iter().any(|u| u.kind == UnitKind::Vehicle
+                && weapon_range::is_infantry_script(&u.script)),
+            "infantry scripts must not stay under Vehicles"
+        );
+        let mut countries: Vec<i32> = infantry.iter().map(|u| u.country()).collect();
+        countries.sort();
+        countries.dedup();
+        assert_eq!(countries, vec![502, 503, 601], "PRC, DPRK, USA");
+        let dprk = infantry.iter().filter(|u| u.country() == 503).count();
+        let prc = infantry.iter().filter(|u| u.country() == 502).count();
+        let usa = infantry.iter().filter(|u| u.country() == 601).count();
+        assert_eq!((dprk, prc, usa), (3, 3, 3));
     }
 
     #[test]
@@ -4771,6 +4863,11 @@ mod tests {
         order.kind = OrderKind::Timer;
         order.time_s = 12.0;
         assert_eq!(order_chip_detail(&order, UnitKind::Plane), "12s");
+        order.kind = OrderKind::GotoWaypoint;
+        order.waypoint = 2;
+        order.altitude = 0.0;
+        order.priority = 2;
+        assert_eq!(order_chip_detail(&order, UnitKind::Plane), "WP 2 · High");
     }
 
     #[test]
@@ -5366,6 +5463,7 @@ mod tests {
         assert!(OrderKind::Cover.has_priority());
         assert!(OrderKind::ForceComplete.has_priority());
         assert!(OrderKind::Land.has_priority());
+        assert!(OrderKind::GotoWaypoint.has_priority());
         assert!(!OrderKind::Timer.has_priority());
         assert!(OrderKind::available(UnitKind::Plane).contains(&OrderKind::MissionComplete));
         assert!(OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::TimeOnTarget));
@@ -5405,6 +5503,35 @@ mod tests {
         let pack = generate_template(&opts).unwrap();
         let wp1 = pack.find_by_name("WP 1").unwrap();
         assert_eq!(wp1.property("Area"), Some("100"));
+        assert_eq!(wp1.property("YPos"), Some("0.000"));
+        assert_eq!(wp1.property("Priority"), Some("1"));
+    }
+
+    #[test]
+    fn ground_waypoint_speed_and_priority_are_unclamped() {
+        let vehicle = catalog_vehicle();
+        let mut seat = TemplateSeat::new(vehicle);
+        seat.orders = vec![OrderSpec {
+            kind: OrderKind::GotoWaypoint,
+            waypoint: 1,
+            priority: 0,
+            ..OrderSpec::default()
+        }];
+        let mut opts = TemplateOptions::default();
+        opts.seats = vec![seat];
+        opts.waypoint_speed = 5.0;
+        opts.waypoint_altitude = 0.0;
+        opts.waypoint_priority = 2;
+        let pack = generate_template(&opts).unwrap();
+        let wp1 = pack.find_by_name("WP 1").unwrap();
+        assert_eq!(wp1.property("Speed"), Some("5"));
+        assert_eq!(wp1.property("Priority"), Some("0"));
+        assert_eq!(wp1.property("YPos"), Some("0.000"));
+        assert_eq!(
+            path_waypoint_display_m(&opts.seats, 0.0),
+            0.0,
+            "ground-only waypoints display 0 m, not a plane fallback"
+        );
     }
 
     #[test]
