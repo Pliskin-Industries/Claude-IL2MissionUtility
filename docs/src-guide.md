@@ -65,7 +65,9 @@ wingman), 1950s `flight_number` / `flight_color` / `plane_display_name`
 (Red 12, White 21, …), `encode_tcode` / `encode_tcode_color` (IL-2
 glyph strings), `callsign_for` (MiG-15bis on 501 → Honcho 12), and
 `plane_coalitions_for_country` (500-series watches `[2]`, 600-series
-watches `[1]` — the *other* coalition, for fighter-pack checkzones).
+watches `[1]` — the *other* coalition, for fighter-pack checkzones),
+and pack naming (`country_pack_tag`, `linked_fighter_pack_name`,
+`fighter_pack_filename` — USSR/DPRK/PRC/USA from the country code).
 **Fighter Pack, Template, Map.**
 
 ### `airfield.rs` — SP airfield → multiplayer
@@ -100,23 +102,23 @@ Script/Model on Plane — ui.rs uses this after fighter/map generation.
 **Fighter, Exclusive, Army, Map, Template; serialize.rs pipeline tests.**
 
 ### `flights.rs` — fighter flight configuration
-Applies GUI composition to **Group 1** in place: rebuilds `Airplanes`
-(cloned plane + `MCU_TR_Entity` pairs — Script/Model/Country/Callsign/
-AILevel/TCode, per-seat XZ offsets, low-cover band 500–1500 m scaled by
-max altitude, +2000 m high-cover pair on 3/4-ships, 25–50 m lead/wing
-stacks), the equal-odds 500 ms randomizer waterfall
-(`Random i:pct%` → `Out i` → `Spawn i`, `Close_Remaining_Output(s)`
-cascade, `ReOpen Outputs`), per-flight `DeathCount`/`SpawnCount`
-counters (plane `OnEvent`/`OnReport` rewired onto them), wing-cover
-MCUs (`Cover Wing i` chained through 50 ms delays off `MORE ORDERS`),
-rewires `Logics` (attack areas = all leads; delete/deactivate/
-force-complete = all planes; COOLDOWN / REINFORCEMENTS / Delay Delete
-timers; checkzone coalitions by country) and retargets `RTB - 1` at
-every plane. `FlightConfig` (defaults: 4 flights, max 4, mig15bis +
-la11 skills 3/2, country 501, 180 s cooldown, 300 s reinforcement,
-60 s delete orders, 1000–5500 m altitude), `configure_aircraft`,
-`flight_sizes` (cycles max…1, so 4/4 → 4,3,2,1). Touches only Group 1
-+ `RTB - 1`; zones and NodeGates are left for `pack.rs` to clone.
+Rebuilds **Group 1** from Template Builder pair logic (Independent
+seats, OnSpawned → AttackArea lead / Cover wing, leftover and extra
+pair leads each get their own AttackArea, events → that plane’s
+Mission Complete → Force Complete / RTB / deactivate for that bird
+only, AI RTB off, Spawn + repeat) then injects the pack randomizer
+(`Random i:pct%` → `Out i` → `Spawn i`, 500 ms equal-odds waterfall),
+per-flight DeathCount, pack hooks (`Enable Spawner` / `Disable Spawner`
+/ `Delete Orders` / `REENFORCEMENTS (33%)`), finger-four placement,
+GUI altitudes (low-cover 500–1500 m scaled by max, each complete
+4-ship 2 down / 2 up +2000 m, leftovers low, 25–50 m wing stacks),
+timers, and identity (Script/Model/Country/Callsign/TCode). Zones stay
+at the original pack sizes (16 km IN / 35 km OUT); AttackArea is 30 km
+air / 600 s. NodeGates and `RTB - 1` are kept from the loaded linked
+pack. `FlightConfig` (defaults: 4 flights, max 4, mig15bis + la11
+skills 3/2, country 501, 180 s cooldown, 300 s reinforcement, 60 s
+delete orders, 1000–5500 m altitude), `configure_aircraft`,
+`flight_sizes` (cycles max…1, so 4/4 → 4,3,2,1).
 **Fighter Pack, Map.**
 
 ### `frontlines.rs` — Korea timeline & base map
@@ -129,7 +131,9 @@ aircraft per period, `snapshot_front_xz` / `timeline_preview` /
 user AABB, paints influence / salients / attack arrows / battle marks,
 and stamps fighter/ship/ground packs plus user reference groups
 (`FrontOptions`, `FrontPack`, `MapFighterPack` / `MapShipPack` /
-`MapGroundPack` / `MapRefGroup`). Constants: `ARROW_TAIL_WIDTH`,
+`MapGroundPack` / `MapRefGroup`). `inspect_base_map` / `ImportedBaseMap`
+split a previously generated Korea base map back into AO, front,
+attack arrows, fighter packs, and unit packs. Constants: `ARROW_TAIL_WIDTH`,
 `PLACE_MARGIN` (10 km), `AOI_GAP` (5 km). **Map mode.**
 
 ### `frontlines/timeline.rs` — dated front polylines
@@ -224,9 +228,11 @@ snapping (`snap_lead_to_pointer`, `snap_waypoint_to_pointer` — a WP may
 sit on another branch or behind the column — `align_heading_to_path`),
 two-WP Zone IN straddle logic (`column_waypoint_dists`,
 `sample_network`), `park_route_copy` (writes column positions into
-the group, preserving decimal precision), and `inspect_path_waypoints` /
-`park_path_waypoints` for off-road Goto WP hops. Unit-tested against
-`TemplateExamples/` fixtures. **Map mode, Army Generator.**
+the group, preserving decimal precision), `inspect_path_waypoints` /
+`park_path_waypoints` for off-road Goto WP hops, and
+`inspect_visual_heading` / `inspect_waypoint_xz` / `inspect_parked_network`
+to restore an already-exported column (including a curved road).
+Unit-tested against `TemplateExamples/` fixtures. **Map mode, Army Generator.**
 
 ### `mapshipping.rs` — ship placement
 `place_ships` parks ship groups on coalition water inside the AO
@@ -280,7 +286,9 @@ timers point at the group's `Enable Spawner` / `ENABLE / PULSE IN` and
 IN timers (mutual exclusion — fanout self-skip is unit-tested).
 Parking is the map grid (`placement::move_to_grid`) or explicit
 positions, translating the group tree, its RTB waypoint and its gate
-cell by one shared delta. `generate_pack` (grid), `generate_pack_at`
+cell by one shared delta. `generate_pack` (grid; root name
+`{nation} Fighters Npack - Linked` from the planes' country),
+`generate_pack_at`
 (explicit positions), `builtin_template` (bundled 3pack V6),
 `park_rtbs`, `zone_in_radius` (used by Map UI). `inspect_pack` /
 `PackInfo` and `group_anchor_xz` are for tests / internal parking
@@ -386,7 +394,9 @@ and TOT expiry continues the chain. Seat model + bookkeeping:
 `append_seat` / `replace_seat_unit` / `copy_seat_attributes` /
 `move_seat`, `normalize_order_chain` + index remapping,
 `insert_goto_waypoint_after`, `set_report_following`,
-`order_tree_columns` / `order_tree_layout` (GUI), formations
+`order_tree_columns` / `order_tree_layout` / `event_triggers_order`
+(GUI: OnSpawned is its own column; an event that Then's an order
+breaks the previous-hop line so cleanup waits for the event), formations
 (`AIR_FORMATIONS` / `GROUND_FORMATIONS`), placement (`PlaceLayout`,
 `place_offset`, `finger_four_offset`, `PLACEMENT_SPACING` = 150 m),
 checkzones (`ZoneCoalition`, `ZoneMix`, `zone_defaults`,
@@ -399,7 +409,12 @@ loading (`bundled_catalog` from `assets/Models.Group`,
 `builtin_plane_catalog`, `load_catalog` — subgroups `Planes` /
 `All Planes` / `Aircraft`, `Vehicles`, `Trains`, `Ships`, `Fixed`,
 `User Added`, loose-block fallback — `load_catalog_as_user_added`,
-`merge_catalog`). Generated at a fixed origin (40 000, 40 000) on a
+`merge_catalog`). `load_template` / `TemplateLoad` fills the builder
+from a `.Group`: native files (`ENABLE / PULSE IN` + `Zone IN` +
+`MISSION END` + `Units`) round-trip seats and orders; anything else is
+rebuilt from world objects and `MCU_CMD_*` / waypoints, with warnings
+for dropped icons, extra checkzones, NodeGates, and unmapped events.
+Generated at a fixed origin (40 000, 40 000) on a
 150 m MCU grid; moving it onto the map is the caller's job. Names other
 modes look for: `Zone IN`, `ENABLE / PULSE IN`, `MISSION END`,
 `Trigger Delete`, `Force Complete - High`. Never writes `NodeGates`.

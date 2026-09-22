@@ -15,12 +15,14 @@
 //! * `fn suggested_aircraft` / `snapshot_front_xz` / `timeline_preview` /
 //!   `preview_dots`
 //! * `struct FrontOptions` / `FrontPack` / `fn generate_front`
+//! * `fn looks_like_base_map` / `fn inspect_base_map` / `ImportedBaseMap`
 //! * `MapFighterPack` / `MapShipPack` / `MapGroundPack` / `MapRefGroup`
 //! * `ARROW_TAIL_WIDTH` / `PLACE_MARGIN` / `AOI_GAP` / `fn attack_arrow_points`
 //!
 //! ## Used by
 //! * ui.rs (Map) — slider, preview strokes, Generate Base Map
 
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::aircraft::{aircraft_by_id, AircraftType};
@@ -33,6 +35,7 @@ use crate::mapclip::{
     influence_minus_salients, multipolygon_rings, prepare_front, WorldAabb,
 };
 use crate::parser::parse_group_file;
+use crate::pack::group_anchor_xz;
 
 mod timeline;
 pub use timeline::{
@@ -325,6 +328,39 @@ pub struct MapShipPack {
 #[derive(Clone, Debug)]
 pub struct MapGroundPack {
     pub root: Il2Entity,
+}
+
+/// A previously generated Korea base map, split back into Map-mode pieces.
+#[derive(Clone, Debug)]
+pub struct ImportedBaseMap {
+    pub aabb: Option<WorldAabb>,
+    pub front: Vec<(f64, f64)>,
+    pub salients: Vec<Vec<(f64, f64)>>,
+    pub attack_arrows: Vec<((f64, f64), (f64, f64))>,
+    pub fighters: Vec<ImportedFighterPack>,
+    pub armies: Vec<ImportedArmy>,
+    pub refs: Vec<MapRefGroup>,
+    pub year: Option<u16>,
+    pub season: Option<Season>,
+    pub timeline_idx: Option<usize>,
+    pub notes: Vec<String>,
+}
+
+/// Linked fighter pack restored from a base-map file (Zone IN positions).
+#[derive(Clone, Debug)]
+pub struct ImportedFighterPack {
+    pub root: Il2Entity,
+    pub eastern: bool,
+    pub wave: u32,
+    pub spots: Vec<(f64, f64)>,
+}
+
+/// Ground/ship pack restored from a base-map file at authored positions.
+#[derive(Clone, Debug)]
+pub struct ImportedArmy {
+    pub name: String,
+    pub entity: Il2Entity,
+    pub eastern: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1480,6 +1516,440 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
             influence_rings,
         ),
     })
+}
+
+const MAP_LAYER_NAMES: &[&str] = &[
+    "Front line",
+    "Attack arrows",
+    "Areas of influence",
+    "Reference groups",
+    "AO outline",
+    "Battles",
+    "Troop buildups",
+    "Defensive positions",
+    "Areas to attack",
+    "Naval routes",
+];
+
+/// True when `root` looks like a file written by [`generate_front`].
+pub fn looks_like_base_map(root: &Il2Entity) -> bool {
+    root.name()
+        .is_some_and(|n| n.starts_with("Korea Base Map"))
+        || root.find_by_name("AO outline").is_some()
+        || root.find_by_name("Front line").is_some()
+}
+
+/// Read AO, front, attack arrows, fighter packs, and unit packs from an exported base map.
+pub fn inspect_base_map(root: &Il2Entity) -> Result<ImportedBaseMap, String> {
+    if !looks_like_base_map(root) {
+        return Err(
+            "that file is not a Korea base map (no AO outline / Front line / Korea Base Map name)."
+                .into(),
+        );
+    }
+    let mut notes = Vec::new();
+    let aabb = root
+        .find_by_name("AO outline")
+        .and_then(aabb_from_ao_outline);
+    if aabb.is_none() {
+        notes.push("No AO outline found — the box was left unchanged.".into());
+    }
+    let front = root
+        .find_by_name("Front line")
+        .map(|g| front_polyline_from_group(g))
+        .unwrap_or_default();
+    if front.len() < 2 {
+        notes.push("No front-line icons found.".into());
+    }
+    let salients = root
+        .find_by_name("Front line")
+        .map(|g| salient_rings_from_group(g, &front))
+        .unwrap_or_default();
+    let attack_arrows = root
+        .find_by_name("Attack arrows")
+        .map(attack_arrows_from_group)
+        .unwrap_or_default();
+
+    let mut fighters = Vec::new();
+    let mut armies = Vec::new();
+    for child in &root.children {
+        if child.block_type != "Group" {
+            continue;
+        }
+        let name = child.name().unwrap_or("");
+        if MAP_LAYER_NAMES.iter().any(|n| *n == name) {
+            continue;
+        }
+        if looks_like_fighter_pack(child) {
+            let spots = fighter_group_spots(child);
+            if spots.is_empty() {
+                notes.push(format!("Fighter pack \"{name}\" has no Group N Zone IN."));
+                continue;
+            }
+            let (eastern, wave) = parse_fighter_label(name, child);
+            fighters.push(ImportedFighterPack {
+                root: child.clone(),
+                eastern,
+                wave,
+                spots,
+            });
+            continue;
+        }
+        if group_has_units(child) {
+            armies.push(ImportedArmy {
+                eastern: coalition_is_eastern(name, child),
+                name: name.to_string(),
+                entity: child.clone(),
+            });
+        }
+    }
+
+    let mut refs = Vec::new();
+    if let Some(g) = root.find_by_name("Reference groups") {
+        for (i, child) in g.children.iter().enumerate() {
+            if child.block_type != "Group" {
+                continue;
+            }
+            let label = child
+                .name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| format!("Reference {}", i + 1));
+            refs.push(MapRefGroup {
+                path: PathBuf::from(format!("{label}.Group")),
+                entity: child.clone(),
+            });
+        }
+    }
+
+    let (year, season, timeline_idx) = parse_base_map_period(root.name().unwrap_or(""));
+
+    Ok(ImportedBaseMap {
+        aabb,
+        front,
+        salients,
+        attack_arrows,
+        fighters,
+        armies,
+        refs,
+        year,
+        season,
+        timeline_idx,
+        notes,
+    })
+}
+
+fn aabb_from_ao_outline(group: &Il2Entity) -> Option<WorldAabb> {
+    let chains = icon_chains(group);
+    let mut boxes = Vec::new();
+    for chain in &chains {
+        if chain.line_type != LINE_POLY {
+            continue;
+        }
+        if let Some(aabb) = aabb_of_points(&chain.pts) {
+            boxes.push(aabb);
+        }
+    }
+    boxes.into_iter().min_by(|a, b| {
+        aabb_area(*a)
+            .partial_cmp(&aabb_area(*b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
+fn aabb_of_points(pts: &[(f64, f64)]) -> Option<WorldAabb> {
+    if pts.len() < 2 {
+        return None;
+    }
+    let mut x_min = f64::MAX;
+    let mut x_max = f64::MIN;
+    let mut z_min = f64::MAX;
+    let mut z_max = f64::MIN;
+    for &(x, z) in pts {
+        x_min = x_min.min(x);
+        x_max = x_max.max(x);
+        z_min = z_min.min(z);
+        z_max = z_max.max(z);
+    }
+    let aabb = WorldAabb {
+        x_min,
+        x_max,
+        z_min,
+        z_max,
+    };
+    aabb.is_valid().then_some(aabb)
+}
+
+fn aabb_area(aabb: WorldAabb) -> f64 {
+    (aabb.x_max - aabb.x_min) * (aabb.z_max - aabb.z_min)
+}
+
+fn front_polyline_from_group(group: &Il2Entity) -> Vec<(f64, f64)> {
+    let mut runs: Vec<Vec<(f64, f64)>> = icon_chains(group)
+        .into_iter()
+        .filter(|c| c.line_type == LINE_FRONT_BODY || c.line_type == LINE_FRONT_END)
+        .map(|c| c.pts)
+        .filter(|pts| pts.len() >= 2)
+        .collect();
+    runs.sort_by(|a, b| a[0].1.partial_cmp(&b[0].1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut out = Vec::new();
+    for run in runs {
+        if out.last().is_some_and(|p| same_export_xz(*p, run[0])) {
+            out.extend(run.into_iter().skip(1));
+        } else {
+            out.extend(run);
+        }
+    }
+    out
+}
+
+fn salient_rings_from_group(group: &Il2Entity, front: &[(f64, f64)]) -> Vec<Vec<(f64, f64)>> {
+    icon_chains(group)
+        .into_iter()
+        .filter(|c| c.line_type == LINE_SALIENT && c.pts.len() >= 3)
+        .filter(|c| !ring_follows_front(&c.pts, front))
+        .map(|c| {
+            let mut pts = c.pts;
+            if pts.first() == pts.last() && pts.len() > 1 {
+                pts.pop();
+            }
+            pts
+        })
+        .collect()
+}
+
+fn ring_follows_front(ring: &[(f64, f64)], front: &[(f64, f64)]) -> bool {
+    if front.len() < 2 || ring.is_empty() {
+        return false;
+    }
+    let near = ring
+        .iter()
+        .filter(|&&p| dist_to_polyline(front, p) < 2_000.0)
+        .count();
+    near as f64 / ring.len() as f64 > 0.2
+}
+
+fn dist_to_polyline(line: &[(f64, f64)], p: (f64, f64)) -> f64 {
+    let mut best = f64::MAX;
+    for w in line.windows(2) {
+        let dx = w[1].0 - w[0].0;
+        let dz = w[1].1 - w[0].1;
+        let len2 = dx * dx + dz * dz;
+        let t = if len2 < 1e-9 {
+            0.0
+        } else {
+            (((p.0 - w[0].0) * dx + (p.1 - w[0].1) * dz) / len2).clamp(0.0, 1.0)
+        };
+        let qx = w[0].0 + dx * t;
+        let qz = w[0].1 + dz * t;
+        let d = (qx - p.0).hypot(qz - p.1);
+        if d < best {
+            best = d;
+        }
+    }
+    best
+}
+
+fn attack_arrows_from_group(group: &Il2Entity) -> Vec<((f64, f64), (f64, f64))> {
+    icon_chains(group)
+        .into_iter()
+        .filter(|c| c.line_type == LINE_ATTACK_ARROW && c.pts.len() >= 2)
+        .filter_map(|c| arrow_tail_tip(&c.pts))
+        .collect()
+}
+
+fn arrow_tail_tip(pts: &[(f64, f64)]) -> Option<((f64, f64), (f64, f64))> {
+    if pts.len() >= 6 {
+        let tail = ((pts[0].0 + pts[1].0) * 0.5, (pts[0].1 + pts[1].1) * 0.5);
+        let tip = pts[4];
+        if (tip.0 - tail.0).hypot(tip.1 - tail.1) < 1.0 {
+            return None;
+        }
+        return Some((tail, tip));
+    }
+    Some((pts[0], *pts.last()?))
+}
+
+struct IconChain {
+    line_type: i32,
+    pts: Vec<(f64, f64)>,
+}
+
+struct IconVert {
+    id: i32,
+    x: f64,
+    z: f64,
+    line: i32,
+    targets: Vec<i32>,
+}
+
+fn icon_chains(group: &Il2Entity) -> Vec<IconChain> {
+    let verts: Vec<IconVert> = group
+        .children
+        .iter()
+        .filter(|c| c.block_type == "MCU_Icon")
+        .filter_map(|c| {
+            let id = c.index?;
+            let (x, z) = c.pos_xz()?;
+            let line = c.property("LineType")?.parse().ok()?;
+            Some(IconVert {
+                id,
+                x,
+                z,
+                line,
+                targets: c.targets.clone(),
+            })
+        })
+        .collect();
+    if verts.is_empty() {
+        return Vec::new();
+    }
+    let by_id: HashMap<i32, &IconVert> = verts.iter().map(|v| (v.id, v)).collect();
+    let targeted: HashSet<i32> = verts.iter().flat_map(|v| v.targets.iter().copied()).collect();
+    let mut used = HashSet::new();
+    let mut out = Vec::new();
+    let mut starts: Vec<&IconVert> = verts.iter().filter(|v| !targeted.contains(&v.id)).collect();
+    if starts.is_empty() {
+        starts = verts.iter().collect();
+    }
+    for start in starts {
+        if used.contains(&start.id) {
+            continue;
+        }
+        let mut pts = Vec::new();
+        let mut cur = start;
+        let line_type = start.line;
+        loop {
+            if !used.insert(cur.id) {
+                break;
+            }
+            pts.push((cur.x, cur.z));
+            let Some(&next_id) = cur.targets.first() else {
+                break;
+            };
+            if next_id == start.id {
+                break;
+            }
+            match by_id.get(&next_id) {
+                Some(next) => cur = next,
+                None => break,
+            }
+        }
+        if pts.len() >= 2 {
+            out.push(IconChain { line_type, pts });
+        }
+    }
+    out
+}
+
+fn looks_like_fighter_pack(entity: &Il2Entity) -> bool {
+    entity.children.iter().any(|c| c.name() == Some("NodeGates"))
+        && entity.children.iter().any(|c| c.name() == Some("Group 1"))
+}
+
+fn fighter_group_spots(entity: &Il2Entity) -> Vec<(f64, f64)> {
+    let mut numbered = Vec::new();
+    for c in &entity.children {
+        if c.block_type != "Group" {
+            continue;
+        }
+        let Some(name) = c.name() else { continue };
+        let Some(rest) = name.strip_prefix("Group ") else {
+            continue;
+        };
+        if let Ok(n) = rest.parse::<u32>() {
+            numbered.push((n, group_anchor_xz(c)));
+        }
+    }
+    numbered.sort_by_key(|(n, _)| *n);
+    numbered.into_iter().map(|(_, p)| p).collect()
+}
+
+fn parse_fighter_label(name: &str, entity: &Il2Entity) -> (bool, u32) {
+    let eastern = coalition_is_eastern(name, entity);
+    let wave = name
+        .split("Wave ")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    (eastern, wave)
+}
+
+fn coalition_is_eastern(name: &str, entity: &Il2Entity) -> bool {
+    if name.starts_with("NATO") {
+        return false;
+    }
+    if name.starts_with("Eastern") || name.starts_with("DPRK") {
+        return true;
+    }
+    match first_country(entity) {
+        Some(c) if c / 100 == 6 => false,
+        _ => true,
+    }
+}
+
+fn first_country(entity: &Il2Entity) -> Option<i32> {
+    let mut found = None;
+    entity.for_each(&mut |e| {
+        if found.is_some() {
+            return;
+        }
+        if !matches!(
+            e.block_type.as_str(),
+            "Vehicle" | "Ship" | "Plane" | "Train"
+        ) {
+            return;
+        }
+        if let Some(c) = e.property("Country").and_then(|s| s.parse().ok()) {
+            if c > 0 {
+                found = Some(c);
+            }
+        }
+    });
+    found
+}
+
+fn group_has_units(entity: &Il2Entity) -> bool {
+    let mut found = false;
+    entity.for_each(&mut |e| {
+        if matches!(
+            e.block_type.as_str(),
+            "Vehicle" | "Ship" | "Plane" | "Train"
+        ) {
+            found = true;
+        }
+    });
+    found
+}
+
+fn parse_base_map_period(name: &str) -> (Option<u16>, Option<Season>, Option<usize>) {
+    let rest = name.strip_prefix("Korea Base Map ").unwrap_or("");
+    if rest.is_empty() || rest == "Custom" || rest.starts_with("Custom") {
+        return (None, None, None);
+    }
+    if rest.len() >= 10 && rest.as_bytes().get(4) == Some(&b'-') {
+        let date = &rest[..10];
+        if let Some((i, mark)) = TIMELINE
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.date_label() == date)
+        {
+            return (Some(mark.year), Some(mark.season), Some(i));
+        }
+        let year = date[..4].parse().ok();
+        return (year, None, None);
+    }
+    let mut parts = rest.split_whitespace();
+    let year = parts.next().and_then(|s| s.parse().ok());
+    let season_label = parts.collect::<Vec<_>>().join(" ");
+    let season = Season::ALL
+        .iter()
+        .copied()
+        .find(|s| s.label().eq_ignore_ascii_case(&season_label));
+    let idx = year.and_then(|y| {
+        season.map(|s| timeline_index(y, s))
+    });
+    (year, season, idx)
 }
 
 fn resolve_timeline_mark(opts: &FrontOptions) -> &'static TimelineMark {
@@ -2982,5 +3452,96 @@ mod tests {
         let (x, z) = wp.pos_xz().unwrap();
         assert!((x - rtb[0].0).abs() < 1.0 && (z - rtb[0].1).abs() < 1.0);
         assert!(pack.root.find_by_name("NodeGates").is_some());
+    }
+
+    #[test]
+    fn inspect_base_map_reads_ao_front_and_arrows() {
+        let aabb = WorldAabb::from_corners(100_000.0, 200_000.0, 160_000.0, 280_000.0);
+        let custom = vec![
+            (130_000.0, 200_000.0),
+            (128_000.0, 240_000.0),
+            (132_000.0, 280_000.0),
+        ];
+        let tail = (140_000.0, 220_000.0);
+        let tip = (145_000.0, 250_000.0);
+        let truck = parse_group_file(include_str!(
+            "../TemplateExamples/GroundUnits/DropIns/DPRK Truck Run.Group"
+        ))
+        .unwrap();
+        let pack = generate_front(&FrontOptions {
+            aabb,
+            front: true,
+            battles: false,
+            buildups: false,
+            defenses: false,
+            attacks: false,
+            naval: false,
+            custom_front: Some(custom),
+            user_attacks: vec![(tail, tip)],
+            ground_packs: vec![MapGroundPack { root: truck }],
+            ..FrontOptions::default()
+        })
+        .unwrap();
+        let imported = inspect_base_map(&pack.root).expect("inspect");
+        let got = imported.aabb.expect("AO");
+        assert!((got.x_min - aabb.x_min).abs() < 5.0);
+        assert!((got.x_max - aabb.x_max).abs() < 5.0);
+        assert!((got.z_min - aabb.z_min).abs() < 5.0);
+        assert!((got.z_max - aabb.z_max).abs() < 5.0);
+        assert!(imported.front.len() >= 2);
+        assert!(imported.front.iter().any(|&(x, _)| (x - 130_000.0).abs() < 500.0));
+        assert_eq!(imported.attack_arrows.len(), 1);
+        let (t, p) = imported.attack_arrows[0];
+        assert!((t.0 - tail.0).abs() < 50.0 && (t.1 - tail.1).abs() < 50.0);
+        assert!((p.0 - tip.0).abs() < 800.0 && (p.1 - tip.1).abs() < 800.0);
+        assert_eq!(imported.armies.len(), 1);
+        assert!(imported.armies[0].eastern);
+        assert!(imported.fighters.is_empty());
+    }
+
+    #[test]
+    fn inspect_shipped_base_map_fixture() {
+        let root = parse_group_file(include_str!(
+            "../TemplateExamples/Korea_BaseMap_1951-04-22.Group"
+        ))
+        .expect("fixture");
+        assert!(looks_like_base_map(&root));
+        let imported = inspect_base_map(&root).expect("inspect fixture");
+        assert!(imported.aabb.is_some());
+        assert!(imported.front.len() >= 2);
+        assert!(!imported.attack_arrows.is_empty());
+    }
+
+    #[test]
+    fn inspect_base_map_restores_fighter_zone_in() {
+        let tpl = parse_group_file(include_str!(
+            "../TemplateExamples/Eastern_Fighters_Random_3pack_V6.Group"
+        ))
+        .expect("parse 3pack");
+        let root = crate::pack::generate_pack_at(
+            &tpl,
+            &[(110_000.0, 280_000.0), (130_000.0, 300_000.0)],
+            "Eastern Fighters Wave 2 pack 1",
+        )
+        .unwrap();
+        let aabb = WorldAabb::from_corners(80_000.0, 250_000.0, 160_000.0, 330_000.0);
+        let pack = generate_front(&FrontOptions {
+            aabb,
+            battles: false,
+            buildups: false,
+            defenses: false,
+            attacks: false,
+            naval: false,
+            fighter_packs: vec![MapFighterPack { root }],
+            ..FrontOptions::default()
+        })
+        .unwrap();
+        let imported = inspect_base_map(&pack.root).expect("inspect");
+        assert_eq!(imported.fighters.len(), 1);
+        assert!(imported.fighters[0].eastern);
+        assert_eq!(imported.fighters[0].wave, 2);
+        assert_eq!(imported.fighters[0].spots.len(), 2);
+        assert!((imported.fighters[0].spots[0].0 - 110_000.0).abs() < 2.0);
+        assert!((imported.fighters[0].spots[1].0 - 130_000.0).abs() < 2.0);
     }
 }

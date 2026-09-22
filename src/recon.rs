@@ -38,7 +38,8 @@
 //!   `RestoreChoice` / `RestoreKind`, `restore_start_choices`),
 //!   `fn inspect_placed_pack` / `PlacedPackInfo` / `PlacedTypeInfo`,
 //!   `fn looks_like_placed_pack`, `fn placed_copy_count`,
-//!   `fn copy_type_name`, `fn inspect_army_copies` / `ArmyCopyInfo`.
+//!   `fn copy_type_name`, `fn inspect_army_copies` / `ArmyCopyInfo`
+//!   (heading, parked network, waypoint X/Z).
 //! * Parking: `fn park_recon_copies(_headed/_spots)`,
 //!   `fn park_army_group(_spots)`, `fn park_army_mixed`,
 //!   `fn snap_copy_attack_areas`, `fn snap_army_attack_areas`,
@@ -737,6 +738,28 @@ fn park_one_ground_copy(child: &mut Il2Entity, spot: &GroundSpot) {
     }
 }
 
+/// Park a loaded copy. Heading is a delta from the yaw already in the file
+/// (templates face north so this matches [`park_one_ground_copy`]).
+fn park_one_ground_copy_from(child: &mut Il2Entity, spot: &GroundSpot, copy: &ArmyCopyInfo) {
+    if let Some(net) = &spot.network {
+        mapnet::park_route_copy(
+            child,
+            (spot.x, spot.z),
+            spot.heading_deg,
+            &net.unit_xz,
+            &net.waypoints,
+        );
+        return;
+    }
+    let delta = crate::placement::heading_delta(copy.heading, spot.heading_deg);
+    crate::placement::apply_group_heading(child, delta);
+    let from = child.first_xz().unwrap_or((0.0, 0.0));
+    crate::placement::move_anchor_to(child, from, (spot.x, spot.z));
+    if !spot.waypoints.is_empty() {
+        mapnet::park_path_waypoints(child, &spot.waypoints);
+    }
+}
+
 /// Park each placed copy from a map preview, following roads/rails when set.
 pub fn park_recon_copies_spots(root: &mut Il2Entity, spots: &[GroundSpot]) {
     let mut i = 0usize;
@@ -827,8 +850,14 @@ pub struct ArmyCopyInfo {
     pub range_m: Option<f64>,
     pub x: f64,
     pub z: f64,
+    /// Visual yaw already baked into the group (`YOri` on Model objects).
+    pub heading: f64,
     pub route: Option<crate::mapnet::RouteLayout>,
+    /// Restored road/rail pose when the copy is already parked on the network.
+    pub network: Option<crate::mapnet::NetworkSpot>,
     pub wp_ahead: Vec<f64>,
+    /// World X/Z of path waypoints (not RTB), Index order.
+    pub waypoints: Vec<(f64, f64)>,
 }
 
 fn army_copy_refs(root: &Il2Entity) -> Vec<&Il2Entity> {
@@ -847,8 +876,10 @@ pub fn inspect_army_copies(root: &Il2Entity) -> Vec<ArmyCopyInfo> {
         .into_iter()
         .map(|copy| {
             let (x, z) = copy.first_xz().unwrap_or((0.0, 0.0));
+            let network = crate::mapnet::inspect_parked_network(copy);
             let route = crate::mapnet::inspect_route(copy);
-            let wp_ahead = if route.is_some() {
+            let on_net = network.is_some() || route.is_some();
+            let wp_ahead = if on_net {
                 Vec::new()
             } else {
                 crate::mapnet::inspect_path_waypoints(copy)
@@ -858,8 +889,11 @@ pub fn inspect_army_copies(root: &Il2Entity) -> Vec<ArmyCopyInfo> {
                 range_m: crate::weapon_range::group_weapon_range(copy),
                 x,
                 z,
+                heading: crate::mapnet::inspect_visual_heading(copy),
                 route,
+                network,
                 wp_ahead,
+                waypoints: crate::mapnet::inspect_waypoint_xz(copy),
             }
         })
         .collect()
@@ -905,16 +939,17 @@ pub fn park_army_mixed(
     let packed = pack_root_mut(root);
     let mut si = 0usize;
     let mut gi = 0usize;
-    let mut apply = |child: &mut Il2Entity, kind: crate::weapon_range::ArmyUnitKind| {
+    let mut apply = |child: &mut Il2Entity, kind: crate::weapon_range::ArmyUnitKind, copy: &ArmyCopyInfo| {
         if kind == crate::weapon_range::ArmyUnitKind::Ship {
             if let Some(&(x, z, heading)) = ships.get(si) {
-                crate::placement::apply_group_heading(child, heading);
+                let delta = crate::placement::heading_delta(copy.heading, heading);
+                crate::placement::apply_group_heading(child, delta);
                 let from = child.first_xz().unwrap_or((0.0, 0.0));
                 crate::placement::move_anchor_to(child, from, (x, z));
                 si += 1;
             }
         } else if let Some(spot) = ground.get(gi) {
-            park_one_ground_copy(child, spot);
+            park_one_ground_copy_from(child, spot, copy);
             gi += 1;
         }
     };
@@ -925,14 +960,14 @@ pub fn park_army_mixed(
                 continue;
             }
             if let Some(copy) = copies.get(ci) {
-                apply(child, copy.kind);
+                apply(child, copy.kind, copy);
             }
             ci += 1;
         }
         return;
     }
     if let Some(copy) = copies.first() {
-        apply(packed, copy.kind);
+        apply(packed, copy.kind, copy);
     }
 }
 
@@ -2456,5 +2491,31 @@ mod tests {
         assert!((got[1].0 - 137_000.0).abs() < 1.0);
         assert!((got[0].1 - 150_000.0).abs() < 1.0);
         assert!((got[1].1 - 150_000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn park_army_mixed_keeps_already_oriented_export() {
+        let mut tmpl = truck();
+        crate::placement::apply_group_heading(&mut tmpl, 90.0);
+        let copies = inspect_army_copies(&tmpl);
+        assert_eq!(copies.len(), 1);
+        assert!((copies[0].heading - 90.0).abs() < 2.0);
+        let from = tmpl.first_xz().unwrap();
+        let mut spot = GroundSpot::at(
+            from.0,
+            from.1,
+            true,
+            copies[0].heading,
+            GroundKind::Supply,
+            None,
+        );
+        spot.waypoints = copies[0].waypoints.clone();
+        let mut parked = tmpl.clone();
+        park_army_mixed(&mut parked, &copies, &[], &[spot]);
+        let after = inspect_army_copies(&parked);
+        assert!((after[0].heading - 90.0).abs() < 2.0);
+        let (x, z) = parked.first_xz().unwrap();
+        assert!((x - from.0).abs() < 1.0);
+        assert!((z - from.1).abs() < 1.0);
     }
 }

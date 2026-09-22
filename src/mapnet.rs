@@ -32,6 +32,9 @@
 //!   preserving the original XPos/ZPos/YOri decimal precision.
 //! * `inspect_path_waypoints` / `park_path_waypoints` — off-road Goto WP hops
 //!   (not RTB) so `mapground` can aim them at an objective or the front.
+//! * `inspect_visual_heading` / `inspect_waypoint_xz` / `inspect_parked_network`
+//!   — restore a already-exported column (including a curved road) so Map
+//!   reimport can keep vehicle and waypoint world positions.
 //!
 //! ## Conventions
 //! * Trains always use rail; non-train groups ride roads only when
@@ -56,7 +59,7 @@ use std::sync::OnceLock;
 use crate::ast::Il2Entity;
 use crate::geo::{MAP_MAX, MAP_MIN};
 use crate::mapclip::WorldAabb;
-use crate::placement::{heading_toward, mix_index, move_anchor_to};
+use crate::placement::{heading_delta, heading_toward, mix_index, move_anchor_to};
 
 const SVG_SIZE: f64 = 9984.0;
 const M_PER_SVG: f64 = (MAP_MAX - MAP_MIN) / SVG_SIZE;
@@ -65,6 +68,8 @@ pub const NETWORK_SPACING: f64 = 2_500.0;
 const COLUMN_MIN_ALONG: f64 = 40.0;
 const COLUMN_ACROSS_ABS: f64 = 25.0;
 const COLUMN_ACROSS_FRAC: f64 = 0.025;
+/// Max metres a parked column vehicle may sit off its road/rail polyline.
+const PARKED_ON_LINE_M: f64 = 80.0;
 
 #[derive(Clone, Debug)]
 pub struct PolyLine {
@@ -354,6 +359,119 @@ pub fn inspect_route(root: &Il2Entity) -> Option<RouteLayout> {
         wp_ahead,
         zone_in_m,
     })
+}
+
+/// Circular mean of `YOri` on every object with a Model (vehicles, trains, ships).
+pub fn inspect_visual_heading(root: &Il2Entity) -> f64 {
+    let mut cx = 0.0;
+    let mut cz = 0.0;
+    let mut n = 0.0;
+    root.for_each(&mut |e| {
+        if e.property("Model").is_none() {
+            return;
+        }
+        let yori: f64 = e
+            .property("YOri")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0);
+        let r = yori.to_radians();
+        cx += r.cos();
+        cz += r.sin();
+        n += 1.0;
+    });
+    if n < 1.0 {
+        return 0.0;
+    }
+    cz.atan2(cx).to_degrees().rem_euclid(360.0)
+}
+
+/// World X/Z of path `MCU_Waypoint`s (not RTB), in Index order.
+pub fn inspect_waypoint_xz(root: &Il2Entity) -> Vec<(f64, f64)> {
+    let mut ids_pts = Vec::new();
+    root.for_each(&mut |e| {
+        if e.block_type != "MCU_Waypoint" || is_rtb_waypoint(e) {
+            return;
+        }
+        if let (Some(id), Some(p)) = (e.index, e.pos_xz()) {
+            ids_pts.push((id, p));
+        }
+    });
+    ids_pts.sort_by_key(|(id, _)| *id);
+    ids_pts.into_iter().map(|(_, p)| p).collect()
+}
+
+/// Restore a column that is already sitting on a road or railroad (including a curve).
+///
+/// Straight authored templates often fail this (they are not on the network).
+/// After Map export, vehicles follow the polyline, so `inspect_route`'s
+/// perfect-column test can miss them — this snaps the lead and checks that
+/// every vehicle still lies on the same line.
+pub fn inspect_parked_network(root: &Il2Entity) -> Option<NetworkSpot> {
+    let rail = root.count_block_type("Train") > 0;
+    let units = collect_route_units(root);
+    if units.is_empty() {
+        return None;
+    }
+    if !rail && units.len() < 2 {
+        return None;
+    }
+    let heading = mean_heading(&units);
+    let n = units.len() as f64;
+    let cx = units.iter().map(|u| u.x).sum::<f64>() / n;
+    let cz = units.iter().map(|u| u.z).sum::<f64>() / n;
+    let mut keyed: Vec<(f64, usize)> = units
+        .iter()
+        .enumerate()
+        .map(|(i, u)| (project_along(u.x, u.z, (cx, cz), heading).0, i))
+        .collect();
+    keyed.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let lead = &units[keyed[0].1];
+    let net = network_for(rail);
+    let snap = net.nearest(lead.x, lead.z)?;
+    let line = net.lines.get(snap.line)?;
+    if polyline_dist(line, lead.x, lead.z) > PARKED_ON_LINE_M {
+        return None;
+    }
+    if units
+        .iter()
+        .any(|u| polyline_dist(line, u.x, u.z) > PARKED_ON_LINE_M)
+    {
+        return None;
+    }
+    let reverse = heading_delta(snap.heading, heading).abs() > 90.0;
+    let lead_along = keyed[0].0;
+    let behind: Vec<f64> = keyed
+        .iter()
+        .skip(1)
+        .map(|(a, _)| (lead_along - *a).max(0.0))
+        .collect();
+    let mut unit_xz = vec![(lead.x, lead.z)];
+    for &(_, i) in keyed.iter().skip(1) {
+        unit_xz.push((units[i].x, units[i].z));
+    }
+    Some(NetworkSpot {
+        rail,
+        line: snap.line,
+        lead_dist: snap.dist,
+        reverse,
+        behind,
+        wp_ahead: waypoint_ahead(root, &units),
+        zone_in_m: inspect_zone_in(root).unwrap_or(if rail { 19_000.0 } else { 10_000.0 }),
+        unit_xz,
+        waypoints: inspect_waypoint_xz(root),
+    })
+}
+
+fn polyline_dist(line: &PolyLine, x: f64, z: f64) -> f64 {
+    let mut best = f64::MAX;
+    for w in line.pts.windows(2) {
+        let (px, pz, _) = closest_on_segment(x, z, w[0], w[1]);
+        let d2 = (px - x) * (px - x) + (pz - z) * (pz - z);
+        if d2 < best {
+            best = d2;
+        }
+    }
+    best.sqrt()
 }
 
 fn inspect_zone_in(root: &Il2Entity) -> Option<f64> {
@@ -992,6 +1110,12 @@ mod tests {
             }
         });
         assert_eq!(wp_n, pose.waypoints.len());
+        let restored = inspect_parked_network(&root).expect("parked column on a road");
+        assert!(!restored.rail);
+        assert_eq!(restored.unit_xz.len(), pose.unit_xz.len());
+        assert_eq!(restored.waypoints.len(), pose.waypoints.len());
+        assert!((restored.unit_xz[0].0 - x).abs() < 2.0);
+        assert!((restored.unit_xz[0].1 - z).abs() < 2.0);
     }
 
     #[test]

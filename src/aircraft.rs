@@ -11,13 +11,17 @@
 //! ## Public API
 //! * `AIRCRAFT_TYPES` / `AircraftType` / `fn aircraft_by_id`
 //! * `COUNTRIES` — (id, label) for the country combo
+//! * `fn country_pack_tag` / `linked_fighter_pack_name` /
+//!   `fighter_pack_filename` — USSR/DPRK/PRC/USA pack titles and export stems
 //! * `fn flight_number` / `flight_color` / `plane_display_name` — Red 12, …
 //! * `fn encode_tcode` / `encode_tcode_color` — IL-2 TCode / TCodeColor
 //! * `fn callsign_for` / `fn default_skill` / `loose_skill` / `pair_skills`
 //! * `fn plane_coalitions_for_country` — enemy-coalition string for Zone IN/OUT
 //!
 //! ## Used by
-//! * ui.rs (Fighter Pack) — type list, country combo, default skills, numbers
+//! * ui.rs (Fighter Pack) — type list, country combo, default skills, numbers,
+//!   export filename / group title from country code
+//! * pack.rs — linked pack title from the generated planes' country
 //! * flights.rs — identity written onto cloned planes
 //! * template.rs — plane display names / TCode when a catalog plane is a fighter
 //! * frontlines.rs — `suggested_aircraft` looks up `AircraftType` by id
@@ -80,6 +84,29 @@ pub const COUNTRIES: &[(i32, &str)] = &[
     (503, "503  PRC"),
     (601, "601  USA"),
 ];
+
+/// Short nation tag for pack titles and export filenames (`USSR`, `USA`, …).
+pub fn country_pack_tag(country: i32) -> &'static str {
+    COUNTRIES
+        .iter()
+        .find(|(id, _)| *id == country)
+        .and_then(|(_, label)| label.split_whitespace().last())
+        .unwrap_or(if country / 100 == 6 { "NATO" } else { "Eastern" })
+}
+
+/// Root group name written into a linked fighter pack.
+pub fn linked_fighter_pack_name(country: i32, group_count: usize) -> String {
+    format!("{} Fighters {group_count}pack - Linked", country_pack_tag(country))
+}
+
+/// Suggested `.Group` filename for a linked fighter pack.
+pub fn fighter_pack_filename(country: i32, group_count: usize) -> String {
+    format!(
+        "{}_Fighters_Random_{}pack.Group",
+        country_pack_tag(country),
+        group_count
+    )
+}
 
 const FLIGHT_COLORS: &[&str] = &["Red", "Blue", "Yellow", "Green", "White", "Black"];
 
@@ -230,5 +257,21 @@ mod tests {
         assert_eq!(plane_coalitions_for_country(502), "[2]");
         assert_eq!(plane_coalitions_for_country(503), "[2]");
         assert_eq!(plane_coalitions_for_country(601), "[1]");
+    }
+
+    #[test]
+    fn pack_names_follow_country_code() {
+        assert_eq!(country_pack_tag(501), "USSR");
+        assert_eq!(country_pack_tag(502), "DPRK");
+        assert_eq!(country_pack_tag(503), "PRC");
+        assert_eq!(country_pack_tag(601), "USA");
+        assert_eq!(
+            linked_fighter_pack_name(601, 3),
+            "USA Fighters 3pack - Linked"
+        );
+        assert_eq!(
+            fighter_pack_filename(502, 5),
+            "DPRK_Fighters_Random_5pack.Group"
+        );
     }
 }

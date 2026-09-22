@@ -1,20 +1,16 @@
 //! flights.rs — fighter flight configuration
 //!
-//! Applies GUI flight composition to **Group 1** of a fighter-pack
-//! template in place: rebuilds `Airplanes` (cloned plane +
-//! `MCU_TR_Entity` pairs with identity, TCode and AILevel; per-seat XZ
-//! offsets; low-cover band 500–1500 m scaled by max altitude; +2000 m
-//! high-cover pair on 3/4-ships; 25–50 m lead/wing stacks), the
-//! equal-odds 500 ms randomizer waterfall, per-flight `Spawn` /
-//! `DeathCount` / `SpawnCount` MCUs, wing-cover MCUs chained off
-//! `MORE ORDERS`, and rewires `Logics` (attack areas, delete/deactivate
-//! targets, cooldown / reinforcement / delete-order timers, checkzone
-//! coalitions by country) and `RTB - 1`. Flight sizes cycle
-//! `max, max-1, …, 1`, so max 4 over 4 flights yields 4-, 3-, 2-, 1-ship
-//! elements rather than four 4-ships. Owns nothing outside Group 1 and
-//! `RTB - 1` — zones, NodeGates and the other groups are left for
-//! `pack.rs` to clone; it does not pick pack size or positions
-//! (`pack::generate_pack` / `generate_pack_at` do).
+//! Rebuilds **Group 1** from Template Builder pair logic (Independent
+//! seats, OnSpawned → AttackArea lead / Cover wing including leftover
+//! and extra pair leads, events → that plane’s Mission Complete →
+//! Force Complete / RTB / deactivate for that bird only, AI RTB off,
+//! Spawn + repeat) then injects the fighter-pack randomizer, per-flight
+//! spawners / DeathCounts, pack hook names, finger-four placement, and
+//! GUI altitude / timer / identity settings. Zones stay
+//! at the original pack sizes (16 km IN / 35 km OUT); AttackArea is
+//! 30 km air / 600 s. NodeGates and `RTB - 1` come from the loaded
+//! linked pack. Flight sizes cycle `max, max-1, …, 1`. `pack.rs` clones
+//! the finished Group 1.
 //!
 //! ## Public API
 //! * `struct FlightConfig` — GUI inputs: flight count (clamped 1–10),
@@ -23,20 +19,29 @@
 //!   delete-order seconds, altitude range. `Default`: 4 flights, max 4,
 //!   mig15bis + la11 (skills 3/2), country 501, 180/300/60 s,
 //!   1000–5500 m.
-//! * `fn configure_aircraft` — apply the config to a template root in place.
+//! * `fn configure_aircraft` — replace Group 1 on a linked-pack root.
 //! * `fn flight_sizes` — size per flight (`max - (i % max)`; 4/4 → 4,3,2,1).
 //!
 //! ## Used by
-//! * ui.rs (Fighter Pack) — writes settings into the loaded/builtin template before pack generation; `flight_sizes` drives the UI summary.
+//! * ui.rs (Fighter Pack) — writes settings into the loaded/builtin
+//!   template before pack generation; `flight_sizes` drives the UI summary.
 //! * ui.rs (Map) — flight packs placed on the map.
-
 
 use crate::aircraft::{
     aircraft_by_id, callsign_for, encode_tcode, encode_tcode_color, flight_color,
-    pair_skills, plane_coalitions_for_country, plane_display_name, AircraftType, AIRCRAFT_TYPES,
+    pair_skills, plane_display_name, AircraftType, AIRCRAFT_TYPES,
 };
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;
+use crate::template::{
+    builtin_plane_catalog, finger_four_offset, generate_template, BringUp, CatalogUnit,
+    EntityEvent, EventHook, EventThen, FlightRole, OrderKind, OrderSpec, PlaceLayout, PlaneStart,
+    TemplateOptions, TemplateSeat, ZoneCoalition, AIR_ZONE_IN_M, AIR_ZONE_OUT_M, PLACEMENT_SPACING,
+};
+
+/// AttackArea radius from the original linked fighter pack (metres).
+const PACK_ATTACK_AREA_M: f32 = 30_000.0;
+const PACK_ATTACK_TIME_S: f32 = 600.0;
 
 #[derive(Debug, Clone)]
 pub struct FlightConfig {
@@ -72,7 +77,7 @@ impl Default for FlightConfig {
 
 /// Seconds between each randomizer waterfall timer. 100ms is too tight for IL-2.
 const WATERFALL_STEP_S: f64 = 0.5;
-/// Second pair in a 3/4-ship sits this far above the low-cover pair.
+/// Second pair of each complete 4-ship sits this far above the low-cover pair.
 const HIGH_COVER_OFFSET_M: f64 = 2000.0;
 const PAIR_STACK_MIN_M: f64 = 25.0;
 const PAIR_STACK_MAX_M: f64 = 50.0;
@@ -81,196 +86,198 @@ const REF_ALT_MAX: f64 = 5500.0;
 const REF_LOW_MIN: f64 = 500.0;
 const REF_LOW_MAX: f64 = 1500.0;
 
+const FIGHTER_EVENTS: &[EntityEvent] = &[
+    EntityEvent::OnPlaneCriticalDamage,
+    EntityEvent::OnPilotWounded,
+    EntityEvent::OnPlaneBingoMainMG,
+    EntityEvent::OnPlaneBingoFuel,
+];
+
 struct BuiltFlight {
     entity_ids: Vec<i32>,
     leads: Vec<i32>,
     wings: Vec<i32>,
 }
 
-/// Apply flight composition to **Group 1** and **RTB - 1** inside `root`.
+struct SeatPlan {
+    flight: usize,
+    seat: usize,
+    size: usize,
+    ac: &'static AircraftType,
+    ailevel: i32,
+}
+
+/// Replace **Group 1** with template pair logic plus pack randomizer / hooks.
+/// Keeps **RTB - 1** and **NodeGates** from `root`.
 pub fn configure_aircraft(root: &mut Il2Entity, cfg: &FlightConfig) -> Result<(), String> {
     let flight_count = cfg.flight_count.clamp(1, 10) as usize;
     let max_in_flight = cfg.max_in_flight.clamp(1, 8) as usize;
     let types = resolve_types(&cfg.type_ids, &cfg.type_skills)?;
     let sizes = flight_sizes(flight_count, max_in_flight);
 
-    let mut next_id = root.max_index().saturating_add(1);
+    require_named(root, "Group", "Group 1")?;
+    let rtb_proto = require_named(root, "MCU_Waypoint", "RTB - 1")?.clone();
+    require_named(root, "Group", "NodeGates")?;
 
-    let group1_pos = root
-        .children
-        .iter()
-        .position(|c| c.block_type == "Group" && c.name() == Some("Group 1"))
-        .ok_or("builtin template has no Group 1")?;
-    let rtb_pos = root
-        .children
-        .iter()
-        .position(|c| c.block_type == "MCU_Waypoint" && c.name() == Some("RTB - 1"))
-        .ok_or("builtin template has no RTB - 1")?;
-
-    let (proto_plane, proto_entity) = {
-        let airplanes = root.children[group1_pos]
-            .find_by_name("Airplanes")
-            .ok_or("Group 1 has no Airplanes group")?;
-        prototype_pair(airplanes)?
+    let catalog = builtin_plane_catalog();
+    let (seats, plans) = build_seats(&types, &sizes, cfg, &catalog)?;
+    let opts = TemplateOptions {
+        name: "Group 1".into(),
+        zone_in: AIR_ZONE_IN_M,
+        zone_out: AIR_ZONE_OUT_M,
+        seats,
+        place_layout: PlaceLayout::InvertedVee,
+        per_group: 4,
+        bring_up: BringUp::Spawn,
+        allow_multiple_spawns: true,
+        spawn_cooldown_min: (cfg.cooldown / 60.0).max(0.0),
+        zone_coalition: zone_coalition_for_country(cfg.country),
+        ..TemplateOptions::default()
     };
-    let proto_timer;
-    let proto_spawner;
-    let proto_deact;
-    let proto_act;
-    let proto_death;
-    let proto_spawn_count;
-    let proto_cover;
-    let proto_delay;
-    {
-        let group1 = &root.children[group1_pos];
-        let randomizer = group1
-            .find_by_name("Randomizer")
-            .ok_or("Group 1 has no Randomizer")?;
-        proto_timer = randomizer
-            .find_by_name("Wait for Output 600ms")
-            .cloned()
-            .ok_or("missing timer prototype")?;
-        proto_spawner = randomizer
-            .find_by_name("Spawn 1")
-            .cloned()
-            .ok_or("missing spawner prototype")?;
-        proto_deact = randomizer
-            .find_by_name("CloseInput")
-            .cloned()
-            .ok_or("missing deactivate prototype")?;
-        proto_act = randomizer
-            .find_by_name("ReOpen Outputs")
-            .cloned()
-            .ok_or("missing activate prototype")?;
-        proto_death = group1
-            .find_by_name("DeathCount")
-            .cloned()
-            .ok_or("missing DeathCount prototype")?;
-        proto_spawn_count = group1
-            .find_by_name("SpawnCount")
-            .cloned()
-            .ok_or("missing SpawnCount prototype")?;
-        proto_cover = group1
-            .find_by_name("Cover Lead")
-            .cloned()
-            .ok_or("missing Cover MCU prototype")?;
-        proto_delay = group1
-            .children
-            .iter()
-            .find_map(|c| {
-                if c.name() == Some("Logics") {
-                    c.children.iter().find(|t| t.name() == Some("50ms")).cloned()
-                } else {
-                    None
-                }
-            })
-            .or_else(|| group1.find_by_name("50ms").cloned())
-            .ok_or("missing 50ms timer prototype")?;
-    }
 
+    let mut group1 = generate_template(&opts)?;
+    install_pack_logic(&mut group1, &sizes, cfg, &rtb_proto)?;
+    apply_identities(&mut group1, &plans, cfg)?;
+
+    let mut next_id = root.max_index().saturating_add(1);
+    let (mut group1, _) = duplicate_template(&group1, &mut next_id);
+    let entity_ids = unit_entity_ids(&group1);
+
+    let mut rtb = None;
+    let mut gates = None;
+    for child in root.children.drain(..) {
+        match (child.block_type.as_str(), child.name()) {
+            ("MCU_Waypoint", Some("RTB - 1")) => rtb = Some(child),
+            ("Group", Some("NodeGates")) => gates = Some(child),
+            _ => {}
+        }
+    }
+    let mut rtb = rtb.ok_or("builtin template has no RTB - 1")?;
+    let gates = gates.ok_or("template has no NodeGates group — load a linked fighter pack")?;
+    rtb.set_objects(entity_ids);
+    wire_zones_to_gates(&mut group1, &gates);
+    root.children.push(rtb);
+    root.children.push(group1);
+    root.children.push(gates);
+    Ok(())
+}
+
+fn require_named<'a>(
+    root: &'a Il2Entity,
+    block: &str,
+    name: &str,
+) -> Result<&'a Il2Entity, String> {
+    root.children
+        .iter()
+        .find(|c| c.block_type == block && c.name() == Some(name))
+        .ok_or_else(|| format!("template has no {name}"))
+}
+
+fn zone_coalition_for_country(country: i32) -> ZoneCoalition {
+    if country / 100 == 6 {
+        ZoneCoalition::Eastern
+    } else {
+        ZoneCoalition::Western
+    }
+}
+
+fn catalog_unit<'a>(catalog: &'a [CatalogUnit], ac: &AircraftType) -> Result<CatalogUnit, String> {
+    catalog
+        .iter()
+        .find(|u| u.script.eq_ignore_ascii_case(ac.script))
+        .cloned()
+        .ok_or_else(|| format!("no catalog unit for `{}`", ac.id))
+}
+
+fn build_seats(
+    types: &[(&'static AircraftType, i32)],
+    sizes: &[usize],
+    cfg: &FlightConfig,
+    catalog: &[CatalogUnit],
+) -> Result<(Vec<TemplateSeat>, Vec<SeatPlan>), String> {
     let alt_min = cfg.altitude_min.min(cfg.altitude_max) as f64;
     let alt_max = cfg.altitude_max.max(cfg.altitude_min) as f64;
-
-    let mut flights: Vec<BuiltFlight> = Vec::with_capacity(flight_count);
-    let mut plane_nodes: Vec<Il2Entity> = Vec::new();
-
-    for f in 0..flight_count {
+    let flight_count = sizes.len();
+    let mut seats = Vec::new();
+    let mut plans = Vec::new();
+    let mut global = 0usize;
+    for (f, &size) in sizes.iter().enumerate() {
         let (ac, recommended) = types[f % types.len()];
-        let size = sizes[f];
-        let mut built = BuiltFlight {
-            entity_ids: Vec::new(),
-            leads: Vec::new(),
-            wings: Vec::new(),
-        };
+        let unit = catalog_unit(catalog, ac)?;
         for seat in 0..size {
             let pair = seat / 2;
             let (lead_skill, wing_skill) = pair_skills(recommended, f, pair);
-            let ailevel = if seat % 2 == 0 { lead_skill } else { wing_skill };
-            let (mut plane, mut entity) =
-                clone_pair(&proto_plane, &proto_entity, &mut next_id);
-            let dx = f as f64 * 180.0 + seat as f64 * 55.0;
-            let dz = f as f64 * -130.0 + seat as f64 * 45.0;
-            plane.translate_xz(dx, dz);
-            entity.translate_xz(dx, dz);
-            let y = plane_altitude(alt_min, alt_max, f, flight_count, seat, size);
-            plane.set_ypos(y);
-            entity.set_ypos(y + 0.2);
-            apply_plane_identity(&mut plane, cfg.country, ac, f, seat, ailevel);
-            let eid = entity.index.ok_or("cloned entity missing Index")?;
-            built.entity_ids.push(eid);
-            if seat % 2 == 0 {
-                built.leads.push(eid);
+            let ailevel = if seat % 2 == 0 {
+                lead_skill
             } else {
-                built.wings.push(eid);
-            }
-            plane_nodes.push(plane);
-            plane_nodes.push(entity);
+                wing_skill
+            };
+            let mut tpl = TemplateSeat::new(unit.clone());
+            tpl.role = FlightRole::Independent;
+            tpl.country = cfg.country;
+            tpl.skill = ailevel;
+            tpl.altitude = plane_altitude(alt_min, alt_max, f, flight_count, seat, size) as f32;
+            tpl.ai_rtb = false;
+            tpl.start_type = PlaneStart::Air.as_i32();
+            tpl.orders = fighter_orders(seat, global);
+            tpl.events = fighter_events(tpl.orders.len().saturating_sub(1));
+            seats.push(tpl);
+            plans.push(SeatPlan {
+                flight: f,
+                seat,
+                size,
+                ac,
+                ailevel,
+            });
         }
-        flights.push(built);
+        global += size;
     }
+    Ok((seats, plans))
+}
 
-    let mut spawners = Vec::new();
-    let mut death_counts = Vec::new();
-    let mut spawn_counts = Vec::new();
-    for (f, flight) in flights.iter().enumerate() {
-        let mut spawner = clone_mcu(&proto_spawner, &mut next_id, &format!("Spawn {}", f + 1));
-        spawner.set_objects(flight.entity_ids.clone());
-        let mut death = clone_mcu(&proto_death, &mut next_id, "DeathCount");
-        death.set_property("Counter", flight.entity_ids.len().to_string());
-        let mut scount = clone_mcu(&proto_spawn_count, &mut next_id, "SpawnCount");
-        scount.set_property("Counter", flight.entity_ids.len().to_string());
-        spawners.push(spawner);
-        death_counts.push(death);
-        spawn_counts.push(scount);
+fn fighter_orders(seat: usize, global: usize) -> Vec<OrderSpec> {
+    let mut orders = vec![on_spawned_order()];
+    if seat % 2 == 1 {
+        let mut cover = OrderSpec::default();
+        cover.kind = OrderKind::Cover;
+        cover.delay_s = 0.5;
+        cover.priority = 1;
+        cover.cover_lead = Some(global + seat - 1);
+        orders.push(cover);
+    } else {
+        let mut area = OrderSpec::default();
+        area.kind = OrderKind::AttackArea;
+        area.delay_s = 0.5;
+        area.attack_area = PACK_ATTACK_AREA_M;
+        area.attack_air = true;
+        area.attack_ground = false;
+        area.attack_g_targets = false;
+        area.time_s = PACK_ATTACK_TIME_S;
+        area.priority = 1;
+        orders.push(area);
     }
+    let mut done = OrderSpec::default();
+    done.kind = OrderKind::MissionComplete;
+    done.delay_s = 0.5;
+    orders.push(done);
+    orders
+}
 
-    patch_plane_events(&mut plane_nodes, &flights, &spawners, &death_counts, &spawn_counts)?;
+fn on_spawned_order() -> OrderSpec {
+    let mut spec = OrderSpec::default();
+    spec.kind = OrderKind::OnSpawned;
+    spec.delay_s = 0.5;
+    spec
+}
 
-    let all_entities: Vec<i32> = flights.iter().flat_map(|f| f.entity_ids.iter().copied()).collect();
-    let all_leads: Vec<i32> = flights.iter().flat_map(|f| f.leads.iter().copied()).collect();
-    let mut pairs: Vec<(i32, i32)> = Vec::new();
-    for flight in &flights {
-        for (lead, wing) in flight.leads.iter().zip(flight.wings.iter()) {
-            pairs.push((*lead, *wing));
-        }
-    }
-
-    let randomizer_nodes = build_randomizer(
-        &proto_timer,
-        &proto_deact,
-        &proto_act,
-        &spawners,
-        &mut next_id,
-    )?;
-    let input_id = randomizer_nodes
+fn fighter_events(mission_complete_index: usize) -> Vec<EventHook> {
+    FIGHTER_EVENTS
         .iter()
-        .find(|n| n.name() == Some("Randomizer:INPUT"))
-        .and_then(|n| n.index)
-        .ok_or("randomizer input missing Index")?;
-
-    {
-        let group1 = &mut root.children[group1_pos];
-        let airplanes = group1
-            .find_by_name_mut("Airplanes")
-            .ok_or("Group 1 has no Airplanes group")?;
-        airplanes.children = plane_nodes;
-
-        let randomizer = group1
-            .find_by_name_mut("Randomizer")
-            .ok_or("Group 1 has no Randomizer")?;
-        randomizer.children = randomizer_nodes;
-
-        let logics = group1
-            .find_by_name_mut("Logics")
-            .ok_or("Group 1 has no Logics")?;
-        replace_named(logics, "DeathCount", death_counts);
-        replace_named(logics, "SpawnCount", spawn_counts);
-        install_cover_wings(logics, &proto_cover, &proto_delay, &pairs, &mut next_id)?;
-        rewire_logics(logics, input_id, &all_entities, &all_leads, cfg);
-    }
-
-    root.children[rtb_pos].set_objects(all_entities);
-    Ok(())
+        .map(|&kind| EventHook {
+            kind,
+            then: EventThen::Order(mission_complete_index),
+        })
+        .collect()
 }
 
 fn resolve_types(
@@ -297,33 +304,324 @@ pub fn flight_sizes(count: usize, max: usize) -> Vec<usize> {
     (0..count).map(|i| max - (i % max)).collect()
 }
 
-fn prototype_pair(airplanes: &Il2Entity) -> Result<(Il2Entity, Il2Entity), String> {
-    let plane = airplanes
-        .children
-        .iter()
-        .find(|c| c.block_type == "Plane")
+fn install_pack_logic(
+    group: &mut Il2Entity,
+    sizes: &[usize],
+    cfg: &FlightConfig,
+    rtb_proto: &Il2Entity,
+) -> Result<(), String> {
+    if let Some(zone) = group.find_by_name_mut("Zone Out") {
+        zone.set_name("Zone OUT");
+    }
+    if let Some(delayed) = group.find_by_name_mut("DELAYED END ORDERS") {
+        delayed.set_name("Delay Delete");
+        delayed.set_property("Time", format_time(cfg.delete_orders));
+    }
+    if let Some(cool) = group.find_by_name_mut("COOLDOWN") {
+        cool.set_property("Time", format_time(cfg.cooldown));
+    }
+
+    rename_covers(group);
+
+    let proto_timer = named_clone(group, "ENABLE / PULSE IN")?;
+    let proto_deact = first_block(group, "MCU_Deactivate")
         .cloned()
-        .ok_or("no prototype Plane")?;
-    let link = plane
-        .property("LinkTrId")
-        .and_then(|s| s.parse::<i32>().ok());
-    let entity = airplanes
-        .children
-        .iter()
-        .find(|c| c.block_type == "MCU_TR_Entity" && c.index == link)
+        .ok_or("missing deactivate prototype")?;
+    let proto_act = first_block(group, "MCU_Activate")
         .cloned()
-        .ok_or("no prototype plane entity")?;
-    Ok((plane, entity))
+        .ok_or("missing activate prototype")?;
+    let proto_spawn = named_clone(group, "Trigger Spawner")?;
+    let proto_death = named_clone(group, "DeathCount")?;
+    let proto_force = named_clone(group, "Force Complete - High")?;
+    let proto_deact_units = named_clone(group, "Deactivate Units")
+        .ok()
+        .unwrap_or_else(|| proto_deact.clone());
+    let old_spawn_id = proto_spawn.index.ok_or("Trigger Spawner missing Index")?;
+    let old_death_id = proto_death.index.ok_or("DeathCount missing Index")?;
+    let mission_end_id = group
+        .find_by_name("MISSION END")
+        .and_then(|e| e.index)
+        .ok_or("missing MISSION END")?;
+    let zone_in_id = group
+        .find_by_name("Zone IN")
+        .and_then(|e| e.index)
+        .ok_or("missing Zone IN")?;
+    let spawn_units_id = group
+        .find_by_name("SPAWN UNITS")
+        .and_then(|e| e.index)
+        .ok_or("missing SPAWN UNITS")?;
+
+    let entity_ids = unit_entity_ids(group);
+    let flights = split_flights(&entity_ids, sizes)?;
+    let mut next_id = group.max_index().saturating_add(1);
+
+    let mut spawners = Vec::new();
+    let mut death_counts = Vec::new();
+    for (f, flight) in flights.iter().enumerate() {
+        let mut spawner = clone_mcu(&proto_spawn, &mut next_id, &format!("Spawn {}", f + 1));
+        spawner.set_objects(flight.entity_ids.clone());
+        let mut death = clone_mcu(&proto_death, &mut next_id, "DeathCount");
+        death.set_property("Counter", flight.entity_ids.len().to_string());
+        death.set_property("Dropcount", "1");
+        spawners.push(spawner);
+        death_counts.push(death);
+    }
+
+    let randomizer_nodes = build_randomizer(&proto_timer, &proto_deact, &proto_act, &spawners, &mut next_id)?;
+    let input_id = randomizer_nodes
+        .iter()
+        .find(|n| n.name() == Some("Randomizer:INPUT"))
+        .and_then(|n| n.index)
+        .ok_or("randomizer input missing Index")?;
+    let death_ids: Vec<i32> = death_counts.iter().filter_map(|d| d.index).collect();
+    for death in &mut death_counts {
+        if let Some(cool) = group.find_by_name("COOLDOWN").and_then(|e| e.index) {
+            death.set_targets(vec![cool]);
+        }
+    }
+
+    patch_plane_links(group, &flights, &spawners, &death_ids, old_spawn_id, old_death_id)?;
+    install_plane_ends(
+        group,
+        &entity_ids,
+        sizes,
+        &death_ids,
+        &proto_force,
+        &proto_timer,
+        &proto_deact_units,
+        rtb_proto,
+        mission_end_id,
+        cfg.delete_orders,
+        &mut next_id,
+    )?;
+
+    let mut enable = clone_mcu(&proto_act, &mut next_id, "Enable Spawner");
+    enable.set_targets(vec![zone_in_id]);
+    enable.set_objects(Vec::new());
+    let mut disable = clone_mcu(&proto_deact, &mut next_id, "Disable Spawner");
+    disable.set_targets(vec![zone_in_id]);
+    disable.set_objects(Vec::new());
+    let mut delete_orders = clone_mcu(&proto_timer, &mut next_id, "Delete Orders");
+    delete_orders.set_property("Time", "0.02");
+    delete_orders.set_property("Random", "100");
+    delete_orders.set_targets(vec![mission_end_id]);
+
+    let mut reenf = clone_mcu(&proto_timer, &mut next_id, "REENFORCEMENTS (33%)");
+    reenf.set_property("Time", format_time(cfg.reinforcement));
+    reenf.set_property("Random", "33");
+    reenf.set_targets(vec![spawn_units_id]);
+    let reenf_id = reenf.index.ok_or("reinforcement missing Index")?;
+
+    if let Some(spawn_units) = group.find_by_name_mut("SPAWN UNITS") {
+        spawn_units.set_targets(vec![input_id, reenf_id]);
+    }
+    if let Some(cool) = group.find_by_name_mut("COOLDOWN") {
+        cool.set_targets(vec![input_id]);
+    }
+    if let Some(on) = group.find_by_name_mut("DeathCount ReActivate") {
+        on.set_targets(death_ids.clone());
+    }
+    if let Some(off) = group.find_by_name_mut("DeathCount Deactivate") {
+        off.set_targets(death_ids.clone());
+    }
+    if let Some(md) = group.find_by_name_mut("Modifier Set Value") {
+        md.set_targets(death_ids);
+    }
+
+    if let Some(logic) = group.find_by_name_mut("Logic") {
+        logic.children.retain(|c| {
+            !matches!(
+                c.name(),
+                Some("Trigger Spawner") | Some("SpawnCount") | Some("DeathCount")
+            )
+        });
+        logic.children.extend(death_counts);
+        logic.children.push(enable);
+        logic.children.push(disable);
+        logic.children.push(delete_orders);
+        logic.children.push(reenf);
+    }
+
+    let mut randomizer = Il2Entity::new("Group");
+    let rid = next_id;
+    next_id += 1;
+    randomizer.index = Some(rid);
+    randomizer.set_property("Index", rid.to_string());
+    randomizer.set_name("Randomizer");
+    randomizer.set_property("Desc", "\"\"");
+    randomizer.children = randomizer_nodes;
+    group.children.push(randomizer);
+    let _ = next_id;
+    layout_pack_mcus(group, sizes.iter().sum());
+    Ok(())
 }
 
-fn clone_pair(plane: &Il2Entity, entity: &Il2Entity, next_id: &mut i32) -> (Il2Entity, Il2Entity) {
-    let mut wrapper = Il2Entity::new("Group");
-    wrapper.children.push(plane.clone());
-    wrapper.children.push(entity.clone());
-    let (mut cloned, _) = duplicate_template(&wrapper, next_id);
-    let entity = cloned.children.pop().unwrap();
-    let plane = cloned.children.pop().unwrap();
-    (plane, entity)
+const MCU_GAP: f64 = 150.0;
+const BRANCH_GAP: f64 = 300.0;
+
+fn left_xz(origin: (f64, f64), branch: usize, row: i32) -> (f64, f64) {
+    (
+        origin.0 - MCU_GAP * f64::from(row),
+        origin.1 - MCU_GAP - BRANCH_GAP * branch as f64,
+    )
+}
+
+fn right_xz(origin: (f64, f64), branch: usize, row: i32) -> (f64, f64) {
+    (
+        origin.0 - MCU_GAP * f64::from(row),
+        origin.1 + MCU_GAP + BRANCH_GAP * branch as f64,
+    )
+}
+
+fn right_order_xz(origin: (f64, f64), branch: usize, row: i32) -> (f64, f64) {
+    let (x, z) = right_xz(origin, branch, row);
+    (x, z + MCU_GAP)
+}
+
+fn set_xz(entity: &mut Il2Entity, xz: (f64, f64)) {
+    entity.set_property("XPos", format!("{:.3}", xz.0));
+    entity.set_property("ZPos", format!("{:.3}", xz.1));
+}
+
+/// Spawn / orders stay on the left (north = spawn). Zone logic stays on the
+/// origin. Cleanup is a right-hand stack: CLEANUP at the top, deactivate
+/// and delete at the bottom. One column per plane.
+fn layout_pack_mcus(group: &mut Il2Entity, plane_count: usize) {
+    let origin = group
+        .find_by_name("Zone IN")
+        .and_then(|z| z.pos_xz())
+        .unwrap_or((40_000.0, 40_000.0));
+
+    if let Some(e) = group.find_by_name_mut("Enable Spawner") {
+        set_xz(e, (origin.0 + MCU_GAP, origin.1));
+    }
+    if let Some(e) = group.find_by_name_mut("Disable Spawner") {
+        set_xz(e, (origin.0 + MCU_GAP, origin.1 + MCU_GAP));
+    }
+    if let Some(e) = group.find_by_name_mut("REENFORCEMENTS (33%)") {
+        set_xz(e, left_xz(origin, 0, -2));
+    }
+    if let Some(e) = group.find_by_name_mut("Delete Orders") {
+        set_xz(e, right_xz(origin, 0, -1));
+    }
+
+    if let Some(logic) = group.find_by_name_mut("Logic") {
+        let mut death_i = 0usize;
+        for child in &mut logic.children {
+            if child.name() == Some("DeathCount") {
+                death_i += 1;
+                set_xz(child, (origin.0 - MCU_GAP * death_i as f64, origin.1));
+            }
+        }
+    }
+
+    if let Some(randomizer) = group.find_by_name_mut("Randomizer") {
+        let mut spawn_i = 0usize;
+        let mut random_i = 0usize;
+        let mut out_i = 0usize;
+        let mut closer_i = 0usize;
+        for child in &mut randomizer.children {
+            let name = child.name().unwrap_or("").to_string();
+            if name == "Randomizer:INPUT" {
+                set_xz(child, left_xz(origin, 0, -2));
+            } else if name.starts_with("Wait for Output") {
+                set_xz(child, left_xz(origin, 1, -2));
+            } else if name == "ReOpen Outputs" {
+                set_xz(child, left_xz(origin, 2, -2));
+            } else if name == "CloseInput" {
+                set_xz(child, left_xz(origin, 3, -2));
+            } else if name.starts_with("Spawn ") {
+                let (x, z) = left_xz(origin, spawn_i, -1);
+                set_xz(child, (x, z - MCU_GAP));
+                spawn_i += 1;
+            } else if name.starts_with("Random ") {
+                set_xz(child, left_xz(origin, random_i, -3));
+                random_i += 1;
+            } else if name.starts_with("Out ") {
+                set_xz(child, left_xz(origin, out_i, -1));
+                out_i += 1;
+            } else if name.starts_with("Close_Remaining") {
+                closer_i += 1;
+                set_xz(child, left_xz(origin, closer_i, -3));
+            }
+        }
+    }
+
+    for i in 0..plane_count {
+        let n = i + 1;
+        let branch = i + 1;
+        if let Some(e) = group.find_by_name_mut(&format!("CLEANUP {n}")) {
+            set_xz(e, right_xz(origin, branch, 0));
+        }
+        if let Some(e) = group.find_by_name_mut(&format!("Force Complete {n}")) {
+            set_xz(e, right_order_xz(origin, branch, 1));
+        }
+        if let Some(e) = group.find_by_name_mut(&format!("RTB DELAY {n}")) {
+            set_xz(e, right_xz(origin, branch, 2));
+        }
+        if let Some(e) = group.find_by_name_mut(&format!("Delay Delete {n}")) {
+            set_xz(e, right_xz(origin, branch, 3));
+        }
+        if let Some(e) = group.find_by_name_mut(&format!("Deactivate {n}")) {
+            set_xz(e, right_order_xz(origin, branch, 4));
+        }
+    }
+}
+
+fn named_clone(group: &Il2Entity, name: &str) -> Result<Il2Entity, String> {
+    group
+        .find_by_name(name)
+        .cloned()
+        .ok_or_else(|| format!("missing `{name}` prototype"))
+}
+
+fn first_block<'a>(group: &'a Il2Entity, block: &str) -> Option<&'a Il2Entity> {
+    if group.block_type == block {
+        return Some(group);
+    }
+    group.children.iter().find_map(|c| first_block(c, block))
+}
+
+fn unit_entity_ids(group: &Il2Entity) -> Vec<i32> {
+    let Some(units) = group.find_by_name("Units") else {
+        return Vec::new();
+    };
+    units
+        .children
+        .iter()
+        .filter(|c| c.block_type == "MCU_TR_Entity")
+        .filter_map(|c| c.index)
+        .collect()
+}
+
+fn split_flights(entity_ids: &[i32], sizes: &[usize]) -> Result<Vec<BuiltFlight>, String> {
+    let need: usize = sizes.iter().sum();
+    if entity_ids.len() != need {
+        return Err(format!(
+            "template placed {} units, expected {need}",
+            entity_ids.len()
+        ));
+    }
+    let mut out = Vec::with_capacity(sizes.len());
+    let mut i = 0;
+    for &size in sizes {
+        let slice = &entity_ids[i..i + size];
+        let mut built = BuiltFlight {
+            entity_ids: slice.to_vec(),
+            leads: Vec::new(),
+            wings: Vec::new(),
+        };
+        for (seat, &eid) in slice.iter().enumerate() {
+            if seat % 2 == 0 {
+                built.leads.push(eid);
+            } else {
+                built.wings.push(eid);
+            }
+        }
+        out.push(built);
+        i += size;
+    }
+    Ok(out)
 }
 
 fn clone_mcu(proto: &Il2Entity, next_id: &mut i32, name: &str) -> Il2Entity {
@@ -355,20 +653,82 @@ fn apply_plane_identity(
     plane.set_property("TCodeColor", format!("\"{}\"", encode_tcode_color(color, number)));
     plane.set_property("VictoryCount", "0");
     plane.set_property("Emblem", "0");
+    plane.set_existing_property("AiRTBDecision", "0");
 }
 
-fn patch_plane_events(
-    nodes: &mut [Il2Entity],
+fn flight_place_xz(origin: (f64, f64), flight: usize, seat: usize) -> (f64, f64) {
+    let spacing = f64::from(PLACEMENT_SPACING);
+    let (dx, dz) = finger_four_offset(seat, spacing);
+    (
+        origin.0 - (flight as f64) * spacing * 3.5 + dx,
+        origin.1 + (flight as f64) * spacing * 2.5 + dz,
+    )
+}
+
+fn apply_identities(group: &mut Il2Entity, plans: &[SeatPlan], cfg: &FlightConfig) -> Result<(), String> {
+    let origin = group
+        .find_by_name("Zone IN")
+        .and_then(|z| z.pos_xz())
+        .unwrap_or((40_000.0, 40_000.0));
+    let alt_min = cfg.altitude_min.min(cfg.altitude_max) as f64;
+    let alt_max = cfg.altitude_max.max(cfg.altitude_min) as f64;
+    let flight_count = plans.last().map(|p| p.flight + 1).unwrap_or(0);
+    let units = group
+        .find_by_name_mut("Units")
+        .ok_or("generated Group 1 has no Units")?;
+    let mut plane_i = 0usize;
+    let mut i = 0;
+    while i + 1 < units.children.len() {
+        if units.children[i].block_type != "Plane"
+            || units.children[i + 1].block_type != "MCU_TR_Entity"
+        {
+            i += 1;
+            continue;
+        }
+        let plan = plans
+            .get(plane_i)
+            .ok_or("more planes than seat plans")?;
+        let y = plane_altitude(alt_min, alt_max, plan.flight, flight_count, plan.seat, plan.size);
+        let xz = flight_place_xz(origin, plan.flight, plan.seat);
+        apply_plane_identity(
+            &mut units.children[i],
+            cfg.country,
+            plan.ac,
+            plan.flight,
+            plan.seat,
+            plan.ailevel,
+        );
+        set_xz(&mut units.children[i], xz);
+        set_xz(&mut units.children[i + 1], xz);
+        units.children[i].set_ypos(y);
+        units.children[i + 1].set_ypos(y + 0.2);
+        plane_i += 1;
+        i += 2;
+    }
+    if plane_i != plans.len() {
+        return Err(format!(
+            "applied identity to {plane_i} planes, expected {}",
+            plans.len()
+        ));
+    }
+    Ok(())
+}
+
+fn patch_plane_links(
+    group: &mut Il2Entity,
     flights: &[BuiltFlight],
     spawners: &[Il2Entity],
-    deaths: &[Il2Entity],
-    spawns: &[Il2Entity],
+    death_ids: &[i32],
+    old_spawn_id: i32,
+    old_death_id: i32,
 ) -> Result<(), String> {
+    let Some(units) = group.find_by_name_mut("Units") else {
+        return Ok(());
+    };
     for (f, flight) in flights.iter().enumerate() {
-        let death_id = deaths[f].index.ok_or("DeathCount missing Index")?;
-        let spawn_id = spawns[f].index.ok_or("SpawnCount missing Index")?;
+        let death_id = *death_ids.get(f).ok_or("DeathCount missing Index")?;
         let spawner_id = spawners[f].index.ok_or("Spawner missing Index")?;
-        for node in nodes.iter_mut() {
+        for node in units.children.iter_mut() {
             if node.block_type != "MCU_TR_Entity" {
                 continue;
             }
@@ -376,20 +736,150 @@ fn patch_plane_events(
             if !flight.entity_ids.contains(&id) {
                 continue;
             }
-            set_nested_id(node, "OnEvent", "TarId", death_id);
-            set_nested_id(node, "OnReport", "TarId", spawn_id);
-            set_nested_id(node, "OnReport", "CmdId", spawner_id);
+            replace_nested_id(node, "OnEvent", "TarId", old_death_id, death_id);
+            replace_nested_id(node, "OnReport", "CmdId", old_spawn_id, spawner_id);
         }
     }
     Ok(())
 }
 
-fn set_nested_id(entity: &mut Il2Entity, child_type: &str, key: &str, value: i32) {
+fn replace_nested_id(entity: &mut Il2Entity, child_type: &str, key: &str, old: i32, new: i32) {
     entity.for_each_mut(&mut |e| {
-        if e.block_type == child_type {
-            e.set_property(key, value.to_string());
+        if e.block_type != child_type {
+            return;
+        }
+        if e.property(key).and_then(|s| s.parse::<i32>().ok()) == Some(old) {
+            e.set_property(key, new.to_string());
         }
     });
+}
+
+fn install_plane_ends(
+    group: &mut Il2Entity,
+    entity_ids: &[i32],
+    sizes: &[usize],
+    death_ids: &[i32],
+    proto_force: &Il2Entity,
+    proto_timer: &Il2Entity,
+    proto_deact: &Il2Entity,
+    rtb_proto: &Il2Entity,
+    mission_end_id: i32,
+    delete_orders: f32,
+    next_id: &mut i32,
+) -> Result<(), String> {
+    let mut logic_nodes = Vec::new();
+    let mut waypoints = Vec::new();
+    let mut end_ids = Vec::new();
+    for (si, &eid) in entity_ids.iter().enumerate() {
+        let n = si + 1;
+        let death_id = flight_of_seat(sizes, si).and_then(|f| death_ids.get(f).copied());
+
+        let mut force = clone_mcu(proto_force, next_id, &format!("Force Complete {n}"));
+        force.set_objects(vec![eid]);
+        let force_id = force.index.ok_or("plane Force Complete missing Index")?;
+
+        let mut rtb = clone_mcu(rtb_proto, next_id, &format!("RTB Plane {n}"));
+        rtb.set_objects(vec![eid]);
+        rtb.set_targets(Vec::new());
+        let rtb_id = rtb.index.ok_or("RTB Plane missing Index")?;
+
+        let mut rtb_delay = clone_mcu(proto_timer, next_id, &format!("RTB DELAY {n}"));
+        rtb_delay.set_property("Time", "0.5");
+        rtb_delay.set_property("Random", "100");
+        rtb_delay.set_targets(vec![rtb_id]);
+        let rtb_delay_id = rtb_delay.index.ok_or("RTB DELAY missing Index")?;
+
+        let mut deact = clone_mcu(proto_deact, next_id, &format!("Deactivate {n}"));
+        deact.set_objects(vec![eid]);
+        deact.set_targets(Vec::new());
+        let deact_id = deact.index.ok_or("Deactivate missing Index")?;
+
+        let mut delay_deact = clone_mcu(proto_timer, next_id, &format!("Delay Delete {n}"));
+        delay_deact.set_property("Time", format_time(delete_orders));
+        delay_deact.set_property("Random", "100");
+        let mut delay_targets = vec![deact_id];
+        if let Some(id) = death_id {
+            delay_targets.push(id);
+        }
+        delay_deact.set_targets(delay_targets);
+        let delay_deact_id = delay_deact.index.ok_or("Delay Delete missing Index")?;
+
+        let mut end = clone_mcu(proto_timer, next_id, &format!("CLEANUP {n}"));
+        end.set_property("Time", "0.1");
+        end.set_property("Random", "100");
+        end.set_targets(vec![force_id, rtb_delay_id, delay_deact_id]);
+        let end_id = end.index.ok_or("CLEANUP missing Index")?;
+        end_ids.push(end_id);
+
+        logic_nodes.push(end);
+        logic_nodes.push(force);
+        logic_nodes.push(rtb_delay);
+        logic_nodes.push(delay_deact);
+        logic_nodes.push(deact);
+        waypoints.push(rtb);
+    }
+    group.for_each_mut(&mut |e| {
+        let Some(name) = e.name() else { return };
+        let Some(rest) = name.strip_prefix("Mission Complete ") else {
+            return;
+        };
+        let Ok(n) = rest.parse::<usize>() else { return };
+        let si = n.saturating_sub(1);
+        if let Some(&id) = end_ids.get(si) {
+            e.replace_target_id(mission_end_id, id);
+        }
+    });
+    if let Some(logic) = group.find_by_name_mut("Logic") {
+        logic.children.extend(logic_nodes);
+    }
+    if let Some(wps) = group.find_by_name_mut("Waypoints") {
+        wps.children.extend(waypoints);
+    } else {
+        let mut wps = Il2Entity::new("Group");
+        let id = *next_id;
+        *next_id += 1;
+        wps.index = Some(id);
+        wps.set_property("Index", id.to_string());
+        wps.set_name("Waypoints");
+        wps.set_property("Desc", "\"\"");
+        wps.children = waypoints;
+        group.children.push(wps);
+    }
+    Ok(())
+}
+
+fn flight_of_seat(sizes: &[usize], si: usize) -> Option<usize> {
+    let mut n = 0;
+    for (f, &sz) in sizes.iter().enumerate() {
+        if si < n + sz {
+            return Some(f);
+        }
+        n += sz;
+    }
+    None
+}
+
+fn rename_covers(group: &mut Il2Entity) {
+    let mut n = 0usize;
+    group.for_each_mut(&mut |e| {
+        if e.block_type == "MCU_CMD_Cover" {
+            n += 1;
+            e.set_name(&format!("Cover Wing {n}"));
+        }
+    });
+}
+
+fn wire_zones_to_gates(group1: &mut Il2Entity, gates: &Il2Entity) {
+    if let Some(id) = gates.find_by_name("1OUT - DISABLE").and_then(|e| e.index) {
+        if let Some(z) = group1.find_by_name_mut("Zone IN") {
+            z.append_target(id);
+        }
+    }
+    if let Some(id) = gates.find_by_name("1OUT - ENABLE").and_then(|e| e.index) {
+        if let Some(z) = group1.find_by_name_mut("Zone OUT") {
+            z.append_target(id);
+        }
+    }
 }
 
 fn build_randomizer(
@@ -446,7 +936,6 @@ fn build_randomizer(
         }
     }
 
-    let input_id = input.index.unwrap();
     let wait_id = wait.index.unwrap();
     let reopen_id = reopen.index.unwrap();
     let close_input_id = close_input.index.unwrap();
@@ -454,6 +943,7 @@ fn build_randomizer(
     let random_ids: Vec<i32> = randoms.iter().filter_map(|o| o.index).collect();
     let closer_ids: Vec<i32> = closers.iter().filter_map(|o| o.index).collect();
     let spawner_ids: Vec<i32> = spawners.iter().filter_map(|o| o.index).collect();
+    let input_id = input.index.unwrap();
 
     let mut input_targets = vec![close_input_id, wait_id];
     input_targets.extend(random_ids.iter().copied());
@@ -487,118 +977,6 @@ fn build_randomizer(
 fn random_pct(index: usize, n: usize) -> i32 {
     let remaining = n.saturating_sub(index).max(1);
     ((100 + remaining / 2) / remaining).clamp(1, 100) as i32
-}
-
-fn replace_named(parent: &mut Il2Entity, name: &str, replacements: Vec<Il2Entity>) {
-    let first = parent.children.iter().position(|c| c.name() == Some(name));
-    parent.children.retain(|c| c.name() != Some(name));
-    if let Some(i) = first.filter(|i| *i <= parent.children.len()) {
-        let mut rest = parent.children.split_off(i);
-        parent.children.extend(replacements);
-        parent.children.append(&mut rest);
-    } else {
-        parent.children.extend(replacements);
-    }
-}
-
-fn install_cover_wings(
-    logics: &mut Il2Entity,
-    proto_cover: &Il2Entity,
-    proto_delay: &Il2Entity,
-    pairs: &[(i32, i32)],
-    next_id: &mut i32,
-) -> Result<(), String> {
-    logics.children.retain(|c| {
-        let name = c.name().unwrap_or("");
-        !(name == "Cover Lead" || name == "50ms" || name.starts_with("Cover Wing"))
-    });
-
-    let mut covers = Vec::new();
-    for (i, (lead, wing)) in pairs.iter().enumerate() {
-        let mut cover = clone_mcu(proto_cover, next_id, &format!("Cover Wing {}", i + 1));
-        cover.set_objects(vec![*wing]);
-        cover.set_targets(vec![*lead]);
-        covers.push(cover);
-    }
-
-    let mut delays = Vec::new();
-    if covers.len() > 1 {
-        for _ in 0..covers.len() - 1 {
-            let mut delay = clone_mcu(proto_delay, next_id, "50ms");
-            delay.set_property("Time", "0.05");
-            delay.set_property("Random", "100");
-            delays.push(delay);
-        }
-    }
-
-    let cover_ids: Vec<i32> = covers.iter().filter_map(|c| c.index).collect();
-    let delay_ids: Vec<i32> = delays.iter().filter_map(|d| d.index).collect();
-
-    for i in 0..delays.len() {
-        if i + 1 < delay_ids.len() {
-            delays[i].set_targets(vec![cover_ids[i + 1], delay_ids[i + 1]]);
-        } else {
-            delays[i].set_targets(vec![cover_ids[i + 1]]);
-        }
-    }
-
-    let more_targets = if cover_ids.is_empty() {
-        Vec::new()
-    } else if delay_ids.is_empty() {
-        vec![cover_ids[0]]
-    } else {
-        vec![cover_ids[0], delay_ids[0]]
-    };
-    if let Some(orders) = logics.find_by_name_mut("MORE ORDERS") {
-        orders.set_targets(more_targets);
-    }
-
-    logics.children.extend(covers);
-    logics.children.extend(delays);
-    Ok(())
-}
-
-fn rewire_logics(
-    logics: &mut Il2Entity,
-    input_id: i32,
-    all_entities: &[i32],
-    leads: &[i32],
-    cfg: &FlightConfig,
-) {
-    let old_input = logics
-        .find_by_name("ACTIONS / SPAWN")
-        .and_then(|e| e.targets.first().copied());
-    let coalitions = plane_coalitions_for_country(cfg.country).to_string();
-    let cooldown = format_time(cfg.cooldown);
-    let reinforcement = format_time(cfg.reinforcement);
-    let delete_orders = format_time(cfg.delete_orders);
-
-    logics.for_each_mut(&mut |e| {
-        let name = e.name().map(str::to_string);
-        match name.as_deref() {
-            Some("ACTIONS / SPAWN") => {
-                if let Some(old) = old_input {
-                    for t in &mut e.targets {
-                        if *t == old {
-                            *t = input_id;
-                        }
-                    }
-                    e.set_targets(e.targets.clone());
-                }
-            }
-            Some("command AttackArea") => e.set_objects(leads.to_vec()),
-            Some("Deactivate ALL") | Some("Trigger Delete") | Some("command Force Complete") => {
-                e.set_objects(all_entities.to_vec());
-            }
-            Some("COOLDOWN") => e.set_property("Time", cooldown.clone()),
-            Some("REENFORCEMENTS (33%)") => e.set_property("Time", reinforcement.clone()),
-            Some("Delay Delete") => e.set_property("Time", delete_orders.clone()),
-            Some("Zone IN") | Some("Zone OUT") => {
-                e.set_property("PlaneCoalitions", coalitions.clone());
-            }
-            _ => {}
-        }
-    });
 }
 
 fn format_time(v: f32) -> String {
@@ -639,8 +1017,16 @@ fn pair_stack_m(flight: usize, pair: usize) -> f64 {
     PAIR_STACK_MIN_M + ((flight * 31 + pair * 17) % (span + 1)) as f64
 }
 
-/// Pair 0 is low cover. A second pair (3- and 4-ships) is high cover, ~2000 m up.
-/// 1- and 2-ships stay on the min–max spread.
+/// Second pair of each complete 4-ship is high cover (~2000 m). Incomplete
+/// leftover pairs stay low (3-ship, 5-ship, 6-ship trailing pair).
+fn pair_is_high(seat: usize, size: usize) -> bool {
+    let cluster_start = (seat / 4) * 4;
+    let cluster_len = size.saturating_sub(cluster_start).min(4);
+    cluster_len == 4 && seat % 4 >= 2
+}
+
+/// 1- and 2-ships stay on the min–max spread. Larger flights split each
+/// complete finger-four 2 down / 2 up and keep leftovers low.
 fn plane_altitude(
     alt_min: f64,
     alt_max: f64,
@@ -653,7 +1039,7 @@ fn plane_altitude(
     let base = if size > 2 {
         let (lo, hi) = low_cover_band(alt_min, alt_max);
         let low = lerp(lo, hi, flight, flight_count);
-        if pair >= 1 {
+        if pair_is_high(seat, size) {
             low + HIGH_COVER_OFFSET_M
         } else {
             low
@@ -681,6 +1067,33 @@ mod tests {
         root
     }
 
+    fn collect_blocks<'a>(e: &'a Il2Entity, block: &str, out: &mut Vec<&'a Il2Entity>) {
+        if e.block_type == block {
+            out.push(e);
+        }
+        for c in &e.children {
+            collect_blocks(c, block, out);
+        }
+    }
+
+    fn attack_areas(g1: &Il2Entity) -> Vec<&Il2Entity> {
+        let mut out = Vec::new();
+        collect_blocks(g1, "MCU_CMD_AttackArea", &mut out);
+        out
+    }
+
+    fn area_objects(g1: &Il2Entity) -> usize {
+        let mut ids = Vec::new();
+        for a in attack_areas(g1) {
+            for id in &a.objects {
+                if !ids.contains(id) {
+                    ids.push(*id);
+                }
+            }
+        }
+        ids.len()
+    }
+
     #[test]
     fn two_flights_mix_sizes_and_separate_covers() {
         let cfg = FlightConfig {
@@ -693,7 +1106,6 @@ mod tests {
         };
         let root = configured(cfg);
         let g1 = root.find_by_name("Group 1").unwrap();
-        // max=2 → sizes 2 then 1
         assert_eq!(g1.count_block_type("Plane"), 3);
         assert_eq!(g1.find_by_name("Spawn 1").unwrap().objects.len(), 2);
         assert_eq!(g1.find_by_name("Spawn 2").unwrap().objects.len(), 1);
@@ -701,7 +1113,7 @@ mod tests {
         assert_eq!(cover1.objects.len(), 1);
         assert_eq!(cover1.targets.len(), 1);
         assert!(g1.find_by_name("Cover Wing 2").is_none());
-        assert_eq!(g1.find_by_name("command AttackArea").unwrap().objects.len(), 2);
+        assert_eq!(area_objects(g1), 2);
     }
 
     #[test]
@@ -720,7 +1132,6 @@ mod tests {
         assert_eq!(g1.count_block_type("Plane"), 10);
         assert_eq!(g1.find_by_name("Spawn 1").unwrap().objects.len(), 4);
         assert_eq!(g1.find_by_name("Spawn 4").unwrap().objects.len(), 1);
-        // 4-ship has 2 pairs, 3-ship has 1, 2-ship has 1, singleton 0 → 4 covers
         assert!(g1.find_by_name("Cover Wing 1").is_some());
         assert!(g1.find_by_name("Cover Wing 4").is_some());
         assert!(g1.find_by_name("Cover Wing 5").is_none());
@@ -749,6 +1160,7 @@ mod tests {
         assert_eq!(c2.objects.len(), 1);
         assert_ne!(c1.objects[0], c2.objects[0]);
         assert_ne!(c1.targets[0], c2.targets[0]);
+        assert_eq!(attack_areas(g1).len(), 2);
         let lead1 = g1.find_by_name("Red 11").unwrap();
         let wing1 = g1.find_by_name("Red 12").unwrap();
         let lead_ai: i32 = lead1.property("AILevel").unwrap().parse().unwrap();
@@ -768,7 +1180,7 @@ mod tests {
         let root = configured(cfg);
         let g1 = root.find_by_name("Group 1").unwrap();
         assert_eq!(g1.count_block_type("Plane"), 3);
-        assert_eq!(g1.find_by_name("command AttackArea").unwrap().objects.len(), 3);
+        assert_eq!(area_objects(g1), 3);
         assert!(g1.find_by_name("Cover Wing 1").is_none());
     }
 
@@ -790,6 +1202,8 @@ mod tests {
             g1.find_by_name("Red 11").unwrap().property("Model"),
             Some("\"graphics\\planes\\f86a5\\f86a5.mgm\"")
         );
+        let pack = generate_pack(&root, 3).expect("pack");
+        assert_eq!(pack.name(), Some("USA Fighters 3pack - Linked"));
     }
 
     #[test]
@@ -940,6 +1354,7 @@ mod tests {
         };
         let mut root = configured(cfg);
         let out = generate_pack(&root, 2).expect("pack");
+        assert_eq!(out.name(), Some("USSR Fighters 2pack - Linked"));
         assert_eq!(out.find_by_name("Group 2").unwrap().count_block_type("Plane"), 5);
         let text = serialize_group(&out);
         parse_group_file(&text).expect("reparse");
@@ -952,5 +1367,234 @@ mod tests {
         let root = configured(FlightConfig::default());
         let g1 = root.find_by_name("Group 1").unwrap();
         assert_eq!(g1.find_by_name("Zone IN").unwrap().property("PlaneCoalitions"), Some("[2]"));
+    }
+
+    #[test]
+    fn pair_uses_template_logic_and_original_pack_zones() {
+        let cfg = FlightConfig {
+            flight_count: 1,
+            max_in_flight: 2,
+            type_ids: vec!["f51d".into()],
+            country: 601,
+            ..FlightConfig::default()
+        };
+        let root = configured(cfg);
+        let g1 = root.find_by_name("Group 1").unwrap();
+        assert_eq!(g1.find_by_name("Zone IN").unwrap().property("Zone"), Some("16000"));
+        assert_eq!(g1.find_by_name("Zone OUT").unwrap().property("Zone"), Some("35000"));
+        let areas = attack_areas(g1);
+        assert_eq!(areas.len(), 1);
+        assert_eq!(areas[0].property("AttackArea"), Some("30000"));
+        assert_eq!(areas[0].property("AttackAir"), Some("1"));
+        assert_eq!(areas[0].property("Time"), Some("600"));
+        assert_eq!(
+            g1.find_by_name("Red 11").unwrap().property("AiRTBDecision"),
+            Some("0")
+        );
+        assert!(g1.find_by_name("OnSpawned 1").is_some());
+        assert!(g1.find_by_name("Mission Complete 1").is_some());
+        assert!(g1.find_by_name("Enable Spawner").is_some());
+        assert!(g1.find_by_name("Delete Orders").is_some());
+        let events: Vec<i32> = g1
+            .find_by_name("Units")
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.block_type == "MCU_TR_Entity")
+            .map(|ent| {
+                ent.children
+                    .iter()
+                    .filter(|c| c.block_type == "OnEvents")
+                    .flat_map(|w| w.children.iter())
+                    .filter_map(|ev| ev.property("Type").and_then(|s| s.parse().ok()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(events.contains(&3), "OnPlaneCriticalDamage");
+        assert!(events.contains(&1), "OnPilotWounded");
+        assert!(events.contains(&8), "OnBingoMainMG");
+        assert!(events.contains(&7), "OnBingoFuel");
+        let gates = root.find_by_name("NodeGates").unwrap();
+        let out_disable = gates.find_by_name("1OUT - DISABLE").unwrap().index.unwrap();
+        assert!(g1.find_by_name("Zone IN").unwrap().targets.contains(&out_disable));
+    }
+
+    #[test]
+    fn leftover_and_high_cover_leads_get_attack_area() {
+        let cfg = FlightConfig {
+            flight_count: 4,
+            max_in_flight: 5,
+            type_ids: vec!["mig15bis".into()],
+            ..FlightConfig::default()
+        };
+        let root = configured(cfg);
+        let g1 = root.find_by_name("Group 1").unwrap();
+        assert_eq!(flight_sizes(4, 5), vec![5, 4, 3, 2]);
+        assert_eq!(g1.count_block_type("Plane"), 14);
+        // 5-ship: 3 leads, 4-ship: 2, 3-ship: 2, 2-ship: 1
+        assert_eq!(attack_areas(g1).len(), 8);
+        assert_eq!(area_objects(g1), 8);
+        for i in 1..=14 {
+            let spawned = g1
+                .find_by_name(&format!("OnSpawned {i}"))
+                .unwrap_or_else(|| panic!("missing OnSpawned {i}"));
+            assert!(
+                !spawned.targets.is_empty(),
+                "OnSpawned {i} has no next order"
+            );
+        }
+    }
+
+    #[test]
+    fn bingo_sends_only_that_plane_home() {
+        let cfg = FlightConfig {
+            flight_count: 1,
+            max_in_flight: 2,
+            delete_orders: 45.0,
+            type_ids: vec!["f51d".into()],
+            ..FlightConfig::default()
+        };
+        let root = configured(cfg);
+        let g1 = root.find_by_name("Group 1").unwrap();
+        let end = g1.find_by_name("CLEANUP 1").unwrap();
+        let force = g1.find_by_name("Force Complete 1").unwrap();
+        let rtb_delay = g1.find_by_name("RTB DELAY 1").unwrap();
+        let rtb = g1.find_by_name("RTB Plane 1").unwrap();
+        let delay = g1.find_by_name("Delay Delete 1").unwrap();
+        let deact = g1.find_by_name("Deactivate 1").unwrap();
+        assert!(end.targets.contains(&force.index.unwrap()));
+        assert!(end.targets.contains(&rtb_delay.index.unwrap()));
+        assert!(end.targets.contains(&delay.index.unwrap()));
+        assert!(rtb_delay.targets.contains(&rtb.index.unwrap()));
+        assert!(delay.targets.contains(&deact.index.unwrap()));
+        assert_eq!(delay.property("Time"), Some("45"));
+        assert_eq!(rtb.objects.len(), 1);
+        assert_eq!(force.objects.len(), 1);
+        assert_eq!(deact.objects.len(), 1);
+        let force2 = g1.find_by_name("Force Complete 2").unwrap();
+        let rtb2 = g1.find_by_name("RTB Plane 2").unwrap();
+        assert_eq!(force2.objects.len(), 1);
+        assert_ne!(force.objects[0], force2.objects[0]);
+        assert_ne!(rtb.objects[0], rtb2.objects[0]);
+        let death = g1
+            .find_by_name("Logic")
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.name() == Some("DeathCount"))
+            .unwrap()
+            .index
+            .unwrap();
+        assert!(delay.targets.contains(&death));
+        assert!(deact.targets.is_empty());
+        let mc1 = g1.find_by_name("Mission Complete 1").unwrap();
+        let mc2 = g1.find_by_name("Mission Complete 2").unwrap();
+        assert!(mc1.targets.contains(&end.index.unwrap()));
+        assert!(!mc1.targets.contains(&g1.find_by_name("CLEANUP 2").unwrap().index.unwrap()));
+        assert!(mc2.targets.contains(&g1.find_by_name("CLEANUP 2").unwrap().index.unwrap()));
+        let parked = {
+            let mut pack = generate_pack(&root, 2).expect("pack");
+            crate::pack::park_rtbs(&mut pack, &[(80_000.0, 210_000.0), (80_000.0, 230_000.0)]);
+            pack
+        };
+        let dest = parked.find_by_name("RTB - 1").unwrap().pos_xz().unwrap();
+        let plane_wp = parked
+            .find_by_name("Group 1")
+            .unwrap()
+            .find_by_name("RTB Plane 1")
+            .unwrap()
+            .pos_xz()
+            .unwrap();
+        assert!((plane_wp.0 - dest.0).abs() < 0.5 && (plane_wp.1 - dest.1).abs() < 0.5);
+    }
+
+    #[test]
+    fn cleanup_stack_sits_right_of_spawn() {
+        let cfg = FlightConfig {
+            flight_count: 2,
+            max_in_flight: 2,
+            type_ids: vec!["mig15bis".into()],
+            ..FlightConfig::default()
+        };
+        let root = configured(cfg);
+        let g1 = root.find_by_name("Group 1").unwrap();
+        let spawn = g1.find_by_name("SPAWN UNITS").unwrap().pos_xz().unwrap();
+        let zone = g1.find_by_name("Zone IN").unwrap().pos_xz().unwrap();
+        let end = g1.find_by_name("CLEANUP 1").unwrap().pos_xz().unwrap();
+        let force = g1.find_by_name("Force Complete 1").unwrap().pos_xz().unwrap();
+        let delay = g1.find_by_name("Delay Delete 1").unwrap().pos_xz().unwrap();
+        let deact = g1.find_by_name("Deactivate 1").unwrap().pos_xz().unwrap();
+        let delete = g1.find_by_name("Trigger Delete").unwrap().pos_xz().unwrap();
+        assert!(spawn.1 < zone.1, "spawn stack west of zone");
+        assert!(end.1 > zone.1, "cleanup east of zone");
+        assert!(end.1 > spawn.1, "cleanup east of spawn");
+        assert!(force.1 > end.1, "force complete sits outboard of the timer");
+        assert!(deact.0 < end.0, "deactivate south of cleanup");
+        assert!(delay.0 < end.0, "delay delete south of cleanup");
+        assert!(deact.0 <= delay.0, "deactivate at the bottom of the stack");
+        assert!(delete.1 > zone.1, "group delete on the cleanup side");
+        let end2 = g1.find_by_name("CLEANUP 2").unwrap().pos_xz().unwrap();
+        assert!(end2.1 > end.1, "second plane cleanup is its own column further east");
+    }
+
+    fn xz(g1: &Il2Entity, name: &str) -> (f64, f64) {
+        g1.find_by_name(name).unwrap().pos_xz().unwrap()
+    }
+
+    #[test]
+    fn four_ship_lays_out_finger_four() {
+        let cfg = FlightConfig {
+            flight_count: 1,
+            max_in_flight: 4,
+            type_ids: vec!["mig15bis".into()],
+            ..FlightConfig::default()
+        };
+        let g1 = configured(cfg).find_by_name("Group 1").unwrap().clone();
+        let lead = xz(&g1, "Red 11");
+        let right = xz(&g1, "Red 12");
+        let left = xz(&g1, "Red 13");
+        let far = xz(&g1, "Red 14");
+        assert!(lead.0 > right.0, "lead north of right wing");
+        assert!(lead.0 > left.0, "lead north of left wing");
+        assert!(right.1 > lead.1, "right wing east of lead");
+        assert!(left.1 < lead.1, "left wing west of lead");
+        assert!(far.1 < left.1, "second left further west");
+    }
+
+    #[test]
+    fn leftover_ships_stay_low() {
+        assert!(!pair_is_high(0, 4) && pair_is_high(2, 4));
+        assert!(!pair_is_high(2, 3), "3-ship leftover stays low");
+        assert!(!pair_is_high(4, 5), "5-ship leftover stays low");
+        assert!(pair_is_high(2, 6) && !pair_is_high(4, 6), "6-ship is 4 down 2 up");
+        assert!(pair_is_high(2, 8) && !pair_is_high(4, 8) && pair_is_high(6, 8));
+
+        let three = FlightConfig {
+            flight_count: 1,
+            max_in_flight: 3,
+            altitude_min: 500.0,
+            altitude_max: 5500.0,
+            type_ids: vec!["mig15bis".into()],
+            ..FlightConfig::default()
+        };
+        let g1 = configured(three).find_by_name("Group 1").unwrap().clone();
+        let y11 = ypos(&g1, "Red 11");
+        let y13 = ypos(&g1, "Red 13");
+        assert!((y13 - y11).abs() < 1.0, "3-ship leftover must not climb 2000 m ({y11} vs {y13})");
+
+        let six = FlightConfig {
+            flight_count: 1,
+            max_in_flight: 6,
+            altitude_min: 500.0,
+            altitude_max: 5500.0,
+            type_ids: vec!["mig15bis".into()],
+            ..FlightConfig::default()
+        };
+        let g1 = configured(six).find_by_name("Group 1").unwrap().clone();
+        let y11 = ypos(&g1, "Red 11");
+        let y13 = ypos(&g1, "Red 13");
+        let y15 = ypos(&g1, "Red 15");
+        assert!((y13 - y11 - 2000.0).abs() < 0.01, "second pair of the 4-ship is high");
+        assert!((y15 - y11).abs() < 1.0, "trailing 6-ship pair stays low");
     }
 }

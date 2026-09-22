@@ -48,7 +48,9 @@ use eframe::egui::{
     Sense, Stroke, TextStyle, TextureHandle, Vec2,
 };
 
-use crate::aircraft::{default_skill, AIRCRAFT_TYPES, COUNTRIES};
+use crate::aircraft::{
+    default_skill, fighter_pack_filename, linked_fighter_pack_name, AIRCRAFT_TYPES, COUNTRIES,
+};
 use crate::airfield::{
     clean_airfield, inspect_airfield, AirfieldInfo, EASTERN_PLANE_COALITIONS,
     WESTERN_PLANE_COALITIONS,
@@ -60,9 +62,10 @@ use crate::bombers::{
 use crate::duplicate::apply_overrides;
 use crate::flights::{configure_aircraft, flight_sizes, FlightConfig};
 use crate::frontlines::{
-    attack_arrow_points, battles_in_period, generate_front, mark_for_battle, preview_dots,
-    preview_front_xz, suggested_aircraft, timeline_index, timeline_preview, Battle, FrontOptions,
-    MapFighterPack, MapGroundPack, MapRefGroup, MapShipPack, PreviewKind, Season, TimelineMark, ARROW_TAIL_WIDTH, BATTLES,
+    attack_arrow_points, battles_in_period, generate_front, inspect_base_map, looks_like_base_map,
+    mark_for_battle, preview_dots, preview_front_xz, suggested_aircraft, timeline_index,
+    timeline_preview, Battle, FrontOptions, ImportedFighterPack, MapFighterPack, MapGroundPack,
+    MapRefGroup, MapShipPack, PreviewKind, Season, TimelineMark, ARROW_TAIL_WIDTH, BATTLES,
     PLACE_MARGIN, TIMELINE, YEARS,
 };
 use crate::geo::{self, MAP_MAX, MAP_MIN};
@@ -74,7 +77,7 @@ use crate::mapclip::{
     points_to_linestring, snap_to_front, stroke_self_intersects, WorldAabb, FRONT_PLACE_BAND,
 };
 use crate::mapfighters::{
-    country_for_coalition, place_in_coalition, rtb_ao_point, MapFighterLayout, MAX_PACKS,
+    country_for_coalition, place_in_coalition, rtb_ao_point, FighterSpot, MapFighterLayout, MAX_PACKS,
 };
 use crate::mapground::{
     numbered_ground_issues, place_ground_jobs, GroundJob, GroundKind, GroundSpot, MapGroundLayout,
@@ -86,7 +89,7 @@ use crate::mapshipping::{place_ships, MapShipLayout, ShipSpot, GROUP_DELAY_S, ST
 use crate::model_spec::{self, ModelClass};
 use crate::payloads;
 use crate::placement::PlaceOpts;
-use crate::pack::{builtin_template, generate_pack, generate_pack_at, park_rtbs, zone_in_radius};
+use crate::pack::{builtin_template, generate_pack, generate_pack_at, group_anchor_xz, park_rtbs, zone_in_radius};
 use crate::parser::{parse_group_file, parse_il2_document};
 use crate::recon::{
     allocate_copies, allocate_mix, apply_randomizer_typed, combine_placed_packs, generate_recon_ex,
@@ -101,8 +104,9 @@ use crate::template::{
     append_seat, apply_formation_numbers, apply_suggested_attack_area, bundled_catalog,
     copy_seat_attributes, flight_lead_of, formation_label, formations_for, generate_template,
     has_linked_wingmen, is_follower, lead_indexes, load_catalog, load_catalog_as_user_added,
-    insert_goto_waypoint_after, merge_catalog, move_seat, next_waypoint_number,
-    normalize_order_chain, order_seat_indexes, order_tree_layout, path_waypoint_display_m,
+    load_template, insert_goto_waypoint_after, merge_catalog, move_seat, next_waypoint_number,
+    event_triggers_order, normalize_order_chain, order_seat_indexes, order_tree_layout,
+    path_waypoint_display_m,
     place_offset, receives_orders, refresh_attack_areas_for_seat, remap_event_then,
     remap_index_vec, remap_seat_index, replace_seat_unit, set_report_following,
     used_waypoint_count, waypoint_area_m, waypoint_display_altitude, waypoint_display_priority,
@@ -361,6 +365,7 @@ struct GroupGeneratorApp {
     redo_salients: Vec<Vec<(f64, f64)>>,
     redo_attack_arrows: Vec<((f64, f64), (f64, f64))>,
     map_fighters: Option<MapFighterLayout>,
+    map_imported_fighters: Vec<ImportedFighterPack>,
     fighter_waves: u32,
     fighter_fill: bool,
     fighter_drag: Option<usize>,
@@ -399,6 +404,8 @@ struct GroupGeneratorApp {
     help_topic: HelpTopic,
     status: Status,
     tpl_path: Option<PathBuf>,
+    /// Group currently being edited (Load group…), not the catalog path.
+    tpl_loaded_path: Option<PathBuf>,
     tpl_catalog: Vec<CatalogUnit>,
     tpl_kind: CatalogKind,
     tpl_class: Option<ModelClass>,
@@ -549,7 +556,7 @@ fn draw_tree_add_buttons(
                     }
                 })
                 .response
-                .on_hover_text("Add Time on Target, Timer, Mission Complete, or RTB");
+                .on_hover_text("Add Time on Target, Timer, or Mission Complete");
                 ui.menu_button("+ Report", |ui| {
                     for k in OrderKind::reports(unit_kind) {
                         if ui.button(k.label()).clicked() {
@@ -724,6 +731,8 @@ fn draw_two_line_chip(
 const TREE_ARROW_SLOT: f32 = 18.0;
 const TREE_CHIP_H: f32 = 40.0;
 const TREE_CHIP_W: f32 = 148.0;
+const TREE_ROW_GAP: f32 = 8.0;
+const TREE_UNIT_GAP: f32 = 20.0;
 
 fn order_chip_size(_kind: OrderKind) -> Vec2 {
     Vec2::new(TREE_CHIP_W, TREE_CHIP_H)
@@ -896,7 +905,7 @@ fn draw_template_order_chip(
         let hover = if kind.is_wp_parallel() {
             "Starts with Attack / Time on Target from the waypoint, not after a delay."
         } else if kind == OrderKind::MissionComplete {
-            "On waypoint arrival (or when Time on Target expires) pulses MISSION END."
+            "Pulses MISSION END. The previous hop starts this only when no event Then's it; otherwise cleanup waits for those events."
         } else if kind == OrderKind::Timer {
             "MCU_Timer pause between the previous order and the next."
         } else {
@@ -935,10 +944,12 @@ fn draw_template_event_chip(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.add_space(TREE_ARROW_SLOT);
-        let chip = egui::Button::new(kind.label())
-            .fill(if selected { selected_fill } else { event_fill })
-            .min_size(Vec2::new(TREE_CHIP_W, TREE_CHIP_H));
-        let resp = ui.add(chip);
+        let resp = centered_fill_button(
+            ui,
+            kind.label(),
+            if selected { selected_fill } else { event_fill },
+            Vec2::new(TREE_CHIP_W, TREE_CHIP_H),
+        );
         if resp.clicked() {
             *clicked = Some(TplSelect::Event { seat: si, event: ei });
         }
@@ -1031,9 +1042,20 @@ fn node_is_spine_order(node: OrderTreeNode, orders: &[OrderSpec]) -> bool {
         node,
         OrderTreeNode::Order(i)
             if orders.get(i).is_some_and(|o| {
-                o.kind != OrderKind::TimeOnTarget && !o.kind.is_report()
+                o.kind == OrderKind::OnSpawned
+                    || (o.kind != OrderKind::TimeOnTarget && !o.kind.is_report())
             })
     )
+}
+
+fn spine_triggered_by_event(
+    col: &[(OrderTreeNode, Rect)],
+    orders: &[OrderSpec],
+    events: &[EventHook],
+) -> bool {
+    column_spine(col, orders).is_some_and(|(n, _)| {
+        matches!(n, OrderTreeNode::Order(i) if event_triggers_order(events, i))
+    })
 }
 
 fn column_spine(
@@ -1058,11 +1080,21 @@ fn node_is_report(node: OrderTreeNode, orders: &[OrderSpec]) -> bool {
     )
 }
 
+fn node_is_stacked_report(node: OrderTreeNode, orders: &[OrderSpec]) -> bool {
+    matches!(
+        node,
+        OrderTreeNode::Order(i)
+            if orders.get(i).is_some_and(|o| {
+                o.kind.is_report() && o.kind != OrderKind::OnSpawned
+            })
+    )
+}
+
 fn top_report_len(col: &[OrderTreeNode], orders: &[OrderSpec]) -> usize {
     let ev = event_prefix_len(col);
     col[ev..]
         .iter()
-        .take_while(|n| node_is_report(**n, orders))
+        .take_while(|n| node_is_stacked_report(**n, orders))
         .count()
 }
 
@@ -1139,6 +1171,9 @@ fn paint_order_tree_lines(
         .filter_map(|(ci, col)| column_spine(col, orders).map(|(_, r)| (ci, r)))
         .collect();
     for pair in spines.windows(2) {
+        if spine_triggered_by_event(&columns[pair[1].0], orders, events) {
+            continue;
+        }
         push_polyline(&mut shapes, right_into_left(pair[0].1, pair[1].1), stroke);
     }
     for (ci, col) in columns.iter().enumerate() {
@@ -1157,10 +1192,13 @@ fn paint_order_tree_lines(
             .rev()
             .find(|(sci, _)| *sci < ci)
             .map(|(_, r)| *r);
-        let next_spine = spines
-            .iter()
-            .find(|(sci, _)| *sci > ci)
-            .map(|(_, r)| *r);
+        let next_spine = spines.iter().find(|(sci, _)| *sci > ci).and_then(|(sci, r)| {
+            if spine_triggered_by_event(&columns[*sci], orders, events) {
+                None
+            } else {
+                Some(*r)
+            }
+        });
         for (row, (node, rect)) in col.iter().copied().enumerate() {
             if row == spine_i {
                 continue;
@@ -1303,11 +1341,11 @@ fn draw_order_tree_columns(
         .max()
         .unwrap_or(0);
     ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(10.0, 8.0);
+        ui.spacing_mut().item_spacing = Vec2::new(10.0, TREE_ROW_GAP);
         for col in columns {
             let mut col_geom = Vec::new();
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
+                ui.spacing_mut().item_spacing.y = TREE_ROW_GAP;
                 let events_n = event_prefix_len(col);
                 let reports_n = top_report_len(col, orders);
                 for _ in 0..max_events.saturating_sub(events_n) {
@@ -1440,6 +1478,7 @@ impl Default for GroupGeneratorApp {
             redo_salients: Vec::new(),
             redo_attack_arrows: Vec::new(),			
             map_fighters: None,
+            map_imported_fighters: Vec::new(),
             fighter_waves: 2,
             fighter_fill: false,
             fighter_drag: None,
@@ -1478,6 +1517,7 @@ impl Default for GroupGeneratorApp {
             help_topic: HelpTopic::Overview,
             status: Status::Idle,
             tpl_path: None,
+            tpl_loaded_path: None,
             tpl_catalog: bundled_catalog(),
             tpl_kind: CatalogKind::Plane,
             tpl_class: None,
@@ -1586,6 +1626,32 @@ impl GroupGeneratorApp {
             )
             .small(),
         );
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui
+                .button("Load group…")
+                .on_hover_text(
+                    "Open a .Group to edit it here. Files this mode wrote load as-is; other layouts are rebuilt from units and orders.",
+                )
+                .clicked()
+            {
+                self.load_template_group();
+            }
+            if ui
+                .button("Reset")
+                .on_hover_text("Clear units and options so you can author a new template from scratch. Catalog stays.")
+                .clicked()
+            {
+                self.reset_template_builder();
+            }
+            if let Some(path) = &self.tpl_loaded_path {
+                let name = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("loaded group");
+                ui.label(RichText::new(format!("Editing {name}")).italics());
+            }
+        });
         ui.add_space(8.0);
 
         ui.columns(2, |cols| {
@@ -1669,7 +1735,7 @@ impl GroupGeneratorApp {
             section_title(ui, "Unit List");
             ui.label(
                 RichText::new(
-                    "UNIT → OnSpawned → orders (Goto WP, Attack, Time on Target, Mission Complete). Events link off the unit.",
+                    "UNIT → OnSpawned → orders (Goto WP, Attack, Time on Target, Mission Complete). An event that Then's an order is the only line into that chip.",
                 )
                 .italics()
                 .small(),
@@ -1918,6 +1984,9 @@ impl GroupGeneratorApp {
         }
 
         for si in 0..self.tpl_seats.len() {
+            if si > 0 {
+                ui.add_space(TREE_UNIT_GAP);
+            }
             ui.horizontal_top(|ui| {
                 let unit_sel = matches!(self.tpl_select, Some(TplSelect::Seat(s)) if s == si);
                 let role = match self.tpl_seats[si].role {
@@ -2714,7 +2783,7 @@ impl GroupGeneratorApp {
                     }
                     OrderKind::MissionComplete => {
                         ui.label(
-                            "Timer from the previous order (or Time on Target) pulses MISSION END: Force Complete, RTB if that order is on a unit, then deactivate / delete. Put Land or Force Complete before this if the flight should receive those commands first.",
+                            "Pulses MISSION END: Force Complete, then deactivate / delete. The previous order (or Time on Target) starts this timer only when no event Then's it. When events Then this chip, cleanup waits for one of those events. Put Land or Force Complete before this if the flight should receive those commands first.",
                         );
                     }
                     OrderKind::Timer => {
@@ -3690,8 +3759,9 @@ impl GroupGeneratorApp {
         }
         let opts = TemplateOptions {
             name: self
-                .tpl_path
+                .tpl_loaded_path
                 .as_ref()
+                .or(self.tpl_path.as_ref())
                 .and_then(|p| p.file_stem())
                 .and_then(|s| s.to_str())
                 .unwrap_or("Unit Template")
@@ -3720,14 +3790,25 @@ impl GroupGeneratorApp {
             }
         };
         let text = serialize_group(&pack);
+        let default_name = self
+            .tpl_loaded_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("Unit_Template.Group");
         let Some(save_path) = rfd::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
-            .set_file_name("Unit_Template.Group")
+            .set_file_name(default_name)
             .save_file()
         else {
             return;
         };
-        let locale = self.tpl_path.as_ref().map(|p| vec![p.clone()]).unwrap_or_default();
+        let locale = self
+            .tpl_loaded_path
+            .as_ref()
+            .or(self.tpl_path.as_ref())
+            .map(|p| vec![p.clone()])
+            .unwrap_or_default();
         self.status = save_with_sidecars(
             &save_path,
             &text,
@@ -3738,6 +3819,109 @@ impl GroupGeneratorApp {
                 opts.bring_up.label()
             ),
         );
+    }
+
+    fn reset_template_builder(&mut self) {
+        self.tpl_seats = default_template_seats();
+        self.tpl_select = None;
+        self.tpl_preview_from_catalog = false;
+        self.tpl_bring_up = BringUp::Activate;
+        self.tpl_spawn_reset = false;
+        self.tpl_spawn_cooldown_min = 5.0;
+        self.tpl_place_layout = PlaceLayout::InvertedVee;
+        self.tpl_per_group = 4;
+        self.tpl_zone_in = AIR_ZONE_IN_M;
+        self.tpl_zone_out = AIR_ZONE_OUT_M;
+        self.tpl_zone_mix = Some(ZoneMix::Air);
+        self.tpl_wp_spacing = WAYPOINT_SPACING_M;
+        self.tpl_wp_speed = 100.0;
+        self.tpl_wp_altitude = 0.0;
+        self.tpl_wp_priority = 1;
+        self.tpl_zone_coalition = ZoneCoalition::Western;
+        self.tpl_view_zoom = 1.0;
+        self.tpl_view_pan = Vec2::ZERO;
+        self.tpl_loaded_path = None;
+        self.status = Status::Info(
+            "Template cleared — add units to start a new group.".into(),
+        );
+    }
+
+    fn load_template_group(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("IL-2 Group", &["Group"])
+            .pick_file()
+        else {
+            return;
+        };
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(err) => {
+                self.status = Status::Error(format!("Could not read group: {err}"));
+                return;
+            }
+        };
+        let root = match parse_group_file(&text).or_else(|_| parse_il2_document(&text)) {
+            Ok(r) => r,
+            Err(err) => {
+                self.status = Status::Error(format!("Group parse failed: {err}"));
+                return;
+            }
+        };
+        let loaded = match load_template(&root, &self.tpl_catalog) {
+            Ok(l) => l,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
+        for seat in &loaded.options.seats {
+            if !self
+                .tpl_catalog
+                .iter()
+                .any(|u| u.script.eq_ignore_ascii_case(&seat.unit.script))
+            {
+                merge_catalog(&mut self.tpl_catalog, vec![seat.unit.clone()]);
+            }
+        }
+        let opts = loaded.options;
+        self.tpl_seats = opts.seats;
+        self.tpl_select = None;
+        self.tpl_preview_from_catalog = false;
+        self.tpl_bring_up = opts.bring_up;
+        self.tpl_spawn_reset = opts.allow_multiple_spawns;
+        self.tpl_spawn_cooldown_min = opts.spawn_cooldown_min;
+        self.tpl_place_layout = opts.place_layout;
+        self.tpl_per_group = opts.per_group;
+        self.tpl_zone_in = opts.zone_in;
+        self.tpl_zone_out = opts.zone_out;
+        self.tpl_zone_mix = zone_mix_for_seats(&self.tpl_seats);
+        self.tpl_wp_speed = opts.waypoint_speed;
+        self.tpl_wp_altitude = opts.waypoint_altitude;
+        self.tpl_wp_priority = opts.waypoint_priority;
+        self.tpl_wp_spacing = WAYPOINT_SPACING_M;
+        self.tpl_zone_coalition = opts.zone_coalition;
+        self.tpl_view_zoom = 1.0;
+        self.tpl_view_pan = Vec2::ZERO;
+        self.tpl_loaded_path = Some(path.clone());
+        clamp_tpl_select(&mut self.tpl_select, &self.tpl_seats);
+        let n = self.tpl_seats.len();
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("group");
+        if loaded.warnings.is_empty() {
+            self.status = Status::Info(format!("Loaded {n} unit(s) from {name} for editing."));
+        } else {
+            let lead = if loaded.native_format {
+                format!("Loaded {n} unit(s) from {name} with corrections:")
+            } else {
+                format!("Rebuilt {name} from units and orders ({n} unit(s)):")
+            };
+            self.status = Status::Warn {
+                lead,
+                items: loaded.warnings,
+            };
+        }
     }
 
     fn draw_template_schematic(&mut self, ui: &mut egui::Ui) {
@@ -4870,6 +5054,16 @@ Add reference groups (airfields, blocks) to stamp at their saved locations; they
             if ui.add(generate).clicked() {
                 self.generate_front_file();
             }
+            ui.add_space(6.0);
+            if ui
+                .button("Load Base Map…")
+                .on_hover_text(
+                    "Reload a previously generated Korea_BaseMap_*.Group: AO, front, attack arrows, and unit/fighter placement. Objectives are not stored in the file.",
+                )
+                .clicked()
+            {
+                self.load_base_map();
+            }
         });
     }
    
@@ -4983,6 +5177,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             ui.add_enabled_ui(has_fighters, |ui| {
                 if ui.button("Clear fighters").clicked() {
                     self.map_fighters = None;
+                    self.map_imported_fighters.clear();
                     self.fighter_drag = None;
                 }
             });
@@ -6800,6 +6995,13 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                             ));
                             continue;
                         }
+                        if looks_like_base_map(&entity) {
+                            errors.push(format!(
+                                "{} is a Korea base map — use Load Base Map to restore the AO, front, and unit placement.",
+                                path.file_stem().and_then(|s| s.to_str()).unwrap_or("group")
+                            ));
+                            continue;
+                        }
                         self.map_armies.push(MapArmySlot {
                             path,
                             entity,
@@ -6860,18 +7062,26 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                     x: copy.x,
                     z: copy.z,
                     in_ao,
-                    heading_deg: 0.0,
+                    heading_deg: copy.heading,
                 }),
                 kind => {
                     if let Some(gkind) = UnitKind::from_army(kind).ground() {
-                        ground_spots.push(GroundSpot::at(
+                        let mut spot = GroundSpot::at(
                             copy.x,
                             copy.z,
                             in_ao,
-                            0.0,
+                            copy.heading,
                             gkind,
                             None,
-                        ));
+                        );
+                        spot.network = copy.network.clone();
+                        spot.wp_ahead = copy.wp_ahead.clone();
+                        spot.waypoints = if let Some(net) = &copy.network {
+                            net.waypoints.clone()
+                        } else {
+                            copy.waypoints.clone()
+                        };
+                        ground_spots.push(spot);
                     }
                 }
             }
@@ -7094,13 +7304,15 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             }
             let mut root = slot.entity.clone();
             park_army_mixed(&mut root, &slot.copies, &ship_poses, ground_spots);
-            snap_army_placed_attack_areas(
-                &mut root,
-                &slot.copies,
-                ground_spots,
-                &self.map_front_xz(),
-                slot.eastern,
-            );
+            if slot.reposition {
+                snap_army_placed_attack_areas(
+                    &mut root,
+                    &slot.copies,
+                    ground_spots,
+                    &self.map_front_xz(),
+                    slot.eastern,
+                );
+            }
             let country = country_for_coalition(slot.eastern, self.country);
             apply_overrides(&mut root, "", country);
             let side = if slot.eastern { "Eastern" } else { "NATO" };
@@ -7306,6 +7518,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                     "{side}: {n} groups in {packs} pack(s). Drag icons in Pan / Select AO to fine-tune."
                 ));
                 self.map_fighters = Some(layout);
+                self.map_imported_fighters.clear();
                 self.fighter_drag = None;
             }
             Err(err) => {
@@ -7348,6 +7561,9 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
     }
 
     fn build_map_fighter_packs(&self) -> Result<Vec<MapFighterPack>, String> {
+        if !self.map_imported_fighters.is_empty() {
+            return self.stamp_imported_fighters();
+        }
         let Some(layout) = &self.map_fighters else {
             return Ok(Vec::new());
         };
@@ -8005,7 +8221,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     fn altitude_section(&mut self, ui: &mut egui::Ui) {
         ui.label(RichText::new("Altitude range (m)").strong());
         ui.label(
-            RichText::new("1- and 2-ships spread between min and max. A second pair is high cover (~2000 m up); low cover sits in a 500–1500 m band that rises with max. Wingmen stack 25–50 m on their lead.")
+            RichText::new("1- and 2-ships spread between min and max. Each complete 4-ship is 2 low / 2 high (~2000 m); leftover ships stay low. Low cover sits in a 500–1500 m band that rises with max. Wingmen stack 25–50 m on their lead.")
         );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -8883,6 +9099,197 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
         }
     }
 
+    fn stamp_imported_fighters(&self) -> Result<Vec<MapFighterPack>, String> {
+        let layout = self.map_fighters.as_ref();
+        let mut out = Vec::new();
+        for (pack_i, src) in self.map_imported_fighters.iter().enumerate() {
+            let mut root = src.root.clone();
+            if let Some(layout) = layout {
+                let mut members: Vec<&FighterSpot> = layout
+                    .spots
+                    .iter()
+                    .filter(|s| s.pack == pack_i as u32)
+                    .collect();
+                members.sort_by_key(|s| s.slot);
+                let mut gi = 0usize;
+                for child in &mut root.children {
+                    if child.block_type != "Group" {
+                        continue;
+                    }
+                    if !child.name().is_some_and(|n| n.starts_with("Group ")) {
+                        continue;
+                    }
+                    if let Some(spot) = members.get(gi) {
+                        let from = group_anchor_xz(child);
+                        crate::placement::move_anchor_to(child, from, (spot.x, spot.z));
+                    }
+                    gi += 1;
+                }
+            }
+            out.push(MapFighterPack { root });
+        }
+        Ok(out)
+    }
+
+    fn load_base_map(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("IL-2 Group", &["Group", "group"])
+            .pick_file()
+        else {
+            return;
+        };
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(err) => {
+                self.status = Status::Error(format!("Could not read {}: {err}", path.display()));
+                return;
+            }
+        };
+        let entity = match parse_group_file(&text).or_else(|_| parse_il2_document(&text)) {
+            Ok(e) => e,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
+        let imported = match inspect_base_map(&entity) {
+            Ok(m) => m,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
+        if let Some(aabb) = imported.aabb {
+            self.front_aabb = aabb;
+        }
+        self.custom_front_xz = imported.front;
+        self.salients = imported.salients;
+        self.current_salient.clear();
+        self.attack_arrows = imported.attack_arrows;
+        self.attack_drag = None;
+        self.drawn_marks.clear();
+        self.clear_redo_stack();
+        for _ in &self.salients {
+            self.drawn_marks.push(DrawnMark::Salient);
+        }
+        for _ in &self.attack_arrows {
+            self.drawn_marks.push(DrawnMark::AttackArrow);
+        }
+        if let Some(y) = imported.year {
+            self.front_year = y;
+        }
+        if let Some(s) = imported.season {
+            self.front_season = s;
+        }
+        if let Some(idx) = imported.timeline_idx {
+            self.front_t = idx.min(TIMELINE.len().saturating_sub(1)) as f32;
+        }
+        self.east_objectives.clear();
+        self.nato_objectives.clear();
+        self.objective_drag = None;
+
+        self.map_armies.clear();
+        self.map_ships = None;
+        self.map_ground_east = None;
+        self.map_ground_nato = None;
+        self.ship_drag = None;
+        self.ship_heading_drag = None;
+        self.ground_drag = None;
+        self.ground_heading_drag = None;
+        self.wp_drag = None;
+        self.wp_selected = None;
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("BaseMap");
+        for army in imported.armies {
+            let copies = inspect_army_copies(&army.entity);
+            if copies.is_empty() {
+                continue;
+            }
+            let slot_path = path.with_file_name(format!("{stem}-{}.Group", army.name));
+            self.map_armies.push(MapArmySlot {
+                path: slot_path,
+                entity: army.entity,
+                eastern: army.eastern,
+                reposition: false,
+                copies,
+                ground: None,
+                ships: None,
+            });
+            let idx = self.map_armies.len() - 1;
+            self.refresh_army_slot(idx);
+        }
+
+        self.map_imported_fighters = imported.fighters;
+        if self.map_imported_fighters.is_empty() {
+            self.map_fighters = None;
+        } else {
+            let eastern = self.map_imported_fighters[0].eastern;
+            let mut spots = Vec::new();
+            for (pack_i, pack) in self.map_imported_fighters.iter().enumerate() {
+                for (slot_i, &(x, z)) in pack.spots.iter().enumerate() {
+                    spots.push(FighterSpot {
+                        x,
+                        z,
+                        wave: pack.wave,
+                        pack: pack_i as u32,
+                        slot: (slot_i + 1) as u32,
+                    });
+                }
+            }
+            self.map_fighters = Some(MapFighterLayout { eastern, spots });
+        }
+        self.fighter_drag = None;
+        self.map_refs = imported.refs;
+
+        let mut parts = Vec::new();
+        if imported.aabb.is_some() {
+            parts.push("AO".into());
+        }
+        if self.custom_front_xz.len() >= 2 {
+            parts.push("front".into());
+        }
+        if !self.attack_arrows.is_empty() {
+            parts.push(format!("{} attack arrow(s)", self.attack_arrows.len()));
+        }
+        if !self.salients.is_empty() {
+            parts.push(format!("{} salient(s)", self.salients.len()));
+        }
+        let units = self
+            .map_armies
+            .iter()
+            .map(|a| a.copies.len())
+            .sum::<usize>();
+        if units > 0 {
+            parts.push(format!("{units} unit group(s) at exported positions"));
+        }
+        let fighters = self
+            .map_fighters
+            .as_ref()
+            .map(|l| l.spots.len())
+            .unwrap_or(0);
+        if fighters > 0 {
+            parts.push(format!("{fighters} fighter group(s)"));
+        }
+        if !self.map_refs.is_empty() {
+            parts.push(format!("{} reference group(s)", self.map_refs.len()));
+        }
+        let extra = if imported.notes.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", imported.notes.join(" "))
+        };
+        self.status = Status::Info(format!(
+            "Loaded base map ({}). Objectives are preview-only and were not in the file.{extra}",
+            if parts.is_empty() {
+                "no layers".into()
+            } else {
+                parts.join(", ")
+            }
+        ));
+    }
+
     fn add_map_refs(&mut self) {
         let Some(paths) = rfd::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
@@ -8938,12 +9345,13 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             }
         };
         apply_overrides(&mut generated, "", self.country);
+        generated.set_name(&linked_fighter_pack_name(
+            self.country,
+            self.linked_groups as usize,
+        ));
         let text = serialize_group(&generated);
 
-        let suggested = format!(
-            "Eastern_Fighters_Random_{}pack.Group",
-            self.linked_groups
-        );
+        let suggested = fighter_pack_filename(self.country, self.linked_groups as usize);
         let Some(save_path) = rfd::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)

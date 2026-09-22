@@ -19,6 +19,9 @@
 //!
 //! ## Public API
 //! * `struct TemplateOptions` + `fn generate_template` — the build.
+//! * `fn load_template` / `struct TemplateLoad` — fill the builder from a
+//!   `.Group` (native Template Builder files round-trip; other layouts are
+//!   rebuilt from units + orders, with warnings for anything dropped).
 //! * Seats: `TemplateSeat`, `CatalogUnit`, `FlightRole`, `PlaneStart`,
 //!   `append_seat`, `replace_seat_unit`, `copy_seat_attributes`,
 //!   `move_seat`, `apply_formation_numbers`, `last_lead_index`,
@@ -27,7 +30,7 @@
 //!   `EntityEvent`, `EventHook` / `EventThen`, `normalize_order_chain`,
 //!   `insert_goto_waypoint_after`, `set_report_following`,
 //!   `used_waypoint_count` / `next_waypoint_number`,
-//!   `order_tree_columns` / `order_tree_layout`.
+//!   `order_tree_columns` / `order_tree_layout`, `event_triggers_order`.
 //! * Zones: `ZoneCoalition`, `ZoneMix`, `zone_defaults`, `visual_range_m`,
 //!   `near_visual_range`, `zone_mix_for_seats`, AIR/GROUND/TRAIN zone
 //!   constants.
@@ -44,13 +47,18 @@
 //! * Catalog: `bundled_catalog`, `builtin_plane_catalog`, `load_catalog`,
 //!   `load_catalog_as_user_added`, `merge_catalog`,
 //!   `catalog_carriage_scripts`, `carriage_label`.
+//! * Load for edit: `load_template` / `TemplateLoad` /
+//!   `looks_like_generated_template`.
 //!
 //! ## Used by
 //! * ui.rs (Template mode) — the whole builder (catalog, seats, order
-//!   tree, zones, waypoints). Generate → `serialize_group`.
+//!   tree, zones, waypoints). Load group → `load_template`; Generate →
+//!   `serialize_group`.
 //! * bombers.rs (Exclusive mode) — `inspect_plan` / cleanup validation
 //!   reads the generated `MISSION END` / `Trigger Delete` graph.
 
+
+use std::collections::{HashMap, HashSet};
 
 use crate::aircraft::{
     callsign_for, encode_tcode, encode_tcode_color, flight_color, flight_number,
@@ -228,7 +236,6 @@ const AIR_ORDERS: &[OrderKind] = &[
     OrderKind::MissionComplete,
     OrderKind::Land,
     OrderKind::TakeOff,
-    OrderKind::RtbOnZoneOut,
     OrderKind::OnSpawned,
     OrderKind::OnTargetAttacked,
     OrderKind::OnAreaAttacked,
@@ -276,6 +283,49 @@ impl OrderKind {
             OrderKind::OnAreaAttacked => "OnAreaAttacked",
             OrderKind::OnTookOff => "OnTookOff",
             OrderKind::OnLanded => "OnLanded",
+        }
+    }
+
+    fn from_label(label: &str) -> Option<Self> {
+        [
+            Self::Attack,
+            Self::AttackArea,
+            Self::Behaviour,
+            Self::Cover,
+            Self::Effect,
+            Self::Flare,
+            Self::ForceComplete,
+            Self::Formation,
+            Self::GotoWaypoint,
+            Self::TimeOnTarget,
+            Self::Timer,
+            Self::MissionComplete,
+            Self::Land,
+            Self::TakeOff,
+            Self::RtbOnZoneOut,
+            Self::OnSpawned,
+            Self::OnTargetAttacked,
+            Self::OnAreaAttacked,
+            Self::OnTookOff,
+            Self::OnLanded,
+        ]
+        .into_iter()
+        .find(|k| k.label().eq_ignore_ascii_case(label))
+    }
+
+    fn from_block_type(block: &str) -> Option<Self> {
+        match block {
+            "MCU_CMD_AttackTarget" => Some(Self::Attack),
+            "MCU_CMD_AttackArea" => Some(Self::AttackArea),
+            "MCU_CMD_Behaviour" => Some(Self::Behaviour),
+            "MCU_CMD_Cover" => Some(Self::Cover),
+            "MCU_CMD_Effect" => Some(Self::Effect),
+            "MCU_CMD_Flare" => Some(Self::Flare),
+            "MCU_CMD_ForceComplete" => Some(Self::ForceComplete),
+            "MCU_CMD_Formation" => Some(Self::Formation),
+            "MCU_CMD_Land" => Some(Self::Land),
+            "MCU_CMD_TakeOff" => Some(Self::TakeOff),
+            _ => None,
         }
     }
 
@@ -363,7 +413,7 @@ impl OrderKind {
     }
 
     /// Orders the editor actually accepts for this unit kind. Land, cover,
-    /// takeoff, RTB, OnTookOff, and OnLanded are aircraft-only.
+    /// takeoff, OnTookOff, and OnLanded are aircraft-only.
     pub fn available(kind: UnitKind) -> &'static [OrderKind] {
         match kind {
             UnitKind::Plane => AIR_ORDERS,
@@ -529,6 +579,14 @@ impl EntityEvent {
             EntityEvent::OnTrailerKilled => 83,
             EntityEvent::OnRadarRequestAirSupport => 85,
         }
+    }
+
+    fn from_type_id(id: i32) -> Option<Self> {
+        AIR_EVENTS
+            .iter()
+            .chain(GROUND_EVENTS)
+            .copied()
+            .find(|e| e.type_id() == id)
     }
 
     pub fn available(kind: UnitKind) -> &'static [EntityEvent] {
@@ -1638,12 +1696,20 @@ fn take_order_hop(orders: &[OrderSpec], i: &mut usize) -> Vec<usize> {
 /// Columns of the order tree. Sequential hops stay in line; Attack / AttackArea
 /// / Time on Target that sit together are stacked as a parallel branch. A TOT
 /// that follows a waypoint (or other hop) with no attack sits in that hop's
-/// column. Leading reports (OnSpawned) attach to the next hop so they stack
-/// on that command instead of sitting in a spine-less column.
+/// column. OnSpawned is its own column — it really does fire before the next
+/// command. Other reports still attach to the hop they wait on.
 pub fn order_tree_columns(orders: &[OrderSpec]) -> Vec<Vec<usize>> {
     let mut cols = Vec::new();
     let mut i = 0;
     while i < orders.len() {
+        if orders[i].kind == OrderKind::OnSpawned {
+            let start = i;
+            while i < orders.len() && orders[i].kind == OrderKind::OnSpawned {
+                i += 1;
+            }
+            cols.push((start..i).collect());
+            continue;
+        }
         if orders[i].kind.is_report() {
             let start = i;
             while i < orders.len() && orders[i].kind.is_report() {
@@ -1697,7 +1763,10 @@ pub fn order_tree_layout(orders: &[OrderSpec], events: &[EventHook]) -> Vec<Vec<
             let mut primary = Vec::new();
             let mut stacked = Vec::new();
             for &i in col {
-                if orders[i].kind.is_report() {
+                if orders[i].kind == OrderKind::OnSpawned {
+                    // Spine row, left of the first command — not stacked on it.
+                    primary.push(OrderTreeNode::Order(i));
+                } else if orders[i].kind.is_report() {
                     reports.push(OrderTreeNode::Order(i));
                 } else if is_stack_satellite(orders[i].kind) {
                     stacked.push(OrderTreeNode::Order(i));
@@ -1800,6 +1869,33 @@ fn sort_reports_longest_first(col: &mut [OrderTreeNode], orders: &[OrderSpec]) {
         col[start..start + n]
             .sort_by(|a, b| report_label_len(*b, orders).cmp(&report_label_len(*a, orders)));
     }
+}
+
+/// True when an entity event pulses this order instead of the previous hop.
+pub fn event_triggers_order(events: &[EventHook], oi: usize) -> bool {
+    events
+        .iter()
+        .any(|h| matches!(h.then, EventThen::Order(i) if i == oi))
+}
+
+fn event_triggered_sources(seats: &[TemplateSeat], owner: usize) -> HashSet<usize> {
+    let mut out = HashSet::new();
+    for (si, seat) in seats.iter().enumerate() {
+        let chain = if receives_orders(seats, si) {
+            si
+        } else {
+            flight_lead_of(seats, si)
+        };
+        if chain != owner {
+            continue;
+        }
+        for hook in &seat.events {
+            if let EventThen::Order(i) = hook.then {
+                out.insert(i);
+            }
+        }
+    }
+    out
 }
 
 /// Set or insert the command that follows a report in the chain.
@@ -2897,6 +2993,9 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     }
     after_bring_up.set_targets(after_targets);
 
+    let triggered: Vec<HashSet<usize>> = (0..emitted.len())
+        .map(|si| event_triggered_sources(&opts.seats, si))
+        .collect();
     for si in 0..emitted.len() {
         for oi in 0..emitted[si].len() {
             let mut targets = Vec::new();
@@ -2914,13 +3013,16 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
             if emitted[si][oi].mission_complete {
                 targets.push(mission_end_id);
             } else if let Some(next_i) = chain_delay_to(&emitted[si], oi) {
-                targets.push(emitted[si][next_i].delay.index.unwrap());
+                let src = emitted[si][next_i].source_index;
+                if !triggered[si].contains(&src) {
+                    targets.push(emitted[si][next_i].delay.index.unwrap());
+                }
             }
             emitted[si][oi].delay.set_targets(targets);
         }
     }
 
-    wire_waypoint_chain(&mut waypoints, &emitted);
+    wire_waypoint_chain(&mut waypoints, &emitted, &triggered);
 
     if repeat {
         // Zone Out always cleans up and resets DeathCount. A full wipe only
@@ -3230,9 +3332,14 @@ fn chain_delay_to(steps: &[EmittedOrder], oi: usize) -> Option<usize> {
 /// On arrival WP n pulses Attack / AttackArea and Time on Target together
 /// (order in the list does not matter). TOT expiry continues the chain.
 /// Mission Complete after a bare Goto WP is also pulsed from the waypoint.
-fn wire_waypoint_chain(waypoints: &mut [Il2Entity], emitted: &[Vec<EmittedOrder>]) {
+fn wire_waypoint_chain(
+    waypoints: &mut [Il2Entity],
+    emitted: &[Vec<EmittedOrder>],
+    triggered: &[HashSet<usize>],
+) {
     let mut extra: Vec<Vec<i32>> = vec![Vec::new(); waypoints.len()];
-    for steps in emitted {
+    for (si, steps) in emitted.iter().enumerate() {
+        let skip = triggered.get(si);
         for (oi, step) in steps.iter().enumerate() {
             let Some(wp_n) = step.goto_wp else {
                 continue;
@@ -3251,7 +3358,8 @@ fn wire_waypoint_chain(waypoints: &mut [Il2Entity], emitted: &[Vec<EmittedOrder>
                     break;
                 }
                 if later.mission_complete {
-                    if !saw_attack && !saw_tot {
+                    let event_owns = skip.is_some_and(|s| s.contains(&later.source_index));
+                    if !saw_attack && !saw_tot && !event_owns {
                         pulse_from_wp(&mut extra, idx, &later.delay);
                     }
                     break;
@@ -3786,6 +3894,1335 @@ fn synthetic_entity() -> Il2Entity {
     e.set_property("Enabled", "0");
     e.set_property("MisObjID", "1");
     e
+}
+
+/// Result of reading a `.Group` back into Template Builder.
+#[derive(Clone, Debug)]
+pub struct TemplateLoad {
+    pub options: TemplateOptions,
+    /// True when the file already has Template Builder `Logic` / `Units` names.
+    pub native_format: bool,
+    /// Dropped MCUs, renamed zones, layout corrections, unmapped events, …
+    pub warnings: Vec<String>,
+}
+
+/// Template Builder files keep `ENABLE / PULSE IN`, `Zone IN`, `MISSION END`,
+/// and a `Units` subgroup. Other groups are rebuilt from units + orders.
+pub fn looks_like_generated_template(root: &Il2Entity) -> bool {
+    let has_units = root
+        .children
+        .iter()
+        .any(|c| c.block_type == "Group" && c.name() == Some("Units"));
+    has_units
+        && root.find_by_name("ENABLE / PULSE IN").is_some()
+        && root.find_by_name("Zone IN").is_some()
+        && root.find_by_name("MISSION END").is_some()
+}
+
+/// Fill `TemplateOptions` from a loaded group so the builder can edit it.
+///
+/// Native files round-trip seats, orders, zones, and bring-up. Any other
+/// layout is reconstructed from world objects and command MCUs; proximity
+/// logic is rebuilt on the next Generate. `warnings` lists everything that
+/// could not be kept or that was corrected.
+pub fn load_template(root: &Il2Entity, catalog: &[CatalogUnit]) -> Result<TemplateLoad, String> {
+    let native_format = looks_like_generated_template(root);
+    let by_index = collect_by_index(root);
+    let loaded = collect_loaded_units(root);
+    if loaded.is_empty() {
+        return Err("that group has no Plane / Vehicle / Train / Ship units to edit.".into());
+    }
+
+    let mut warnings = Vec::new();
+    let mut consumed: HashSet<i32> = HashSet::new();
+    if !native_format {
+        warnings.push(
+            "This group is not in Template Builder format. Units and orders were kept; Logic, checkzones, and formation layout will be rebuilt on Generate.".into(),
+        );
+    }
+
+    let mut seats = Vec::new();
+    let mut entity_to_seat: HashMap<i32, usize> = HashMap::new();
+    for unit in &loaded {
+        if let Some(id) = unit.object.index {
+            consumed.insert(id);
+        }
+        if let Some(id) = unit.entity.index {
+            consumed.insert(id);
+            entity_to_seat.insert(id, seats.len());
+        }
+        seats.push(seat_from_loaded(unit, catalog));
+    }
+    apply_loaded_roles(&mut seats, &loaded, &entity_to_seat);
+
+    let mut opts = TemplateOptions::default();
+    opts.name = root
+        .name()
+        .filter(|n| !n.is_empty())
+        .unwrap_or("Unit Template")
+        .to_string();
+    opts.seats = seats;
+
+    read_bring_up(root, &mut opts, &mut consumed, &mut warnings);
+    read_zones(root, &mut opts, native_format, &mut consumed, &mut warnings);
+
+    let mut timer_to_order: HashMap<i32, (usize, usize)> = HashMap::new();
+    if native_format {
+        read_native_orders(
+            root,
+            &by_index,
+            &entity_to_seat,
+            &mut opts,
+            &mut consumed,
+            &mut timer_to_order,
+            &mut warnings,
+        );
+    } else {
+        read_foreign_orders(
+            root,
+            &by_index,
+            &entity_to_seat,
+            &mut opts,
+            &mut consumed,
+            &mut warnings,
+        );
+    }
+    read_rtb_orders(root, &entity_to_seat, &mut opts, &mut consumed);
+    read_events(
+        &loaded,
+        &by_index,
+        &entity_to_seat,
+        &timer_to_order,
+        &mut opts,
+        &mut consumed,
+        &mut warnings,
+    );
+    for seat in &mut opts.seats {
+        if !seat.orders.is_empty() {
+            normalize_order_chain(&mut seat.orders, &mut seat.events, 0);
+        }
+    }
+
+    read_waypoints_into_opts(root, &mut opts, &mut consumed);
+    infer_layout(&loaded, &mut opts, &mut warnings);
+
+    collect_dropped(root, &consumed, native_format, &mut warnings);
+
+    Ok(TemplateLoad {
+        options: opts,
+        native_format,
+        warnings,
+    })
+}
+
+struct LoadedUnit {
+    object: Il2Entity,
+    entity: Il2Entity,
+}
+
+fn visit<'a>(e: &'a Il2Entity, f: &mut impl FnMut(&'a Il2Entity)) {
+    f(e);
+    for c in &e.children {
+        visit(c, f);
+    }
+}
+
+fn collect_by_index(root: &Il2Entity) -> HashMap<i32, &Il2Entity> {
+    let mut map = HashMap::new();
+    visit(root, &mut |e| {
+        if let Some(id) = e.index {
+            map.entry(id).or_insert(e);
+        }
+    });
+    map
+}
+
+fn collect_loaded_units(root: &Il2Entity) -> Vec<LoadedUnit> {
+    let mut objects = Vec::new();
+    if let Some(units) = root
+        .children
+        .iter()
+        .find(|c| c.block_type == "Group" && c.name() == Some("Units"))
+    {
+        collect_unit_objects(units, &mut objects);
+    }
+    if objects.is_empty() {
+        collect_unit_objects(root, &mut objects);
+    }
+    objects
+        .into_iter()
+        .map(|object| {
+            let entity = object
+                .property("LinkTrId")
+                .and_then(|s| s.parse::<i32>().ok())
+                .and_then(|id| find_index(root, id))
+                .cloned()
+                .unwrap_or_else(synthetic_entity);
+            LoadedUnit {
+                object: object.clone(),
+                entity,
+            }
+        })
+        .collect()
+}
+
+fn collect_unit_objects<'a>(e: &'a Il2Entity, out: &mut Vec<&'a Il2Entity>) {
+    if e.block_type == "Group" && e.name().is_some_and(|n| n.eq_ignore_ascii_case("NodeGates")) {
+        return;
+    }
+    if matches!(
+        e.block_type.as_str(),
+        "Plane" | "Vehicle" | "Train" | "Ship"
+    ) {
+        out.push(e);
+    }
+    for c in &e.children {
+        collect_unit_objects(c, out);
+    }
+}
+
+fn kind_from_object(object: &Il2Entity) -> UnitKind {
+    let script = object
+        .property("Script")
+        .map(|s| s.trim_matches('"'))
+        .unwrap_or("");
+    match object.block_type.as_str() {
+        "Plane" => UnitKind::Plane,
+        "Train" => UnitKind::Train,
+        "Ship" => UnitKind::Ship,
+        _ if weapon_range::is_infantry_script(script) => UnitKind::Infantry,
+        _ if is_fixed_script(script) => UnitKind::Fixed,
+        _ => UnitKind::Vehicle,
+    }
+}
+
+fn catalog_unit_matching(catalog: &[CatalogUnit], object: &Il2Entity, entity: &Il2Entity) -> CatalogUnit {
+    let script = object
+        .property("Script")
+        .map(|s| s.trim_matches('"').to_string())
+        .unwrap_or_default();
+    if let Some(unit) = catalog
+        .iter()
+        .find(|u| u.script.eq_ignore_ascii_case(&script))
+    {
+        return unit.clone();
+    }
+    let name = object.name().unwrap_or("").to_string();
+    let display = display_name(&name, &script);
+    CatalogUnit {
+        kind: kind_from_object(object),
+        name,
+        script,
+        display,
+        object: object.clone(),
+        entity: entity.clone(),
+    }
+}
+
+fn seat_from_loaded(unit: &LoadedUnit, catalog: &[CatalogUnit]) -> TemplateSeat {
+    let spec = catalog_unit_matching(catalog, &unit.object, &unit.entity);
+    let mut seat = TemplateSeat::new(spec);
+    let obj = &unit.object;
+    seat.country = prop_i32(obj, "Country", seat.country);
+    seat.skill = prop_i32(obj, "AILevel", seat.skill).clamp(0, 4);
+    seat.number_in_formation = prop_i32(obj, "NumberInFormation", seat.number_in_formation);
+    seat.fuel = prop_f32(obj, "Fuel", seat.fuel).clamp(0.0, 1.0);
+    seat.payload_id = prop_i32(obj, "PayloadId", seat.payload_id);
+    if obj.property("ModMask").is_some() {
+        seat.mod_mask = prop_mod_mask(obj);
+    }
+    seat.vulnerable = prop_bool(obj, "Vulnerable", seat.vulnerable);
+    seat.engageable = prop_bool(obj, "Engageable", seat.engageable);
+    seat.limit_ammo = prop_bool(obj, "LimitAmmo", seat.limit_ammo);
+    seat.ai_rtb = prop_bool(obj, "AiRTBDecision", seat.ai_rtb);
+    if seat.unit.is_air() {
+        seat.altitude = prop_f32(obj, "YPos", seat.altitude).max(0.0);
+        seat.start_type = PlaneStart::stored_for_altitude(
+            prop_i32(obj, "StartType", seat.start_type),
+            seat.altitude,
+        );
+    } else {
+        seat.altitude = 0.0;
+    }
+    if seat.unit.is_train() {
+        seat.carriages = train_carriages(obj);
+    }
+    seat
+}
+
+fn apply_loaded_roles(
+    seats: &mut [TemplateSeat],
+    loaded: &[LoadedUnit],
+    entity_to_seat: &HashMap<i32, usize>,
+) {
+    for (i, unit) in loaded.iter().enumerate() {
+        let Some(&lead_eid) = unit.entity.targets.first() else {
+            continue;
+        };
+        let Some(&lead) = entity_to_seat.get(&lead_eid) else {
+            continue;
+        };
+        if lead == i {
+            continue;
+        }
+        seats[i].role = FlightRole::Follows(lead);
+    }
+    for i in 0..seats.len() {
+        if seats
+            .iter()
+            .any(|s| s.role == FlightRole::Follows(i))
+            && seats[i].role == FlightRole::Independent
+        {
+            seats[i].role = FlightRole::Lead;
+        }
+    }
+}
+
+fn read_bring_up(
+    root: &Il2Entity,
+    opts: &mut TemplateOptions,
+    consumed: &mut HashSet<i32>,
+    _warnings: &mut Vec<String>,
+) {
+    let mut spawn = None;
+    let mut activate = None;
+    let mut death = None;
+    let mut cooldown = None;
+    visit(root, &mut |e| {
+        match (e.block_type.as_str(), e.name().unwrap_or("")) {
+            ("MCU_Spawner", _) => spawn = Some(e),
+            ("MCU_Activate", name)
+                if name.eq_ignore_ascii_case("Activate Units")
+                    || name.eq_ignore_ascii_case("Activate Unit(s)") =>
+            {
+                activate = Some(e);
+            }
+            ("MCU_Counter", "DeathCount") => death = Some(e),
+            ("MCU_Timer", "COOLDOWN") => cooldown = Some(e),
+            _ => {}
+        }
+    });
+    if let Some(s) = spawn {
+        opts.bring_up = BringUp::Spawn;
+        mark_consumed(s, consumed);
+        if let Some(c) = find_named(root, "SpawnCount") {
+            mark_consumed(c, consumed);
+        }
+    } else if let Some(a) = activate {
+        opts.bring_up = BringUp::Activate;
+        mark_consumed(a, consumed);
+    }
+    if opts.bring_up == BringUp::Spawn && death.is_some() {
+        opts.allow_multiple_spawns = true;
+        if let Some(d) = death {
+            mark_consumed(d, consumed);
+        }
+        for name in [
+            "DeathCount ReActivate",
+            "DeathCount Deactivate",
+            "Reset Counter",
+            "Modifier Set Value",
+        ] {
+            if let Some(e) = find_named(root, name) {
+                mark_consumed(e, consumed);
+            }
+        }
+        if let Some(c) = cooldown {
+            mark_consumed(c, consumed);
+            let secs = prop_f32(c, "Time", 0.0);
+            if secs > 0.0 {
+                opts.spawn_cooldown_min = (secs / 60.0).max(1.0);
+            }
+        }
+    }
+}
+
+fn find_named<'a>(root: &'a Il2Entity, name: &str) -> Option<&'a Il2Entity> {
+    root.find_by_name(name)
+}
+
+fn mark_consumed(e: &Il2Entity, consumed: &mut HashSet<i32>) {
+    if let Some(id) = e.index {
+        consumed.insert(id);
+    }
+}
+
+fn read_zones(
+    root: &Il2Entity,
+    opts: &mut TemplateOptions,
+    native: bool,
+    consumed: &mut HashSet<i32>,
+    warnings: &mut Vec<String>,
+) {
+    let zone_in = root
+        .find_by_name("Zone IN")
+        .or_else(|| find_checkzone_named(root, "Zone In"));
+    let zone_out = root
+        .find_by_name("Zone Out")
+        .or_else(|| find_checkzone_named(root, "Zone Out"));
+    if let Some(z) = zone_in {
+        mark_consumed(z, consumed);
+        if let Some(r) = z.property("Zone").and_then(|s| s.parse::<f32>().ok()) {
+            opts.zone_in = r.max(200.0);
+        }
+        opts.zone_coalition = parse_zone_coalition(z.property("PlaneCoalitions").unwrap_or(""));
+        if !native && z.name() != Some("Zone IN") {
+            warnings.push(format!(
+                "Checkzone \"{}\" was mapped to Zone IN ({:.0} m).",
+                z.name().unwrap_or("Zone In"),
+                opts.zone_in
+            ));
+        }
+    } else if let Some(mix) = zone_mix_for_seats(&opts.seats) {
+        let (inn, out) = zone_defaults(mix);
+        opts.zone_in = inn;
+        opts.zone_out = out;
+        warnings.push(format!(
+            "No Zone IN found — using {} defaults ({:.0} / {:.0} m).",
+            match mix {
+                ZoneMix::Air => "aircraft",
+                ZoneMix::Ground => "ground",
+                ZoneMix::Train => "train",
+            },
+            inn,
+            out
+        ));
+    }
+    if let Some(z) = zone_out {
+        mark_consumed(z, consumed);
+        if let Some(r) = z.property("Zone").and_then(|s| s.parse::<f32>().ok()) {
+            opts.zone_out = r.max(opts.zone_in + 200.0);
+        }
+        if !native && z.name() != Some("Zone Out") {
+            warnings.push(format!(
+                "Checkzone \"{}\" was mapped to Zone Out ({:.0} m).",
+                z.name().unwrap_or("Zone Out"),
+                opts.zone_out
+            ));
+        }
+    }
+    if opts.zone_out < opts.zone_in + 200.0 {
+        let old = opts.zone_out;
+        opts.zone_out = opts.zone_in + 200.0;
+        if old > 0.0 {
+            warnings.push(format!(
+                "Zone Out ({old:.0} m) was raised to {:.0} m so it stays larger than Zone IN.",
+                opts.zone_out
+            ));
+        }
+    }
+    for name in [
+        "ENABLE / PULSE IN",
+        "PULSE OUT",
+        "Translator Mission Begin",
+        "AFTER BRING UP",
+        "MISSION BEGIN",
+        "SPAWN UNITS",
+        "MISSION END",
+        "MISSION END ORDERS",
+        "DELAYED END ORDERS",
+        "DELETE DELAY",
+        "Trigger Delete",
+        "Deactivate Units",
+        "Force Complete - High",
+        "Zone Out ReActivate",
+        "Zone In ReActivate",
+        "RTB DELAY",
+        "COOLDOWN",
+    ] {
+        if let Some(e) = root.find_by_name(name) {
+            mark_consumed(e, consumed);
+        }
+    }
+    consume_named_block(root, "MCU_Deactivate", "Self Deactivate", consumed);
+    consume_named_block(root, "MCU_Deactivate", "Deactivate Unit(s)", consumed);
+}
+
+fn consume_named_block(root: &Il2Entity, block: &str, name: &str, consumed: &mut HashSet<i32>) {
+    visit(root, &mut |e| {
+        if e.block_type == block && e.name().is_some_and(|n| n.eq_ignore_ascii_case(name)) {
+            if let Some(id) = e.index {
+                consumed.insert(id);
+            }
+        }
+    });
+}
+
+fn find_checkzone_named<'a>(root: &'a Il2Entity, name: &str) -> Option<&'a Il2Entity> {
+    let mut found = None;
+    visit(root, &mut |e| {
+        if found.is_none()
+            && e.block_type == "MCU_CheckZone"
+            && e.name().is_some_and(|n| n.eq_ignore_ascii_case(name))
+        {
+            found = Some(e);
+        }
+    });
+    found
+}
+
+fn parse_zone_coalition(raw: &str) -> ZoneCoalition {
+    let has1 = raw.contains('1');
+    let has2 = raw.contains('2');
+    match (has1, has2) {
+        (true, true) => ZoneCoalition::Both,
+        (true, false) => ZoneCoalition::Eastern,
+        _ => ZoneCoalition::Western,
+    }
+}
+
+fn parse_order_timer_name(name: &str) -> Option<(OrderKind, usize)> {
+    let (label, num) = name.rsplit_once(' ')?;
+    let seat = num.parse::<usize>().ok()?.checked_sub(1)?;
+    let kind = OrderKind::from_label(label)?;
+    Some((kind, seat))
+}
+
+fn parse_wp_number(name: &str) -> Option<u32> {
+    name.strip_prefix("WP ")?.trim().parse().ok()
+}
+
+fn is_rtb_name(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.starts_with("rtb east") || n.starts_with("rtb west") || n == "rtb delay"
+}
+
+fn read_native_orders(
+    root: &Il2Entity,
+    by_index: &HashMap<i32, &Il2Entity>,
+    entity_to_seat: &HashMap<i32, usize>,
+    opts: &mut TemplateOptions,
+    consumed: &mut HashSet<i32>,
+    timer_to_order: &mut HashMap<i32, (usize, usize)>,
+    warnings: &mut Vec<String>,
+) {
+    let mut timers: Vec<(OrderKind, usize, &Il2Entity)> = Vec::new();
+    visit(root, &mut |e| {
+        if e.block_type != "MCU_Timer" {
+            return;
+        }
+        let Some(name) = e.name() else {
+            return;
+        };
+        if let Some((kind, seat)) = parse_order_timer_name(name) {
+            if seat < opts.seats.len() {
+                timers.push((kind, seat, e));
+            }
+        }
+    });
+    let mut ids: HashSet<i32> = HashSet::new();
+    for (_, _, t) in &timers {
+        if let Some(id) = t.index {
+            ids.insert(id);
+            consumed.insert(id);
+        }
+    }
+    let n_seats = opts.seats.len();
+    for seat in 0..n_seats {
+        if !receives_orders(&opts.seats, seat) {
+            continue;
+        }
+        let ordered = sort_native_timers(&timers, seat, &ids, by_index, root);
+        for (kind, timer) in ordered {
+            let spec = spec_from_native_timer(
+                kind,
+                timer,
+                by_index,
+                entity_to_seat,
+                seat,
+                consumed,
+                warnings,
+            );
+            let oi = opts.seats[seat].orders.len();
+            if let Some(id) = timer.index {
+                timer_to_order.insert(id, (seat, oi));
+            }
+            opts.seats[seat].orders.push(spec);
+        }
+    }
+}
+
+fn sort_native_timers<'a>(
+    timers: &[(OrderKind, usize, &'a Il2Entity)],
+    seat: usize,
+    order_ids: &HashSet<i32>,
+    by_index: &HashMap<i32, &Il2Entity>,
+    root: &Il2Entity,
+) -> Vec<(OrderKind, &'a Il2Entity)> {
+    let mine: Vec<(OrderKind, &Il2Entity)> = timers
+        .iter()
+        .filter(|(_, s, _)| *s == seat)
+        .map(|(k, _, t)| (*k, *t))
+        .collect();
+    if mine.is_empty() {
+        return Vec::new();
+    }
+    let mine_ids: HashSet<i32> = mine.iter().filter_map(|(_, t)| t.index).collect();
+    let mut incoming: HashMap<i32, usize> = HashMap::new();
+    for id in &mine_ids {
+        incoming.insert(*id, 0);
+    }
+    for (_, t) in &mine {
+        for next in next_order_timer_ids(t, by_index, order_ids) {
+            if mine_ids.contains(&next) {
+                *incoming.entry(next).or_insert(0) += 1;
+            }
+        }
+    }
+    // Events that Then an order timer are the real predecessor. Without this,
+    // Mission Complete looks like a chain start (nothing in the timer graph
+    // points at it) and load puts it before AttackArea / Cover.
+    visit(root, &mut |e| {
+        if e.block_type != "OnEvent" {
+            return;
+        }
+        let tar = prop_i32(e, "TarId", -1);
+        if mine_ids.contains(&tar) {
+            *incoming.entry(tar).or_insert(0) += 1;
+        }
+    });
+    let mut frontier: Vec<i32> = Vec::new();
+    if let Some(after) = root.find_by_name("AFTER BRING UP") {
+        for &id in &after.targets {
+            if mine_ids.contains(&id) && !frontier.contains(&id) {
+                frontier.push(id);
+            }
+        }
+    }
+    for (_, t) in &mine {
+        let Some(id) = t.index else {
+            continue;
+        };
+        if incoming.get(&id).copied().unwrap_or(0) == 0 && !frontier.contains(&id) {
+            frontier.push(id);
+        }
+    }
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    while !frontier.is_empty() {
+        let id = frontier.remove(0);
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some((kind, timer)) = mine.iter().find(|(_, t)| t.index == Some(id)) else {
+            continue;
+        };
+        out.push((*kind, *timer));
+        for next in next_order_timer_ids(timer, by_index, order_ids) {
+            if mine_ids.contains(&next) && !seen.contains(&next) && !frontier.contains(&next) {
+                frontier.push(next);
+            }
+        }
+    }
+    for (kind, t) in mine {
+        if t.index.is_some_and(|id| !seen.contains(&id)) {
+            out.push((kind, t));
+        }
+    }
+    out
+}
+
+fn next_order_timer_ids(
+    timer: &Il2Entity,
+    by_index: &HashMap<i32, &Il2Entity>,
+    order_ids: &HashSet<i32>,
+) -> Vec<i32> {
+    let mut out = Vec::new();
+    for &tid in &timer.targets {
+        if order_ids.contains(&tid) {
+            out.push(tid);
+            continue;
+        }
+        if let Some(e) = by_index.get(&tid) {
+            if e.block_type == "MCU_Waypoint" {
+                for &wid in &e.targets {
+                    if order_ids.contains(&wid) {
+                        out.push(wid);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+fn spec_from_native_timer(
+    kind: OrderKind,
+    timer: &Il2Entity,
+    by_index: &HashMap<i32, &Il2Entity>,
+    entity_to_seat: &HashMap<i32, usize>,
+    owner: usize,
+    consumed: &mut HashSet<i32>,
+    warnings: &mut Vec<String>,
+) -> OrderSpec {
+    let mut spec = OrderSpec::default();
+    spec.kind = kind;
+    spec.delay_s = prop_f32(timer, "Time", BAKED_ORDER_DELAY as f32);
+    if kind == OrderKind::TimeOnTarget || kind == OrderKind::Timer {
+        spec.time_s = spec.delay_s;
+    }
+    for &tid in &timer.targets {
+        let Some(e) = by_index.get(&tid) else {
+            continue;
+        };
+        if e.block_type.starts_with("MCU_CMD_") {
+            mark_consumed(e, consumed);
+            fill_spec_from_cmd(&mut spec, e, entity_to_seat, owner, warnings);
+        } else if e.block_type == "MCU_Waypoint" {
+            mark_consumed(e, consumed);
+            if let Some(n) = e.name().and_then(parse_wp_number) {
+                spec.waypoint = n;
+                spec.priority = prop_i32(e, "Priority", spec.priority);
+                let y = prop_f32(e, "YPos", 0.0);
+                if y > 0.0 {
+                    spec.altitude = y;
+                }
+            }
+        }
+    }
+    spec
+}
+
+fn fill_spec_from_cmd(
+    spec: &mut OrderSpec,
+    cmd: &Il2Entity,
+    entity_to_seat: &HashMap<i32, usize>,
+    owner: usize,
+    warnings: &mut Vec<String>,
+) {
+    if spec.kind == OrderKind::AttackArea
+        || cmd.block_type == "MCU_CMD_AttackArea"
+    {
+        if spec.kind == OrderKind::AttackArea {
+            spec.attack_ground = prop_bool(cmd, "AttackGround", spec.attack_ground);
+            spec.attack_air = prop_bool(cmd, "AttackAir", spec.attack_air);
+            spec.attack_g_targets = prop_bool(cmd, "AttackGTargets", spec.attack_g_targets);
+            spec.attack_area = prop_f32(cmd, "AttackArea", spec.attack_area);
+            spec.time_s = prop_f32(cmd, "Time", spec.time_s);
+        }
+    }
+    spec.priority = prop_i32(cmd, "Priority", spec.priority);
+    spec.formation_type = prop_i32(cmd, "FormationType", spec.formation_type);
+    spec.behaviour_filter = prop_i32(cmd, "Filter", spec.behaviour_filter);
+    spec.flare_color = prop_i32(cmd, "Color", spec.flare_color);
+    if cmd.block_type == "MCU_CMD_Effect" {
+        spec.effect_start = !prop_bool(cmd, "ActionType", false);
+    }
+    spec.attack_group = prop_bool(cmd, "AttackGroup", spec.attack_group);
+    spec.shared_with = cmd
+        .objects
+        .iter()
+        .filter_map(|id| entity_to_seat.get(id).copied())
+        .filter(|&si| si != owner)
+        .collect();
+    if spec.kind == OrderKind::Cover {
+        spec.cover_lead = cmd
+            .targets
+            .first()
+            .and_then(|id| entity_to_seat.get(id).copied())
+            .filter(|&si| si != owner);
+        if spec.cover_lead.is_none() && !cmd.targets.is_empty() {
+            warnings.push(format!(
+                "Cover order on seat {} had a target that is not a unit in this group.",
+                owner + 1
+            ));
+        }
+    }
+    if spec.kind == OrderKind::Attack {
+        spec.attack_seat = cmd
+            .targets
+            .first()
+            .and_then(|id| entity_to_seat.get(id).copied())
+            .filter(|&si| si != owner);
+    }
+}
+
+fn read_foreign_orders(
+    root: &Il2Entity,
+    by_index: &HashMap<i32, &Il2Entity>,
+    entity_to_seat: &HashMap<i32, usize>,
+    opts: &mut TemplateOptions,
+    consumed: &mut HashSet<i32>,
+    warnings: &mut Vec<String>,
+) {
+    let mut cmds = Vec::new();
+    visit(root, &mut |e| {
+        if !e.block_type.starts_with("MCU_CMD_") {
+            return;
+        }
+        if e.name() == Some("Force Complete - High") {
+            return;
+        }
+        let Some(kind) = OrderKind::from_block_type(&e.block_type) else {
+            return;
+        };
+        if kind == OrderKind::ForceComplete {
+            warnings.push(format!(
+                "Force Complete \"{}\" was treated as MISSION END cleanup, not a unit order.",
+                e.name().unwrap_or("Force Complete")
+            ));
+            mark_consumed(e, consumed);
+            return;
+        }
+        cmds.push(e);
+    });
+    let mut used_cmd = HashSet::new();
+    for cmd in cmds {
+        let Some(id) = cmd.index else {
+            continue;
+        };
+        if !used_cmd.insert(id) {
+            continue;
+        }
+        let Some(kind) = OrderKind::from_block_type(&cmd.block_type) else {
+            continue;
+        };
+        let owner = cmd
+            .objects
+            .iter()
+            .find_map(|oid| entity_to_seat.get(oid).copied())
+            .or_else(|| {
+                opts.seats
+                    .iter()
+                    .enumerate()
+                    .find(|(i, _)| receives_orders(&opts.seats, *i))
+                    .map(|(i, _)| i)
+            });
+        let Some(owner) = owner else {
+            warnings.push(format!(
+                "Dropped {} \"{}\" (not linked to a unit).",
+                kind.label(),
+                cmd.name().unwrap_or("command")
+            ));
+            continue;
+        };
+        if !receives_orders(&opts.seats, owner) {
+            continue;
+        }
+        mark_consumed(cmd, consumed);
+        let mut spec = OrderSpec::for_kind(opts.seats[owner].unit.kind);
+        spec.kind = kind;
+        fill_spec_from_cmd(&mut spec, cmd, entity_to_seat, owner, warnings);
+        if let Some(timer) = unique_predecessor_timer(root, id, by_index) {
+            let wait = prop_f32(timer, "Time", 0.0);
+            if wait >= 1.0 {
+                spec.delay_s = wait;
+                warnings.push(format!(
+                    "Timer \"{}\" ({wait:.0} s) became the delay before {} on seat {}.",
+                    timer.name().unwrap_or("timer"),
+                    kind.label(),
+                    owner + 1
+                ));
+            }
+            mark_consumed(timer, consumed);
+        }
+        if cmd.name().is_some_and(|n| n != kind.label()) {
+            warnings.push(format!(
+                "{} \"{}\" was imported as a {} order on seat {}.",
+                cmd.block_type,
+                cmd.name().unwrap_or("command"),
+                kind.label(),
+                owner + 1
+            ));
+        }
+        opts.seats[owner].orders.push(spec);
+    }
+
+    let mut path_wps: Vec<&Il2Entity> = Vec::new();
+    visit(root, &mut |e| {
+        if e.block_type == "MCU_Waypoint" {
+            if e.name().is_some_and(is_rtb_name) {
+                return;
+            }
+            path_wps.push(e);
+        }
+    });
+    path_wps.sort_by_key(|w| {
+        w.name()
+            .and_then(parse_wp_number)
+            .unwrap_or(u32::MAX)
+    });
+    if path_wps.iter().all(|w| parse_wp_number(w.name().unwrap_or("")).is_none()) {
+        path_wps.sort_by(|a, b| {
+            let ax = a.pos_xz().map(|p| p.0).unwrap_or(0.0);
+            let bx = b.pos_xz().map(|p| p.0).unwrap_or(0.0);
+            ax.partial_cmp(&bx).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    for (i, wp) in path_wps.iter().enumerate() {
+        mark_consumed(wp, consumed);
+        let n = parse_wp_number(wp.name().unwrap_or("")).unwrap_or((i as u32) + 1);
+        let owners: Vec<usize> = wp
+            .objects
+            .iter()
+            .filter_map(|id| entity_to_seat.get(id).copied())
+            .filter(|&si| receives_orders(&opts.seats, si))
+            .collect();
+        let targets = if owners.is_empty() {
+            order_seat_indexes(&opts.seats)
+        } else {
+            owners
+        };
+        for owner in targets {
+            if opts.seats[owner]
+                .orders
+                .iter()
+                .any(|o| o.kind == OrderKind::GotoWaypoint && o.waypoint == n)
+            {
+                continue;
+            }
+            let mut spec = OrderSpec::default();
+            spec.kind = OrderKind::GotoWaypoint;
+            spec.waypoint = n;
+            spec.priority = prop_i32(wp, "Priority", 1);
+            let y = prop_f32(wp, "YPos", 0.0);
+            if y > 0.0 {
+                spec.altitude = y;
+            }
+            let idx = opts.seats[owner]
+                .orders
+                .iter()
+                .take_while(|o| o.kind == OrderKind::GotoWaypoint)
+                .count();
+            opts.seats[owner].orders.insert(idx, spec);
+            warnings.push(format!(
+                "Waypoint \"{}\" became Goto WP {n} on seat {}.",
+                wp.name().unwrap_or("waypoint"),
+                owner + 1
+            ));
+        }
+    }
+
+    read_foreign_reports(root, entity_to_seat, opts, warnings);
+}
+
+fn unique_predecessor_timer<'a>(
+    root: &'a Il2Entity,
+    cmd_id: i32,
+    _by_index: &HashMap<i32, &Il2Entity>,
+) -> Option<&'a Il2Entity> {
+    let mut found = None;
+    let mut count = 0;
+    visit(root, &mut |e| {
+        if e.block_type == "MCU_Timer" && e.targets.contains(&cmd_id) {
+            count += 1;
+            found = Some(e);
+        }
+    });
+    if count == 1 {
+        found
+    } else {
+        None
+    }
+}
+
+fn read_foreign_reports(
+    root: &Il2Entity,
+    entity_to_seat: &HashMap<i32, usize>,
+    opts: &mut TemplateOptions,
+    warnings: &mut Vec<String>,
+) {
+    visit(root, &mut |e| {
+        if e.block_type != "MCU_TR_Entity" {
+            return;
+        }
+        let Some(&seat) = e.index.and_then(|id| entity_to_seat.get(&id)) else {
+            return;
+        };
+        if !receives_orders(&opts.seats, seat) {
+            return;
+        }
+        for wrap in &e.children {
+            if wrap.block_type != "OnReports" {
+                continue;
+            }
+            for r in &wrap.children {
+                if r.block_type != "OnReport" {
+                    continue;
+                }
+                let typ = prop_i32(r, "Type", -1);
+                let kind = match typ {
+                    0 => OrderKind::OnSpawned,
+                    1 => OrderKind::OnTargetAttacked,
+                    2 => OrderKind::OnAreaAttacked,
+                    3 => OrderKind::OnTookOff,
+                    4 => OrderKind::OnLanded,
+                    _ => {
+                        warnings.push(format!(
+                            "Dropped OnReport Type {typ} on seat {}.",
+                            seat + 1
+                        ));
+                        continue;
+                    }
+                };
+                if opts.seats[seat].orders.iter().any(|o| o.kind == kind) {
+                    continue;
+                }
+                opts.seats[seat].orders.push(OrderSpec {
+                    kind,
+                    ..OrderSpec::default()
+                });
+            }
+        }
+    });
+}
+
+fn read_rtb_orders(
+    root: &Il2Entity,
+    entity_to_seat: &HashMap<i32, usize>,
+    opts: &mut TemplateOptions,
+    consumed: &mut HashSet<i32>,
+) {
+    let mut rtb = Vec::new();
+    visit(root, &mut |e| {
+        if e.block_type == "MCU_Waypoint" && e.name().is_some_and(is_rtb_name) {
+            rtb.push(e);
+        }
+    });
+    if rtb.is_empty() && root.find_by_name("RTB DELAY").is_none() {
+        return;
+    }
+    let mut owners: HashSet<usize> = HashSet::new();
+    for wp in &rtb {
+        mark_consumed(wp, consumed);
+        for id in &wp.objects {
+            if let Some(&si) = entity_to_seat.get(id) {
+                let owner = if receives_orders(&opts.seats, si) {
+                    si
+                } else {
+                    flight_lead_of(&opts.seats, si)
+                };
+                owners.insert(owner);
+            }
+        }
+    }
+    if owners.is_empty() {
+        owners.extend(order_seat_indexes(&opts.seats));
+    }
+    for owner in owners {
+        if opts.seats[owner]
+            .orders
+            .iter()
+            .any(|o| o.kind == OrderKind::RtbOnZoneOut)
+        {
+            continue;
+        }
+        opts.seats[owner].orders.push(OrderSpec {
+            kind: OrderKind::RtbOnZoneOut,
+            ..OrderSpec::default()
+        });
+    }
+}
+
+fn read_events(
+    loaded: &[LoadedUnit],
+    by_index: &HashMap<i32, &Il2Entity>,
+    entity_to_seat: &HashMap<i32, usize>,
+    timer_to_order: &HashMap<i32, (usize, usize)>,
+    opts: &mut TemplateOptions,
+    consumed: &mut HashSet<i32>,
+    warnings: &mut Vec<String>,
+) {
+    let death_id = by_index
+        .values()
+        .find(|e| e.name() == Some("DeathCount"))
+        .and_then(|e| e.index);
+    let force_id = by_index
+        .values()
+        .find(|e| e.name() == Some("Force Complete - High"))
+        .and_then(|e| e.index);
+    for unit in loaded {
+        let Some(&si) = unit.entity.index.and_then(|id| entity_to_seat.get(&id)) else {
+            continue;
+        };
+        let unit_name = unit.object.name().unwrap_or("unit");
+        for wrap in &unit.entity.children {
+            if wrap.block_type != "OnEvents" {
+                continue;
+            }
+            for ev in &wrap.children {
+                if ev.block_type != "OnEvent" {
+                    continue;
+                }
+                let typ = prop_i32(ev, "Type", -1);
+                let tar = prop_i32(ev, "TarId", -1);
+                if death_id == Some(tar) {
+                    continue;
+                }
+                let Some(kind) = EntityEvent::from_type_id(typ) else {
+                    warnings.push(format!(
+                        "Dropped OnEvent Type {typ} on {unit_name} (unknown event)."
+                    ));
+                    continue;
+                };
+                let then = if force_id == Some(tar) {
+                    EventThen::ForceComplete
+                } else if let Some(&(chain_si, oi)) = timer_to_order.get(&tar) {
+                    let _ = chain_si;
+                    EventThen::Order(oi)
+                } else if let Some(target) = by_index.get(&tar) {
+                    warnings.push(format!(
+                        "{} on {unit_name} targeted \"{}\" — dropped (not Force Complete or an order).",
+                        kind.label(),
+                        target.name().unwrap_or("MCU")
+                    ));
+                    mark_consumed(target, consumed);
+                    continue;
+                } else {
+                    warnings.push(format!(
+                        "{} on {unit_name} targeted missing MCU {tar} — dropped.",
+                        kind.label()
+                    ));
+                    continue;
+                };
+                opts.seats[si].events.push(EventHook { kind, then });
+            }
+        }
+    }
+}
+
+fn read_waypoints_into_opts(
+    root: &Il2Entity,
+    opts: &mut TemplateOptions,
+    consumed: &mut HashSet<i32>,
+) {
+    visit(root, &mut |e| {
+        if e.block_type != "MCU_Waypoint" {
+            return;
+        }
+        let Some(n) = e.name().and_then(parse_wp_number) else {
+            return;
+        };
+        mark_consumed(e, consumed);
+        opts.waypoint_speed = prop_f32(e, "Speed", opts.waypoint_speed);
+        if n == 1 {
+            opts.waypoint_priority = prop_i32(e, "Priority", opts.waypoint_priority);
+            let y = prop_f32(e, "YPos", 0.0);
+            let plane_alt = first_plane_altitude(&opts.seats) as f32;
+            if y > 0.0 && (y - plane_alt).abs() > 1.0 {
+                opts.waypoint_altitude = y;
+            }
+        }
+        let y = prop_f32(e, "YPos", 0.0);
+        let plane_alt = first_plane_altitude(&opts.seats) as f32;
+        let hop_alt = if y > 0.0 && (y - plane_alt).abs() > 1.0 && (opts.waypoint_altitude - y).abs() > 1.0
+        {
+            y
+        } else {
+            0.0
+        };
+        for seat in &mut opts.seats {
+            for order in &mut seat.orders {
+                if order.kind == OrderKind::GotoWaypoint && order.waypoint.max(1) == n {
+                    order.priority = prop_i32(e, "Priority", order.priority);
+                    if hop_alt > 0.0 {
+                        order.altitude = hop_alt;
+                    } else if (y - plane_alt).abs() <= 1.0 {
+                        order.altitude = 0.0;
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn infer_layout(loaded: &[LoadedUnit], opts: &mut TemplateOptions, warnings: &mut Vec<String>) {
+    let positions: Vec<(f64, f64)> = loaded
+        .iter()
+        .filter_map(|u| u.object.pos_xz())
+        .collect();
+    if positions.len() < 2 {
+        if opts.seats.iter().any(|s| s.unit.is_air()) {
+            opts.place_layout = PlaceLayout::InvertedVee;
+            opts.per_group = 4;
+        } else {
+            opts.place_layout = PlaceLayout::Column;
+            opts.per_group = opts.seats.len().max(1) as u32;
+        }
+        return;
+    }
+    let origin = positions[0];
+    let rel: Vec<(f64, f64)> = positions
+        .iter()
+        .map(|(x, z)| (x - origin.0, z - origin.1))
+        .collect();
+    let n = rel.len();
+    let spacing = PLACEMENT_SPACING as f64;
+    let mut best = (f64::MAX, PlaceLayout::Column, n.min(8) as u32);
+    for layout in PlaceLayout::ALL {
+        for per in 1..=n.min(8) {
+            let mut err = 0.0;
+            for (i, &(dx, dz)) in rel.iter().enumerate() {
+                let (ex, ez) = place_offset(layout, i, per, spacing);
+                let ddx = dx - ex;
+                let ddz = dz - ez;
+                err += ddx * ddx + ddz * ddz;
+            }
+            if err < best.0 {
+                best = (err, layout, per as u32);
+            }
+        }
+    }
+    let rms = (best.0 / n as f64).sqrt();
+    if rms <= 25.0 {
+        opts.place_layout = best.1;
+        opts.per_group = best.2;
+    } else {
+        if opts.seats.iter().any(|s| s.unit.is_air()) {
+            opts.place_layout = PlaceLayout::InvertedVee;
+            opts.per_group = 4.min(n as u32).max(1);
+        } else {
+            opts.place_layout = PlaceLayout::Column;
+            opts.per_group = n.min(8) as u32;
+        }
+        warnings.push(format!(
+            "Unit positions did not match a Template Builder formation (about {rms:.0} m off). Using {} at 150 m; original map placement will not be kept.",
+            opts.place_layout.label()
+        ));
+    }
+}
+
+fn collect_dropped(
+    root: &Il2Entity,
+    consumed: &HashSet<i32>,
+    native: bool,
+    warnings: &mut Vec<String>,
+) {
+    let mut icons = 0;
+    let mut subtitles = 0;
+    let mut extra_zones = Vec::new();
+    let mut extra_groups = Vec::new();
+    let mut extra_cmds = Vec::new();
+    let mut extra_other = Vec::new();
+    let mut nodegates = false;
+    visit(root, &mut |e| {
+        if std::ptr::eq(e, root) {
+            return;
+        }
+        if e.block_type == "Group" && e.name().is_some_and(|n| n.eq_ignore_ascii_case("NodeGates")) {
+            nodegates = true;
+            return;
+        }
+        if matches!(e.name(), Some("Logic" | "Units" | "Orders" | "Waypoints")) {
+            return;
+        }
+        if consumed.contains(&e.index.unwrap_or(-1)) {
+            return;
+        }
+        match e.block_type.as_str() {
+            "MCU_Icon" => icons += 1,
+            "MCU_TR_Subtitle" | "MCU_Subtitle" => subtitles += 1,
+            "MCU_CheckZone" => {
+                extra_zones.push(e.name().unwrap_or("checkzone").to_string());
+            }
+            "Group" => {
+                if let Some(n) = e.name() {
+                    if !matches!(n, "Logic" | "Units" | "Orders" | "Waypoints")
+                        && !n.eq_ignore_ascii_case("NodeGates")
+                    {
+                        extra_groups.push(n.to_string());
+                    }
+                }
+            }
+            b if b.starts_with("MCU_CMD_") => {
+                extra_cmds.push(format!(
+                    "{} \"{}\"",
+                    b,
+                    e.name().unwrap_or("command")
+                ));
+            }
+            "MCU_Timer" | "MCU_Counter" | "MCU_Activate" | "MCU_Deactivate"
+            | "MCU_Delete" | "MCU_Spawner" | "MCU_TR_MissionBegin"
+            | "MCU_Waypoint" | "MCU_TR_ComplexTrigger" | "MCU_Random" => {
+                if native || distinctive_drop(e) {
+                    extra_other.push(format!(
+                        "{} \"{}\"",
+                        e.block_type,
+                        e.name().unwrap_or("MCU")
+                    ));
+                }
+            }
+            "Plane" | "Vehicle" | "Train" | "Ship" | "MCU_TR_Entity"
+            | "OnEvents" | "OnEvent" | "OnReports" | "OnReport" | "Carriages" => {}
+            _ => {
+                if e.index.is_some() && distinctive_drop(e) {
+                    extra_other.push(format!(
+                        "{} \"{}\"",
+                        e.block_type,
+                        e.name().unwrap_or("block")
+                    ));
+                }
+            }
+        }
+    });
+    if nodegates {
+        warnings.push("Dropped NodeGates (fighter-pack link logic).".into());
+    }
+    if icons > 0 {
+        warnings.push(format!(
+            "Dropped {icons} map icon{}.",
+            if icons == 1 { "" } else { "s" }
+        ));
+    }
+    if subtitles > 0 {
+        warnings.push(format!(
+            "Dropped {subtitles} subtitle{}.",
+            if subtitles == 1 { "" } else { "s" }
+        ));
+    }
+    extra_zones.sort();
+    extra_zones.dedup();
+    for name in extra_zones {
+        warnings.push(format!("Dropped checkzone \"{name}\"."));
+    }
+    extra_groups.sort();
+    extra_groups.dedup();
+    for name in extra_groups {
+        warnings.push(format!(
+            "Dropped subgroup \"{name}\" (custom logic is not imported)."
+        ));
+    }
+    for cmd in extra_cmds {
+        warnings.push(format!("Dropped command {cmd}."));
+    }
+    extra_other.sort();
+    extra_other.dedup();
+    const MAX_OTHER: usize = 12;
+    let extra_n = extra_other.len();
+    for item in extra_other.into_iter().take(MAX_OTHER) {
+        warnings.push(format!("Dropped {item}."));
+    }
+    if extra_n > MAX_OTHER {
+        warnings.push(format!(
+            "Dropped {} more custom MCU(s).",
+            extra_n - MAX_OTHER
+        ));
+    }
+}
+
+fn distinctive_drop(e: &Il2Entity) -> bool {
+    let name = e.name().unwrap_or("");
+    if name.is_empty() {
+        return false;
+    }
+    !matches!(
+        name,
+        "Self Deactivate"
+            | "Translator Mission Begin"
+            | "Trigger Delete"
+            | "Deactivate Units"
+            | "Deactivate Unit(s)"
+            | "Activate Units"
+            | "Activate Unit(s)"
+            | "Trigger Activate"
+            | "Trigger Deactivate"
+            | "Trigger Timer"
+            | "Trigger Check Zone"
+            | "Force Complete"
+            | "ORDERS"
+            | "2s"
+            | "3s"
+    )
 }
 
 #[cfg(test)]
@@ -5466,6 +6903,8 @@ mod tests {
         assert!(OrderKind::GotoWaypoint.has_priority());
         assert!(!OrderKind::Timer.has_priority());
         assert!(OrderKind::available(UnitKind::Plane).contains(&OrderKind::MissionComplete));
+        assert!(!OrderKind::available(UnitKind::Plane).contains(&OrderKind::RtbOnZoneOut));
+        assert!(!OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::RtbOnZoneOut));
         assert!(OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::TimeOnTarget));
         assert!(OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::Timer));
         assert!(OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::MissionComplete));
@@ -5828,6 +7267,85 @@ mod tests {
     }
 
     #[test]
+    fn events_break_attack_area_chain_to_mission_complete() {
+        let mut opts = one_mig();
+        opts.bring_up = BringUp::Spawn;
+        opts.waypoint_count = 0;
+        opts.seats[0].orders = vec![
+            OrderSpec {
+                kind: OrderKind::OnSpawned,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::AttackArea,
+                attack_air: true,
+                attack_ground: false,
+                attack_g_targets: false,
+                attack_area: 18_000.0,
+                time_s: 600.0,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::MissionComplete,
+                ..OrderSpec::default()
+            },
+        ];
+        opts.seats[0].events = vec![
+            EventHook {
+                kind: EntityEvent::OnPlaneCriticalDamage,
+                then: EventThen::Order(2),
+            },
+            EventHook {
+                kind: EntityEvent::OnPilotWounded,
+                then: EventThen::Order(2),
+            },
+            EventHook {
+                kind: EntityEvent::OnPlaneBingoMainMG,
+                then: EventThen::Order(2),
+            },
+            EventHook {
+                kind: EntityEvent::OnPlaneBingoFuel,
+                then: EventThen::Order(2),
+            },
+        ];
+        let pack = generate_template(&opts).unwrap();
+        let spawn_tm = pack.find_by_name("OnSpawned 1").unwrap();
+        let atk_delay = pack.find_by_name("AttackArea 1").unwrap();
+        let attack = pack.find_by_name("AttackArea").unwrap();
+        let done = pack.find_by_name("Mission Complete 1").unwrap();
+        let hub = pack.find_by_name("MISSION END").unwrap();
+        assert!(spawn_tm.targets.contains(&atk_delay.index.unwrap()));
+        assert!(atk_delay.targets.contains(&attack.index.unwrap()));
+        assert!(
+            !atk_delay.targets.contains(&done.index.unwrap()),
+            "AttackArea timer must not start Mission Complete when events Then it, got {:?}",
+            atk_delay.targets
+        );
+        assert!(done.targets.contains(&hub.index.unwrap()));
+        let events = entity_events(&pack);
+        let done_id = done.index.unwrap();
+        for ty in [3, 1, 8, 7] {
+            assert!(
+                events.iter().any(|(t, tar)| *t == ty && *tar == done_id),
+                "expected OnEvent type {ty} → Mission Complete, got {events:?}"
+            );
+        }
+        let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
+        let kinds: Vec<_> = loaded.options.seats[0].orders.iter().map(|o| o.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                OrderKind::OnSpawned,
+                OrderKind::AttackArea,
+                OrderKind::MissionComplete,
+            ]
+        );
+        assert!(loaded.options.seats[0].events.iter().all(|e| {
+            e.then == EventThen::Order(2)
+        }));
+    }
+
+    #[test]
     fn order_tree_stacks_tot_with_attack() {
         let orders = vec![
             OrderSpec {
@@ -5989,11 +7507,14 @@ mod tests {
         ];
         assert_eq!(
             order_tree_columns(&spawned_then_form),
-            vec![vec![0, 1]]
+            vec![vec![0], vec![1]]
         );
         assert_eq!(
             order_tree_layout(&spawned_then_form, &[]),
-            vec![vec![OrderTreeNode::Order(0), OrderTreeNode::Order(1)]]
+            vec![
+                vec![OrderTreeNode::Order(0)],
+                vec![OrderTreeNode::Order(1)],
+            ]
         );
         let takeoff_report = vec![
             OrderSpec {
@@ -6055,11 +7576,10 @@ mod tests {
         ];
         assert_eq!(
             order_tree_layout(&spawned_and_area, &[]),
-            vec![vec![
-                OrderTreeNode::Order(2),
-                OrderTreeNode::Order(0),
-                OrderTreeNode::Order(1),
-            ]]
+            vec![
+                vec![OrderTreeNode::Order(0)],
+                vec![OrderTreeNode::Order(2), OrderTreeNode::Order(1)],
+            ]
         );
         let bingo = vec![EventHook {
             kind: EntityEvent::OnPlaneBingoBombs,
@@ -6076,6 +7596,52 @@ mod tests {
                 ],
             ]
         );
+    }
+
+    #[test]
+    fn order_tree_puts_onspawned_left_and_events_on_mission_complete() {
+        let orders = vec![
+            OrderSpec {
+                kind: OrderKind::OnSpawned,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::AttackArea,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::MissionComplete,
+                ..OrderSpec::default()
+            },
+        ];
+        assert_eq!(
+            order_tree_columns(&orders),
+            vec![vec![0], vec![1], vec![2]]
+        );
+        let events = vec![
+            EventHook {
+                kind: EntityEvent::OnPlaneCriticalDamage,
+                then: EventThen::Order(2),
+            },
+            EventHook {
+                kind: EntityEvent::OnPilotWounded,
+                then: EventThen::Order(2),
+            },
+        ];
+        assert_eq!(
+            order_tree_layout(&orders, &events),
+            vec![
+                vec![OrderTreeNode::Order(0)],
+                vec![
+                    OrderTreeNode::Event(0),
+                    OrderTreeNode::Event(1),
+                    OrderTreeNode::Order(1),
+                ],
+                vec![OrderTreeNode::Order(2)],
+            ]
+        );
+        assert!(event_triggers_order(&events, 2));
+        assert!(!event_triggers_order(&events, 1));
     }
 
     #[test]
@@ -6195,5 +7761,140 @@ mod tests {
         assert_eq!(seats[0].orders[1].waypoint, 2);
         assert_eq!(used_waypoint_count(&seats), 2);
         assert_eq!(seats[0].events[0].then, EventThen::Order(0));
+    }
+
+    #[test]
+    fn load_round_trips_generated_four_migs() {
+        let src = four_migs();
+        let pack = generate_template(&src).unwrap();
+        let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
+        assert!(loaded.native_format);
+        assert!(
+            loaded.warnings.is_empty(),
+            "unexpected warnings: {:?}",
+            loaded.warnings
+        );
+        let opts = loaded.options;
+        assert_eq!(opts.seats.len(), 4);
+        assert_eq!(opts.seats[0].role, FlightRole::Lead);
+        assert_eq!(opts.seats[1].role, FlightRole::Follows(0));
+        assert_eq!(opts.seats[2].role, FlightRole::Follows(0));
+        assert_eq!(opts.seats[3].role, FlightRole::Follows(0));
+        assert_eq!(opts.bring_up, BringUp::Activate);
+        assert_eq!(opts.zone_coalition, ZoneCoalition::Western);
+        assert!((opts.zone_in - AIR_ZONE_IN_M).abs() < 1.0);
+        assert!((opts.zone_out - AIR_ZONE_OUT_M).abs() < 1.0);
+        assert_eq!(opts.place_layout, PlaceLayout::InvertedVee);
+        assert_eq!(opts.per_group, 4);
+        let kinds: Vec<_> = opts.seats[0].orders.iter().map(|o| o.kind).collect();
+        assert_eq!(kinds, vec![OrderKind::Formation, OrderKind::AttackArea]);
+        assert_eq!(opts.seats[0].orders[0].formation_type, 23);
+        assert!(opts.seats[1].orders.is_empty());
+        assert!(opts.seats[0].unit.script.contains("mig15bis"));
+        assert_eq!(opts.seats[0].country, 501);
+        assert!((opts.seats[0].altitude - 1000.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn load_round_trips_spawn_goto_and_rtb() {
+        let mut opts = one_mig();
+        opts.bring_up = BringUp::Spawn;
+        opts.allow_multiple_spawns = true;
+        opts.spawn_cooldown_min = 5.0;
+        opts.seats[0].orders = vec![
+            OrderSpec {
+                kind: OrderKind::OnSpawned,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 1,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::AttackArea,
+                attack_area: 2000.0,
+                time_s: 120.0,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::RtbOnZoneOut,
+                ..OrderSpec::default()
+            },
+        ];
+        opts.seats[0].events = vec![EventHook {
+            kind: EntityEvent::OnPlaneDestroyed,
+            then: EventThen::ForceComplete,
+        }];
+        let pack = generate_template(&opts).unwrap();
+        let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
+        assert!(loaded.native_format);
+        let got = loaded.options;
+        assert_eq!(got.bring_up, BringUp::Spawn);
+        assert!(got.allow_multiple_spawns);
+        assert!((got.spawn_cooldown_min - 5.0).abs() < 0.1);
+        let kinds: Vec<_> = got.seats[0].orders.iter().map(|o| o.kind).collect();
+        assert!(kinds.contains(&OrderKind::OnSpawned));
+        assert!(kinds.contains(&OrderKind::GotoWaypoint));
+        assert!(kinds.contains(&OrderKind::AttackArea));
+        assert!(kinds.contains(&OrderKind::RtbOnZoneOut));
+        let area = got.seats[0]
+            .orders
+            .iter()
+            .find(|o| o.kind == OrderKind::AttackArea)
+            .unwrap();
+        assert!((area.attack_area - 2000.0).abs() < 0.5);
+        assert!(got.seats[0].events.iter().any(|e| {
+            e.kind == EntityEvent::OnPlaneDestroyed && e.then == EventThen::ForceComplete
+        }));
+    }
+
+    #[test]
+    fn load_foreign_tank_platoon_rebuilds_from_units_and_orders() {
+        let text = include_str!("../TemplateExamples/GroundUnits/DropIns/DPRK Tank Platoon.Group");
+        let root = parse_group_file(text).unwrap();
+        assert!(!looks_like_generated_template(&root));
+        let loaded = load_template(&root, &bundled_catalog()).unwrap();
+        assert!(!loaded.native_format);
+        assert_eq!(loaded.options.seats.len(), 3);
+        assert!(loaded.options.seats.iter().all(|s| s.unit.script.contains("t34-85")));
+        assert_eq!(loaded.options.seats[0].country, 503);
+        let area = loaded.options.seats[0]
+            .orders
+            .iter()
+            .find(|o| o.kind == OrderKind::AttackArea)
+            .expect("AttackArea kept");
+        assert!((area.attack_area - 1500.0).abs() < 0.5);
+        assert_eq!(area.shared_with, vec![1, 2]);
+        assert!((loaded.options.zone_in - 7500.0).abs() < 1.0);
+        assert!((loaded.options.zone_out - 8500.0).abs() < 1.0);
+        assert_eq!(loaded.options.zone_coalition, ZoneCoalition::Both);
+        assert_eq!(loaded.options.bring_up, BringUp::Activate);
+        assert!(
+            loaded.warnings.iter().any(|w| w.contains("not in Template Builder format")),
+            "{:?}",
+            loaded.warnings
+        );
+        assert!(
+            loaded.warnings.iter().any(|w| w.contains("icon")),
+            "expected dropped icons, got {:?}",
+            loaded.warnings
+        );
+        assert!(
+            loaded.warnings.iter().any(|w| w.contains("OnKilled") || w.contains("Damaged")),
+            "expected dropped OnKilled → Damaged Counter, got {:?}",
+            loaded.warnings
+        );
+        let rebuilt = generate_template(&loaded.options).unwrap();
+        assert!(looks_like_generated_template(&rebuilt));
+        assert!(rebuilt.find_by_name("ENABLE / PULSE IN").is_some());
+        assert_eq!(rebuilt.count_block_type("Vehicle"), 3);
+    }
+
+    #[test]
+    fn load_empty_group_is_an_error() {
+        let mut root = Il2Entity::new("Group");
+        root.set_name("Empty");
+        assert!(load_template(&root, &[]).is_err());
     }
 }

@@ -14,7 +14,7 @@
 //!   `template_square_origins`, `move_to_grid(_at)`, `move_anchor_to`
 //! * `fn apply_group_heading` — yaw visuals, 0 = north / +X
 //! * `struct PlaceOpts` / `UNIT_PLACE_SPACING` (4.5 km)
-//! * `fn heading_toward` / `heading_toward_nearest`
+//! * `fn heading_toward` / `heading_toward_nearest` / `heading_delta`
 //! * `fn mix_index` / `hashed_pick` / `subsample_favoring` / `subsample_spaced`
 //!
 //! ## Used by
@@ -229,6 +229,16 @@ pub fn heading_toward(from: (f64, f64), to: (f64, f64)) -> f64 {
         return 0.0;
     }
     dz.atan2(dx).to_degrees().rem_euclid(360.0)
+}
+
+/// Signed yaw from `from` to `to` in (-180, 180]. Positive is clockwise (toward +Z).
+pub fn heading_delta(from: f64, to: f64) -> f64 {
+    let d = (to - from).rem_euclid(360.0);
+    if d > 180.0 {
+        d - 360.0
+    } else {
+        d
+    }
 }
 
 /// Mix `seed` and `index` into a 64-bit value.
@@ -628,6 +638,9 @@ mod tests {
         let h = heading_toward_nearest((0.0, 0.0), &[(10.0, 0.0), (0.0, 1000.0)]).unwrap();
         assert!((h - 0.0).abs() < 0.01);
         assert!(heading_toward_nearest((0.0, 0.0), &[]).is_none());
+        assert!((heading_delta(90.0, 90.0)).abs() < 0.01);
+        assert!((heading_delta(90.0, 100.0) - 10.0).abs() < 0.01);
+        assert!((heading_delta(10.0, 350.0) + 20.0).abs() < 0.01);
     }
 
     #[test]

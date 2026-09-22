@@ -12,13 +12,14 @@
 //! `root.max_index() + 1` through `duplicate::duplicate_template`), and
 //! parking — map grid or explicit positions — translating each group's
 //! tree, its RTB waypoint and its gate cell by one shared delta. It does
-//! NOT configure aircraft (`flights::configure_aircraft` runs first on
-//! Group 1) and leaves everything outside the pack root alone.
+//! NOT configure aircraft (`flights::configure_aircraft` rebuilds Group 1
+//! first) and leaves everything outside the pack root alone.
 //!
 //! ## Public API
 //! * `fn builtin_template` — parse the bundled
 //!   `Eastern_Fighters_Random_3pack_V6.Group` fallback (no template loaded).
 //! * `fn generate_pack` — N-pack from Group 1, groups parked on the map grid.
+//!   Root name is `{nation} Fighters Npack - Linked` from the planes' country.
 //! * `fn generate_pack_at` — same, with each group's Zone IN parked on
 //!   `positions`; caller supplies the pack name.
 //! * `fn park_rtbs` — move each `RTB - N` waypoint onto `targets[n-1]`.
@@ -35,6 +36,7 @@
 //! * flights.rs tests — `builtin_template` + `generate_pack` round-trips.
 
 
+use crate::aircraft::linked_fighter_pack_name;
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;
 use crate::parser::parse_group_file;
@@ -116,11 +118,12 @@ pub fn group_anchor_xz(group: &Il2Entity) -> (f64, f64) {
 /// copies stay linked the same way the 3-pack and 5-pack are.
 pub fn generate_pack(root: &Il2Entity, group_count: usize) -> Result<Il2Entity, String> {
     let group_count = group_count.max(1);
+    let country = first_plane_country(root);
     generate_pack_ex(
         root,
         group_count,
         None,
-        &format!("Eastern Fighters {group_count}pack - Linked"),
+        &linked_fighter_pack_name(country, group_count),
     )
 }
 
@@ -136,7 +139,23 @@ pub fn generate_pack_at(
     generate_pack_ex(root, positions.len(), Some(positions), name)
 }
 
+fn first_plane_country(root: &Il2Entity) -> i32 {
+    let mut found = None;
+    root.for_each(&mut |e| {
+        if found.is_some() || e.block_type != "Plane" {
+            return;
+        }
+        if let Some(c) = e.property("Country").and_then(|s| s.parse().ok()) {
+            if c > 0 {
+                found = Some(c);
+            }
+        }
+    });
+    found.unwrap_or(501)
+}
+
 /// Move each `RTB - N` waypoint so it sits on `targets[n-1]`.
+/// Per-plane `RTB Plane *` waypoints inside that group move with it.
 pub fn park_rtbs(pack: &mut Il2Entity, targets: &[(f64, f64)]) {
     for (i, &target) in targets.iter().enumerate() {
         let name = format!("RTB - {}", i + 1);
@@ -146,7 +165,24 @@ pub fn park_rtbs(pack: &mut Il2Entity, targets: &[(f64, f64)]) {
             let from = wp.pos_xz().unwrap_or((0.0, 0.0));
             placement::move_anchor_to(wp, from, target);
         }
+        let group_name = format!("Group {}", i + 1);
+        if let Some(group) = pack.children.iter_mut().find(|c| {
+            c.block_type == "Group" && c.name() == Some(group_name.as_str())
+        }) {
+            snap_rtb_flights(group, target);
+        }
     }
+}
+
+fn snap_rtb_flights(group: &mut Il2Entity, xz: (f64, f64)) {
+    group.for_each_mut(&mut |e| {
+        if e.block_type == "MCU_Waypoint"
+            && e.name().is_some_and(|n| n.starts_with("RTB Plane") || n.starts_with("RTB Flight"))
+        {
+            let from = e.pos_xz().unwrap_or((0.0, 0.0));
+            placement::move_anchor_to(e, from, xz);
+        }
+    });
 }
 
 fn generate_pack_ex(
@@ -198,6 +234,9 @@ fn generate_pack_ex(
         };
         waypoints[i].translate_xz(dx, dz);
         translate_gate_cell(&mut cells[i], dx, dz);
+        if let Some(xz) = waypoints[i].pos_xz() {
+            snap_rtb_flights(&mut groups[i], xz);
+        }
     }
 
     for i in 0..group_count {
@@ -470,7 +509,7 @@ mod tests {
     #[test]
     fn generate_10pack_from_3pack() {
         let out = generate_pack(&pack3(), 10).expect("generate 10pack");
-        assert_eq!(out.name(), Some("Eastern Fighters 10pack - Linked"));
+        assert_eq!(out.name(), Some("USSR Fighters 10pack - Linked"));
         assert_eq!(count_named_groups(&out), 10);
         assert_eq!(
             out.children
