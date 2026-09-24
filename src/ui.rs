@@ -101,7 +101,8 @@ use crate::recon::{
 };
 use crate::serialize::serialize_group;
 use crate::template::{
-    append_seat, apply_formation_numbers, apply_suggested_attack_area, bundled_catalog,
+    append_seat, apply_auto_altitude, apply_auto_altitude_all, apply_formation_numbers,
+    apply_suggested_attack_area, bundled_catalog,
     copy_seat_attributes, flight_lead_of, formation_label, formations_for, generate_template,
     has_linked_wingmen, is_follower, lead_indexes, load_catalog, load_catalog_as_user_added,
     load_template, insert_goto_waypoint_after, merge_catalog, move_seat, next_waypoint_number,
@@ -431,6 +432,9 @@ struct GroupGeneratorApp {
     tpl_wp_speed: f32,
     tpl_wp_altitude: f32,
     tpl_wp_priority: i32,
+    /// Auto altitude: new planes and model swaps start at 50% of service ceiling.
+    /// Session preference; the builder reset leaves it alone.
+    tpl_auto_altitude: bool,
     tpl_zone_coalition: ZoneCoalition,
     tpl_view_zoom: f32,
     tpl_view_pan: Vec2,
@@ -1539,6 +1543,7 @@ impl Default for GroupGeneratorApp {
             tpl_wp_speed: 100.0,
             tpl_wp_altitude: 0.0,
             tpl_wp_priority: 1,
+            tpl_auto_altitude: true,
             tpl_zone_coalition: ZoneCoalition::Western,
             tpl_view_zoom: 1.0,
             tpl_view_pan: Vec2::ZERO,
@@ -2220,7 +2225,9 @@ impl GroupGeneratorApp {
         if let Some((si, unit)) = change_unit {
             if si < self.tpl_seats.len() {
                 replace_seat_unit(&mut self.tpl_seats[si], unit);
-                if self.tpl_seats[si].unit.is_air() {
+                if self.tpl_auto_altitude {
+                    apply_auto_altitude(&mut self.tpl_seats[si]);
+                } else if self.tpl_seats[si].unit.is_air() {
                     let ceil = model_spec::ceiling_m(&self.tpl_seats[si].unit.script);
                     self.tpl_seats[si].altitude = self.tpl_seats[si].altitude.min(ceil);
                 }
@@ -2504,6 +2511,16 @@ impl GroupGeneratorApp {
                                 .suffix(" m")
                                 .integer(),
                         );
+                        let half = model_spec::auto_altitude_m(&self.tpl_seats[si].unit.script);
+                        if ui
+                            .button("50% ceiling")
+                            .on_hover_text(format!(
+                                "Set to {half:.0} m (half of {ceiling:.0} m service ceiling)."
+                            ))
+                            .clicked()
+                        {
+                            apply_auto_altitude(&mut self.tpl_seats[si]);
+                        }
                         if self.tpl_seats[si].altitude <= 0.0 {
                             self.tpl_seats[si].altitude = 0.0;
                         }
@@ -3322,6 +3339,11 @@ impl GroupGeneratorApp {
             if ui.button("Add unit").clicked() {
                 if let Some(unit) = models.get(self.tpl_add_pick).cloned() {
                     append_seat(&mut self.tpl_seats, unit, self.tpl_per_group);
+                    if self.tpl_auto_altitude {
+                        if let Some(seat) = self.tpl_seats.last_mut() {
+                            apply_auto_altitude(seat);
+                        }
+                    }
                     self.tpl_select = Some(TplSelect::Seat(self.tpl_seats.len() - 1));
                     self.tpl_preview_from_catalog = false;
                     self.sync_template_waypoint_speed();
@@ -3341,6 +3363,16 @@ impl GroupGeneratorApp {
                     None => 0,
                 };
                 copy_seat_attributes(&mut self.tpl_seats, from);
+            }
+            if ui
+                .checkbox(&mut self.tpl_auto_altitude, "Auto altitude (50% ceiling)")
+                .on_hover_text(
+                    "New planes and model swaps start in the air at half the aircraft’s service ceiling. Turning this on re-heights every plane. Turn it off to add ground-start (runway or parked) planes.",
+                )
+                .changed()
+                && self.tpl_auto_altitude
+            {
+                apply_auto_altitude_all(&mut self.tpl_seats);
             }
         });
     }
