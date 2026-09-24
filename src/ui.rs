@@ -177,6 +177,25 @@ enum MapDrawingMode {
     PlaceNatoObjective,
 }
 
+/// Map tool palette, top to bottom; keys 1–6 pick them (README §5.6).
+/// (mode, glyph, name, banner / status hint)
+const MAP_TOOLS: [(MapDrawingMode, &str, &str, &str); 6] = [
+    (MapDrawingMode::None, "⬉", "Select AO / move units", "Drag a box for the AO, or drag a unit"),
+    (MapDrawingMode::BaseFront, "≈", "Draw front", "Click west to east, or drag · Esc to cancel"),
+    (MapDrawingMode::Salient, "∩", "Salient", "Click along the front · right-click to finish · Esc to cancel"),
+    (MapDrawingMode::AttackArrow, "➚", "Attack arrow", "Drag from tail to tip · Esc to cancel"),
+    (MapDrawingMode::PlaceEastObjective, "◆", "DPRK objective", "Click to place · Shift for more · right-click removes"),
+    (MapDrawingMode::PlaceNatoObjective, "◆", "NATO objective", "Click to place · Shift for more · right-click removes"),
+];
+
+/// Tabs of the Map tab's right dock.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MapDock {
+    Period,
+    Forces,
+    References,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DrawnMark {
     Salient,
@@ -369,6 +388,7 @@ struct GroupGeneratorApp {
     drawing_custom_front: bool,
     custom_front_xz: Vec<(f64, f64)>,
     map_drawing_mode: MapDrawingMode,
+    map_dock: MapDock,
     current_salient: Vec<(f64, f64)>,
     salients: Vec<Vec<(f64, f64)>>,
     attack_arrows: Vec<((f64, f64), (f64, f64))>,
@@ -1464,6 +1484,7 @@ impl Default for GroupGeneratorApp {
             drawing_custom_front: false,
             custom_front_xz: Vec::new(),
 			map_drawing_mode: MapDrawingMode::None,
+            map_dock: MapDock::Period,
             current_salient: Vec::new(),
             salients: Vec::new(),
             attack_arrows: Vec::new(),
@@ -1570,18 +1591,19 @@ impl eframe::App for GroupGeneratorApp {
             .show(ctx, |ui| self.page_header_bar(ui));
         if self.mode == AppMode::Template {
             self.template_page(ctx);
+        } else if self.mode == AppMode::Map {
+            self.map_page(ctx);
         } else {
             egui::CentralPanel::default().show(ctx, |ui| {
                 // One scroll position per tab; the window itself never scrolls.
                 egui::ScrollArea::vertical()
                     .id_salt(("page", self.mode as u8))
                     .show(ui, |ui| match self.mode {
-                        AppMode::Template => {}
+                        AppMode::Template | AppMode::Map => {}
                         AppMode::Fighter => self.fighter_panel(ui),
                         AppMode::Exclusive => self.bomber_panel(ui),
                         AppMode::Recon => self.recon_panel(ui),
                         AppMode::Airfield => self.airfield_panel(ui),
-                        AppMode::Map => self.map_panel(ui),
                     });
             });
         }
@@ -1612,9 +1634,7 @@ impl GroupGeneratorApp {
             return;
         }
         if self.mode == AppMode::Map {
-            self.map_drawing_mode = MapDrawingMode::None;
-            self.current_salient.clear();
-            self.attack_drag = None;
+            self.cancel_map_tool();
         }
         self.mode = mode;
     }
@@ -1639,6 +1659,12 @@ impl GroupGeneratorApp {
             }
             if keys.redo {
                 self.redo_last_mark();
+            }
+            if let Some(i) = keys.map_tool {
+                self.map_drawing_mode = MAP_TOOLS[i].0;
+            }
+            if keys.escape {
+                self.cancel_map_tool();
             }
         }
     }
@@ -5160,86 +5186,185 @@ Load the messy airfield group here — it may sit in a Group wrapper or as loose
         }
     }
 
-	fn map_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-                "Draw a box on Korea to clip the period front and areas of influence.
-Add reference groups (airfields, blocks) to stamp at their saved locations; they are trimmed to the box plus 10 km.",
-            )
-        );
+    /// Map tab (README §5.6): tool palette, the map with a front-date strip,
+    /// and a right dock with Period / Forces / References.
+    fn map_page(&mut self, ctx: &egui::Context) {
+        self.ensure_map_assets(ctx);
+        egui::SidePanel::left("map_tools")
+            .exact_width(shell::TOOL_PALETTE_W)
+            .resizable(false)
+            .frame(egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin::symmetric(10, 8)))
+            .show(ctx, |ui| self.map_tool_palette(ui));
+        egui::SidePanel::right("map_dock")
+            .exact_width(304.0)
+            .resizable(false)
+            .show(ctx, |ui| self.map_dock_panel(ui));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0))
+            .show(ctx, |ui| {
+                egui::TopBottomPanel::bottom("map_date")
+                    .exact_height(64.0)
+                    .show_inside(ui, |ui| self.map_date_strip(ui));
+                self.handle_map_timeline_keys(ui);
+                self.draw_korea_map(ui);
+            });
+    }
+
+    /// Esc on Map: drop a half-drawn mark or WP pick and return to Select.
+    fn cancel_map_tool(&mut self) {
+        self.current_salient.clear();
+        self.attack_drag = None;
+        self.wp_selected = None;
+        self.wp_drag = None;
+        self.map_drawing_mode = MapDrawingMode::None;
+    }
+
+    fn map_has_marks(&self) -> bool {
+        !self.salients.is_empty()
+            || !self.current_salient.is_empty()
+            || !self.attack_arrows.is_empty()
+            || self.attack_drag.is_some()
+    }
+
+    /// "Tool: Salient · right-click to finish · Esc to cancel" while a tool is active.
+    fn map_tool_status(&self) -> Option<String> {
+        if let Some((hit, wi)) = self.wp_selected {
+            return Some(format!(
+                "Placing unit {} WP{} · click the map · right-click or Esc to cancel",
+                hit.spot_i() + 1,
+                wi + 1
+            ));
+        }
+        MAP_TOOLS
+            .iter()
+            .find(|t| t.0 == self.map_drawing_mode && t.0 != MapDrawingMode::None)
+            .map(|t| format!("Tool: {} · {}", t.2, t.3))
+    }
+
+    fn map_tool_palette(&mut self, ui: &mut egui::Ui) {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        for (i, (mode, glyph, name, _)) in MAP_TOOLS.iter().enumerate() {
+            let tint = match mode {
+                MapDrawingMode::PlaceEastObjective => Some(c::DPRK),
+                MapDrawingMode::PlaceNatoObjective => Some(c::NATO),
+                _ => None,
+            };
+            let key = (i + 1).to_string();
+            if shell::tool_button(ui, None, glyph, tint, name, &key, self.map_drawing_mode == *mode).clicked() {
+                self.map_drawing_mode = *mode;
+            }
+        }
+        ui.add_space(2.0);
+        ui.separator();
+        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            let can_redo = !self.redo_marks.is_empty();
+            let can_undo = self.map_has_marks();
+            // Disabled tools fade to 40 % (README §5.6).
+            let mut redo = false;
+            let mut undo = false;
+            ui.scope(|ui| {
+                if !can_redo {
+                    ui.disable();
+                    ui.set_opacity(0.4);
+                }
+                redo = shell::tool_button(ui, None, "↷", None, "Redo drawing", "Ctrl Y", false).clicked();
+            });
+            ui.scope(|ui| {
+                if !can_undo {
+                    ui.disable();
+                    ui.set_opacity(0.4);
+                }
+                undo = shell::tool_button(ui, None, "↶", None, "Undo drawing", "Ctrl Z", false).clicked();
+            });
+            if redo {
+                self.redo_last_mark();
+            }
+            if undo {
+                self.remove_last_mark();
+            }
+        });
+    }
+
+    fn map_dock_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
+        let refs = format!("References {}", self.map_refs.len());
+        shell::segmented(
+            ui,
+            &mut self.map_dock,
+            &[
+                (MapDock::Period, "Period"),
+                (MapDock::Forces, "Forces"),
+                (MapDock::References, refs.as_str()),
+            ],
+        );
+        ui.add_space(4.0);
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .id_salt("map_dock_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().slider_width = 110.0;
+                match self.map_dock {
+                    MapDock::Period => self.map_period_tab(ui),
+                    MapDock::Forces => self.map_forces_tab(ui),
+                    MapDock::References => self.map_references_tab(ui),
+                }
+            });
+    }
 
-        self.handle_map_timeline_keys(ui);
-
+    fn map_period_tab(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label("Year");
             egui::ComboBox::from_id_salt("front_year")
                 .selected_text(self.front_year.to_string())
                 .width(80.0)
                 .show_ui(ui, |ui| {
                     for y in YEARS {
-                        if ui
-                            .selectable_label(self.front_year == y, y.to_string())
-                            .clicked()
-                        {
+                        if ui.selectable_label(self.front_year == y, y.to_string()).clicked() {
                             self.front_year = y;
                             self.front_focus = None;
                             self.snap_timeline(timeline_index(self.front_year, self.front_season));
                         }
                     }
-                });
-            ui.label("Season");
+                })
+                .response
+                .on_hover_text("Year");
             egui::ComboBox::from_id_salt("front_season")
                 .selected_text(self.front_season.label())
-                .width(140.0)
+                .width(150.0)
                 .show_ui(ui, |ui| {
                     for s in Season::ALL {
-                        if ui
-                            .selectable_label(self.front_season == s, s.label())
-                            .clicked()
-                        {
+                        if ui.selectable_label(self.front_season == s, s.label()).clicked() {
                             self.front_season = s;
                             self.front_focus = None;
                             self.snap_timeline(timeline_index(self.front_year, self.front_season));
                         }
                     }
-                });
+                })
+                .response
+                .on_hover_text("Season");
         });
-
+        ui.add_space(8.0);
         let mark = self.current_mark();
-        ui.label(RichText::new(mark.title).strong());
-        ui.label(RichText::new(mark.note));
-        ui.label(
-            RichText::new(mark.editor_hint())
-                .strong()
-                .color(Color32::from_rgb(170, 200, 255)),
-        );
-        ui.add_space(4.0);
-        let n_slots = TIMELINE.len().max(1);
-        ui.label(RichText::new("Front date").strong());
-        let slider_w = ui.available_width().max(640.0);
-        let slider = egui::Slider::new(&mut self.front_t, 0.0..=(n_slots - 1) as f32)
-            .show_value(false);
-        if ui.add_sized([slider_w, 22.0], slider).changed() {
-            self.custom_front_xz.clear();
-            let i = self
-                .front_t
-                .round()
-                .clamp(0.0, (n_slots - 1) as f32) as usize;
-            self.apply_timeline_mark(i, true);
-        }
-        ui.add_space(6.0);
-        ui.label("Focus on a battle");
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            ui.label(RichText::new(mark.title).font(FontId::new(16.0, theme::heading_family())));
+            ui.label(mark.note);
+            ui.label(
+                RichText::new(mark.editor_hint())
+                    .font(FontId::new(13.0, theme::bold_family()))
+                    .color(c::ACCENT_700),
+            );
+        });
+        ui.add_space(10.0);
+
+        ui.label(RichText::new("Battle focus").font(FontId::new(13.0, theme::bold_family())));
         let period_battles = battles_in_period(self.front_year, self.front_season);
-        let selected_battle = self
-            .front_focus
-            .and_then(|id| BATTLES.iter().find(|b| b.id == id));
-        let focus_text = selected_battle
-            .map(|b| b.name)
-            .unwrap_or("Entire front (this period)");
+        let selected_battle = self.front_focus.and_then(|id| BATTLES.iter().find(|b| b.id == id));
+        let focus_text = selected_battle.map_or("Entire front (this period)", |b| b.name);
         egui::ComboBox::from_id_salt("front_battle")
             .selected_text(focus_text)
-            .width(360.0)
+            .width(ui.available_width() - 8.0)
             .show_ui(ui, |ui| {
                 if ui
                     .selectable_label(self.front_focus.is_none(), "Entire front (this period)")
@@ -5248,154 +5373,41 @@ Add reference groups (airfields, blocks) to stamp at their saved locations; they
                     self.front_focus = None;
                 }
                 ui.separator();
-                ui.label(RichText::new("This period"));
+                ui.label(RichText::new("This period").small().color(c::NEUTRAL_700));
                 for b in &period_battles {
-                    if ui
-                        .selectable_label(self.front_focus == Some(b.id), b.name)
-                        .clicked()
-                    {
+                    if ui.selectable_label(self.front_focus == Some(b.id), b.name).clicked() {
                         self.focus_battle(b);
                     }
                 }
                 ui.separator();
-                ui.label(RichText::new("Jump to any battle"));
+                ui.label(RichText::new("Jump to any battle").small().color(c::NEUTRAL_700));
                 for b in BATTLES {
                     let label = format!("{}  ({} {})", b.name, b.season.label(), b.year);
-                    if ui
-                        .selectable_label(self.front_focus == Some(b.id), label)
-                        .clicked()
-                    {
+                    if ui.selectable_label(self.front_focus == Some(b.id), label).clicked() {
                         self.focus_battle(b);
                     }
                 }
             });
         if let Some(b) = selected_battle {
-            ui.label(RichText::new(b.note));
+            ui.label(RichText::new(b.note).small().color(c::NEUTRAL_700));
         }
-        ui.add_space(6.0);
+        ui.add_space(10.0);
 
-        ui.label(
-            RichText::new(
-                suggested_aircraft(self.front_year, self.front_season)
-                    .iter()
-                    .map(|a| a.label)
-                    .collect::<Vec<_>>()
-                    .join("  ·  "),
-            )
-            .color(Color32::from_rgb(110, 150, 110)),
-        );
-        ui.add_space(6.0);
-
-        ui.with_layout(Layout::top_down(Align::Center), |ui| { 
-            self.ensure_map_assets(ui.ctx());
-            self.draw_korea_map(ui);
-        });
-        
-        ui.add_space(8.0);
-
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                self.map_view_toolbar(ui);
-                ui.separator();
-                self.map_draw_toolbar(ui);
-            });
-        });
-
-        ui.add_space(4.0);
-
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                self.map_fighter_toolbar(ui);
-                ui.separator();
-                self.map_objectives_toolbar(ui);
-                ui.separator();
-                self.map_units_toolbar(ui);
-            });
-        });
-
-        ui.add_space(4.0);
-        
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!(
-                    "AABB  XPos {:.0} – {:.0}   ZPos {:.0} – {:.0}",
-                    self.front_aabb.x_min, self.front_aabb.x_max, self.front_aabb.z_min, self.front_aabb.z_max
-                )).monospace(),
-            );
-        });
-
-        self.draw_map_legend(ui);
-        ui.add_space(6.0);
-
-        ui.collapsing("Loaded Reference Groups", |ui| {
-            ui.label(RichText::new("Airfields/blocks/entities are stamped in the box plus 10 km. Landscape MCU_Waypoint marks show on the preview as nested dots but are not exported.").italics());
-            ui.horizontal(|ui| {
-                if ui.button("Add reference groups…").clicked() {
-                    self.add_map_refs();
-                }
-            });
-            let mut remove_at: Option<usize> = None;
-            for (i, g) in self.map_refs.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    let label = g.path.file_stem().and_then(|s| s.to_str()).unwrap_or("group");
-                    let xz = g.entity.first_xz().map(|(x, z)| format!("  X {x:.0}  Z {z:.0}")).unwrap_or_default();
-                    ui.label(format!("{label}{xz}"));
-                    if ui.small_button("Remove").clicked() {
-                        remove_at = Some(i);
-                    }
-                });
-            }
-            if let Some(i) = remove_at {
-                self.map_refs.remove(i);
-            }
-            if self.map_refs.is_empty() {
-                ui.label(RichText::new("No reference groups loaded.").italics());
+        ui.label(RichText::new("Suggested aircraft").font(FontId::new(13.0, theme::bold_family())));
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+            for a in suggested_aircraft(self.front_year, self.front_season) {
+                shell::tag(ui, a.label, false);
             }
         });
-        
-    }
-   
-fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if ui.button("Reset AO").on_hover_text("Reset Area of Operations box to full map").clicked() {
-                self.front_aabb = WorldAabb::full_map();
-                self.map_drag_uv = None;
-            }
-            ui.label("Zoom:");
-            if ui.add(egui::Slider::new(&mut self.map_zoom, 1.0..=12.0).show_value(false)).changed() {
-                self.clamp_map_pan();
-            }
-            ui.label(RichText::new(format!("{:.0}%", self.map_zoom * 100.0)));
-            if ui.button("Reset View").on_hover_text("Reset map zoom and pan position").clicked() {
-                self.map_zoom = 1.0;
-                self.map_pan = Pos2::new(0.5, 0.5);
-            }
-        });
-    }
+        ui.add_space(10.0);
+        ui.separator();
 
-	fn map_draw_toolbar(&mut self, ui: &mut egui::Ui) {
-        // Ctrl Z / Ctrl Y are read once in `update()` (shell::read_shortcuts).
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Map Tools:").strong());
-        });
-		
-        // Top Row: Primary Creation
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.map_drawing_mode, MapDrawingMode::None, "Select AO / Move Units")
-                .on_hover_text("Left Click and drag to select Area of Operations (AO) or to move a placed unit / Right Click to Pan the map view.");
-            ui.selectable_value(&mut self.map_drawing_mode, MapDrawingMode::BaseFront, "Draw Custom Front")
-                .on_hover_text("Left Click sequentially (or Click and drag) from  West to East to draw a custom front.");
-            ui.selectable_value(&mut self.map_drawing_mode, MapDrawingMode::Salient, "Draw Salient")
-                .on_hover_text("Left Click sequentially (or Click and drag) to draw along the front. Right-click to finish.");
-            ui.selectable_value(&mut self.map_drawing_mode, MapDrawingMode::AttackArrow, "Draw Attack Arrow")
-                .on_hover_text("Drag from tail to tip. Colour follows the tail's side of the front.");
-        });
-
-        // Second Row: Modifiers
-        ui.horizontal(|ui| {
-            let has_custom = !self.custom_front_xz.is_empty() || !self.salients.is_empty() || !self.attack_arrows.is_empty();
+        shell::section_title(ui, "Drawn marks", Some("tools 2–4"));
+        ui.horizontal_wrapped(|ui| {
+            let has_custom = !self.custom_front_xz.is_empty() || self.map_has_marks();
             ui.add_enabled_ui(has_custom, |ui| {
-                if ui.button("Clear Custom Lines").clicked() {
+                if ui.button("Clear lines").on_hover_text("Clear the drawn front, salients and arrows").clicked() {
                     self.custom_front_xz.clear();
                     self.salients.clear();
                     self.current_salient.clear();
@@ -5405,181 +5417,222 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                     self.clear_redo_stack();
                 }
             });
-
-            let has_marks = !self.salients.is_empty() || !self.current_salient.is_empty() || !self.attack_arrows.is_empty() || self.attack_drag.is_some();
-            ui.add_enabled_ui(has_marks, |ui| {
-                if ui.button("Undo").on_hover_text("Ctrl-Z").clicked() {
-                    self.remove_last_mark();
-                }
-            });
-
-            let has_redo = !self.redo_marks.is_empty();
-            ui.add_enabled_ui(has_redo, |ui| {
-                if ui.button("Redo").on_hover_text("Ctrl-Y").clicked() {
-                    self.redo_last_mark();
-                }
-            });
-
             let has_salients = !self.salients.is_empty() || !self.current_salient.is_empty();
             ui.add_enabled_ui(has_salients, |ui| {
-                if ui.button("Clear Salients").clicked() {
+                if ui.button("Clear salients").clicked() {
                     self.salients.clear();
                     self.current_salient.clear();
                     self.drawn_marks.retain(|m| *m != DrawnMark::Salient);
                 }
             });
-
             let has_arrows = !self.attack_arrows.is_empty() || self.attack_drag.is_some();
             ui.add_enabled_ui(has_arrows, |ui| {
-                if ui.button("Clear Attack Arrows").clicked() {
+                if ui.button("Clear arrows").clicked() {
                     self.attack_arrows.clear();
                     self.attack_drag = None;
                     self.drawn_marks.retain(|m| *m != DrawnMark::AttackArrow);
                 }
             });
         });
+        ui.add_space(6.0);
+        if shell::hint(
+            ui,
+            "Drag a box on the map to set the AO; the period front and areas of influence are clipped to it.",
+            true,
+        ) {
+            self.open_help(HelpTopic::Front);
+        }
     }
 
-    fn map_fighter_toolbar(&mut self, ui: &mut egui::Ui) {
-		ui.horizontal(|ui| {
-            ui.label(RichText::new("Fighters").strong());
-			ui.label(RichText::new("Set in the 'Fighter Pack' mode"));
-        });
-		
+    fn map_forces_tab(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        shell::section_title(ui, "Fighters", Some("from Fighter Pack"));
         ui.horizontal(|ui| {
-            if ui.button("Eastern").on_hover_text("Place Eastern fighters in their coalition zone").clicked() { self.place_map_fighters(true); }
-            if ui.button("NATO").on_hover_text("Place NATO fighters in their coalition zone").clicked() { self.place_map_fighters(false); }
-            
-            ui.separator();
-            labeled_slider(ui, "Number of Groups active at once:", &mut self.fighter_waves, 1..=6);
-            ui.checkbox(&mut self.fighter_fill, format!("Fill AO (will allow up to {MAX_PACKS} at once)")).on_hover_text("Fill AO at Zone IN spacing");
-            
-            let has_fighters = self.map_fighters.as_ref().is_some_and(|l| !l.spots.is_empty());
-            ui.add_enabled_ui(has_fighters, |ui| {
-                if ui.button("Clear fighters").clicked() {
-                    self.map_fighters = None;
-                    self.map_imported_fighters.clear();
-                    self.fighter_drag = None;
-                }
-            });
-
-            if let Some(layout) = &self.map_fighters {
-                let n = layout.spots.len();
-                let packs = layout.spots.iter().map(|s| s.pack).collect::<std::collections::BTreeSet<_>>().len();
-                let side = if layout.eastern { "Eastern" } else { "NATO" };
-                ui.label(RichText::new(format!("{side}: {n} grps in {packs} pack(s)")).color(Color32::from_rgb(180, 180, 190)));
+            if ui.button("Place DPRK").on_hover_text("Place DPRK fighters in their coalition zone").clicked() {
+                self.place_map_fighters(true);
+            }
+            if ui.button("Place NATO").on_hover_text("Place NATO fighters in their coalition zone").clicked() {
+                self.place_map_fighters(false);
             }
         });
-    }
-
-    fn map_objectives_toolbar(&mut self, ui: &mut egui::Ui) {
-		ui.horizontal(|ui| {
-            ui.label(RichText::new("Objectives").strong());
+        labeled_slider(ui, "Groups at once", &mut self.fighter_waves, 1..=6);
+        ui.checkbox(&mut self.fighter_fill, format!("Fill AO (up to {MAX_PACKS} at once)"))
+            .on_hover_text("Fill the AO at Zone In spacing");
+        ui.horizontal(|ui| {
+            if let Some(layout) = &self.map_fighters {
+                let n = layout.spots.len();
+                let packs = layout
+                    .spots
+                    .iter()
+                    .map(|s| s.pack)
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len();
+                let side = shell::Side::from_eastern(layout.eastern);
+                shell::side_marker(ui, side, 12.0);
+                ui.label(format!("{}: {n} groups in {packs} packs", side.label()));
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let has_fighters = self.map_fighters.as_ref().is_some_and(|l| !l.spots.is_empty());
+                ui.add_enabled_ui(has_fighters, |ui| {
+                    if ui.button("Clear").on_hover_text("Clear placed fighters").clicked() {
+                        self.map_fighters = None;
+                        self.map_imported_fighters.clear();
+                        self.fighter_drag = None;
+                    }
+                });
+            });
         });
+        ui.add_space(6.0);
+        ui.separator();
+
+        shell::section_title(ui, "Objectives", Some("one click each · Shift for more"));
         ui.horizontal(|ui| {
             let e_active = self.map_drawing_mode == MapDrawingMode::PlaceEastObjective;
             let n_active = self.map_drawing_mode == MapDrawingMode::PlaceNatoObjective;
+            if ui
+                .selectable_label(e_active, format!("DPRK · {}", self.east_objectives.len()))
+                .on_hover_text("DPRK objective tool (5): click the map to place one")
+                .clicked()
+            {
+                self.map_drawing_mode = MapDrawingMode::PlaceEastObjective;
+            }
+            if ui
+                .selectable_label(n_active, format!("NATO · {}", self.nato_objectives.len()))
+                .on_hover_text("NATO objective tool (6): click the map to place one")
+                .clicked()
+            {
+                self.map_drawing_mode = MapDrawingMode::PlaceNatoObjective;
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let has_objs = !self.east_objectives.is_empty() || !self.nato_objectives.is_empty();
+                ui.add_enabled_ui(has_objs, |ui| {
+                    if ui.button("Clear").on_hover_text("Clear all objectives").clicked() {
+                        self.east_objectives.clear();
+                        self.nato_objectives.clear();
+                        self.objective_drag = None;
+                        self.reaim_map_ground();
+                    }
+                });
+            });
+        });
+        shell::hint(ui, "Preview markers that aim placed units. Right-click one to remove it. Not exported.", false);
+        ui.add_space(6.0);
+        ui.separator();
 
-            if ui.selectable_label(e_active, "Eastern").on_hover_text("Select Eastern objective, then click map").clicked() {
-                self.map_drawing_mode = if e_active { MapDrawingMode::None } else { MapDrawingMode::PlaceEastObjective };
-            }
-            if ui.selectable_label(n_active, "NATO").on_hover_text("Select NATO objective, then click map").clicked() {
-                self.map_drawing_mode = if n_active { MapDrawingMode::None } else { MapDrawingMode::PlaceNatoObjective };
-            }
-            
-            let has_objs = !self.east_objectives.is_empty() || !self.nato_objectives.is_empty();
-            ui.add_enabled_ui(has_objs, |ui| {
-                if ui.button("Clear objectives").clicked() {
-                    self.east_objectives.clear();
-                    self.nato_objectives.clear();
-                    self.objective_drag = None;
-                    self.reaim_map_ground();
+        shell::section_title(ui, "Units", Some("from Army Generator"));
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(!self.recon_keep_positions, |ui| {
+                if ui
+                    .button("Place DPRK")
+                    .on_hover_text("Place Army Generator units along the front as DPRK")
+                    .on_disabled_hover_text("Keep loaded positions is on in Army Generator.")
+                    .clicked()
+                {
+                    self.place_map_units(true);
+                }
+                if ui
+                    .button("Place NATO")
+                    .on_hover_text("Place Army Generator units along the front as NATO")
+                    .on_disabled_hover_text("Keep loaded positions is on in Army Generator.")
+                    .clicked()
+                {
+                    self.place_map_units(false);
                 }
             });
-            ui.label(RichText::new(format!("Eastern {} · NATO {}", self.east_objectives.len(), self.nato_objectives.len())).color(Color32::from_rgb(180, 180, 190)));
         });
-    }
-
-    fn map_units_toolbar(&mut self, ui: &mut egui::Ui) {
-		ui.horizontal(|ui| {
-            ui.label(RichText::new("Units").strong());
-			ui.label(RichText::new(
-                "Units details may be set in the 'Army Generator' mode, or load groups to reposition.",
-            ));
-        });
-        ui.horizontal(|ui| {            
-            ui.add_enabled_ui(!self.recon_keep_positions, |ui| {
-                if ui.button("Eastern").on_hover_text("Place Army Generator units along the front as Eastern").clicked() { self.place_map_units(true); }
-                if ui.button("NATO").on_hover_text("Place Army Generator units along the front as NATO").clicked() { self.place_map_units(false); }
-            });
-            if ui.button("Load Eastern…").on_hover_text("Load a .Group as the Eastern army. Reposition along the front, or keep authored positions.").clicked() {
+        ui.horizontal(|ui| {
+            if ui
+                .button("Load DPRK…")
+                .on_hover_text("Load a .Group as the DPRK army. Reposition along the front, or keep authored positions.")
+                .clicked()
+            {
                 self.load_map_armies(true);
             }
-            if ui.button("Load NATO…").on_hover_text("Load a .Group as the NATO army. Reposition along the front, or keep authored positions.").clicked() {
+            if ui
+                .button("Load NATO…")
+                .on_hover_text("Load a .Group as the NATO army. Reposition along the front, or keep authored positions.")
+                .clicked()
+            {
                 self.load_map_armies(false);
             }
-
-            let has_units = self.map_ships.is_some()
-                || self.map_ground_east.is_some()
-                || self.map_ground_nato.is_some()
-                || !self.map_armies.is_empty();
-            ui.add_enabled_ui(has_units, |ui| {
-                if ui.button("Clear units").clicked() {
-                    self.map_ships = None;
-                    self.map_ground_east = None;
-                    self.map_ground_nato = None;
-                    self.map_armies.clear();
-                    self.ship_drag = None;
-                    self.ship_heading_drag = None;
-                    self.ground_drag = None;
-                    self.ground_heading_drag = None;
-                    self.wp_drag = None;
-                    self.wp_selected = None;
-                }
-            });
-
+        });
+        let army_count = |eastern: bool| -> usize {
+            self.map_armies
+                .iter()
+                .filter(|a| a.eastern == eastern)
+                .map(|a| {
+                    a.ground.as_ref().map_or(0, |g| g.spots.len()) + a.ships.as_ref().map_or(0, |s| s.spots.len())
+                })
+                .sum()
+        };
+        let e_n = self.map_ground_east.as_ref().map_or(0, |l| l.spots.len()) + army_count(true);
+        let n_n = self.map_ground_nato.as_ref().map_or(0, |l| l.spots.len()) + army_count(false);
+        let ships = self.map_ships.as_ref().map_or(0, |l| l.spots.len());
+        ui.horizontal(|ui| {
             let mut parts = Vec::new();
-            let e_n = self.map_ground_east.as_ref().map(|l| l.spots.len()).unwrap_or(0)
-                + self.map_armies.iter().filter(|a| a.eastern).map(|a| {
-                    a.ground.as_ref().map(|g| g.spots.len()).unwrap_or(0)
-                        + a.ships.as_ref().map(|s| s.spots.len()).unwrap_or(0)
-                }).sum::<usize>();
-            let n_n = self.map_ground_nato.as_ref().map(|l| l.spots.len()).unwrap_or(0)
-                + self.map_armies.iter().filter(|a| !a.eastern).map(|a| {
-                    a.ground.as_ref().map(|g| g.spots.len()).unwrap_or(0)
-                        + a.ships.as_ref().map(|s| s.spots.len()).unwrap_or(0)
-                }).sum::<usize>();
-            let ships = self.map_ships.as_ref().map(|l| l.spots.len()).unwrap_or(0);
-            if e_n > 0 { parts.push(format!("E: {e_n}")); }
-            if n_n > 0 { parts.push(format!("N: {n_n}")); }
-            if ships > 0 { parts.push(format!("Ships: {ships}")); }
-            
-            if !parts.is_empty() {
-                ui.label(RichText::new(parts.join(" · ")).color(Color32::from_rgb(180, 180, 190)));
-            } else if self.recon_keep_positions {
-                ui.label(RichText::new("Keep loaded positions is ON").color(Color32::from_rgb(200, 160, 80)));
+            if e_n > 0 {
+                parts.push(format!("DPRK {e_n}"));
             }
+            if n_n > 0 {
+                parts.push(format!("NATO {n_n}"));
+            }
+            if ships > 0 {
+                parts.push(format!("Ships {ships}"));
+            }
+            if !parts.is_empty() {
+                ui.label(parts.join(" · "));
+            } else if self.recon_keep_positions {
+                shell::warning(ui, "Keep loaded positions is on");
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let has_units = self.map_ships.is_some()
+                    || self.map_ground_east.is_some()
+                    || self.map_ground_nato.is_some()
+                    || !self.map_armies.is_empty();
+                ui.add_enabled_ui(has_units, |ui| {
+                    if ui.button("Clear").on_hover_text("Clear placed and loaded units").clicked() {
+                        self.map_ships = None;
+                        self.map_ground_east = None;
+                        self.map_ground_nato = None;
+                        self.map_armies.clear();
+                        self.ship_drag = None;
+                        self.ship_heading_drag = None;
+                        self.ground_drag = None;
+                        self.ground_heading_drag = None;
+                        self.wp_drag = None;
+                        self.wp_selected = None;
+                    }
+                });
+            });
         });
         if !self.map_armies.is_empty() {
+            ui.add_space(4.0);
             let mut remove_at: Option<usize> = None;
             let mut toggle_at: Option<usize> = None;
             for (i, slot) in self.map_armies.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    let name = slot
-                        .path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("group");
-                    let side = if slot.eastern { "Eastern" } else { "NATO" };
-                    ui.label(format!("{side}  {name}  {}", army_mix_label(&slot.copies)));
+                let name = slot.path.file_stem().and_then(|s| s.to_str()).unwrap_or("group");
+                let side = shell::Side::from_eastern(slot.eastern);
+                shell::card(ui, false, |ui| {
+                    ui.horizontal(|ui| {
+                        shell::side_marker(ui, side, 12.0);
+                        ui.add(egui::Label::new(RichText::new(name).font(FontId::new(13.0, theme::bold_family()))).truncate());
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.small_button("Remove").clicked() {
+                                remove_at = Some(i);
+                            }
+                        });
+                    });
+                    ui.label(RichText::new(army_mix_label(&slot.copies)).small().color(c::NEUTRAL_700));
                     let mut repo = slot.reposition;
-                    if ui.checkbox(&mut repo, "Reposition").on_hover_text("Park along the front using detected unit types. Off keeps the group's authored X/Z.").changed() {
+                    if ui
+                        .checkbox(&mut repo, "Reposition")
+                        .on_hover_text("Park along the front using detected unit types. Off keeps the group's authored X/Z.")
+                        .changed()
+                    {
                         toggle_at = Some(i);
                     }
-                    if ui.small_button("Remove").clicked() {
-                        remove_at = Some(i);
-                    }
                 });
+                ui.add_space(4.0);
             }
             if let Some(i) = toggle_at {
                 self.map_armies[i].reposition = !self.map_armies[i].reposition;
@@ -5596,7 +5649,168 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             }
         }
     }
-	
+
+    fn map_references_tab(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        if ui.button("Add reference groups…").clicked() {
+            self.add_map_refs();
+        }
+        shell::hint(
+            ui,
+            "Airfields, blocks and entities are stamped at their saved spots, trimmed to the AO plus 10 km. Landscape MCU_Waypoint marks show as nested dots but are not exported.",
+            false,
+        );
+        ui.add_space(4.0);
+        let mut remove_at: Option<usize> = None;
+        for (i, g) in self.map_refs.iter().enumerate() {
+            let label = g.path.file_stem().and_then(|s| s.to_str()).unwrap_or("group");
+            let xz = g
+                .entity
+                .first_xz()
+                .map(|(x, z)| format!("X {x:.0}  Z {z:.0}"))
+                .unwrap_or_default();
+            shell::card(ui, false, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Label::new(RichText::new(label).font(FontId::new(13.0, theme::bold_family()))).truncate());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Remove").clicked() {
+                            remove_at = Some(i);
+                        }
+                    });
+                });
+                if !xz.is_empty() {
+                    ui.label(RichText::new(xz).monospace().color(c::NEUTRAL_700));
+                }
+            });
+            ui.add_space(4.0);
+        }
+        if let Some(i) = remove_at {
+            self.map_refs.remove(i);
+        }
+        if self.map_refs.is_empty() {
+            ui.label(RichText::new("No reference groups loaded.").color(c::NEUTRAL_700));
+        }
+    }
+
+    /// 64 px strip under the map: the front-date slider with year ticks.
+    fn map_date_strip(&mut self, ui: &mut egui::Ui) {
+        let n_slots = TIMELINE.len().max(1);
+        ui.add_space(6.0);
+        let mut rail = Rect::NOTHING;
+        ui.horizontal(|ui| {
+            ui.add_sized([86.0, 20.0], egui::Label::new(section_heading("Front date")));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.label(RichText::new("step").small().color(c::NEUTRAL_700));
+                shell::kbd(ui, "→");
+                shell::kbd(ui, "←");
+                ui.add_space(8.0);
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.spacing_mut().slider_width = ui.available_width();
+                    let slider = egui::Slider::new(&mut self.front_t, 0.0..=(n_slots - 1) as f32)
+                        .show_value(false);
+                    let resp = ui.add(slider).on_hover_text("Front date. ← → step one mark; Home / End jump to the ends.");
+                    rail = resp.rect;
+                    if resp.changed() {
+                        self.custom_front_xz.clear();
+                        let i = self.front_t.round().clamp(0.0, (n_slots - 1) as f32) as usize;
+                        self.apply_timeline_mark(i, true);
+                    }
+                });
+            });
+        });
+        // Year ticks under the rail; egui insets the rail by the handle radius.
+        let inset = rail.height() / 2.5;
+        let (x0, x1) = (rail.left() + inset, rail.right() - inset);
+        let painter = ui.painter();
+        for year in YEARS {
+            let Some(i) = TIMELINE.iter().position(|m| m.year == year) else {
+                continue;
+            };
+            let x = x0 + (x1 - x0) * i as f32 / (n_slots - 1).max(1) as f32;
+            painter.line_segment(
+                [Pos2::new(x, rail.bottom()), Pos2::new(x, rail.bottom() + 4.0)],
+                Stroke::new(1.0_f32, c::NEUTRAL_500),
+            );
+            painter.text(
+                Pos2::new(x, rail.bottom() + 5.0),
+                Align2::CENTER_TOP,
+                year.to_string(),
+                FontId::monospace(12.0),
+                c::NEUTRAL_700,
+            );
+        }
+    }
+
+    /// Overlays on the map: AO readout, legend chip, zoom group (README §5.6).
+    fn map_overlays(&mut self, ui: &mut egui::Ui, area: Rect) {
+        let ao = format!(
+            "AO  X {:.0}–{:.0}  Z {:.0}–{:.0}",
+            self.front_aabb.x_min, self.front_aabb.x_max, self.front_aabb.z_min, self.front_aabb.z_max
+        );
+        let painter = ui.painter_at(area);
+        let g = painter.layout_no_wrap(ao, FontId::monospace(12.0), c::TEXT);
+        // 52 px down so it clears the tool banner.
+        let ao_rect = Rect::from_min_size(area.min + Vec2::new(12.0, 52.0), g.size() + Vec2::new(16.0, 10.0));
+        painter.rect_filled(ao_rect, 0.0, c::BG);
+        painter.rect_stroke(ao_rect, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
+        painter.galley(ao_rect.min + Vec2::new(8.0, 5.0), g, c::TEXT);
+
+        let chip = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
+            egui::Frame::new()
+                .fill(c::BG)
+                .stroke(Stroke::new(1.0_f32, c::DIVIDER))
+                .inner_margin(egui::Margin::symmetric(8, 2))
+                .show(ui, |ui| ui.horizontal(|ui| add(ui)));
+        };
+        let legend_rect = Rect::from_min_max(
+            area.left_bottom() + Vec2::new(12.0, -46.0),
+            area.left_bottom() + Vec2::new(area.width() * 0.6, -10.0),
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(legend_rect).layout(Layout::left_to_right(Align::Max)),
+            |ui| {
+                chip(ui, &mut |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    legend_swatch(ui, Color32::from_rgb(220, 30, 30), "Front");
+                    legend_swatch(ui, Color32::from_rgb(155, 0, 0), "DPRK");
+                    legend_swatch(ui, Color32::from_rgb(0, 120, 150), "NATO");
+                    legend_swatch(ui, Color32::from_rgb(255, 210, 70), "AO");
+                    ui.menu_button("All layers ▾", |ui| self.draw_map_legend(ui))
+                        .response
+                        .on_hover_text("Every map layer and its color");
+                });
+            },
+        );
+        let zoom_rect = Rect::from_min_max(
+            area.right_bottom() - Vec2::new(380.0, 46.0),
+            area.right_bottom() - Vec2::new(12.0, 10.0),
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(zoom_rect).layout(Layout::right_to_left(Align::Max)),
+            |ui| {
+                // Right-to-left: added in reverse so it reads − % + Reset view Reset AO.
+                chip(ui, &mut |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if ui.button("Reset AO").on_hover_text("Reset the AO box to the full map").clicked() {
+                        self.front_aabb = WorldAabb::full_map();
+                        self.map_drag_uv = None;
+                    }
+                    if ui.button("Reset view").on_hover_text("Reset map zoom and pan").clicked() {
+                        self.map_zoom = 1.0;
+                        self.map_pan = Pos2::new(0.5, 0.5);
+                    }
+                    if ui.button("+").on_hover_text("Zoom in").clicked() {
+                        self.bump_map_zoom(1.25, None);
+                    }
+                    ui.label(RichText::new(format!("{:.0}%", self.map_zoom * 100.0)).monospace());
+                    if ui.button("−").on_hover_text("Zoom out").clicked() {
+                        self.bump_map_zoom(1.0 / 1.25, None);
+                    }
+                });
+            },
+        );
+    }
+
     fn ensure_map_assets(&mut self, ctx: &egui::Context) {
         if self.fighter_tex_east.is_none() {
             self.fighter_tex_east = Some(ctx.load_texture(
@@ -5800,11 +6014,16 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             });
             return;
         };
-        let avail = ui.available_width().min(960.0);
+        // The map fills the center, letterboxed on NEUTRAL_200.
+        let area = ui.available_rect_before_wrap();
+        ui.painter().rect_filled(area, 0.0, c::NEUTRAL_200);
         let size = lo.size_vec2();
-        let scale = (avail / size.x).min(840.0 / size.y);
+        let scale = ((area.width() - 16.0) / size.x)
+            .min((area.height() - 16.0) / size.y)
+            .max(0.01);
         let img_size = Vec2::new(size.x * scale, size.y * scale);
-        let (rect, response) = ui.allocate_exact_size(img_size, Sense::click_and_drag());
+        let rect = Rect::from_center_size(area.center(), img_size);
+        let response = ui.allocate_rect(rect, Sense::click_and_drag());
         let view = self.map_view_uv();
         let tex = if self.map_zoom > 1.0 {
             self.map_hi_tex.clone().unwrap_or(lo)
@@ -6008,6 +6227,9 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                             self.nato_objectives.push((x, z));
                         }
                         self.reaim_map_ground();
+                        if !ui.input(|i| i.modifiers.shift) {
+                            self.map_drawing_mode = MapDrawingMode::None;
+                        }
                     }
                     if response.clicked_by(egui::PointerButton::Secondary) {
                         if self.remove_nearest_objective(eastern, map_rect, pos) {
@@ -6170,37 +6392,6 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         let (composite_front, patches) = apply_salients(full_dense.clone(), &self.salients);
         let painter = ui.painter_at(rect);
 
-        if self.map_drawing_mode != MapDrawingMode::None {
-            let text = match self.map_drawing_mode {
-                MapDrawingMode::BaseFront => "DRAWING BASE FRONT\nWest to east only. Timeline slider clears it.",
-                MapDrawingMode::Salient => "DRAWING SALIENT\nClick or drag to draw. Light dot = start, dark dot = return.\nClick the dark dot or right-click to finish.",
-                MapDrawingMode::AttackArrow => "DRAWING ATTACK ARROW\nDrag from tail to tip. Colour follows the tail's side of the front.",
-                MapDrawingMode::PlaceEastObjective => "EASTERN OBJECTIVE\nClick to drop a preview marker. Right-click to remove. Not exported.",
-                MapDrawingMode::PlaceNatoObjective => "NATO OBJECTIVE\nClick to drop a preview marker. Right-click to remove. Not exported.",
-                MapDrawingMode::None => "",
-            };
-            painter.text(rect.min + Vec2::new(11.0, 11.0), Align2::LEFT_TOP, text, FontId::proportional(16.0), Color32::from_rgb(20, 20, 24));
-            painter.text(rect.min + Vec2::new(10.0, 10.0), Align2::LEFT_TOP, text, FontId::proportional(16.0), Color32::from_rgb(255, 255, 100));
-        } else if let Some((hit, wi)) = self.wp_selected {
-            let n = hit.spot_i() + 1;
-            let text = if self
-                .ground_spot_mut(hit)
-                .is_some_and(|s| s.network.is_some())
-            {
-                format!(
-                    "PLACE UNIT {n} WP{}\nClick a road or railroad — any branch, including behind the column.\nRight-click to cancel.",
-                    wi + 1
-                )
-            } else {
-                format!(
-                    "PLACE UNIT {n} WP{}\nClick dry land toward the objective (or the front).\nRight-click to cancel.",
-                    wi + 1
-                )
-            };
-            painter.text(rect.min + Vec2::new(11.0, 11.0), Align2::LEFT_TOP, &text, FontId::proportional(16.0), Color32::from_rgb(20, 20, 24));
-            painter.text(rect.min + Vec2::new(10.0, 10.0), Align2::LEFT_TOP, &text, FontId::proportional(16.0), Color32::from_rgb(255, 255, 100));
-        }
-
         let overlay = timeline_preview(self.front_t);
 
         draw_reference_overlays(&painter, map_rect);
@@ -6326,6 +6517,31 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             egui::StrokeKind::Outside,
         );
         painter.rect_filled(box_rect, 0.0, Color32::from_rgba_unmultiplied(255, 210, 70, 25));
+
+        // Tool banner at the top-center (only while a tool or a WP pick is active).
+        let banner = if let Some(t) = MAP_TOOLS
+            .iter()
+            .find(|t| t.0 == self.map_drawing_mode && t.0 != MapDrawingMode::None)
+        {
+            Some((t.2.to_string(), t.3.to_string()))
+        } else if let Some((hit, wi)) = self.wp_selected {
+            let on_network = self.ground_spot_mut(hit).is_some_and(|s| s.network.is_some());
+            let hint = if on_network {
+                "Click a road or railroad, any branch · right-click to cancel"
+            } else {
+                "Click dry land toward the objective · right-click to cancel"
+            };
+            Some((format!("Place unit {} WP{}", hit.spot_i() + 1, wi + 1), hint.to_string()))
+        } else {
+            None
+        };
+        if let Some((name, hint)) = banner {
+            shell::map_tool_banner(&ui.painter_at(area), area, &name, &hint);
+        }
+        if self.map_drawing_mode != MapDrawingMode::None && response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        self.map_overlays(ui, area);
     }
 
     fn hit_fighter_spot(&self, map_rect: Rect, pointer: Pos2) -> Option<usize> {
@@ -8519,6 +8735,13 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn status_line(&self, ui: &mut egui::Ui) {
+        // An active map tool owns the status line until it is put down (README §6.2).
+        if self.mode == AppMode::Map {
+            if let Some(msg) = self.map_tool_status() {
+                shell::status_bar(ui, Severity::Info, &msg, None);
+                return;
+            }
+        }
         let (severity, msg) = match &self.status {
             Status::Idle => (Severity::Info, self.idle_hint().to_owned()),
             Status::Info(msg) => (Severity::Info, msg.clone()),

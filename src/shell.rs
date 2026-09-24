@@ -179,18 +179,26 @@ pub fn settings_section(
     ui.separator();
 }
 
-/// Small outlined tag (e.g. "Lead ×4"). Accent tags use ACCENT_700 text on ACCENT_100.
-pub fn tag(ui: &mut Ui, text: &str, accent: bool) {
+/// Small outlined tag (e.g. "Lead ×4"). Accent tags use ACCENT_700 text on
+/// ACCENT_100. Painted as one widget so it wraps in `horizontal_wrapped`.
+pub fn tag(ui: &mut Ui, text: &str, accent: bool) -> Response {
     let (fg, fill, border) = if accent {
         (c::ACCENT_700, c::ACCENT_100, c::ACCENT_300)
     } else {
         (c::NEUTRAL_800, Color32::TRANSPARENT, c::DIVIDER)
     };
-    egui::Frame::new()
-        .fill(fill)
-        .stroke(Stroke::new(1.0_f32, border))
-        .inner_margin(egui::Margin::symmetric(6, 1))
-        .show(ui, |ui| ui.label(RichText::new(text).small().font(FontId::new(12.0, bold_family())).color(fg)));
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), FontId::new(12.0, bold_family()), fg);
+    let size = galley.size() + Vec2::new(12.0, 6.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        p.rect_filled(rect, 0.0, fill);
+        p.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, border), StrokeKind::Inside);
+        p.galley(rect.min + Vec2::new(6.0, 3.0), galley, fg);
+    }
+    resp
 }
 
 /// Dashed circle outline (egui has no dashed circle primitive).
