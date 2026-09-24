@@ -297,6 +297,39 @@ fn resolve_types(
     Ok(out)
 }
 
+/// One flight as the Fighter Pack preview shows it.
+pub struct FlightPreview {
+    pub type_label: &'static str,
+    /// Per seat: (altitude in metres, true for an AttackArea lead, false for a Cover wing).
+    pub seats: Vec<(f64, bool)>,
+}
+
+/// What `configure_aircraft` will build for Group 1, without building it:
+/// the same type cycling, seat roles and altitudes as `build_seats`.
+pub fn preview_flights(cfg: &FlightConfig) -> Vec<FlightPreview> {
+    let flight_count = cfg.flight_count.clamp(1, 10) as usize;
+    let max_in_flight = cfg.max_in_flight.clamp(1, 8) as usize;
+    let Ok(types) = resolve_types(&cfg.type_ids, &cfg.type_skills) else {
+        return Vec::new();
+    };
+    let alt_min = cfg.altitude_min.min(cfg.altitude_max) as f64;
+    let alt_max = cfg.altitude_max.max(cfg.altitude_min) as f64;
+    let sizes = flight_sizes(flight_count, max_in_flight);
+    sizes
+        .iter()
+        .enumerate()
+        .map(|(f, &size)| FlightPreview {
+            type_label: types[f % types.len()].0.label,
+            seats: (0..size)
+                .map(|seat| {
+                    let alt = plane_altitude(alt_min, alt_max, f, sizes.len(), seat, size);
+                    (alt, seat % 2 == 0)
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 /// `max` is a ceiling. Flights cycle `max, max-1, …, 1` so a setting of 4
 /// produces 4-, 3-, 2-, and 1-ship elements rather than four 4-ships.
 pub fn flight_sizes(count: usize, max: usize) -> Vec<usize> {
@@ -1057,6 +1090,31 @@ fn plane_altitude(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_flights_matches_built_seats() {
+        let cfg = FlightConfig {
+            flight_count: 5,
+            max_in_flight: 4,
+            type_ids: vec!["mig15bis".into(), "la11".into(), "yak9p".into()],
+            type_skills: vec![3, 2, 2],
+            altitude_min: 800.0,
+            altitude_max: 6200.0,
+            ..FlightConfig::default()
+        };
+        let types = resolve_types(&cfg.type_ids, &cfg.type_skills).expect("types");
+        let sizes = flight_sizes(5, 4);
+        let (seats, plans) =
+            build_seats(&types, &sizes, &cfg, &builtin_plane_catalog()).expect("seats");
+        let preview = preview_flights(&cfg);
+        let flat: Vec<(f64, bool)> = preview.iter().flat_map(|f| f.seats.clone()).collect();
+        assert_eq!(flat.len(), seats.len());
+        for ((alt, lead), (seat, plan)) in flat.iter().zip(seats.iter().zip(&plans)) {
+            assert!((*alt as f32 - seat.altitude).abs() < 0.01);
+            assert_eq!(*lead, seat.orders[1].kind == OrderKind::AttackArea);
+            assert_eq!(preview[plan.flight].type_label, plan.ac.label);
+        }
+    }
     use crate::pack::{builtin_template, generate_pack};
     use crate::parser::parse_group_file;
     use crate::serialize::serialize_group;

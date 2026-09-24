@@ -60,7 +60,7 @@ use crate::bombers::{
     BomberInput, BomberPlanInfo, SUGGESTED_END_NAMES, SUGGESTED_TRIGGER_NAMES,
 };
 use crate::duplicate::apply_overrides;
-use crate::flights::{configure_aircraft, flight_sizes, FlightConfig};
+use crate::flights::{configure_aircraft, FlightConfig};
 use crate::frontlines::{
     attack_arrow_points, battles_in_period, generate_front, inspect_base_map, looks_like_base_map,
     mark_for_battle, preview_dots, preview_front_xz, suggested_aircraft, timeline_index,
@@ -358,6 +358,8 @@ struct GroupGeneratorApp {
     altitude_max: f32,
     bomber_slots: Vec<BomberSlot>,
     bomber_keep_positions: bool,
+    /// Plan shown in the Exclusive Activation center.
+    bomber_selected: Option<usize>,
     recon_submode: ReconSubmode,
     recon_slots: Vec<ReconSlot>,
     recon_rework: Vec<ReconSlot>,
@@ -1455,6 +1457,7 @@ impl Default for GroupGeneratorApp {
             altitude_max: 5500.0,
             bomber_slots: Vec::new(),
             bomber_keep_positions: false,
+            bomber_selected: None,
             recon_submode: ReconSubmode::New,
             recon_slots: Vec::new(),
             recon_rework: Vec::new(),
@@ -1589,23 +1592,14 @@ impl eframe::App for GroupGeneratorApp {
             .exact_height(shell::HEADER_H)
             .frame(egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin::symmetric(18, 0)))
             .show(ctx, |ui| self.page_header_bar(ui));
-        if self.mode == AppMode::Template {
-            self.template_page(ctx);
-        } else if self.mode == AppMode::Map {
-            self.map_page(ctx);
-        } else {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                // One scroll position per tab; the window itself never scrolls.
-                egui::ScrollArea::vertical()
-                    .id_salt(("page", self.mode as u8))
-                    .show(ui, |ui| match self.mode {
-                        AppMode::Template | AppMode::Map => {}
-                        AppMode::Fighter => self.fighter_panel(ui),
-                        AppMode::Exclusive => self.bomber_panel(ui),
-                        AppMode::Recon => self.recon_panel(ui),
-                        AppMode::Airfield => self.airfield_panel(ui),
-                    });
-            });
+        // Each page adds its own side and center panels; only panels scroll.
+        match self.mode {
+            AppMode::Template => self.template_page(ctx),
+            AppMode::Recon => self.recon_page(ctx),
+            AppMode::Fighter => self.fighter_page(ctx),
+            AppMode::Exclusive => self.bomber_page(ctx),
+            AppMode::Airfield => self.airfield_page(ctx),
+            AppMode::Map => self.map_page(ctx),
         }
         help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
     }
@@ -1782,7 +1776,12 @@ impl GroupGeneratorApp {
                         load = ui.button("Add packs…").on_hover_text("Ctrl O").clicked();
                     }
                 },
-                AppMode::Fighter => {}
+                AppMode::Fighter => {
+                    reset = ui
+                        .button("Reset")
+                        .on_hover_text("Back to the default pack, flights, types, country, altitudes and timers.")
+                        .clicked();
+                }
                 AppMode::Exclusive => {
                     load = ui
                         .button("Add templates…")
@@ -1802,7 +1801,10 @@ impl GroupGeneratorApp {
         );
         self.recon_submode = new_submode;
         if reset {
-            self.reset_template_builder();
+            match mode {
+                AppMode::Fighter => self.reset_fighter_pack(),
+                _ => self.reset_template_builder(),
+            }
         }
         if add_folder {
             self.add_recon_folder();
@@ -4862,135 +4864,745 @@ impl GroupGeneratorApp {
         }
     }
 
-    fn fighter_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-                "Group logic is built in. Configure flights, then generate a linked N-pack.",
-            )
-        );
-        ui.add_space(10.0);
+    // ── Army Generator (README §5.2) ───────────────────────────────────────
 
-        self.pack_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.flight_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.types_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.country_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.timers_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.altitude_section(ui);
-        ui.add_space(12.0);
-        ui.separator();
-        ui.add_space(6.0);
-        self.optional_template_section(ui);
+    fn recon_page(&mut self, ctx: &egui::Context) {
+        self.ensure_map_assets(ctx);
+        side_panel(ctx, "recon_left", true, 330.0, |ui| self.recon_templates_panel(ui));
+        side_panel(ctx, "recon_right", false, 300.0, |ui| self.recon_settings_panel(ui));
+        center_panel(ctx, "recon_center", |ui| self.recon_center(ui));
     }
 
-    fn bomber_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-                "This mode takes existing groups that may have complex mission logic or are known to be resource intensive and only allows a single one to activate at a time.
-The start checkzones triggers it's mission profile and closes the others until the end timer fires.
-A good example of when to use this, is preplanned bomber flights. 
-New templates park on a square 10 km grid from 40000, 40000 unless 'export in place' is selected.",
-            )
+    fn recon_templates_panel(&mut self, ui: &mut egui::Ui) {
+        let rework = self.recon_submode == ReconSubmode::Rework;
+        let n = if rework { self.recon_rework.len() } else { self.recon_slots.len() };
+        shell::section_title(
+            ui,
+            &format!("Templates · {n}"),
+            (!rework && n > 0).then_some("click a type to change it"),
         );
-        ui.label(
-            RichText::new(format!(
-                "Name start zones {SUGGESTED_TRIGGER_NAMES}. Name the end timer {SUGGESTED_END_NAMES}; it should target a Deactivate and/or Delete MCU whose Objects are the units in the template."
-            ))
-        );
+        if n == 0 {
+            shell::hint(
+                ui,
+                if rework {
+                    "Add the Random Ground Units packs this utility exported with Add packs… (Ctrl O)."
+                } else {
+                    "Add ground-unit .Group templates, or a folder of them, with Add templates… (Ctrl O)."
+                },
+                false,
+            );
+            return;
+        }
+        let side = shell::Side::from_eastern(self.recon_eastern);
+        if rework {
+            let label = (!self.recon_strip_randomizer).then_some("Activate %");
+            recon_slot_list(ui, &mut self.recon_rework, label, None, side);
+        } else {
+            let icons = self.type_icons(self.recon_eastern);
+            recon_slot_list(ui, &mut self.recon_slots, Some("Influence"), Some(icons), side);
+        }
+    }
+
+    fn recon_center(&mut self, ui: &mut egui::Ui) {
+        let rework = self.recon_submode == ReconSubmode::Rework;
+        let sentence = if rework {
+            "Reworks packs this utility exported: copies stay where they are and get a new activate mix."
+        } else {
+            "Copies templates onto a 10 km parking grid and picks which copies activate each mission."
+        };
+        if shell::hint(ui, sentence, true) {
+            self.open_help(HelpTopic::Recon);
+        }
         ui.add_space(8.0);
+        let empty = if rework { self.recon_rework.is_empty() } else { self.recon_slots.is_empty() };
+        if empty {
+            let label = if rework { "Add packs…" } else { "Add templates…" };
+            if empty_state(ui, &format!("{label} to begin."), label) {
+                self.load_action();
+            }
+            return;
+        }
+        if !rework {
+            self.recon_parking_grid(ui);
+            ui.add_space(12.0);
+        }
+        self.recon_copy_mix(ui);
+    }
 
-        ui.checkbox(
-            &mut self.bomber_keep_positions,
-            "Export in place (leave groups where they are)",
+    /// Schematic of the parking grid: one square block per template, sized
+    /// to its copies (2×2 for 4, 3×3 for 9), with a side marker per copy.
+    fn recon_parking_grid(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Parking grid · 10 km cells from 40000, 40000", None);
+        if self.recon_keep_positions {
+            shell::hint(ui, "Keep loaded positions is on: copies stay where they were authored.", false);
+            return;
+        }
+        let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
+        let mix = allocate_mix(&weights, self.recon_total as usize, self.recon_percent);
+        let side = shell::Side::from_eastern(self.recon_eastern);
+        const CELL: f32 = 18.0;
+        const BLOCK_W: f32 = 132.0;
+        let blocks: Vec<(String, usize)> = self
+            .recon_slots
+            .iter()
+            .zip(&mix)
+            .filter(|(_, m)| m.copies > 0)
+            .map(|(slot, m)| (slot.info.name.clone(), m.copies))
+            .collect();
+        let per_row = ((ui.available_width() / BLOCK_W).floor() as usize).max(1);
+        let rows = blocks.len().div_ceil(per_row).max(1);
+        let max_side = blocks
+            .iter()
+            .map(|(_, n)| (*n as f32).sqrt().ceil() as usize)
+            .max()
+            .unwrap_or(1);
+        let row_h = max_side as f32 * CELL + 30.0;
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), rows as f32 * row_h),
+            Sense::hover(),
         );
-        ui.label(
-            RichText::new(
-                "Load a generated Exclusive Activation .Group to list its plans, add another template, and write back without moving them.",
-            )
-            .color(Color32::from_rgb(160, 160, 170)),
-        );
-        ui.add_space(6.0);
-
-        if self.bomber_slots.is_empty() {
-            ui.label(
-                RichText::new("No templates yet — add a .Group to begin.")
-                    .italics()
+        let p = ui.painter_at(rect);
+        for (bi, (name, copies)) in blocks.iter().enumerate() {
+            let side_n = (*copies as f32).sqrt().ceil() as usize;
+            let origin = rect.min
+                + Vec2::new((bi % per_row) as f32 * BLOCK_W, (bi / per_row) as f32 * row_h);
+            for k in 0..side_n * side_n {
+                let cell = Rect::from_min_size(
+                    origin + Vec2::new((k % side_n) as f32 * CELL, (k / side_n) as f32 * CELL),
+                    Vec2::splat(CELL),
+                );
+                p.rect_stroke(cell, 0.0, Stroke::new(1.0_f32, c::NEUTRAL_400), egui::StrokeKind::Inside);
+                if k < *copies {
+                    shell::paint_side_marker(&p, cell.center(), 10.0, side);
+                }
+            }
+            p.with_clip_rect(Rect::from_min_size(
+                origin + Vec2::new(0.0, side_n as f32 * CELL + 4.0),
+                Vec2::new(BLOCK_W - 8.0, 20.0),
+            ))
+            .text(
+                origin + Vec2::new(0.0, side_n as f32 * CELL + 4.0),
+                Align2::LEFT_TOP,
+                format!("{name} · {copies}"),
+                FontId::proportional(12.0),
+                c::NEUTRAL_800,
             );
         }
+    }
 
-        let mut remove = None;
-        let mut duplicate = None;
-        for i in 0..self.bomber_slots.len() {
-            ui.group(|ui| {
+    fn recon_copy_mix(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Copy mix", None);
+        let rework = self.recon_submode == ReconSubmode::Rework;
+        let strip = self.recon_strip_randomizer;
+        let verb = if strip { "spawn" } else { "activate" };
+        let mut placed = 0usize;
+        let mut live = 0usize;
+        egui::Grid::new("recon_mix")
+            .num_columns(4)
+            .striped(true)
+            .spacing([18.0, 6.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new("Template").font(FontId::new(12.0, theme::bold_family())));
+                if rework {
+                    ui.label(RichText::new("On map").font(FontId::new(12.0, theme::bold_family())));
+                } else {
+                    ui.label(RichText::new("Type").font(FontId::new(12.0, theme::bold_family())));
+                    ui.label(RichText::new("Placed").font(FontId::new(12.0, theme::bold_family())));
+                }
+                ui.label(RichText::new(if strip { "Spawn" } else { "Activate" }).font(FontId::new(12.0, theme::bold_family())));
+                ui.end_row();
+                if rework {
+                    for slot in &self.recon_rework {
+                        let n = slot.detected.unwrap_or(0);
+                        let mix = TypeMix::from_copies(n, slot.influence.clamp(1, 100));
+                        let act = if strip { mix.copies } else { mix.activate };
+                        placed += mix.copies;
+                        live += act;
+                        ui.label(&slot.info.name);
+                        ui.label(mix.copies.to_string());
+                        ui.label(act.to_string());
+                        ui.end_row();
+                    }
+                } else {
+                    let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
+                    let mix = allocate_mix(&weights, self.recon_total as usize, self.recon_percent);
+                    for (slot, m) in self.recon_slots.iter().zip(mix.iter()) {
+                        let act = if strip { m.copies } else { m.activate };
+                        placed += m.copies;
+                        live += act;
+                        ui.label(&slot.info.name);
+                        ui.label(slot.kind.label());
+                        ui.label(m.copies.to_string());
+                        ui.label(act.to_string());
+                        ui.end_row();
+                    }
+                }
+            });
+        ui.add_space(6.0);
+        if placed > 0 {
+            ui.label(
+                RichText::new(format!("{live} of {placed} copies will {verb}."))
+                    .font(FontId::new(13.0, theme::bold_family()))
+                    .color(c::ACCENT_800),
+            );
+        }
+        if !strip {
+            let text = if rework {
+                "Copies stay where they are. Each type's Activate % runs its own waterfall."
+            } else {
+                "Activate % applies per type, not to the pack total."
+            };
+            if shell::hint(ui, text, true) {
+                self.open_help(HelpTopic::Recon);
+            }
+        }
+    }
+
+    fn recon_settings_panel(&mut self, ui: &mut egui::Ui) {
+        let rework = self.recon_submode == ReconSubmode::Rework;
+        shell::section_title(ui, "Army", None);
+        shell::segmented(ui, &mut self.recon_eastern, &[(true, "DPRK"), (false, "NATO")]);
+        shell::hint(ui, "Sets the icons on this page. Map › Place picks the side.", false);
+        if !rework {
+            ui.add_space(4.0);
+            ui.label("Import new templates as");
+            self.unit_kind_picker(ui);
+        }
+        ui.add_space(6.0);
+        ui.separator();
+        shell::section_title(ui, "Copies", None);
+        if rework {
+            ui.checkbox(&mut self.recon_strip_randomizer, "Remove random logic (keep every copy)");
+            if self.recon_strip_randomizer {
+                shell::hint(ui, "Every copy starts. Pick what Mission Begin fires for each pack below.", false);
+            }
+            let detected_total: usize = self.recon_rework.iter().filter_map(|s| s.detected).sum();
+            ui.label(format!("{detected_total} groups detected on the map"));
+            if !self.recon_strip_randomizer {
+                ui.label("Activate ratio (%)");
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{}.", i + 1)).strong());
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(&self.bomber_slots[i].info.name).strong());
-                        let file = self.bomber_slots[i]
-                            .path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("file")
-                            .to_string();
-						ui.label(RichText::new(file));
-                        ui.label(
-                            RichText::new(format!(
-                                "{} units",
-                                self.bomber_slots[i].info.unit_count
-                            ))
-                        );
+                    let changed = ui
+                        .add(egui::Slider::new(&mut self.recon_percent, 1..=100).show_value(false).trailing_fill(true))
+                        .changed();
+                    let typed = ui
+                        .add(egui::DragValue::new(&mut self.recon_percent).range(1..=100).speed(0.2))
+                        .changed();
+                    if changed || typed {
+                        for slot in &mut self.recon_rework {
+                            slot.influence = self.recon_percent;
+                        }
+                    }
+                });
+                shell::hint(ui, "Sets every pack's Activate %. Adjust one pack on its card.", false);
+            }
+        } else {
+            labeled_slider(ui, "Templates to create", &mut self.recon_total, 1..=64);
+            ui.checkbox(&mut self.recon_strip_randomizer, "Spawn all copies (no randomizer)");
+            if self.recon_strip_randomizer {
+                shell::hint(ui, "Every copy keeps its Mission Begin chain and starts.", false);
+            } else {
+                labeled_slider(ui, "Activate ratio (%)", &mut self.recon_percent, 1..=100);
+                if shell::hint(ui, "Share of each type's copies that start.", true) {
+                    self.open_help(HelpTopic::Recon);
+                }
+            }
+            ui.checkbox(&mut self.recon_keep_positions, "Keep loaded positions");
+        }
+        recon_dserver_note(ui);
+        ui.add_space(4.0);
+        ui.separator();
+        if !self.recon_strip_randomizer {
+            let summary = format!(
+                "Start {} s · {} ms apart",
+                self.recon_start_delay_s, self.recon_group_delay_ms
+            );
+            shell::settings_section(ui, "recon_timing", "Timing", &summary, false, |ui| {
+                self.recon_timing_sliders(ui);
+            });
+        }
+        if rework && self.recon_strip_randomizer && !self.recon_rework.is_empty() {
+            shell::section_title(ui, "Reconnect Mission Begin", None);
+            let detected_total: usize = self.recon_rework.iter().filter_map(|s| s.detected).sum();
+            for (i, slot) in self.recon_rework.iter_mut().enumerate() {
+                if slot.restore_start.is_empty() {
+                    if let Some(c) = slot.info.suggested_restore() {
+                        slot.restore_start = c.name.clone();
+                    }
+                }
+                let selected = slot.restore_start.clone();
+                ui.label(RichText::new(&slot.info.name).font(FontId::new(13.0, theme::bold_family())));
+                egui::ComboBox::from_id_salt(format!("restore_start_{i}"))
+                    .selected_text(if selected.is_empty() {
+                        "Select a timer or checkzone".to_string()
+                    } else {
+                        selected
+                    })
+                    .width(ui.available_width() - 8.0)
+                    .show_ui(ui, |ui| {
+                        for choice in &slot.info.restore_starts {
+                            let kind = match choice.kind {
+                                RestoreKind::Timer => "Timer",
+                                RestoreKind::CheckZone => "CheckZone",
+                            };
+                            let rec = if choice.recommended { "  (recommended)" } else { "" };
+                            let label = format!("{}  [{kind}]{rec}", choice.name);
+                            if ui.selectable_label(slot.restore_start == choice.name, label).clicked() {
+                                slot.restore_start = choice.name.clone();
+                            }
+                        }
                     });
+                if let Some(c) = slot.info.restore_starts.iter().find(|c| c.name == slot.restore_start) {
+                    ui.label(RichText::new(&c.hint).small().color(c::WARN_TEXT));
+                }
+                ui.add_space(4.0);
+            }
+            ui.label(
+                RichText::new(format!("All {detected_total} copies will start (no randomizer)."))
+                    .font(FontId::new(13.0, theme::bold_family()))
+                    .color(c::ACCENT_800),
+            );
+        }
+    }
+
+    fn recon_timing_sliders(&mut self, ui: &mut egui::Ui) {
+        labeled_slider(ui, "Start delay (s)", &mut self.recon_start_delay_s, 0..=180);
+        shell::hint(ui, "Wait after Mission Begin, so several Army Generator packs do not all fire at t=0.", false);
+        labeled_slider(ui, "Delay between groups (ms)", &mut self.recon_group_delay_ms, 0..=5000);
+        shell::hint(ui, "Each following type waits this long so MCU load does not spike.", false);
+    }
+
+    // ── Fighter Pack (README §5.3) ─────────────────────────────────────────
+
+    fn fighter_page(&mut self, ctx: &egui::Context) {
+        side_panel(ctx, "fighter_left", true, 270.0, |ui| self.fighter_types_panel(ui));
+        side_panel(ctx, "fighter_right", false, 304.0, |ui| self.fighter_settings_panel(ui));
+        egui::CentralPanel::default().show(ctx, |ui| {
+            paint_blueprint_grid(ui.painter(), ui.max_rect());
+            egui::ScrollArea::vertical()
+                .id_salt("fighter_center")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.fighter_preview(ui));
+        });
+    }
+
+    fn fighter_flight_config(&self) -> FlightConfig {
+        let (type_ids, type_skills) = self.selected_types();
+        FlightConfig {
+            flight_count: self.flight_count,
+            max_in_flight: self.max_in_flight,
+            type_ids,
+            type_skills,
+            country: self.country,
+            cooldown: self.cooldown,
+            reinforcement: self.reinforcement,
+            delete_orders: self.delete_orders,
+            altitude_min: self.altitude_min,
+            altitude_max: self.altitude_max,
+        }
+    }
+
+    fn fighter_types_panel(&mut self, ui: &mut egui::Ui) {
+        let n = self.type_enabled.iter().filter(|e| **e).count();
+        shell::section_title(ui, &format!("Aircraft types · {n} selected"), None);
+        shell::hint(ui, "Flights cycle through the selected types. Lead skill ≥ wingman.", false);
+        ui.add_space(4.0);
+        ui.spacing_mut().slider_width = 90.0;
+        for (i, ac) in AIRCRAFT_TYPES.iter().enumerate() {
+            ui.scope(|ui| {
+                if !self.type_enabled[i] {
+                    ui.set_opacity(0.55);
+                }
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.type_enabled[i], ac.label);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("Remove").clicked() {
-                            remove = Some(i);
-                        }
-                        if ui.small_button("Add again").clicked() {
-                            duplicate = Some(i);
-                        }
+                        ui.add_enabled(
+                            self.type_enabled[i],
+                            egui::Slider::new(&mut self.type_skill[i], 0..=4)
+                                .integer()
+                                .trailing_fill(true),
+                        )
+                        .on_hover_text("Skill 0–4 for this type's leads");
                     });
                 });
+            });
+        }
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Skill 0–4").small().color(c::NEUTRAL_700));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.link("Select all").clicked() {
+                    self.type_enabled.iter_mut().for_each(|e| *e = true);
+                }
+            });
+        });
+        if n == 0 {
+            shell::warning(ui, "Select at least one aircraft type.");
+        }
+    }
 
-                show_missing_locale_hint(ui, &self.bomber_slots[i].path);
+    fn fighter_preview(&mut self, ui: &mut egui::Ui) {
+        let flights = crate::flights::preview_flights(&self.fighter_flight_config());
+        let total: usize = flights.iter().map(|f| f.seats.len()).sum();
+        let groups = self.linked_groups.max(1) as usize;
+        ui.add_space(6.0);
+        shell::section_title(ui, "Pack preview", None);
+        ui.label(if groups == 1 {
+            "One group of Group 1's flights.".to_string()
+        } else {
+            format!("{groups} copies of Group 1, chained through NodeGates so they take turns spawning.")
+        });
+        ui.add_space(8.0);
 
-                let slot = &mut self.bomber_slots[i];
-                let zones = slot.info.checkzones.clone();
-                let suggested_triggers = slot.info.suggested_triggers.clone();
-                let timers = slot.info.timers.clone();
-                let suggested_end = slot.info.suggested_completion;
-                let many_zones = zones.len() > 1;
-                let end_missing = slot.selected_completion.is_none();
-
-                if many_zones {
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new("Multiple checkzones — select which ones this plan should enable and disable.")
-                            .color(Color32::from_rgb(180, 150, 70)),
+        // Group cards joined by NodeGate links.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
+            for g in 0..groups {
+                if g > 0 {
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(70.0, 48.0), Sense::hover());
+                    let y = r.center().y;
+                    ui.painter().line_segment(
+                        [Pos2::new(r.left(), y), Pos2::new(r.right(), y)],
+                        Stroke::new(1.0_f32, c::NEUTRAL_500),
+                    );
+                    ui.painter().text(
+                        Pos2::new(r.center().x, y - 3.0),
+                        Align2::CENTER_BOTTOM,
+                        "NodeGate",
+                        FontId::proportional(12.0),
+                        c::NEUTRAL_700,
                     );
                 }
+                let border = if g == 0 { c::ACCENT } else { c::DIVIDER };
+                egui::Frame::new()
+                    .fill(c::BG)
+                    .stroke(Stroke::new(1.0_f32, border))
+                    .inner_margin(egui::Margin::symmetric(12, 6))
+                    .show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(format!("Group {}", g + 1)).font(FontId::new(13.0, theme::bold_family())));
+                            ui.label(RichText::new(format!("{total} aircraft")).small().color(c::NEUTRAL_700));
+                        });
+                    });
+            }
+        });
+        ui.add_space(12.0);
 
-                for zone in &zones {
-                    let mut on = slot.selected_triggers.contains(&zone.index);
-                    let suggested = suggested_triggers.contains(&zone.index);
-                    let label = if suggested {
-                        format!("{}  (suggested)", zone.name)
-                    } else {
-                        zone.name.clone()
-                    };
-                    if ui.checkbox(&mut on, label).changed() {
+        let sizes: Vec<String> = flights.iter().map(|f| f.seats.len().to_string()).collect();
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            shell::section_title(
+                ui,
+                "Group 1 · flights",
+                Some(&format!("{total} aircraft · sizes {}", sizes.join("/"))),
+            );
+            egui::Grid::new("fighter_flights")
+                .num_columns(5)
+                .striped(true)
+                .spacing([22.0, 6.0])
+                .show(ui, |ui| {
+                    for h in ["Flight", "Type", "Aircraft", "Role", "Altitude"] {
+                        ui.label(RichText::new(h).font(FontId::new(12.0, theme::bold_family())));
+                    }
+                    ui.end_row();
+                    for (f, fl) in flights.iter().enumerate() {
+                        let leads = fl.seats.iter().filter(|s| s.1).count();
+                        let covers = fl.seats.len() - leads;
+                        let lo = fl.seats.iter().map(|s| s.0).fold(f64::MAX, f64::min);
+                        let hi = fl.seats.iter().map(|s| s.0).fold(f64::MIN, f64::max);
+                        ui.label(RichText::new(crate::aircraft::flight_number(f, 0).to_string()).monospace());
+                        ui.label(fl.type_label);
+                        ui.label(fl.seats.len().to_string());
+                        ui.label(if covers == 0 {
+                            format!("{leads} attack")
+                        } else {
+                            format!("{leads} attack · {covers} cover")
+                        });
+                        ui.label(
+                            RichText::new(if (hi - lo).abs() < 1.0 {
+                                format!("{lo:.0} m")
+                            } else {
+                                format!("{lo:.0}–{hi:.0} m")
+                            })
+                            .monospace(),
+                        );
+                        ui.end_row();
+                    }
+                });
+        });
+        ui.add_space(12.0);
+
+        // Altitude strip: the min–max band, a tick per aircraft, flight numbers at the leads.
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            shell::section_title(
+                ui,
+                "Altitude",
+                Some(&format!("{:.0}–{:.0} m", self.altitude_min, self.altitude_max)),
+            );
+            let all: Vec<f64> = flights.iter().flat_map(|f| f.seats.iter().map(|s| s.0)).collect();
+            let lo = all.iter().copied().fold(self.altitude_min as f64, f64::min);
+            let hi = all.iter().copied().fold(self.altitude_max as f64, f64::max).max(lo + 1.0);
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 46.0), Sense::hover());
+            let p = ui.painter();
+            let x_of = |alt: f64| rect.left() + ((alt - lo) / (hi - lo)) as f32 * rect.width();
+            let y = rect.top() + 14.0;
+            p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0_f32, c::NEUTRAL_400));
+            p.rect_filled(
+                Rect::from_min_max(
+                    Pos2::new(x_of(self.altitude_min as f64), y - 3.0),
+                    Pos2::new(x_of(self.altitude_max as f64), y + 3.0),
+                ),
+                0.0,
+                c::ACCENT_200,
+            );
+            for (f, fl) in flights.iter().enumerate() {
+                for (alt, lead) in &fl.seats {
+                    let x = x_of(*alt);
+                    let h = if *lead { 8.0 } else { 5.0 };
+                    p.line_segment([Pos2::new(x, y - h), Pos2::new(x, y + h)], Stroke::new(1.0_f32, c::ACCENT_700));
+                }
+                if let Some((alt, _)) = fl.seats.first() {
+                    p.text(
+                        Pos2::new(x_of(*alt), y + 10.0),
+                        Align2::CENTER_TOP,
+                        crate::aircraft::flight_number(f, 0).to_string(),
+                        FontId::monospace(12.0),
+                        c::NEUTRAL_700,
+                    );
+                }
+            }
+        });
+    }
+
+    fn fighter_settings_panel(&mut self, ui: &mut egui::Ui) {
+        ui.spacing_mut().slider_width = 110.0;
+        shell::section_title(ui, "Pack", None);
+        labeled_slider(ui, "Linked groups", &mut self.linked_groups, 1..=10);
+        labeled_slider(ui, "Flights", &mut self.flight_count, 1..=10);
+        labeled_slider(ui, "Max in a flight", &mut self.max_in_flight, 1..=8);
+        if shell::hint(ui, "Each flight is one randomizer slot.", true) {
+            self.open_help(HelpTopic::Fighter);
+        }
+        ui.add_space(4.0);
+        ui.separator();
+
+        shell::section_title(ui, "Country", None);
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+            paint_seat_marker(ui.painter(), r.center(), 12.0, self.country);
+            let selected = COUNTRIES
+                .iter()
+                .find(|(id, _)| *id == self.country)
+                .map(|(_, label)| *label)
+                .unwrap_or("501  USSR");
+            egui::ComboBox::from_id_salt("country")
+                .selected_text(selected)
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    for (id, label) in COUNTRIES {
+                        ui.selectable_value(&mut self.country, *id, *label);
+                    }
+                });
+        });
+        shell::hint(
+            ui,
+            if self.country / 100 == 6 {
+                "Zone In / Zone Out trigger on DPRK [1]."
+            } else {
+                "Zone In / Zone Out trigger on NATO [2]."
+            },
+            false,
+        );
+        ui.add_space(4.0);
+        ui.separator();
+
+        let summary = format!("{:.0}–{:.0} m", self.altitude_min, self.altitude_max);
+        let mut help = false;
+        shell::settings_section(ui, "fighter_alt", "Altitude range", &summary, true, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Min");
+                ui.add(egui::DragValue::new(&mut self.altitude_min).range(100.0..=9000.0).speed(25.0).suffix(" m"));
+                ui.label("Max");
+                ui.add(egui::DragValue::new(&mut self.altitude_max).range(100.0..=9000.0).speed(25.0).suffix(" m"));
+            });
+            help = shell::hint(ui, "Complete 4-ships split 2 low / 2 high.", true);
+        });
+        if self.altitude_min > self.altitude_max {
+            std::mem::swap(&mut self.altitude_min, &mut self.altitude_max);
+        }
+        if help {
+            self.open_help(HelpTopic::Fighter);
+        }
+        let summary = format!(
+            "Cooldown {:.0} s · Reinf. {:.0} s · Delete {:.0} s",
+            self.cooldown, self.reinforcement, self.delete_orders
+        );
+        shell::settings_section(ui, "fighter_timers", "Timers", &summary, false, |ui| {
+            egui::Grid::new("fighter_timer_grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+                ui.label("Cooldown");
+                ui.add(egui::DragValue::new(&mut self.cooldown).range(0.0..=1800.0).speed(1.0).suffix(" s"));
+                ui.end_row();
+                ui.label("Reinforcement");
+                ui.add(egui::DragValue::new(&mut self.reinforcement).range(0.0..=1800.0).speed(1.0).suffix(" s"));
+                ui.end_row();
+                ui.label("Delete orders");
+                ui.add(egui::DragValue::new(&mut self.delete_orders).range(0.0..=600.0).speed(1.0).suffix(" s"));
+                ui.end_row();
+            });
+        });
+        let custom = self
+            .custom_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(str::to_owned);
+        let summary = custom.clone().unwrap_or_else(|| "Built-in · experimental".into());
+        shell::settings_section(ui, "fighter_custom", "Custom pack template", &summary, false, |ui| {
+            shell::hint(ui, "Experimental. Leave unloaded to use the built-in logic.", false);
+            ui.horizontal(|ui| {
+                if ui.button("Load…").clicked() {
+                    self.pick_template();
+                }
+                if self.custom_path.is_some() && ui.button("Use built-in").clicked() {
+                    self.custom_path = None;
+                    self.status = Status::Info("Using built-in logic.".into());
+                }
+            });
+            ui.label(RichText::new(custom.as_deref().unwrap_or("Built-in")).italics().color(c::NEUTRAL_700));
+        });
+    }
+
+    /// Header Reset on Fighter Pack: back to the startup settings.
+    fn reset_fighter_pack(&mut self) {
+        let d = Self::default();
+        self.custom_path = d.custom_path;
+        self.linked_groups = d.linked_groups;
+        self.flight_count = d.flight_count;
+        self.max_in_flight = d.max_in_flight;
+        self.type_enabled = d.type_enabled;
+        self.type_skill = d.type_skill;
+        self.country = d.country;
+        self.cooldown = d.cooldown;
+        self.reinforcement = d.reinforcement;
+        self.delete_orders = d.delete_orders;
+        self.altitude_min = d.altitude_min;
+        self.altitude_max = d.altitude_max;
+        self.status = Status::Info("Fighter Pack reset to the default settings.".into());
+    }
+
+    // ── Exclusive Activation (README §5.4) ─────────────────────────────────
+
+    fn bomber_page(&mut self, ctx: &egui::Context) {
+        if let Some(i) = self.bomber_selected {
+            if i >= self.bomber_slots.len() {
+                self.bomber_selected = self.bomber_slots.len().checked_sub(1);
+            }
+        } else if !self.bomber_slots.is_empty() {
+            self.bomber_selected = Some(0);
+        }
+        side_panel(ctx, "bomber_left", true, 290.0, |ui| self.bomber_plans_panel(ui));
+        side_panel(ctx, "bomber_right", false, 290.0, |ui| self.bomber_settings_panel(ui));
+        center_panel(ctx, "bomber_center", |ui| self.bomber_center(ui));
+    }
+
+    fn bomber_plans_panel(&mut self, ui: &mut egui::Ui) {
+        let n = self.bomber_slots.len();
+        shell::section_title(ui, &format!("Plans · {n}"), Some("one active at a time"));
+        if n == 0 {
+            shell::hint(ui, "Add templates… (Ctrl O) to list plans here.", false);
+            return;
+        }
+        let mut clicked = None;
+        for i in 0..n {
+            let slot = &self.bomber_slots[i];
+            let file = slot.path.file_name().and_then(|f| f.to_str()).unwrap_or("file").to_string();
+            let title = format!("{} · {}", i + 1, slot.info.name);
+            let meta = format!("{file} · {} units", slot.info.unit_count);
+            let state = if slot.selected_triggers.is_empty() {
+                Some("⚠ Checkzone")
+            } else if slot.selected_completion.is_none() {
+                Some("⚠ End timer")
+            } else {
+                None
+            };
+            let resp = ui
+                .scope_builder(
+                    egui::UiBuilder::new().id_salt(("bomber_card", i)).sense(Sense::click()),
+                    |ui| {
+                        shell::card(ui, self.bomber_selected == Some(i), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::Label::new(RichText::new(title).font(FontId::new(13.0, theme::bold_family())))
+                                        .truncate(),
+                                );
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| match state {
+                                    None => {
+                                        shell::tag(ui, "Ready", true);
+                                    }
+                                    Some(text) => {
+                                        ui.label(RichText::new(text).small().color(c::WARN_TEXT));
+                                    }
+                                });
+                            });
+                            ui.label(RichText::new(meta).small().color(c::NEUTRAL_700));
+                        });
+                    },
+                )
+                .response;
+            if resp.clicked() {
+                clicked = Some(i);
+            }
+            ui.add_space(4.0);
+        }
+        if clicked.is_some() {
+            self.bomber_selected = clicked;
+        }
+    }
+
+    fn bomber_center(&mut self, ui: &mut egui::Ui) {
+        if self.bomber_slots.is_empty() {
+            if empty_state(ui, "Add templates… to begin.", "Add templates…") {
+                self.add_bomber_template();
+            }
+            return;
+        }
+        let i = self.bomber_selected.unwrap_or(0).min(self.bomber_slots.len() - 1);
+        let mut remove = false;
+        let mut duplicate = false;
+        {
+            let slot = &self.bomber_slots[i];
+            let file = slot.path.file_name().and_then(|f| f.to_str()).unwrap_or("file").to_string();
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(format!("PLAN {}", i + 1)).small().color(c::NEUTRAL_700));
+                    ui.label(RichText::new(&slot.info.name).font(FontId::new(24.0, theme::heading_family())));
+                    ui.label(
+                        RichText::new(format!("{file} · {} units", slot.info.unit_count))
+                            .small()
+                            .color(c::NEUTRAL_700),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    remove = ui.button("Remove").clicked();
+                    duplicate = ui.button("Add again").on_hover_text("Add this template again as another plan").clicked();
+                });
+            });
+            show_missing_locale_hint(ui, &slot.path);
+        }
+        ui.add_space(8.0);
+
+        let slot = &mut self.bomber_slots[i];
+        let zones = slot.info.checkzones.clone();
+        let suggested_triggers = slot.info.suggested_triggers.clone();
+        let timers = slot.info.timers.clone();
+        let suggested_end = slot.info.suggested_completion;
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            shell::section_title(ui, "Start checkzones", Some("opens this plan, closes the others"));
+            if zones.len() > 1 {
+                shell::warning(ui, "Multiple checkzones: select which ones this plan should enable and disable.");
+            }
+            for zone in &zones {
+                let mut on = slot.selected_triggers.contains(&zone.index);
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut on, &zone.name).changed() {
                         if on {
                             if !slot.selected_triggers.contains(&zone.index) {
                                 slot.selected_triggers.push(zone.index);
@@ -4999,191 +5611,245 @@ New templates park on a square 10 km grid from 40000, 40000 unless 'export in pl
                             slot.selected_triggers.retain(|id| *id != zone.index);
                         }
                     }
-                }
-                if slot.selected_triggers.is_empty() {
-                    ui.label(
-                        RichText::new("Select at least one checkzone.")
-                            .color(Color32::from_rgb(200, 90, 90)),
-                    );
-                }
-                for id in &slot.selected_triggers {
-                    if let Some(msg) = slot.info.trigger_warnings.get(id) {
-                        ui.add_space(2.0);
-                        ui.label(
-                            RichText::new(msg)
-                                .color(Color32::from_rgb(200, 90, 90)),
-                        );
+                    if suggested_triggers.contains(&zone.index) {
+                        ui.label(RichText::new("(suggested)").small().color(c::NEUTRAL_700));
                     }
+                });
+            }
+            if slot.selected_triggers.is_empty() {
+                shell::warning(ui, "Select at least one checkzone.");
+            }
+            for id in &slot.selected_triggers {
+                if let Some(msg) = slot.info.trigger_warnings.get(id) {
+                    shell::warning(ui, msg);
                 }
-
-                ui.add_space(6.0);
-                if end_missing {
-                    ui.label(
-                        RichText::new(format!(
-                            "No end timer was detected. Select the MCU_Timer that finishes the plan. Name it {SUGGESTED_END_NAMES}; it should target a Deactivate and/or Delete MCU that lists the units."
-                        ))
-                        .color(Color32::from_rgb(180, 150, 70)),
-                    );
-                } else {
-					ui.label(RichText::new("End timer"));
-                }
-
-                let selected_label = slot
-                    .selected_completion
-                    .and_then(|id| timers.iter().find(|t| t.index == id).map(|t| t.name.clone()))
-                    .unwrap_or_else(|| "Select end trigger timer…".into());
-                egui::ComboBox::from_id_salt(format!("bomber-end-{i}"))
-                    .selected_text(selected_label)
-                    .width(280.0)
-                    .show_ui(ui, |ui| {
-                        for timer in &timers {
-                            let text = if suggested_end == Some(timer.index) {
-                                format!("{}  (suggested)", timer.name)
-                            } else {
-                                timer.name.clone()
-                            };
-                            ui.selectable_value(
-                                &mut slot.selected_completion,
-                                Some(timer.index),
-                                text,
-                            );
-                        }
-                    });
-                if let Some(id) = slot.selected_completion {
-                    if let Some(msg) = slot.info.cleanup_warnings.get(&id) {
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(msg)
-                                .color(Color32::from_rgb(200, 90, 90)),
-                        );
+            }
+        });
+        ui.add_space(10.0);
+        let end_missing = slot.selected_completion.is_none();
+        shell::blueprint(ui, if end_missing { c::WARN } else { c::DIVIDER }, |ui| {
+            shell::section_title(ui, "End timer", None);
+            if end_missing {
+                shell::warning(
+                    ui,
+                    &format!(
+                        "No end timer was detected. Select the MCU_Timer that finishes the plan. Name it {SUGGESTED_END_NAMES}; it should target a Deactivate and/or Delete MCU that lists the units."
+                    ),
+                );
+            }
+            let selected_label = slot
+                .selected_completion
+                .and_then(|id| timers.iter().find(|t| t.index == id).map(|t| t.name.clone()))
+                .unwrap_or_else(|| "Select end trigger timer…".into());
+            egui::ComboBox::from_id_salt(format!("bomber-end-{i}"))
+                .selected_text(selected_label)
+                .width(280.0)
+                .show_ui(ui, |ui| {
+                    for timer in &timers {
+                        let text = if suggested_end == Some(timer.index) {
+                            format!("{}  (suggested)", timer.name)
+                        } else {
+                            timer.name.clone()
+                        };
+                        ui.selectable_value(&mut slot.selected_completion, Some(timer.index), text);
                     }
+                });
+            if let Some(id) = slot.selected_completion {
+                if let Some(msg) = slot.info.cleanup_warnings.get(&id) {
+                    shell::warning(ui, msg);
                 }
-            });
+            }
+        });
+        ui.add_space(12.0);
+
+        shell::section_title(ui, "Sequence", None);
+        let mut pick = None;
+        for (j, s) in self.bomber_slots.iter().enumerate() {
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+            let sel = j == i;
+            let (fill, stroke) = if sel {
+                (c::ACCENT_100, Stroke::new(1.5_f32, c::ACCENT))
+            } else {
+                (c::NEUTRAL_100, Stroke::new(1.0_f32, c::DIVIDER))
+            };
+            let p = ui.painter();
+            p.rect_filled(rect, 0.0, fill);
+            p.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
+            p.text(
+                rect.left_center() + Vec2::new(10.0, 0.0),
+                Align2::LEFT_CENTER,
+                format!("{} · {}", j + 1, s.info.name),
+                FontId::new(13.0, if sel { theme::bold_family() } else { FontFamily::Proportional }),
+                c::TEXT,
+            );
+            if resp.clicked() {
+                pick = Some(j);
+            }
             ui.add_space(4.0);
         }
-        if let Some(i) = remove {
-            self.bomber_slots.remove(i);
+        shell::hint(ui, "A start zone opens one plan and closes the rest until its end timer fires.", false);
+        if let Some(j) = pick {
+            self.bomber_selected = Some(j);
         }
-        if let Some(i) = duplicate {
+        if remove {
+            self.bomber_slots.remove(i);
+            self.bomber_selected = if self.bomber_slots.is_empty() { None } else { Some(i.min(self.bomber_slots.len() - 1)) };
+        } else if duplicate {
+            let s = &self.bomber_slots[i];
             let copy = BomberSlot {
-                path: self.bomber_slots[i].path.clone(),
-                root: self.bomber_slots[i].root.clone(),
-                info: self.bomber_slots[i].info.clone(),
-                selected_triggers: self.bomber_slots[i].selected_triggers.clone(),
-                selected_completion: self.bomber_slots[i].selected_completion,
+                path: s.path.clone(),
+                root: s.root.clone(),
+                info: s.info.clone(),
+                selected_triggers: s.selected_triggers.clone(),
+                selected_completion: s.selected_completion,
             };
             self.bomber_slots.push(copy);
         }
     }
 
-    fn recon_panel(&mut self, ui: &mut egui::Ui) {
-        match self.recon_submode {
-            ReconSubmode::New => self.recon_new_panel(ui),
-            ReconSubmode::Rework => self.recon_rework_panel(ui),
-        }
-    }
-
-    fn airfield_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-                "Freeflight airfields from the Task Editor include a player aircraft and SP logic that multiplayer does not use.
-This mode strips the player and retargets the checkzones that were object-linked to it quickly making it multiplayer ready.
-Be advised, adding in planes to fly and setting the starting location is still required.",
-            )
+    fn bomber_settings_panel(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Output", None);
+        ui.checkbox(&mut self.bomber_keep_positions, "Export in place");
+        shell::hint(
+            ui,
+            "Off: new templates park on a 10 km grid from 40000, 40000. On: groups stay where they are.",
+            false,
+        );
+        shell::hint(
+            ui,
+            "Loading a generated Exclusive Activation pack lists its plans, so you can add one and write it back in place.",
+            false,
         );
         ui.add_space(4.0);
-        ui.label(
-            RichText::new(
-                "In game open a Freeflight mission and select takeoff from the desired airfield.
-Use the offical mission editor to open the /missions/_gen.mission file, select the desired field and use File, Save Selection to File. 
-Load the messy airfield group here — it may sit in a Group wrapper or as loose blocks at the root in your group.",
-            )
-        );
-        ui.add_space(8.0);
-
-        ui.label("Friendly plane coalition (USA airfields: Western)");
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.airfield_western, true, "Western  [2]");
-            ui.selectable_value(&mut self.airfield_western, false, "Eastern  [1]");
-        });
-        ui.add_space(8.0);
-
-        if let Some(info) = &self.airfield_info {
-            ui.separator();
-            ui.add_space(6.0);
-            ui.label(RichText::new("Airfield").strong());
-            ui.label(format!("Name: {}", info.name));
-            ui.label(format!(
-                "Layout: {}",
-                if info.in_group {
-                    "inside a Group"
-                } else {
-                    "blocks at the root"
-                }
-            ));
-            if let Some((x, z)) = info.origin_xz {
-                ui.label(format!("Origin: {x:.0}, {z:.0}"));
-            }
-            ui.add_space(6.0);
-            ui.label(RichText::new("On the field").strong());
-            ui.label(format!("{} vehicles/ships", info.vehicle_count));
-            ui.label(format!("{} AI aircraft", info.ai_plane_count));
-            ui.label(format!("{} blocks", info.block_count));
-            ui.label(format!("{} checkzones", info.checkzone_count));
-            ui.add_space(6.0);
-            ui.label(RichText::new("Player (will be removed)").strong());
-            if info.player_planes.is_empty() {
-                ui.label(
-                    RichText::new("No player aircraft found — this file may already be cleaned.")
-                        .color(Color32::from_rgb(180, 150, 70)),
-                );
-            } else {
-                for p in &info.player_planes {
-                    let country = COUNTRIES
-                        .iter()
-                        .find(|(id, _)| *id == p.country)
-                        .map(|(_, label)| *label)
-                        .unwrap_or("unknown country");
-                    ui.label(format!("{}  ({country})", p.name));
-                }
-            }
-            if info.has_autoremove {
-                ui.label(
-                    RichText::new("AutoRemove subgroup will be deleted.")
-                );
-            }
-            ui.label(format!(
-                "{} objects in the player / SP graph will be stripped",
-                info.strip_count
-            ));
-            ui.add_space(6.0);
-            ui.label(RichText::new("Checkzones to unlink").strong());
-            if info.unlink_zones.is_empty() {
-                ui.label(
-                    RichText::new("None object-linked to the player.")
-                );
-            } else {
-                ui.label(
-                    RichText::new(format!(
-                        "{} zone(s) will drop the player object link and use {}.",
-                        info.unlink_zones.len(),
-                        if self.airfield_western {
-                            "Western [2]"
-                        } else {
-                            "Eastern [1]"
-                        }
-                    ))
-                );
-                for name in &info.unlink_zones {
-					ui.label(RichText::new(format!("  {name}")));
-                }
-            }
-        } else {
-            ui.label(
-                RichText::new("Load an airfield group exported from _gen.mission.")
-                    .italics()
-            );
+        ui.separator();
+        shell::section_title(ui, "Naming", None);
+        if shell::hint(
+            ui,
+            &format!("Name start zones {SUGGESTED_TRIGGER_NAMES}, and the end timer {SUGGESTED_END_NAMES}."),
+            true,
+        ) {
+            self.open_help(HelpTopic::Exclusive);
         }
+        ui.add_space(4.0);
+        ui.separator();
+        shell::section_title(ui, "Use it for", None);
+        shell::hint(
+            ui,
+            "Groups with heavy logic, such as preplanned bomber flights, where only one should run at a time.",
+            false,
+        );
+    }
+
+    // ── Airfield (README §5.5) ─────────────────────────────────────────────
+
+    fn airfield_page(&mut self, ctx: &egui::Context) {
+        side_panel(ctx, "airfield_left", true, 290.0, |ui| self.airfield_left_panel(ui));
+        side_panel(ctx, "airfield_right", false, 270.0, |ui| self.airfield_right_panel(ui));
+        center_panel(ctx, "airfield_center", |ui| self.airfield_center(ui));
+    }
+
+    fn airfield_left_panel(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Get the file", None);
+        numbered_step(ui, 1, "In game, open a Freeflight mission and take off from the airfield.");
+        numbered_step(
+            ui,
+            2,
+            "Open /missions/_gen.mission in the mission editor. Select the field, then File › Save Selection to File.",
+        );
+        numbered_step(ui, 3, "Load that file here.");
+        if ui.link(RichText::new("Help ›").small()).clicked() {
+            self.open_help(HelpTopic::Airfield);
+        }
+        ui.add_space(6.0);
+        ui.separator();
+        shell::section_title(ui, "Friendly plane coalition", None);
+        shell::segmented(ui, &mut self.airfield_western, &[(true, "NATO [2]"), (false, "DPRK [1]")]);
+        shell::hint(ui, "USA airfields use NATO.", false);
+    }
+
+    fn airfield_center(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "What Generate will change", None);
+        ui.label("Generate strips the single-player parts and relinks the checkzones, so the field works in multiplayer.");
+        ui.add_space(10.0);
+        let Some(info) = &self.airfield_info else {
+            if empty_state(ui, "Load an airfield group exported from _gen.mission.", "Load airfield…") {
+                self.load_airfield();
+            }
+            return;
+        };
+        let side = if self.airfield_western { "NATO [2]" } else { "DPRK [1]" };
+        ui.columns(2, |cols| {
+            shell::blueprint(&mut cols[0], c::DIVIDER, |ui| {
+                shell::section_title(ui, "Removed", None);
+                if info.player_planes.is_empty() {
+                    shell::warning(ui, "No player aircraft found; this file may already be cleaned.");
+                } else {
+                    for p in &info.player_planes {
+                        let country = COUNTRIES
+                            .iter()
+                            .find(|(id, _)| *id == p.country)
+                            .map_or("unknown country", |(_, label)| *label);
+                        ui.label(format!("{}  ({country})", p.name));
+                    }
+                }
+                if info.has_autoremove {
+                    ui.label("AutoRemove subgroup");
+                }
+                ui.label(format!("Player / SP graph objects: {}", info.strip_count));
+            });
+            shell::blueprint(&mut cols[1], c::ACCENT, |ui| {
+                shell::section_title(ui, &format!("Relinked to {side}"), None);
+                if info.unlink_zones.is_empty() {
+                    ui.label("No checkzones are object-linked to the player.");
+                } else {
+                    ui.label(format!(
+                        "{} checkzones drop the player object link and use {side}:",
+                        info.unlink_zones.len()
+                    ));
+                    for name in &info.unlink_zones {
+                        ui.label(RichText::new(name).monospace());
+                    }
+                }
+            });
+        });
+        ui.add_space(10.0);
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            shell::section_title(ui, "Kept", None);
+            ui.columns(4, |cols| {
+                for (col, (n, label)) in cols.iter_mut().zip([
+                    (info.vehicle_count, "vehicles / ships"),
+                    (info.ai_plane_count, "AI aircraft"),
+                    (info.block_count, "blocks"),
+                    (info.checkzone_count, "checkzones"),
+                ]) {
+                    col.label(RichText::new(n.to_string()).font(FontId::new(24.0, theme::heading_family())));
+                    col.label(RichText::new(label).small().color(c::NEUTRAL_700));
+                }
+            });
+        });
+        ui.add_space(10.0);
+        shell::warning(ui, "Still required after export: add planes to fly and set the starting location.");
+    }
+
+    fn airfield_right_panel(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Airfield", None);
+        let Some(info) = &self.airfield_info else {
+            shell::hint(ui, "Load an airfield to see it here.", false);
+            return;
+        };
+        egui::Grid::new("airfield_facts").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+            ui.label(RichText::new("Name").color(c::NEUTRAL_700));
+            ui.label(&info.name);
+            ui.end_row();
+            ui.label(RichText::new("Layout").color(c::NEUTRAL_700));
+            ui.label(if info.in_group { "inside a Group" } else { "blocks at the root" });
+            ui.end_row();
+            if let Some((x, z)) = info.origin_xz {
+                ui.label(RichText::new("Origin").color(c::NEUTRAL_700));
+                ui.label(RichText::new(format!("{x:.0}, {z:.0}")).monospace());
+                ui.end_row();
+            }
+        });
     }
 
     /// Map tab (README §5.6): tool palette, the map with a front-date strip,
@@ -6904,21 +7570,27 @@ Load the messy airfield group here — it may sit in a Group wrapper or as loose
 
     fn unit_kind_picker(&mut self, ui: &mut egui::Ui) {
         let icons = self.type_icons(self.recon_eastern);
-        for kind in UnitKind::ALL {
-            ui.vertical(|ui| {
-                if unit_kind_icon_button(
-                    ui,
-                    icons[kind.index()].as_ref(),
-                    kind.label(),
-                    &kind.hover(),
-                    self.recon_import_kind == kind,
-                    28.0,
-                ) {
-                    self.recon_import_kind = kind;
+        ui.spacing_mut().button_padding = Vec2::new(4.0, 3.0);
+        egui::Grid::new("unit_kind_picker").num_columns(3).spacing([6.0, 6.0]).show(ui, |ui| {
+            for (n, kind) in UnitKind::ALL.into_iter().enumerate() {
+                ui.vertical(|ui| {
+                    if unit_kind_icon_button(
+                        ui,
+                        icons[kind.index()].as_ref(),
+                        kind.label(),
+                        &kind.hover(),
+                        self.recon_import_kind == kind,
+                        28.0,
+                    ) {
+                        self.recon_import_kind = kind;
+                    }
+                    ui.label(RichText::new(kind.label()).small());
+                });
+                if n % 3 == 2 {
+                    ui.end_row();
                 }
-                ui.label(kind.label());
-            });
-        }
+            }
+        });
     }
 
     fn units_locked(&self) -> bool {
@@ -8246,492 +8918,6 @@ Load the messy airfield group here — it may sit in a Group wrapper or as loose
         self.front_t = idx.min(TIMELINE.len().saturating_sub(1)) as f32;
         self.apply_timeline_mark(idx, false);
         self.front_focus = Some(battle.id);
-    }
-
-    fn recon_new_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-				"Each template parks in its own square 10 km grid from 40000, 40000 (2×2 for 4 copies of that type, 3×3 for 9) so you can sort by hand if desired. 
-A random logic may be used so that each mission spawns placed units at random.
-If used mission begin is unlinked in each loaded group.
-Influence is set to control how many copies of that type are created (from the share of Templates to create). 
-Activate ratio then runs a waterfall inside each type: the last timer is 100%, and a win closes the remaining Outs so two cannot fire.
-Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated).",
-            )
-        );
-        ui.label(
-            RichText::new(
-                "Icon and subtitle text stay as LC indexes in the group. If .eng (or other language) files sit next to a template they are copied beside the output; re-export from the editor if they are missing.",
-            )
-        );
-        ui.label(
-            RichText::new(format!(
-                "Select the {SUGGESTED_ZONE_NAMES} checkzones that belong to each template so we know the group is valid."
-            ))
-        );
-        ui.add_space(8.0);
-
-        self.ensure_map_assets(ui.ctx());
-        ui.label(RichText::new("Army").strong());
-        ui.label(
-            RichText::new(
-                "Eastern or NATO artwork for the type icons on this page. Map Place Eastern / Place NATO still picks the coalition that parks along the front.",
-            )
-        );
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.recon_eastern, true, "Eastern");
-            ui.selectable_value(&mut self.recon_eastern, false, "NATO");
-        });
-        ui.add_space(6.0);
-        ui.label(RichText::new("Import as").strong());
-        ui.label(
-            RichText::new(
-                "Default type for newly added templates. Each template keeps its own icon — click the icons on a template to change it. Map draws that same type: Ship on water, Train on railroad, Armor / Supply / Artillery on open ground, Infantry on dry land (not water)."
-            )
-        );
-        ui.horizontal(|ui| {
-            self.unit_kind_picker(ui);
-        });
-        ui.add_space(8.0);
-
-        labeled_slider(ui, "Templates to create", &mut self.recon_total, 1..=64);
-        ui.checkbox(
-            &mut self.recon_strip_randomizer,
-            "Spawn all copies (omit randomizer)",
-        );
-        if self.recon_strip_randomizer {
-            ui.label(
-                RichText::new(
-                    "Every copy keeps its Mission Begin chain and starts. No waterfall, no deletions.",
-                )
-            );
-        } else {
-            labeled_slider(ui, "Activate ratio (%)", &mut self.recon_percent, 1..=100);
-        }
-        recon_dserver_note(ui);
-        if !self.recon_strip_randomizer {
-            self.recon_timing_sliders(ui);
-        }
-        ui.checkbox(
-            &mut self.recon_keep_positions,
-            "Keep loaded positions (do not park on the grid)",
-        );
-        ui.add_space(8.0);
-
-        if self.recon_slots.is_empty() {
-            ui.label(
-                RichText::new("Add one or more .Group files, or a folder of them, then set influence.")
-                    .italics()
-            );
-        }
-
-        let kind_icons = self.type_icons(self.recon_eastern);
-        recon_slot_list(
-            ui,
-            &mut self.recon_slots,
-            Some("Influence (share of copies created)"),
-            Some(kind_icons),
-        );
-
-        if !self.recon_slots.is_empty() {
-            let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
-            let mix = allocate_mix(&weights, self.recon_total as usize, self.recon_percent);
-            let placed: usize = mix.iter().map(|m| m.copies).sum();
-            let live: usize = mix.iter().map(|m| m.activate).sum();
-            ui.add_space(4.0);
-			ui.label(RichText::new("Copy mix").strong());
-            ui.label(
-                RichText::new(
-                    if self.recon_strip_randomizer {
-                        "Influence splits how many copies of each type are placed. Spawn-all keeps every copy; no activate waterfall."
-                    } else {
-                        "Influence splits how many copies of each type are placed. Activate % is per type, not on the pack total, so two types at 50% of 10 copies is 5 placed / 3 live each (6 live), not 5 live overall."
-                    },
-                )
-            );
-            for (slot, m) in self.recon_slots.iter().zip(mix.iter()) {
-                let live_n = if self.recon_strip_randomizer {
-                    m.copies
-                } else {
-                    m.activate
-                };
-                ui.label(
-                    RichText::new(format!(
-                        "  {} placed, {} {}  ×  {} ({})",
-                        m.copies,
-                        live_n,
-                        if self.recon_strip_randomizer {
-                            "spawn"
-                        } else {
-                            "activate"
-                        },
-                        slot.info.name,
-                        slot.kind.label()
-                    ))
-                );
-            }
-            let shown_live = if self.recon_strip_randomizer {
-                placed
-            } else {
-                live
-            };
-            ui.label(
-                RichText::new(format!(
-                    "{shown_live} of {placed} copies will {}.",
-                    if self.recon_strip_randomizer {
-                        "spawn"
-                    } else {
-                        "activate"
-                    }
-                ))
-                    .color(Color32::from_rgb(110, 150, 110)),
-            );
-        }
-
-    }
-
-    fn recon_rework_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-                "Add Ground Units packs that need to be modified once exported from this utility. 
-	In this mode copies stay where you have placed them. 
-	This may be used to add another unit pack in later, or to combine several packs into one group file.",
-            )
-        );
-        ui.label(
-            RichText::new(format!(
-                "Select the {SUGGESTED_ZONE_NAMES} checkzones so we know each type is valid. Influence is the activate ratio for that type: how many of the copies already on the map will win that type's waterfall."
-            ))
-        );
-        ui.add_space(8.0);
-
-        ui.checkbox(
-            &mut self.recon_strip_randomizer,
-            "Remove random logic (keep every copy, no waterfall)",
-        );
-        if self.recon_strip_randomizer {
-            ui.label(
-                RichText::new(
-                    "Strips Recon Randomizer and reconnects each copy's Mission Begin so every group starts. Pick the MCU Mission Begin should fire: a timer, or a checkzone. Recommended: a timer that targets a Closer checkzone (Zone IN). ENABLE / PULSE IN is usually that timer. Pick the checkzone itself only if you want Mission Begin to pulse that zone directly.",
-                )
-            );
-        }
-        recon_dserver_note(ui);
-        ui.add_space(8.0);
-
-        let detected_total: usize = self.recon_rework.iter().filter_map(|s| s.detected).sum();
-        ui.label(
-            RichText::new(format!("{detected_total} groups detected on the map")).strong(),
-        );
-        if !self.recon_strip_randomizer {
-            ui.label("Activate ratio (%)");
-            ui.horizontal(|ui| {
-                let changed = ui
-                    .add(
-                        egui::Slider::new(&mut self.recon_percent, 1..=100)
-                            .show_value(false)
-                            .trailing_fill(true),
-                    )
-                    .changed();
-                let typed = ui
-                    .add(egui::DragValue::new(&mut self.recon_percent).range(1..=100).speed(0.2))
-                    .changed();
-                if changed || typed {
-                    for slot in &mut self.recon_rework {
-                        slot.influence = self.recon_percent;
-                    }
-                }
-            });
-            self.recon_timing_sliders(ui);
-        }
-        ui.add_space(8.0);
-
-        if self.recon_rework.is_empty() {
-            ui.label(
-                RichText::new("Add one or more Random Ground Units .Group files exported from the editor.")
-                    .italics()
-            );
-        }
-
-        recon_slot_list(
-            ui,
-            &mut self.recon_rework,
-            if self.recon_strip_randomizer {
-                None
-            } else {
-                Some("Influence (activate %)")
-            },
-            None,
-        );
-
-        if self.recon_strip_randomizer && !self.recon_rework.is_empty() {
-            ui.add_space(6.0);
-            ui.label(RichText::new("Reconnect Mission Begin").strong());
-            for (i, slot) in self.recon_rework.iter_mut().enumerate() {
-                if slot.restore_start.is_empty() {
-                    if let Some(c) = slot.info.suggested_restore() {
-                        slot.restore_start = c.name.clone();
-                    }
-                }
-                let selected = slot.restore_start.clone();
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&slot.info.name).strong());
-                    egui::ComboBox::from_id_salt(format!("restore_start_{i}"))
-                        .selected_text(if selected.is_empty() {
-                            "Select a timer or checkzone".to_string()
-                        } else {
-                            selected.clone()
-                        })
-                        .width(360.0)
-                        .show_ui(ui, |ui| {
-                            for choice in &slot.info.restore_starts {
-                                let kind = match choice.kind {
-                                    RestoreKind::Timer => "Timer",
-                                    RestoreKind::CheckZone => "CheckZone",
-                                };
-                                let rec = if choice.recommended { "  (recommended)" } else { "" };
-                                let label = format!("{}  [{kind}]{rec}", choice.name);
-                                if ui
-                                    .selectable_label(slot.restore_start == choice.name, label)
-                                    .clicked()
-                                {
-                                    slot.restore_start = choice.name.clone();
-                                }
-                            }
-                        });
-                });
-                if let Some(c) = slot
-                    .info
-                    .restore_starts
-                    .iter()
-                    .find(|c| c.name == slot.restore_start)
-                {
-                    ui.label(
-                        RichText::new(&c.hint).color(Color32::from_rgb(180, 150, 70)),
-                    );
-                }
-            }
-            ui.label(
-                RichText::new(format!(
-                    "All {detected_total} copies will start (no randomizer)."
-                ))
-                .color(Color32::from_rgb(110, 150, 110)),
-            );
-        } else if !self.recon_rework.is_empty() {
-            ui.add_space(4.0);
-			ui.label(RichText::new("Copy mix").strong());
-            ui.label(
-                RichText::new(
-                    "Copies stay where they are. Influence is that type's activate %. Each type has its own waterfall.",
-                )
-            );
-            let mut placed = 0usize;
-            let mut live = 0usize;
-            for slot in &self.recon_rework {
-                let n = slot.detected.unwrap_or(0);
-                let mix = TypeMix::from_copies(n, slot.influence.clamp(1, 100));
-                placed += mix.copies;
-                live += mix.activate;
-                ui.label(
-                    RichText::new(format!(
-                        "  {} on map, {} activate  ×  {}",
-                        mix.copies, mix.activate, slot.info.name
-                    ))
-                );
-            }
-            if placed > 0 {
-                ui.label(
-                    RichText::new(format!("{live} of {placed} copies will activate."))
-                        .color(Color32::from_rgb(110, 150, 110)),
-                );
-            }
-        }
-
-    }
-
-    fn recon_timing_sliders(&mut self, ui: &mut egui::Ui) {
-        labeled_slider(ui, "Start delay (s)", &mut self.recon_start_delay_s, 0..=180);
-        ui.label(
-            RichText::new(
-                "Wait this long after Mission Begin before the first type starts. Use this when several Army Generator groups are in the same mission so they do not all fire at t=0.",
-            )
-        );
-        labeled_slider(
-            ui,
-            "Delay between groups (ms)",
-            &mut self.recon_group_delay_ms,
-            0..=5000,
-        );
-        ui.label(
-            RichText::new(
-                "After the start delay, each following type waits this long (default 500 ms) so MCU load does not spike.",
-            )
-        );
-    }
-
-    fn pack_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Linked groups").strong());
-        ui.label(
-            RichText::new("Copies of the configured group are chained through 'NodeGates' and are parked in a square 10 km grid from 40000, 40000.")
-        );
-        ui.add_space(4.0);
-        labeled_slider(ui, "Number of linked groups", &mut self.linked_groups, 1..=10);
-    }
-
-    fn flight_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Random aircraft flights").strong());
-        ui.label(
-            RichText::new(
-                "Each flight is one randomizer slot. Pairs: AttackArea + Cover. A leftover aircraft gets AttackArea only.",
-            )
-        );
-        ui.add_space(4.0);
-        labeled_slider(ui, "Number of flights", &mut self.flight_count, 1..=10);
-        labeled_slider(ui, "Max number in each flight", &mut self.max_in_flight, 1..=8);
-        let sizes = flight_sizes(self.flight_count as usize, self.max_in_flight as usize);
-        let total: usize = sizes.iter().sum();
-        let mix = sizes
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .join("/");
-        ui.label(
-            RichText::new(format!(
-                "{total} aircraft in Group 1  ·  flight sizes {mix}  ·  numbers {}–{}",
-                crate::aircraft::flight_number(0, 0),
-                crate::aircraft::flight_number(
-                    (self.flight_count as usize).saturating_sub(1),
-                    sizes.last().copied().unwrap_or(1).saturating_sub(1)
-                )
-            ))
-            .color(Color32::from_rgb(110, 150, 110)),
-        );
-    }
-
-    fn types_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Aircraft types").strong());
-        ui.label(
-            RichText::new("Flights cycle through the selected types. Skill is loosely applied; lead ≥ wingman.")
-        );
-        ui.add_space(4.0);
-        for (i, ac) in AIRCRAFT_TYPES.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.type_enabled[i], ac.label);
-                ui.add_enabled(
-                    self.type_enabled[i],
-                    egui::Slider::new(&mut self.type_skill[i], 0..=4)
-                        .integer()
-                        .text("skill")
-                        .trailing_fill(true),
-                );
-            });
-        }
-    }
-
-    fn country_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Country").strong());
-        ui.label(
-            RichText::new(
-                "500-series: Zone IN/OUT trigger on western coalitions [2].  600-series: trigger on [1].",
-            )
-        );
-        ui.add_space(4.0);
-        let selected = COUNTRIES
-            .iter()
-            .find(|(id, _)| *id == self.country)
-            .map(|(_, label)| *label)
-            .unwrap_or("501  USSR");
-        egui::ComboBox::from_id_salt("country")
-            .selected_text(selected)
-            .width(220.0)
-            .show_ui(ui, |ui| {
-                for (id, label) in COUNTRIES {
-                    ui.selectable_value(&mut self.country, *id, *label);
-                }
-            });
-    }
-
-    fn timers_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Timers (seconds)").strong());
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label("Cooldown");
-            ui.add(
-                egui::DragValue::new(&mut self.cooldown)
-                    .range(0.0..=1800.0)
-                    .speed(1.0)
-                    .suffix(" s"),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.label("Reinforcement");
-            ui.add(
-                egui::DragValue::new(&mut self.reinforcement)
-                    .range(0.0..=1800.0)
-                    .speed(1.0)
-                    .suffix(" s"),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.label("Delete orders");
-            ui.add(
-                egui::DragValue::new(&mut self.delete_orders)
-                    .range(0.0..=600.0)
-                    .speed(1.0)
-                    .suffix(" s"),
-            );
-        });
-    }
-
-    fn altitude_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Altitude range (m)").strong());
-        ui.label(
-            RichText::new("1- and 2-ships spread between min and max. Each complete 4-ship is 2 low / 2 high (~2000 m); leftover ships stay low. Low cover sits in a 500–1500 m band that rises with max. Wingmen stack 25–50 m on their lead.")
-        );
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label("Min");
-            ui.add(
-                egui::DragValue::new(&mut self.altitude_min)
-                    .range(100.0..=9000.0)
-                    .speed(25.0)
-                    .suffix(" m"),
-            );
-            ui.label("Max");
-            ui.add(
-                egui::DragValue::new(&mut self.altitude_max)
-                    .range(100.0..=9000.0)
-                    .speed(25.0)
-                    .suffix(" m"),
-            );
-        });
-        if self.altitude_min > self.altitude_max {
-            std::mem::swap(&mut self.altitude_min, &mut self.altitude_max);
-        }
-    }
-
-    fn optional_template_section(&mut self, ui: &mut egui::Ui) {
-        ui.collapsing("Custom pack template (experimental)", |ui| {
-            ui.label(
-                RichText::new("Leave unloaded to use the built-in logic.")
-            );
-            ui.horizontal(|ui| {
-                if ui.button("Load…").clicked() {
-                    self.pick_template();
-                }
-                if self.custom_path.is_some() && ui.button("Use built-in").clicked() {
-                    self.custom_path = None;
-                    self.status = Status::Info("Using built-in logic.".into());
-                }
-                let label = self
-                    .custom_path
-                    .as_ref()
-                    .and_then(|p| p.file_name())
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("Built-in");
-                ui.label(RichText::new(label).italics());
-            });
-        });
     }
 
     fn status_line(&self, ui: &mut egui::Ui) {
@@ -10454,109 +10640,177 @@ fn drop_rework_path(slots: &mut Vec<ReconSlot>, path: &Path) {
     slots.retain(|s| !s.sources.is_empty());
 }
 
+/// A fixed-width side panel whose contents scroll on their own (README §6.1).
+fn side_panel(ctx: &egui::Context, id: &str, left: bool, width: f32, add: impl FnOnce(&mut egui::Ui)) {
+    let panel = if left {
+        egui::SidePanel::left(id.to_owned())
+    } else {
+        egui::SidePanel::right(id.to_owned())
+    };
+    panel.exact_width(width).resizable(false).show(ctx, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt(id)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add_space(6.0);
+                add(ui);
+            });
+    });
+}
+
+/// The center panel of a tab, scrolling on its own.
+fn center_panel(ctx: &egui::Context, id: &str, add: impl FnOnce(&mut egui::Ui)) {
+    egui::CentralPanel::default().show(ctx, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt(id)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add_space(6.0);
+                add(ui);
+            });
+    });
+}
+
+/// Empty center: names the first step and offers its button (README §4).
+/// Returns true when the button is clicked.
+fn empty_state(ui: &mut egui::Ui, text: &str, button: &str) -> bool {
+    let mut clicked = false;
+    ui.add_space(40.0);
+    ui.vertical_centered(|ui| {
+        ui.label(RichText::new(text).color(c::NEUTRAL_800));
+        ui.add_space(8.0);
+        clicked = ui.button(button).on_hover_text("Ctrl O").clicked();
+    });
+    clicked
+}
+
+/// "1  In game, …" with a 22 px boxed number.
+fn numbered_step(ui: &mut egui::Ui, n: u32, text: &str) {
+    ui.horizontal_top(|ui| {
+        let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+        ui.painter().rect_stroke(r, 0.0, Stroke::new(1.0_f32, c::NEUTRAL_500), egui::StrokeKind::Inside);
+        ui.painter().text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            n.to_string(),
+            FontId::monospace(12.0),
+            c::TEXT,
+        );
+        ui.add(egui::Label::new(text).wrap());
+    });
+    ui.add_space(4.0);
+}
+
+/// 32 px blueprint grid behind a canvas-like center.
+fn paint_blueprint_grid(painter: &egui::Painter, rect: Rect) {
+    let grid = Stroke::new(1.0_f32, c::NEUTRAL_200);
+    let mut x = rect.left() + 32.0;
+    while x < rect.right() {
+        painter.line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], grid);
+        x += 32.0;
+    }
+    let mut y = rect.top() + 32.0;
+    while y < rect.bottom() {
+        painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], grid);
+        y += 32.0;
+    }
+}
+
+/// One card per Army Generator template (README §5.2).
 fn recon_slot_list(
     ui: &mut egui::Ui,
     slots: &mut Vec<ReconSlot>,
     influence_label: Option<&str>,
     kind_icons: Option<[Option<TextureHandle>; 6]>,
+    side: shell::Side,
 ) {
     let mut remove = None;
     for i in 0..slots.len() {
-        ui.group(|ui| {
+        shell::card(ui, false, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{}.", i + 1)).strong());
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(&slots[i].info.name).strong());
-                    if let Some(icons) = &kind_icons {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            for k in UnitKind::ALL {
-                                if unit_kind_icon_button(
-                                    ui,
-                                    icons[k.index()].as_ref(),
-                                    k.label(),
-                                    &k.hover(),
-                                    slots[i].kind == k,
-                                    22.0,
-                                ) {
-                                    slots[i].kind = k;
-                                }
-                            }
-                        });
-                    }
-                    let file = slots[i]
-                        .path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("file")
-                        .to_string();
-                    let file = if slots[i].sources.len() > 1 {
-                        format!("{} + {} more", file, slots[i].sources.len() - 1)
-                    } else {
-                        file
-                    };
-					ui.label(RichText::new(file));
-                    ui.label(
-                        RichText::new(format!(
-                            "{} vehicles/ships/trains, {} blocks",
-                            slots[i].info.vehicle_count, slots[i].info.block_count
-                        ))
-                    );
-                    if let Some(n) = slots[i].detected {
-                        ui.label(
-                            RichText::new(format!("{n} detected on the map"))
-                                .color(Color32::from_rgb(70, 140, 200)),
-                        );
-                    }
-                });
+                shell::side_marker(ui, side, 12.0);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("{} · {}", i + 1, slots[i].info.name))
+                            .font(FontId::new(13.0, theme::bold_family())),
+                    )
+                    .truncate(),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button("Remove").clicked() {
+                    if ui.link("Remove").clicked() {
                         remove = Some(i);
                     }
                 });
             });
-
-            show_missing_locale_hint(ui, &slots[i].path);
-
-            if let Some(label) = influence_label {
-                ui.add_space(4.0);
-                ui.label(label);
-                ui.add(egui::Slider::new(&mut slots[i].influence, 0..=100).trailing_fill(true));
+            let file = slots[i].path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+            let file = if slots[i].sources.len() > 1 {
+                format!("{} + {} more", file, slots[i].sources.len() - 1)
+            } else {
+                file
+            };
+            let mut meta = format!(
+                "{file} · {} units, {} blocks",
+                slots[i].info.vehicle_count, slots[i].info.block_count
+            );
+            if let Some(n) = slots[i].detected {
+                meta.push_str(&format!(" · {n} on the map"));
             }
-
+            ui.label(RichText::new(meta).small().color(c::NEUTRAL_700));
+            if let Some(icons) = &kind_icons {
+                ui.horizontal(|ui| {
+                    // Six types must fit the 330 px panel: tight padding.
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.spacing_mut().button_padding = Vec2::new(4.0, 3.0);
+                    for k in UnitKind::ALL {
+                        if unit_kind_icon_button(
+                            ui,
+                            icons[k.index()].as_ref(),
+                            k.label(),
+                            &k.hover(),
+                            slots[i].kind == k,
+                            22.0,
+                        ) {
+                            slots[i].kind = k;
+                        }
+                    }
+                });
+            }
+            show_missing_locale_hint(ui, &slots[i].path);
+            if let Some(label) = influence_label {
+                ui.horizontal(|ui| {
+                    ui.label(label);
+                    ui.add(egui::Slider::new(&mut slots[i].influence, 0..=100).trailing_fill(true));
+                });
+            }
             let zones = slots[i].info.checkzones.clone();
             let suggested = slots[i].info.suggested_triggers.clone();
             if !zones.is_empty() {
-                ui.add_space(4.0);
+                // The checkzone *name* the scan matches; not UI vocabulary.
                 ui.label(
-                    RichText::new(
-                        "Zone IN checkzones on this group (used to confirm the group is valid).",
-                    )
-                    .color(Color32::from_rgb(180, 150, 70)),
+                    RichText::new(format!("{SUGGESTED_ZONE_NAMES} checkzones (confirm the group is valid)"))
+                        .small()
+                        .color(c::NEUTRAL_700),
                 );
             }
             for zone in &zones {
                 let mut on = slots[i].selected_triggers.contains(&zone.index);
-                let label = if suggested.contains(&zone.index) {
-                    format!("{}  (suggested)", zone.name)
-                } else {
-                    zone.name.clone()
-                };
-                if ui.checkbox(&mut on, label).changed() {
-                    if on {
-                        if !slots[i].selected_triggers.contains(&zone.index) {
-                            slots[i].selected_triggers.push(zone.index);
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut on, &zone.name).changed() {
+                        if on {
+                            if !slots[i].selected_triggers.contains(&zone.index) {
+                                slots[i].selected_triggers.push(zone.index);
+                            }
+                        } else {
+                            slots[i].selected_triggers.retain(|id| *id != zone.index);
                         }
-                    } else {
-                        slots[i].selected_triggers.retain(|id| *id != zone.index);
                     }
-                }
+                    if suggested.contains(&zone.index) {
+                        ui.label(RichText::new("(suggested)").small().color(c::NEUTRAL_700));
+                    }
+                });
             }
             if slots[i].selected_triggers.is_empty() {
-                ui.label(
-                    RichText::new("Select at least one Zone IN.")
-                        .color(Color32::from_rgb(200, 90, 90)),
-                );
+                shell::warning(ui, "Select at least one Zone In.");
             }
         });
         ui.add_space(4.0);
@@ -10567,12 +10821,7 @@ fn recon_slot_list(
 }
 
 fn recon_dserver_note(ui: &mut egui::Ui) {
-    ui.label(
-        RichText::new(
-            "DServer struggles when too many random units fire at once. This pack is capped at 64 copies. Stay under 30 random units in the whole mission (this pack plus any others) unless you use Spawn all / omit randomizer.",
-        )
-        .color(Color32::from_rgb(180, 150, 70)),
-    );
+    shell::warning(ui, "DServer: keep under 30 random units per mission. Packs cap at 64 copies.");
 }
 
 fn recon_delay_note(start_s: u32, group_ms: u32) -> String {
