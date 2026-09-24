@@ -154,6 +154,57 @@ pub fn section_title(ui: &mut Ui, title: &str, note: Option<&str>) {
     });
 }
 
+/// Collapsible settings block for the right panel. Collapsed, it still shows a
+/// one-line summary on the right. Open/closed state persists by `id`.
+pub fn settings_section(
+    ui: &mut Ui,
+    id: &str,
+    title: &str,
+    summary: &str,
+    default_open: bool,
+    body: impl FnOnce(&mut Ui),
+) {
+    let id = ui.make_persistent_id(id);
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, default_open)
+        .show_header(ui, |ui| {
+            ui.label(RichText::new(title).font(FontId::new(13.0, bold_family())));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add(egui::Label::new(RichText::new(summary).small().color(c::NEUTRAL_700)).truncate());
+            });
+        })
+        .body(|ui| {
+            ui.add_space(4.0);
+            body(ui);
+        });
+    ui.separator();
+}
+
+/// Small outlined tag (e.g. "Lead ×4"). Accent tags use ACCENT_700 text on ACCENT_100.
+pub fn tag(ui: &mut Ui, text: &str, accent: bool) {
+    let (fg, fill, border) = if accent {
+        (c::ACCENT_700, c::ACCENT_100, c::ACCENT_300)
+    } else {
+        (c::NEUTRAL_800, Color32::TRANSPARENT, c::DIVIDER)
+    };
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(Stroke::new(1.0_f32, border))
+        .inner_margin(egui::Margin::symmetric(6, 1))
+        .show(ui, |ui| ui.label(RichText::new(text).small().font(FontId::new(12.0, bold_family())).color(fg)));
+}
+
+/// Dashed circle outline (egui has no dashed circle primitive).
+pub fn dashed_circle(painter: &egui::Painter, center: Pos2, radius: f32, stroke: Stroke) {
+    let n = ((radius * 0.6) as usize).clamp(24, 360);
+    let pts: Vec<Pos2> = (0..=n)
+        .map(|i| {
+            let a = i as f32 / n as f32 * std::f32::consts::TAU;
+            center + Vec2::new(a.cos(), a.sin()) * radius
+        })
+        .collect();
+    painter.extend(egui::Shape::dashed_line(&pts, stroke, 6.0, 5.0));
+}
+
 /// One-line explanation under a control (spec item 8). Optional "Help ›" link.
 /// Returns true if the Help link was clicked.
 pub fn hint(ui: &mut Ui, text: &str, with_help: bool) -> bool {
