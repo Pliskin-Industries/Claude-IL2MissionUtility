@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/industry-7bd2fe22-a7c5-4d46-b6f4-cd98d6bfeaeb/styles.css">
+<script src="_ds/industry-7bd2fe22-a7c5-4d46-b6f4-cd98d6bfeaeb/_ds_bundle.js"></script>
+<style>body{margin:0;background:var(--color-bg);font-family:var(--font-body);color:var(--color-text)}a{color:var(--color-accent-700)}a:hover{color:var(--color-accent-800)}</style>
+</helmet>
+<main style="max-width:1080px;margin:0 auto;padding:48px 32px 80px;display:flex;flex-direction:column;gap:56px">
+
+<header style="display:flex;flex-direction:column;gap:10px">
+<div style="font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-neutral-700)">IL-2 Group Generator · Interface spec v0.1</div>
+<h1 style="margin:0;font-size:44px;line-height:1;text-transform:uppercase;letter-spacing:.01em">Direction A, applied to every tab</h1>
+<p style="margin:0;max-width:720px;font-size:15px;line-height:1.55;color:var(--color-neutral-800);text-wrap:pretty">Rules for the rebuild of all six modes. Covers items 1, 4, 5, 6, 7, 9 and 10 from the HFE review, with an example of item 8. Item 2 is deferred; see the backlog at the end. Screens: <a href="Group Generator Mockups.dc.html#t2">turn 2 of the mockups</a>.</p>
+</header>
+
+<!-- 1 -->
+<section style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:14px;align-items:baseline"><span style="font:600 14px ui-monospace,monospace;color:var(--color-accent-700)">01</span><h2 style="margin:0;font-size:28px;text-transform:uppercase">One page layout</h2></div>
+<div class="blueprint" style="display:grid;grid-template-columns:120px 1fr 1.8fr 1fr;grid-template-rows:44px 170px 30px;font-size:13px">
+<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+<div style="grid-row:1 / 4;border-right:1px solid var(--color-divider);padding:10px;display:flex;flex-direction:column;gap:4px"><b>Mode rail</b><span style="color:var(--color-neutral-700)">6 tabs · Help</span></div>
+<div style="grid-column:2 / 5;border-bottom:1px solid var(--color-divider);padding:0 12px;display:flex;align-items:center;gap:10px"><b>Title</b><span style="color:var(--color-neutral-700)">loaded file</span><span style="flex:1"></span><span style="color:var(--color-neutral-700)">Load… · secondary</span><span style="padding:4px 10px;background:var(--color-accent);color:var(--color-bg);font-weight:600">Generate</span></div>
+<div style="border-right:1px solid var(--color-divider);padding:12px;display:flex;flex-direction:column;gap:4px"><b>Left · inputs</b><span style="color:var(--color-neutral-700)">What goes in: files, units, plans</span></div>
+<div style="border-right:1px solid var(--color-divider);padding:12px;display:flex;flex-direction:column;gap:4px;background-image:linear-gradient(var(--color-neutral-200) 1px,transparent 1px),linear-gradient(90deg,var(--color-neutral-200) 1px,transparent 1px);background-size:24px 24px"><b>Center · canvas or preview</b><span style="color:var(--color-neutral-700)">What comes out</span></div>
+<div style="padding:12px;display:flex;flex-direction:column;gap:4px"><b>Right · settings</b><span style="color:var(--color-neutral-700)">Selection first, then collapsed sections with one-line summaries</span></div>
+<div style="grid-column:2 / 5;border-top:1px solid var(--color-divider);padding:0 12px;display:flex;align-items:center;color:var(--color-neutral-700)">Status bar · message · undo · active tool</div>
+</div>
+<table class="table" style="font-size:13px">
+<thead><tr><th>Tab</th><th>Left</th><th>Center</th><th>Right</th><th>Primary</th></tr></thead>
+<tbody>
+<tr><td><b>Template</b></td><td>Add units, unit list</td><td>Formation view, order tree</td><td>Selection; Activate or Spawn, Placement, Waypoints, Catalog</td><td>Generate File</td></tr>
+<tr><td><b>Army Generator</b></td><td>Templates</td><td>Parking grid, copy mix</td><td>Army, import type, totals, timing</td><td>Generate File</td></tr>
+<tr><td><b>Fighter Pack</b></td><td>Aircraft types</td><td>Pack preview: linked groups, flights</td><td>Pack, flights, country, timers, altitude</td><td>Generate File</td></tr>
+<tr><td><b>Exclusive Activation</b></td><td>Plans</td><td>Selected plan: start zones, end timer</td><td>Output options</td><td>Generate File</td></tr>
+<tr><td><b>Airfield</b></td><td>Source file, coalition</td><td>Change preview</td><td>Airfield facts</td><td>Generate File</td></tr>
+<tr><td><b>Map</b></td><td>Tool palette</td><td>Map, front date</td><td>Period · Forces · References</td><td>Generate Base Map</td></tr>
+</tbody></table>
+<ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px;line-height:1.5">
+<li>The primary action is always top-right and always <b>Ctrl G</b>. Load… is always the first secondary button.</li>
+<li>Panels scroll on their own; the window never scrolls. The status bar is always visible.</li>
+<li>An empty center names the first step ("Add templates… to begin"), with the button.</li>
+<li>egui: <code>SidePanel::left</code> (rail), <code>TopBottomPanel</code> (header, status), <code>SidePanel::left/right</code> (inputs, settings), <code>CentralPanel</code> (canvas), <code>CollapsingHeader</code> (settings sections).</li>
+</ul>
+</section>
+
+<!-- 4 -->
+<section style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:14px;align-items:baseline"><span style="font:600 14px ui-monospace,monospace;color:var(--color-accent-700)">04</span><h2 style="margin:0;font-size:28px;text-transform:uppercase">Map tool safety</h2></div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:28px;align-items:start">
+<ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;font-size:14px;line-height:1.5">
+<li>One tool is active at a time. It is filled in the accent color, the cursor matches it, and a banner on the map names it and says how to finish.</li>
+<li><b>Esc</b> cancels a line in progress and returns to Select.</li>
+<li>Place objective tools are one-shot: one click places one objective, then the tool returns to Select. Hold <b>Shift</b> to place several.</li>
+<li>Right-drag pans in every tool.</li>
+<li>Leaving the Map tab returns to Select.</li>
+<li>The status bar repeats the active tool's hint.</li>
+</ul>
+<div class="blueprint" style="position:relative;height:200px;background:var(--color-neutral-200)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+<div style="position:absolute;top:12px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;padding:6px 12px;background:var(--color-accent-900);color:var(--color-bg);font-size:13px;white-space:nowrap"><b>SALIENT</b>Click along the front · right-click to finish · Esc to cancel</div>
+<svg width="100%" height="100%" viewBox="0 0 420 200" style="position:absolute;inset:0"><path d="M10 130 C90 118 140 140 200 124 S320 100 410 96" fill="none" stroke="oklch(0.55 0.18 25)" stroke-width="2.2"></path><path d="M160 128 L186 96 L222 104 L240 118" fill="none" stroke="var(--color-accent-800)" stroke-width="1.6" stroke-dasharray="5 3"></path><g fill="var(--color-bg)" stroke="var(--color-accent-800)" stroke-width="1.5"><rect x="182" y="92" width="8" height="8"></rect><rect x="218" y="100" width="8" height="8"></rect></g></svg>
+</div>
+</div>
+</section>
+
+<!-- 5 -->
+<section style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:14px;align-items:baseline"><span style="font:600 14px ui-monospace,monospace;color:var(--color-accent-700)">05</span><h2 style="margin:0;font-size:28px;text-transform:uppercase">Side markers face opposite directions</h2></div>
+<p style="margin:0;max-width:760px;font-size:14px;line-height:1.55;text-wrap:pretty">Keep the existing <code>assets/Eastern*.svg</code> and <code>assets/Nato*.svg</code> icons. DPRK icons point south, toward the front from the north; NATO icons point north. Direction tells the sides apart without color, so red/teal becomes a second cue. Lists, legends and the map all use the same orientation.</p>
+<div style="display:flex;gap:40px;align-items:center;flex-wrap:wrap">
+<div style="display:flex;gap:18px;align-items:center;font-size:14px">
+<svg width="28" height="28" viewBox="-14 -14 28 28"><path d="M-8 -9 H8 V3 L0 11 L-8 3 Z" fill="oklch(0.52 0.17 25)"></path></svg><span><b>DPRK</b> · faces south</span></div>
+<div style="display:flex;gap:18px;align-items:center;font-size:14px">
+<svg width="28" height="28" viewBox="-14 -14 28 28"><path d="M-8 9 H8 V-3 L0 -11 L-8 -3 Z" fill="var(--color-accent-700)"></path></svg><span><b>NATO</b> · faces north</span></div>
+<div style="display:flex;gap:18px;align-items:center;font-size:14px">
+<svg width="28" height="28" viewBox="-14 -14 28 28"><path d="M-8 -9 H8 V3 L0 11 L-8 3 Z" fill="none" stroke="var(--color-text)" stroke-width="1.5"></path></svg><svg width="28" height="28" viewBox="-14 -14 28 28"><path d="M-8 9 H8 V-3 L0 -11 L-8 -3 Z" fill="none" stroke="var(--color-text)" stroke-width="1.5"></path></svg><span style="color:var(--color-neutral-700)">Still readable in grayscale</span></div>
+</div>
+<p style="margin:0;font-size:13px;color:var(--color-neutral-700)">The shapes above stand in for your SVGs. Upload <code>assets/</code> and the mockups will use the real icons. In egui, rotate with the existing <code>paint_rotated_image</code>.</p>
+</section>
+
+<!-- 6 -->
+<section style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:14px;align-items:baseline"><span style="font:600 14px ui-monospace,monospace;color:var(--color-accent-700)">06</span><h2 style="margin:0;font-size:28px;text-transform:uppercase">Glossary</h2></div>
+<table class="table" style="font-size:13px">
+<thead><tr><th style="width:190px">Use</th><th>Meaning</th><th>Replaces</th></tr></thead>
+<tbody>
+<tr><td><b>DPRK</b></td><td>Eastern side. Add the coalition number only where the MCU value matters: "DPRK [1]".</td><td>Eastern, East, Axis, Eastern [1]</td></tr>
+<tr><td><b>NATO</b></td><td>Western side. "NATO [2]" where the coalition number matters.</td><td>Western, UN, Nato, Western [2]</td></tr>
+<tr><td><b>Zone In / Zone Out</b></td><td>The two checkzone radii.</td><td>Zone IN, Zone Out, ZONE IN</td></tr>
+<tr><td><b>Load…</b></td><td>Open a file and replace what the page holds.</td><td>Open</td></tr>
+<tr><td><b>Add…</b></td><td>Append files to a list.</td><td>Add template or pack…, Add pack…</td></tr>
+<tr><td><b>Place</b></td><td>Put items on the map.</td><td>Eastern / NATO buttons with no verb</td></tr>
+<tr><td><b>Remove</b></td><td>Take one item out of a list.</td><td>—</td></tr>
+<tr><td><b>Clear</b></td><td>Remove every item of one kind.</td><td>Clear Custom Lines, Clear fighters (casing)</td></tr>
+<tr><td><b>Reset</b></td><td>Return a page to its defaults.</td><td>—</td></tr>
+<tr><td><b>Generate File</b></td><td>Write the output .Group.</td><td>Export File (Airfield)</td></tr>
+</tbody></table>
+<p style="margin:0;font-size:13px;color:var(--color-neutral-700)">Button labels use sentence case ("Clear salients"). Asset filenames and code identifiers stay as they are.</p>
+</section>
+
+<!-- 7 -->
+<section style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:14px;align-items:baseline"><span style="font:600 14px ui-monospace,monospace;color:var(--color-accent-700)">07</span><h2 style="margin:0;font-size:28px;text-transform:uppercase">Undo and confirmation</h2></div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:28px;align-items:start">
+<div style="display:flex;flex-direction:column;gap:14px">
+<table class="table" style="font-size:13px">
+<thead><tr><th>Action</th><th>Where</th><th>Treatment</th></tr></thead>
+<tbody>
+<tr><td>Reset</td><td>Template</td><td>Confirm, then undoable</td></tr>
+<tr><td>Load… over unsaved edits</td><td>All tabs</td><td>Confirm</td></tr>
+<tr><td>Remove (one item)</td><td>Template, Army, Exclusive, Map references</td><td>Undoable</td></tr>
+<tr><td>Clear units / fighters / objectives</td><td>Map</td><td>Undoable</td></tr>
+<tr><td>Clear lines / salients / arrows</td><td>Map</td><td>Undoable (exists today)</td></tr>
+</tbody></table>
+<p style="margin:0;font-size:14px;line-height:1.5">Ctrl Z undoes the last destructive action on the current tab. After a Clear or Remove, the status bar says what went and shows an Undo link. Keep one snapshot per tab; egui needs no extra widget for this.</p>
+<div style="display:flex;align-items:center;gap:10px;height:30px;padding:0 12px;border:1px solid var(--color-divider);font-size:13px"><span style="width:8px;height:8px;background:var(--color-accent)"></span>Cleared 6 NATO units<span style="flex:1"></span><a href="#">Undo</a><span style="font:12px ui-monospace,monospace;padding:1px 5px;border:1px solid var(--color-divider)">Ctrl Z</span></div>
+</div>
+<div class="dialog blueprint elev-lg" style="position:relative;padding:20px;display:flex;flex-direction:column;gap:12px;background:var(--color-bg)"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+<div class="dialog-title" style="font:600 20px/1.1 var(--font-heading);text-transform:uppercase">Reset Template Builder?</div>
+<div class="dialog-body" style="font-size:14px;line-height:1.5">This clears 3 units, 5 orders and the placement settings. The catalog stays. You can undo with Ctrl Z.</div>
+<div class="dialog-actions" style="display:flex;justify-content:flex-end;gap:8px"><button class="btn btn-secondary" style="min-height:28px;padding:4px 12px;font-size:13px">Cancel</button><button class="btn btn-primary" style="min-height:28px;padding:4px 12px;font-size:13px">Reset</button></div>
+</div>
+</div>
+</section>
+
+<!-- 8 -->
+<section style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:14px;align-items:baseline"><span style="font:600 14px ui-monospace,monospace;color:var(--color-accent-700)">08</span><h2 style="margin:0;font-size:28px;text-transform:uppercase">Example: short inline text, details in Help</h2></div>
+<p style="margin:0;max-width:760px;font-size:14px;line-height:1.55">Where a choice is made, say what it does in one line. Explain edge cases in Help, linked from that line. The two examples below use current text from ui.rs.</p>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+<div style="display:flex;flex-direction:column;gap:10px"><div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-700)">Now · Template › Activate or Spawn, hover text</div>
+<div style="padding:14px;border:1px solid var(--color-divider);display:flex;flex-direction:column;gap:10px;font-size:13px">
+<div style="display:flex;gap:8px;align-items:center"><span style="width:16px;height:16px;border:1px solid var(--color-neutral-500)"></span>Allow multiple spawns</div>
+<div style="padding:10px;background:var(--color-neutral-800);color:var(--color-bg);font-size:12.5px;line-height:1.45">One-shot: leave unchecked. Repeat spawn: Zone Out always cleans up and zeros DeathCount. If every unit is destroyed (OnPlaneDestroyed / OnKilled), cooldown pulses the spawner even while the player stays. A hiding unit is cleaned up when the player leaves, not mid-fight.</div>
+<div style="font-size:12px;color:var(--color-neutral-700)">Only visible on hover. 4 sentences, 3 concepts.</div></div></div>
+<div style="display:flex;flex-direction:column;gap:10px"><div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-accent-700)">Proposed</div>
+<div style="padding:14px;border:1px solid var(--color-accent);display:flex;flex-direction:column;gap:8px;font-size:13px">
+<div style="display:flex;gap:8px;align-items:center"><span style="width:16px;height:16px;border:1px solid var(--color-accent);background:var(--color-accent);color:var(--color-bg);font-size:12px;line-height:16px;text-align:center">✓</span>Allow multiple spawns</div>
+<div style="font-size:12.5px;line-height:1.45;color:var(--color-neutral-800);padding-left:24px">Respawns after the cooldown once every unit is destroyed. <a href="#">How cleanup works ›</a></div>
+<div style="display:flex;gap:8px;align-items:center;padding-left:24px"><span style="color:var(--color-neutral-700)">Cooldown</span><span style="width:60px;height:26px;display:flex;align-items:center;padding:0 7px;border:1px solid var(--color-divider);font:12px ui-monospace,monospace">5 min</span></div>
+<div style="font-size:12px;color:var(--color-neutral-700);padding-top:4px">The Zone Out cleanup, DeathCount and hiding-unit details move to Help › Template › Spawn.</div></div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+<div style="display:flex;flex-direction:column;gap:10px"><div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-700)">Now · Army Generator intro</div>
+<div style="padding:14px;border:1px solid var(--color-divider);font-size:12.5px;line-height:1.45;color:var(--color-neutral-800)">Each template parks in its own square 10 km grid from 40000, 40000 (2×2 for 4 copies of that type, 3×3 for 9) so you can sort by hand if desired. A random logic may be used so that each mission spawns placed units at random. If used mission begin is unlinked in each loaded group. Influence is set to control how many copies of that type are created… <span style="color:var(--color-neutral-600)">(+ 3 more sentences, then 3 more paragraphs)</span></div></div>
+<div style="display:flex;flex-direction:column;gap:10px"><div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-accent-700)">Proposed</div>
+<div style="padding:14px;border:1px solid var(--color-accent);display:flex;flex-direction:column;gap:8px;font-size:13px">
+<div style="font-size:13px">Copies templates onto a 10 km parking grid and picks which copies activate each mission. <a href="#">Help ›</a></div>
+<div style="display:grid;grid-template-columns:110px 1fr;gap:6px 10px;font-size:12.5px"><b>Influence</b><span style="color:var(--color-neutral-800)">Share of copies this template gets.</span><b>Activate ratio</b><span style="color:var(--color-neutral-800)">Share of each type's copies that start.</span></div>
+<div style="font-size:12px;color:var(--color-neutral-700)">Each explanation sits next to its own control.</div></div></div>
+</div>
+</section>
+
+<!-- 9 -->
+<section style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:14px;align-items:baseline"><span style="font:600 14px ui-monospace,monospace;color:var(--color-accent-700)">09</span><h2 style="margin:0;font-size:28px;text-transform:uppercase">Minimum sizes</h2></div>
+<table class="table" style="font-size:13px">
+<thead><tr><th>Element</th><th>Minimum</th><th>egui</th></tr></thead>
+<tbody>
+<tr><td>Body text</td><td>13 px</td><td><code>TextStyle::Body</code> 13</td></tr>
+<tr><td>Small text (hints, meta)</td><td>12 px, never smaller</td><td><code>TextStyle::Small</code> 12 in <code>apply_readable_style</code></td></tr>
+<tr><td>Buttons, combos, drag values</td><td>28 px tall</td><td><code>spacing.interact_size = vec2(40, 28)</code></td></tr>
+<tr><td>Map tool buttons</td><td>36 × 36 px</td><td><code>ImageButton</code> sized 36</td></tr>
+<tr><td>Order-tree chips</td><td>28 px tall</td><td><code>TREE_CHIP_H</code> ≥ 28</td></tr>
+<tr><td>Gap between targets</td><td>4 px</td><td><code>item_spacing</code> ≥ 4</td></tr>
+<tr><td>Constraints (e.g. Spawn locked by wingmen)</td><td>Shown inline, not only on hover</td><td><code>ui.label</code> under the control</td></tr>
+</tbody></table>
+</section>
+
+<!-- 10 -->
+<section style="display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:14px;align-items:baseline"><span style="font:600 14px ui-monospace,monospace;color:var(--color-accent-700)">10</span><h2 style="margin:0;font-size:28px;text-transform:uppercase">Keyboard shortcuts</h2></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+<table class="table" style="font-size:13px"><thead><tr><th style="width:120px">Keys</th><th>All tabs</th></tr></thead><tbody>
+<tr><td><code>Ctrl G</code></td><td>Generate File / Generate Base Map</td></tr>
+<tr><td><code>Ctrl O</code></td><td>Load…</td></tr>
+<tr><td><code>Ctrl Z</code> / <code>Ctrl Y</code></td><td>Undo / redo</td></tr>
+<tr><td><code>Ctrl 1–6</code></td><td>Switch tab</td></tr>
+<tr><td><code>F1</code></td><td>Help for this tab</td></tr>
+<tr><td><code>Esc</code></td><td>Close dialog, cancel drag</td></tr>
+</tbody></table>
+<table class="table" style="font-size:13px"><thead><tr><th style="width:120px">Keys</th><th>Map</th></tr></thead><tbody>
+<tr><td><code>1</code></td><td>Select AO / move units</td></tr>
+<tr><td><code>2</code> / <code>3</code> / <code>4</code></td><td>Draw front / salient / attack arrow</td></tr>
+<tr><td><code>5</code> / <code>6</code></td><td>Place DPRK / NATO objective</td></tr>
+<tr><td><code>Esc</code></td><td>Cancel line, back to Select</td></tr>
+<tr><td><code>← →</code></td><td>Front date (existing keys, unchanged)</td></tr>
+</tbody></table>
+</div>
+<p style="margin:0;font-size:13px;color:var(--color-neutral-700)">Every shortcut appears in its button's hover text and in Help.</p>
+</section>
+
+<!-- backlog -->
+<section class="blueprint" style="position:relative;padding:24px;display:flex;flex-direction:column;gap:12px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+<div style="font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700)">Backlog · future release</div>
+<h2 style="margin:0;font-size:24px;text-transform:uppercase">Define a minimum usable group for each tab</h2>
+<p style="margin:0;max-width:760px;font-size:14px;line-height:1.55">Item 2 (a readiness check next to Generate) is deferred. It first needs a definition of the smallest output each tab should allow. The code already enforces some of these rules and they are a starting point:</p>
+<ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px;line-height:1.5">
+<li><b>Exclusive Activation:</b> each plan has at least one start checkzone and an end timer.</li>
+<li><b>Army Generator:</b> each template has at least one Zone In selected.</li>
+<li><b>Template:</b> flights with wingmen must use Activate.</li>
+<li><b>Open:</b> Template, Fighter Pack, Airfield and Map have no written minimum yet.</li>
+</ul>
+</section>
+</main>
+</x-dc>
+</body>
+</html>
