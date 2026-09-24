@@ -23,6 +23,7 @@
 //!
 //! ## Used by
 //! * heightprobe.rs — probe tiles and ingest of snapped files
+//! * ui.rs — Map › Terrain: store status, coverage and relief layers, height readout
 
 #![allow(dead_code)] // wired into export and the Map tab in later phases
 

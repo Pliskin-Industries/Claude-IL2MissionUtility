@@ -47,6 +47,13 @@ around them. Per-tab undo snapshots (`shell::Undo`), confirmation
 dialogs (`Confirm`) and unsaved-edit checks (`tpl_fingerprint`,
 `map_fingerprint`) live here too.
 
+`ui_tests.rs` (compiled with `cargo test` only) drives the whole app on a
+headless `egui::Context`: it finds widgets by their AccessKit labels,
+clicks, drags and types, and answers file dialogs from a queue
+(`dialog::answer`) so Load / Generate run end to end into a temp folder.
+Custom-painted widgets set `widget_info` so the tests (and screen readers)
+can find them.
+
 ### `theme.rs` — design tokens
 Color tokens (`theme::c`: ground, accent and neutral ramps, DPRK / NATO /
 FRONT / WARN), the embedded Barlow fonts (Hack as the last fallback for
@@ -471,6 +478,21 @@ Armor / Supply / Infantry — used by Map and Army), `snap_ground_attack_areas`.
 `is_infantry_script` / `group_is_infantry` detect squads.
 Fallbacks: `UNKNOWN_ARTILLERY_M` = 15 km, `UNKNOWN_ARMOR_M` = 2 km,
 `ARTILLERY_RANGE_MIN_M` = 4.5 km. **Template, Map, Army Generator.**
+
+### `terrain.rs` — measured ground heights
+Sparse store of ground heights on a 100 m lattice (224 × 224-node tiles,
+HGT1 file under `%APPDATA%\IL2MissionUtility\terrain`). `lookup` falls back
+from 100 m to 200 / 400 / 800 m cells and reports the spacing that
+answered; `ground_margin_m` gives the lift for that spacing. Stores and
+answers only: no parsing, no placement. **Map mode (Terrain tab); export
+use comes later.**
+
+### `heightprobe.rs` — terrain probe files
+Builds T-34 probe groups (one per 100 m land node, one file per tile; the
+800 m survey pass over the whole map) and ingests files the user snapped
+with the editor's *set to ground*, refusing ones that look unsnapped.
+`run_cli` serves `--probe-survey`, `--probe-ingest`, `--probe-status`.
+**Map mode (Terrain tab) and the command line.**
 
 ### `watermap.rs` — water/terrain queries
 Packed Korea terrain mask from `assets/combined_terrain.bin`

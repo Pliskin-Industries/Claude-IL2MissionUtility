@@ -282,6 +282,7 @@ pub fn primary_button(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool) -
     let size = Vec2::new(pad * 2.0 + label_g.size().x + gap + key_g.size().x, 32.0);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, resp) = ui.allocate_exact_size(size, sense);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     if ui.is_rect_visible(rect) {
         let fill = if !enabled {
             c::ACCENT_300
@@ -335,6 +336,7 @@ pub fn tool_button(
     active: bool,
 ) -> Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(TOOL_SIZE), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, tooltip));
     let (bg, fg) = if active {
         (c::ACCENT, c::BG)
     } else if resp.hovered() {
@@ -366,6 +368,7 @@ pub fn mode_rail(ui: &mut Ui, labels: &[&str], selected: &mut usize) -> bool {
     for (i, label) in labels.iter().enumerate() {
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
         let sel = *selected == i;
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, *label));
         let p = ui.painter();
         if sel {
             p.rect_filled(rect, 0.0, c::ACCENT_200);

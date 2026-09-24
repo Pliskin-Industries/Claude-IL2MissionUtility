@@ -73,9 +73,26 @@ use crate::harvest::{
     default_missions_dir, find_gen_file, harvest_file, GenWatcher, HarvestConfig,
     HarvestOutcome, DEFAULT_DB_DIR,
 };
+use crate::heightprobe;
 use crate::help::{self, HelpTopic};
 use crate::shell::{self, Severity};
+use crate::terrain::HeightStore;
 use crate::theme::{self, c};
+
+/// Native file dialogs. Tests swap in `ui_tests::dialog`, which answers
+/// from a queue of prepared paths instead of opening a window.
+#[cfg(not(test))]
+mod dialog {
+    pub use rfd::FileDialog;
+}
+#[cfg(test)]
+use ui_tests::dialog;
+#[cfg(test)]
+#[path = "ui_tests.rs"]
+mod ui_tests;
+
+/// Terrain lattice spacing in metres (terrain::STEP_M).
+const TERRAIN_STEP: f64 = crate::terrain::STEP_M;
 use crate::locale::{has_sidecars, merge_template_sidecars, write_sidecars, LANG_EXTS};
 use crate::mapclip::{
     apply_salients, can_extend_salient, can_extend_west_east, clip_linestring_to_rect,
@@ -243,6 +260,7 @@ enum MapDock {
     Period,
     Forces,
     References,
+    Terrain,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -450,6 +468,17 @@ struct GroupGeneratorApp {
     custom_front_xz: Vec<(f64, f64)>,
     map_drawing_mode: MapDrawingMode,
     map_dock: MapDock,
+    /// World (x, z) under the pointer on the map, for the height readout.
+    map_hover_xz: Option<(f64, f64)>,
+    terrain_store_path: PathBuf,
+    /// Loaded on first use; `terrain_error` holds why it could not be.
+    terrain_store: Option<HeightStore>,
+    terrain_error: Option<String>,
+    terrain_tiles: Option<Vec<(usize, usize, usize)>>,
+    terrain_log: Vec<String>,
+    terrain_show_coverage: bool,
+    terrain_show_relief: bool,
+    terrain_relief: Option<TextureHandle>,
     current_salient: Vec<(f64, f64)>,
     salients: Vec<Vec<(f64, f64)>>,
     attack_arrows: Vec<((f64, f64), (f64, f64))>,
@@ -785,6 +814,7 @@ fn draw_tree_chip(
     size: Vec2,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, title));
     let p = ui.painter();
     let (fill, stroke) = if selected {
         (c::ACCENT_200, Stroke::new(1.5_f32, c::ACCENT))
@@ -816,6 +846,7 @@ fn draw_tree_chip(
 /// The unit chip that starts each order-tree row: side marker, "{n} · {model}".
 fn draw_tree_unit_chip(ui: &mut egui::Ui, n: usize, label: &str, country: i32, selected: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(TREE_UNIT_W, TREE_CHIP_H), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, format!("{n} · {label}")));
     let p = ui.painter();
     let (fill, stroke) = if selected {
         (c::ACCENT_200, Stroke::new(1.5_f32, c::ACCENT))
@@ -1564,6 +1595,15 @@ impl Default for GroupGeneratorApp {
             custom_front_xz: Vec::new(),
 			map_drawing_mode: MapDrawingMode::None,
             map_dock: MapDock::Period,
+            map_hover_xz: None,
+            terrain_store_path: crate::terrain::default_store_path(),
+            terrain_store: None,
+            terrain_error: None,
+            terrain_tiles: None,
+            terrain_log: Vec::new(),
+            terrain_show_coverage: false,
+            terrain_show_relief: false,
+            terrain_relief: None,
             current_salient: Vec::new(),
             salients: Vec::new(),
             attack_arrows: Vec::new(),
@@ -1653,6 +1693,14 @@ impl Default for GroupGeneratorApp {
 
 impl eframe::App for GroupGeneratorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.ui(ctx);
+    }
+}
+
+impl GroupGeneratorApp {
+    /// One frame of the whole app. `update` only forwards here, so the UI
+    /// tests (`ui_tests.rs`) can drive frames on a bare `egui::Context`.
+    fn ui(&mut self, ctx: &egui::Context) {
         self.poll_harvest(ctx);
         let keys = shell::read_shortcuts(ctx, self.mode == AppMode::Map);
         self.handle_shortcuts(&keys);
@@ -2156,6 +2204,7 @@ impl GroupGeneratorApp {
                     },
                 )
                 .response;
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected == Some(si), format!("Unit card {}", si + 1)));
             if resp.clicked() {
                 clicked = Some(si);
             }
@@ -3873,6 +3922,7 @@ impl GroupGeneratorApp {
                 for (i, unit) in models.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 28.0), Sense::click());
                     let sel = i == self.tpl_add_pick;
+                    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, format!("Model {}", unit.label())));
                     let add_rect = Rect::from_min_max(Pos2::new(rect.right() - 58.0, rect.top()), rect.max);
                     let over_add = resp.hover_pos().is_some_and(|p| add_rect.contains(p));
                     let p = ui.painter();
@@ -4173,7 +4223,7 @@ impl GroupGeneratorApp {
     }
 
     fn load_unit_catalog(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .pick_file()
         else {
@@ -4211,7 +4261,7 @@ impl GroupGeneratorApp {
     }
 
     fn add_user_catalog_group(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .pick_file()
         else {
@@ -4317,7 +4367,7 @@ impl GroupGeneratorApp {
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str())
             .unwrap_or("Unit_Template.Group");
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(default_name)
             .save_file()
@@ -4368,7 +4418,7 @@ impl GroupGeneratorApp {
     }
 
     fn load_template_group(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .pick_file()
         else {
@@ -4449,6 +4499,7 @@ impl GroupGeneratorApp {
     fn draw_template_schematic(&mut self, ui: &mut egui::Ui) {
         let rect = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Formation view"));
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, c::BG);
         let grid = Stroke::new(1.0_f32, c::NEUTRAL_200);
@@ -5248,6 +5299,342 @@ impl GroupGeneratorApp {
         }
     }
 
+    // ── Map › Terrain: measured ground heights (terrain.rs, heightprobe.rs) ──
+
+    /// The height store, loaded from disk the first time it is needed.
+    fn terrain_store(&mut self) -> Option<&HeightStore> {
+        if self.terrain_store.is_none() && self.terrain_error.is_none() {
+            match HeightStore::load(&self.terrain_store_path, crate::terrain::KOREA_MAP_ID) {
+                Ok(s) => self.terrain_store = Some(s),
+                Err(e) => self.terrain_error = Some(e),
+            }
+        }
+        self.terrain_store.as_ref()
+    }
+
+    /// (tile row, tile col, land probes) for every tile with probes; cached.
+    fn terrain_tiles(&mut self) -> &[(usize, usize, usize)] {
+        self.terrain_tiles.get_or_insert_with(heightprobe::probe_tiles)
+    }
+
+    /// Tiles with probes that overlap the AO.
+    fn terrain_ao_tiles(&mut self) -> Vec<(usize, usize, usize)> {
+        let ao = self.front_aabb;
+        self.terrain_tiles()
+            .iter()
+            .copied()
+            .filter(|&(ti, tj, _)| {
+                let (i_lo, i_hi, j_lo, j_hi) = crate::terrain::tile_node_range(ti, tj);
+                let (x0, x1) = (i_lo as f64 * TERRAIN_STEP, i_hi as f64 * TERRAIN_STEP);
+                let (z0, z1) = (j_lo as f64 * TERRAIN_STEP, j_hi as f64 * TERRAIN_STEP);
+                x1 >= ao.x_min && x0 <= ao.x_max && z1 >= ao.z_min && z0 <= ao.z_max
+            })
+            .collect()
+    }
+
+    /// "Ground 412 m · 100 m grid" for the point under the pointer, while a
+    /// terrain layer is on.
+    fn terrain_readout(&mut self) -> Option<String> {
+        if !(self.terrain_show_coverage || self.terrain_show_relief) {
+            return None;
+        }
+        let (x, z) = self.map_hover_xz?;
+        Some(match self.terrain_store().and_then(|s| s.lookup(x, z)) {
+            Some(h) if h.spacing_m == 0.0 => format!("Ground {:.0} m · measured point", h.y),
+            Some(h) => format!("Ground {:.0} m · {:.0} m grid", h.y, h.spacing_m),
+            None => "Ground not measured".to_string(),
+        })
+    }
+
+    fn map_terrain_tab(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        shell::section_title(ui, "Height store", None);
+        let path = self.terrain_store_path.display().to_string();
+        ui.add(egui::Label::new(RichText::new(path).small().monospace().color(c::NEUTRAL_700)).truncate());
+        let total_probes: usize = self.terrain_tiles().iter().map(|t| t.2).sum();
+        let tiles = self.terrain_tiles().to_vec();
+        if let Some(err) = self.terrain_error.clone() {
+            shell::warning(ui, &err);
+        } else if let Some(store) = self.terrain_store() {
+            let measured = store.measured_nodes();
+            let tiles_done = tiles.iter().filter(|&&(ti, tj, _)| store.tile_measured(ti, tj) > 0).count();
+            let points = store.points().len();
+            let pct = if total_probes > 0 { measured as f64 * 100.0 / total_probes as f64 } else { 0.0 };
+            ui.label(format!("{measured} of {total_probes} land nodes measured ({pct:.1}%)"));
+            ui.label(
+                RichText::new(format!("{tiles_done} of {} tiles started · {points} extra points", tiles.len()))
+                    .small()
+                    .color(c::NEUTRAL_700),
+            );
+        }
+        if ui.button("Reload").on_hover_text("Read the store from disk again").clicked() {
+            self.terrain_store = None;
+            self.terrain_error = None;
+            self.terrain_relief = None;
+        }
+        shell::hint(ui, "Generate does not use these heights yet; that is the next terrain phase.", false);
+        ui.add_space(6.0);
+        ui.separator();
+
+        shell::section_title(ui, "Measure", Some("export probes"));
+        if ui
+            .button("Export survey pass…")
+            .on_hover_text("390,625 T-34s, 800 m apart over the whole map (sea and frame included)")
+            .clicked()
+        {
+            self.terrain_export_survey();
+        }
+        let ao_tiles = self.terrain_ao_tiles();
+        let ao_probes: usize = ao_tiles.iter().map(|t| t.2).sum();
+        ui.add_enabled_ui(!ao_tiles.is_empty(), |ui| {
+            if ui
+                .button(format!("Export AO tiles ({})…", ao_tiles.len()))
+                .on_hover_text("One .Group per 224 × 224-node tile the AO touches, 100 m apart")
+                .clicked()
+            {
+                self.terrain_export_tiles(&ao_tiles);
+            }
+        });
+        shell::hint(
+            ui,
+            &format!(
+                "The AO touches {} tiles, {ao_probes} probes. Import a file in the editor, select all, set to ground, save, then Import snapped.",
+                ao_tiles.len()
+            ),
+            false,
+        );
+        ui.add_space(6.0);
+        ui.separator();
+
+        shell::section_title(ui, "Import", Some("snapped files"));
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button("Import snapped…")
+                .on_hover_text("Merge probe files you ran set to ground on into the store")
+                .clicked()
+            {
+                self.terrain_import(false);
+            }
+            if ui
+                .button("Learn from mission…")
+                .on_hover_text("Also keep the snapped height of pinned ground units in a mission you ran set to ground on")
+                .clicked()
+            {
+                self.terrain_import(true);
+            }
+        });
+        for line in self.terrain_log.iter().take(8) {
+            ui.add(egui::Label::new(RichText::new(line).small().monospace()).wrap());
+        }
+        ui.add_space(6.0);
+        ui.separator();
+
+        shell::section_title(ui, "Map layers", None);
+        ui.checkbox(&mut self.terrain_show_coverage, "Coverage")
+            .on_hover_text("Tiles shaded by how much of their land is measured");
+        if ui
+            .checkbox(&mut self.terrain_show_relief, "Relief")
+            .on_hover_text("Measured heights: color by height, with hillshade")
+            .changed()
+            && self.terrain_show_relief
+        {
+            self.terrain_relief = None;
+        }
+        shell::hint(ui, "With a layer on, the map shows the ground height under the pointer.", false);
+    }
+
+    fn terrain_export_survey(&mut self) {
+        let Some(path) = dialog::FileDialog::new()
+            .add_filter("IL-2 Group", &["Group"])
+            .set_file_name("HG800_survey.Group")
+            .save_file()
+        else {
+            return;
+        };
+        match heightprobe::survey_group().and_then(|g| {
+            let n = g.children.len();
+            std::fs::write(&path, serialize_group(&g)).map_err(|e| format!("{}: {e}", path.display()))?;
+            Ok(n)
+        }) {
+            Ok(n) => {
+                self.status = Status::Info(format!(
+                    "Wrote {n} survey probes to {}. Import it, select all, set to ground, save, then Import snapped.",
+                    path.display()
+                ));
+            }
+            Err(e) => self.status = Status::Error(e),
+        }
+    }
+
+    fn terrain_export_tiles(&mut self, tiles: &[(usize, usize, usize)]) {
+        let Some(dir) = dialog::FileDialog::new().pick_folder() else {
+            return;
+        };
+        let mut written = 0;
+        let mut probes = 0;
+        for &(ti, tj, _) in tiles {
+            match heightprobe::tile_probe_group(ti, tj) {
+                Ok(Some(g)) => {
+                    let path = dir.join(format!("{}.Group", heightprobe::tile_name(ti, tj)));
+                    if let Err(e) = std::fs::write(&path, serialize_group(&g)) {
+                        self.status = Status::Error(format!("{}: {e}", path.display()));
+                        return;
+                    }
+                    written += 1;
+                    probes += g.children.len();
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    self.status = Status::Error(e);
+                    return;
+                }
+            }
+        }
+        self.status = Status::Info(format!(
+            "Wrote {written} probe tiles ({probes} T-34s) to {}.",
+            dir.display()
+        ));
+    }
+
+    /// Merge snapped files into the store and save it (the CLI's --probe-ingest).
+    fn terrain_import(&mut self, learn: bool) {
+        let Some(paths) = dialog::FileDialog::new()
+            .add_filter("Snapped group or mission", &["Group", "group", "Mission", "mission"])
+            .pick_files()
+        else {
+            return;
+        };
+        self.terrain_import_paths(&paths, learn);
+    }
+
+    fn terrain_import_paths(&mut self, paths: &[PathBuf], learn: bool) {
+        if self.terrain_store().is_none() {
+            self.status = Status::Error(self.terrain_error.clone().unwrap_or_else(|| "No height store.".into()));
+            return;
+        }
+        let mut store = self.terrain_store.take().unwrap_or_else(|| HeightStore::new(crate::terrain::KOREA_MAP_ID));
+        let mut refused = Vec::new();
+        let mut merged = 0;
+        let mut lines = Vec::new();
+        for path in paths {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+            let root = match std::fs::read_to_string(path)
+                .map_err(|e| e.to_string())
+                .and_then(|t| parse_il2_document(&t).map_err(|e| e.to_string()))
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    lines.push(format!("{name}: FAILED {e}"));
+                    refused.push(name);
+                    continue;
+                }
+            };
+            let rep = heightprobe::ingest(&root, &mut store, learn);
+            lines.push(format!(
+                "{name}: {} heights, {} water, {} extra, {} learned, {} unsnapped{}",
+                rep.lattice,
+                rep.water,
+                rep.probe_points,
+                rep.learned,
+                rep.unsnapped,
+                if rep.merged { "" } else { " — NOT merged (looks unsnapped)" }
+            ));
+            if rep.merged {
+                merged += 1;
+            } else {
+                refused.push(name);
+            }
+        }
+        let saved = store.save(&self.terrain_store_path);
+        self.terrain_store = Some(store);
+        self.terrain_relief = None;
+        for line in lines.into_iter().rev() {
+            self.terrain_log.insert(0, line);
+        }
+        self.terrain_log.truncate(30);
+        self.status = match saved {
+            Err(e) => Status::Error(format!("Heights merged but not saved: {e}")),
+            Ok(()) if refused.is_empty() => Status::Info(format!("Merged {merged} snapped file(s) into the height store.")),
+            Ok(()) => Status::Warn {
+                lead: format!("Merged {merged} file(s); {} not merged:", refused.len()),
+                items: refused
+                    .into_iter()
+                    .map(|n| format!("{n}: select all, set to ground, save, then import again"))
+                    .collect(),
+            },
+        };
+    }
+
+    /// Relief texture over the whole map at 800 m: hypsometric color plus a
+    /// hillshade from the north-west; unmeasured ground stays transparent.
+    fn terrain_relief_texture(&mut self, ctx: &egui::Context) -> Option<TextureHandle> {
+        if let Some(t) = &self.terrain_relief {
+            return Some(t.clone());
+        }
+        let store = self.terrain_store()?;
+        const N: usize = 624; // 800 m per pixel over the 499.2 km map
+        let mut h = vec![f32::NAN; N * N];
+        for py in 0..N {
+            for px in 0..N {
+                let uv = Pos2::new((px as f32 + 0.5) / N as f32, (py as f32 + 0.5) / N as f32);
+                let (x, z) = uv_to_world(uv);
+                if let Some(y) = store.height_at(x, z) {
+                    h[py * N + px] = y as f32;
+                }
+            }
+        }
+        let mut img = ColorImage::new([N, N], vec![Color32::TRANSPARENT; N * N]);
+        for py in 0..N {
+            for px in 0..N {
+                let y = h[py * N + px];
+                if y.is_nan() {
+                    continue;
+                }
+                let at = |dx: isize, dy: isize| {
+                    let (qx, qy) = (px as isize + dx, py as isize + dy);
+                    if qx < 0 || qy < 0 || qx >= N as isize || qy >= N as isize {
+                        return y;
+                    }
+                    let v = h[qy as usize * N + qx as usize];
+                    if v.is_nan() { y } else { v }
+                };
+                let (gx, gy) = ((at(1, 0) - at(-1, 0)) / 1600.0, (at(0, 1) - at(0, -1)) / 1600.0);
+                let shade = (0.75 - (gx + gy) * 1.2).clamp(0.35, 1.15);
+                let base = relief_color(y);
+                let c = |v: u8| ((v as f32 * shade).min(255.0)) as u8;
+                img.pixels[py * N + px] = Color32::from_rgba_unmultiplied(c(base.r()), c(base.g()), c(base.b()), 170);
+            }
+        }
+        let tex = ctx.load_texture("terrain_relief", img, egui::TextureOptions::LINEAR);
+        self.terrain_relief = Some(tex.clone());
+        Some(tex)
+    }
+
+    /// Terrain layers over the map (drawn under units and the AO box).
+    fn draw_terrain_layers(&mut self, ctx: &egui::Context, painter: &egui::Painter, map_rect: Rect) {
+        if self.terrain_show_relief {
+            if let Some(tex) = self.terrain_relief_texture(ctx) {
+                painter.image(tex.id(), map_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            }
+        }
+        if self.terrain_show_coverage {
+            let tiles = self.terrain_tiles().to_vec();
+            let Some(store) = self.terrain_store() else { return };
+            for (ti, tj, probes) in tiles {
+                let (i_lo, i_hi, j_lo, j_hi) = crate::terrain::tile_node_range(ti, tj);
+                let r = Rect::from_two_pos(
+                    world_to_pos(map_rect, i_lo as f64 * TERRAIN_STEP, j_lo as f64 * TERRAIN_STEP),
+                    world_to_pos(map_rect, (i_hi + 1) as f64 * TERRAIN_STEP, (j_hi + 1) as f64 * TERRAIN_STEP),
+                );
+                let frac = (store.tile_measured(ti, tj) as f32 / probes.max(1) as f32).min(1.0);
+                if frac > 0.0 {
+                    painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(0x41, 0x61, 0x80, (40.0 + 110.0 * frac) as u8));
+                }
+                painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(0x2c, 0x45, 0x5d, 90)), egui::StrokeKind::Inside);
+            }
+        }
+    }
+
     // ── Army Generator (README §5.2) ───────────────────────────────────────
 
     fn recon_page(&mut self, ctx: &egui::Context) {
@@ -5940,6 +6327,7 @@ impl GroupGeneratorApp {
                     },
                 )
                 .response;
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, self.bomber_selected == Some(i), format!("Plan card {}", i + 1)));
             if resp.clicked() {
                 clicked = Some(i);
             }
@@ -6060,6 +6448,7 @@ impl GroupGeneratorApp {
         for (j, s) in self.bomber_slots.iter().enumerate() {
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
             let sel = j == i;
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, format!("Sequence {}", j + 1)));
             let (fill, stroke) = if sel {
                 (c::ACCENT_100, Stroke::new(1.5_f32, c::ACCENT))
             } else {
@@ -6362,6 +6751,7 @@ impl GroupGeneratorApp {
                 (MapDock::Period, "Period"),
                 (MapDock::Forces, "Forces"),
                 (MapDock::References, refs.as_str()),
+                (MapDock::Terrain, "Terrain"),
             ],
         );
         ui.add_space(4.0);
@@ -6375,6 +6765,7 @@ impl GroupGeneratorApp {
                     MapDock::Period => self.map_period_tab(ui),
                     MapDock::Forces => self.map_forces_tab(ui),
                     MapDock::References => self.map_references_tab(ui),
+                    MapDock::Terrain => self.map_terrain_tab(ui),
                 }
             });
     }
@@ -6832,6 +7223,15 @@ impl GroupGeneratorApp {
         painter.rect_filled(ao_rect, 0.0, c::BG);
         painter.rect_stroke(ao_rect, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
         painter.galley(ao_rect.min + Vec2::new(8.0, 5.0), g, c::TEXT);
+        if let Some(text) = self.terrain_readout() {
+            {
+                let g = painter.layout_no_wrap(text, FontId::monospace(12.0), c::TEXT);
+                let r = Rect::from_min_size(ao_rect.left_bottom() + Vec2::new(0.0, 4.0), g.size() + Vec2::new(16.0, 10.0));
+                painter.rect_filled(r, 0.0, c::BG);
+                painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
+                painter.galley(r.min + Vec2::new(8.0, 5.0), g, c::TEXT);
+            }
+        }
 
         let chip = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
             egui::Frame::new()
@@ -7102,6 +7502,7 @@ impl GroupGeneratorApp {
         let img_size = Vec2::new(size.x * scale, size.y * scale);
         let rect = Rect::from_center_size(area.center(), img_size);
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Korea map"));
         let view = self.map_view_uv();
         let tex = if self.map_zoom > 1.0 {
             self.map_hi_tex.clone().unwrap_or(lo)
@@ -7226,6 +7627,7 @@ impl GroupGeneratorApp {
 
         let hover_pos = response.hover_pos().or(response.interact_pointer_pos());
         let hover_xz = hover_pos.map(|p| uv_to_world(pos_to_uv(map_rect, p)));
+        self.map_hover_xz = response.hover_pos().map(|p| uv_to_world(pos_to_uv(map_rect, p)));
         let end_snap = if self.current_salient.is_empty() {
             None
         } else {
@@ -7473,6 +7875,7 @@ impl GroupGeneratorApp {
         let overlay = timeline_preview(self.front_t);
 
         draw_reference_overlays(&painter, map_rect);
+        self.draw_terrain_layers(ui.ctx(), &painter, map_rect);
 
         for battle in &overlay.battles {
             let pos = world_to_pos(map_rect, battle.x, battle.z);
@@ -8546,7 +8949,7 @@ impl GroupGeneratorApp {
     }
 
     fn load_map_armies(&mut self, eastern: bool) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -9427,7 +9830,7 @@ impl GroupGeneratorApp {
     }
 
     fn pick_template(&mut self) {
-        let picked = rfd::FileDialog::new()
+        let picked = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_file();
         let Some(path) = picked else {
@@ -9465,7 +9868,7 @@ impl GroupGeneratorApp {
     }
 
     fn add_bomber_template(&mut self) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -9583,7 +9986,7 @@ impl GroupGeneratorApp {
             "Exclusive_Activation_{}plan.Group",
             self.bomber_slots.len()
         );
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -9665,7 +10068,7 @@ impl GroupGeneratorApp {
     }
 
     fn add_recon_template(&mut self) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -9675,7 +10078,7 @@ impl GroupGeneratorApp {
     }
 
     fn add_recon_folder(&mut self) {
-        let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+        let Some(dir) = dialog::FileDialog::new().pick_folder() else {
             return;
         };
         let paths = group_files_in_dir(&dir);
@@ -9766,7 +10169,7 @@ impl GroupGeneratorApp {
                 live, self.recon_total
             )
         };
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -9819,7 +10222,7 @@ impl GroupGeneratorApp {
     }
 
     fn add_placed_packs(&mut self) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -9927,7 +10330,7 @@ impl GroupGeneratorApp {
             };
             let text = serialize_group(&combined);
             let suggested = format!("Ground_Units_{n}_always_on.Group");
-            let Some(save_path) = rfd::FileDialog::new()
+            let Some(save_path) = dialog::FileDialog::new()
                 .add_filter("IL-2 Group", &["Group"])
                 .set_file_name(&suggested)
                 .save_file()
@@ -9965,7 +10368,7 @@ impl GroupGeneratorApp {
             .sum();
         let text = serialize_group(&combined);
         let suggested = format!("Random_Ground_Units_{live}of{n}.Group");
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -9982,7 +10385,7 @@ impl GroupGeneratorApp {
     }
 
     fn load_airfield(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group / mission", &["Group", "group", "Mission", "mission"])
             .pick_file()
         else {
@@ -10051,7 +10454,7 @@ impl GroupGeneratorApp {
                 self.harvest_current_gen();
             }
             if ui.button("Harvest a file…").on_hover_text("Harvest any .Mission file").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
+                if let Some(path) = dialog::FileDialog::new()
                     .add_filter("IL-2 mission", &["Mission", "mission"])
                     .pick_file()
                 {
@@ -10066,7 +10469,7 @@ impl GroupGeneratorApp {
                 let browse_w = 72.0;
                 ui.add(egui::TextEdit::singleline(value).desired_width(ui.available_width() - browse_w));
                 if ui.button("Browse…").clicked() {
-                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                    if let Some(dir) = dialog::FileDialog::new().pick_folder() {
                         *value = dir.display().to_string();
                     }
                 }
@@ -10207,7 +10610,7 @@ impl GroupGeneratorApp {
             .and_then(|s| s.to_str())
             .map(|stem| format!("{stem}_mp.Group"))
             .unwrap_or_else(|| "Airfield_mp.Group".into());
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -10292,7 +10695,7 @@ impl GroupGeneratorApp {
         };
         let text = serialize_group(&pack.root);
         let suggested = format!("Korea_BaseMap_{}.Group", self.current_mark().date_label());
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -10377,7 +10780,7 @@ impl GroupGeneratorApp {
     }
 
     fn load_base_map(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_file()
         else {
@@ -10536,7 +10939,7 @@ impl GroupGeneratorApp {
     }
 
     fn add_map_refs(&mut self) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -10597,7 +11000,7 @@ impl GroupGeneratorApp {
         let text = serialize_group(&generated);
 
         let suggested = fighter_pack_filename(self.country, self.linked_groups as usize);
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -10662,6 +11065,7 @@ fn preview_dot_style(kind: PreviewKind, in_box: bool) -> (Color32, f32) {
 fn move_row_button(ui: &mut egui::Ui, up: bool) -> egui::Response {
     let size = Vec2::splat(28.0); // minimum target (README §6.6)
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), if up { "Move up" } else { "Move down" }));
     let visuals = ui.style().interact(&response);
     ui.painter().rect(
         rect.shrink(0.5),
@@ -10694,6 +11098,7 @@ fn move_row_button(ui: &mut egui::Ui, up: bool) -> egui::Response {
 fn move_col_button(ui: &mut egui::Ui, left: bool) -> egui::Response {
     let size = Vec2::splat(28.0); // minimum target (README §6.6)
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), if left { "Move left" } else { "Move right" }));
     let visuals = ui.style().interact(&response);
     ui.painter().rect(
         rect.shrink(0.5),
@@ -10758,9 +11163,11 @@ fn unit_kind_icon_button(
     size: f32,
 ) -> bool {
     if let Some(tex) = tex {
-        ui.add(egui::ImageButton::new((tex.id(), Vec2::splat(size))).selected(selected))
-            .on_hover_text(hover)
-            .clicked()
+        let resp = ui
+            .add(egui::ImageButton::new((tex.id(), Vec2::splat(size))).selected(selected))
+            .on_hover_text(hover);
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, fallback));
+        resp.clicked()
     } else {
         ui.selectable_label(selected, fallback)
             .on_hover_text(hover)
@@ -10859,6 +11266,33 @@ fn decode_png(bytes: &[u8]) -> Option<ColorImage> {
         [w as usize, h as usize],
         img.as_raw(),
     ))
+}
+
+/// Hypsometric ramp for the relief layer (metres → color).
+fn relief_color(y: f32) -> Color32 {
+    const STOPS: [(f32, [f32; 3]); 7] = [
+        (0.5, [120.0, 160.0, 200.0]),
+        (1.0, [92.0, 140.0, 90.0]),
+        (150.0, [140.0, 170.0, 100.0]),
+        (400.0, [205.0, 190.0, 130.0]),
+        (800.0, [170.0, 120.0, 80.0]),
+        (1200.0, [140.0, 110.0, 100.0]),
+        (1800.0, [235.0, 235.0, 235.0]),
+    ];
+    if y < STOPS[0].0 {
+        let [r, g, b] = STOPS[0].1;
+        return Color32::from_rgb(r as u8, g as u8, b as u8);
+    }
+    for w in STOPS.windows(2) {
+        let ((y0, a), (y1, b)) = (w[0], w[1]);
+        if y <= y1 {
+            let t = ((y - y0) / (y1 - y0)).clamp(0.0, 1.0);
+            let m = |i: usize| (a[i] + (b[i] - a[i]) * t) as u8;
+            return Color32::from_rgb(m(0), m(1), m(2));
+        }
+    }
+    let [r, g, b] = STOPS[STOPS.len() - 1].1;
+    Color32::from_rgb(r as u8, g as u8, b as u8)
 }
 
 fn map_screen_rect(widget: Rect, view: Rect) -> Rect {
