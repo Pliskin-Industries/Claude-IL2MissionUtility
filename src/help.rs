@@ -371,7 +371,7 @@ mod tests {
         assert!(s.contains("Zone IN"));
         assert!(s.contains("Mission Begin"));
         assert!(s.contains("Closer"));
-        assert!(s.contains("Remove random logic"));
+        assert!(s.contains("Spawn all copies (no randomizer)"));
         assert!(s.contains("30"));
         assert!(s.contains("Train"));
         assert!(s.contains("Infantry"));

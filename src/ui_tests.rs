@@ -394,6 +394,137 @@ fn template_load_over_edits_asks_first() {
     assert_eq!(h.app.tpl_seats.len(), 1, "Ctrl Z undoes the load");
 }
 
+#[test]
+fn template_empty_view_names_the_first_step_and_adds_the_pick() {
+    let mut h = Harness::new("tplempty");
+    h.tab("Template");
+    assert!(h.has("Pick a model on the left, then + Add to begin."), "{:?}", h.labels());
+    let pick = h.app.displayed_catalog()[h.app.tpl_add_pick].label().to_string();
+    h.click(&format!("+ Add {pick}"));
+    assert_eq!(h.app.tpl_seats.len(), 1);
+    assert_eq!(h.app.tpl_seats[0].unit.label(), pick);
+    assert!(!h.has("Pick a model on the left, then + Add to begin."));
+
+    // A kind with no models offers to show the list instead.
+    h.app.tpl_seats.clear();
+    h.app.tpl_catalog.retain(|u| u.kind != CatalogKind::UserAdded);
+    h.click("User Added");
+    h.click("Show model list");
+    assert!(!h.app.tpl_show_models, "the left panel consumed the request");
+    assert!(h.app.tpl_seats.is_empty());
+}
+
+#[test]
+fn template_kind_cells_and_both_filters() {
+    let mut h = Harness::new("tplkinds");
+    h.tab("Template");
+    // Two rows of equal cells: four, then three.
+    let row1: Vec<Node> = ["Planes", "Vehicles", "Infantry", "Trains"].iter().map(|l| h.find(l)).collect();
+    let row2: Vec<Node> = ["Ships", "Fixed Units", "User Added"].iter().map(|l| h.find(l)).collect();
+    for row in [&row1, &row2] {
+        for n in row.iter() {
+            assert!((n.rect.width() - row[0].rect.width()).abs() < 1.0, "{} is {} px", n.label, n.rect.width());
+            assert!((n.rect.top() - row[0].rect.top()).abs() < 0.5 && n.rect.height() >= 28.0);
+        }
+    }
+    assert!(row2[0].rect.top() > row1[0].rect.top());
+    h.click("Vehicles");
+    assert!(h.app.tpl_kind == CatalogKind::Vehicle);
+    h.click("Planes");
+
+    // Planes have both a class and a country filter; the list obeys both.
+    let countries = h.app.countries_for_kind(CatalogKind::Plane);
+    assert!(countries.len() > 1 && h.app.classes_for_kind(CatalogKind::Plane).len() > 1);
+    let panel_right = h.find("Planes").rect.left() + 270.0;
+    let mut combos: Vec<Node> =
+        h.nodes.iter().filter(|n| n.role == Role::ComboBox && n.rect.left() < panel_right).cloned().collect();
+    combos.sort_by(|a, b| a.rect.left().total_cmp(&b.rect.left()));
+    assert_eq!(combos.len(), 2, "class and country combos");
+    h.click_at(combos[1].rect.center());
+    let country = countries[countries.len() - 1];
+    h.click(&country_short(country));
+    assert_eq!(h.app.tpl_country, Some(country));
+    let shown = h.app.displayed_catalog();
+    assert!(!shown.is_empty() && shown.iter().all(|u| u.country() == country));
+    for u in &shown {
+        assert!(h.has(&format!("Model {}", u.label())));
+    }
+    let hidden = h.app.tpl_catalog.iter().find(|u| u.kind == CatalogKind::Plane && u.country() != country).unwrap();
+    assert!(!h.has(&format!("Model {}", hidden.label())), "{} is filtered out", hidden.label());
+}
+
+#[test]
+fn template_card_meta_tree_hint_and_selection_grid() {
+    let mut h = Harness::new("tplmeta");
+    h.tab("Template");
+    add_model(&mut h, "F-51D");
+    let seat = &h.app.tpl_seats[0];
+    let country = country_short(seat.country);
+    let country = country.split_once(' ').map_or(country.as_str(), |(_, n)| n.trim()).to_string();
+    let k = seat.orders.len();
+    let meta = format!("{country} · {} · {k} {}", skill_name(seat.skill), if k == 1 { "order" } else { "orders" });
+    assert!(h.has(&meta), "{meta:?} in {:?}", h.labels());
+    assert!(h.has("UNIT → OnSpawned → orders. ‹ › move the selected chip."));
+
+    // Seat fields: labels in a 96 px column, controls to the right of it.
+    h.click("Unit card 1");
+    let role = h.find("Role").rect;
+    let country_label = h.find("Country").rect;
+    assert!((role.left() - country_label.left()).abs() < 0.5);
+    let role_combo = h
+        .nodes
+        .iter()
+        .find(|n| n.role == Role::ComboBox && (n.rect.center().y - role.center().y).abs() < 8.0)
+        .expect("Role combo on the Role row")
+        .clone();
+    assert!((role_combo.rect.left() - role.left() - FIELD_LABEL_W - 8.0).abs() < 1.0, "control column starts after 96 px");
+    // Zone sliders read in km; the stored value stays metres.
+    assert!(h.has(&format!("{:.1} km", h.app.tpl_zone_in / 1000.0)), "{:?}", h.labels());
+    assert!(h.app.tpl_zone_in > 1000.0);
+}
+
+#[test]
+fn template_remove_order_selects_its_unit() {
+    let mut h = Harness::new("tplrmorder");
+    h.tab("Template");
+    add_model(&mut h, "F-51D");
+    h.click("+ Order ▾");
+    h.click("Goto WP");
+    h.click("+ Order ▾");
+    h.click("AttackArea");
+    let before = h.app.tpl_seats[0].orders.len();
+    let gi = h.app.tpl_seats[0].orders.iter().position(|o| o.kind == OrderKind::GotoWaypoint).unwrap();
+    assert!(gi + 1 < before, "an order follows Goto WP");
+    h.click_at(h.find(&format!("{} Goto WP", gi + 1)).rect.center());
+    h.click("Remove order");
+    assert_eq!(h.app.tpl_seats[0].orders.len(), before - 1);
+    assert!(matches!(h.app.tpl_select, Some(TplSelect::Seat(0))), "the unit is selected, not a neighbouring order");
+    assert!(h.has("SELECTED · UNIT 1"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.tpl_seats[0].orders.len(), before);
+}
+
+#[test]
+fn template_copy_attributes_needs_a_unit_and_undoes() {
+    let mut h = Harness::new("tplcopy");
+    h.tab("Template");
+    add_model(&mut h, "F-51D");
+    add_model(&mut h, "Il-10");
+    h.app.tpl_select = None;
+    h.settle();
+    assert!(h.find("Copy attributes to all").disabled, "nothing to copy from");
+    assert!(h.has("Select a unit to copy its attributes from."), "the reason shows inline");
+
+    h.app.tpl_seats[0].skill = 4;
+    h.app.tpl_seats[1].skill = 1;
+    h.click("Unit card 1");
+    h.click("Copy attributes to all");
+    assert_eq!(h.app.tpl_seats[1].skill, 4);
+    assert_eq!(h.app.undo_label(), Some("Copied attributes from F-51D"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.tpl_seats[1].skill, 1);
+}
+
 // ── Army Generator ────────────────────────────────────────────────────────
 
 /// A Template Builder vehicle group: the input the Army Generator expects.
@@ -462,10 +593,97 @@ fn army_rework_detects_copies() {
     assert!(!h.app.recon_rework.is_empty(), "{}", h.status());
     let detected: usize = h.app.recon_rework.iter().filter_map(|s| s.detected).sum();
     assert_eq!(detected, 72);
+    assert!(h.has("COPY MIX") && h.has("On map"));
+    // The same randomizer label in both submodes.
+    h.click("Spawn all copies (no randomizer)");
+    assert!(h.app.recon_strip_randomizer);
+    h.click("Spawn all copies (no randomizer)");
     let out = h.out("rework.Group");
     dialog::answer(vec![out.clone()]);
     h.key_with(Key::G, CTRL);
     assert_group_file(&out);
+}
+
+#[test]
+fn army_cards_mix_block_import_row_and_settings() {
+    let mut h = Harness::new("armylayout");
+    h.tab("Army Generator");
+    let (a, b) = (h.out("armor_a.Group"), h.out("armor_b.Group"));
+    write_ground_template(&a, "Armor A");
+    write_ground_template(&b, "Armor B");
+    dialog::answer(vec![a, b]);
+    h.click("Add templates…");
+
+    // Type buttons are 36 × 28; the import picker is one row of six.
+    let kinds = ["Ship", "Armor", "Supply", "Artillery", "Infantry", "Train"];
+    for label in kinds {
+        let buttons: Vec<Node> = h.all(label).into_iter().filter(|n| n.role == Role::Button).collect();
+        assert_eq!(buttons.len(), 3, "{label}: two cards and the import picker");
+        for n in &buttons {
+            assert!((n.rect.width() - 36.0).abs() < 0.5 && (n.rect.height() - 28.0).abs() < 0.5, "{label} is {:?}", n.rect.size());
+        }
+    }
+    let picker = |h: &Harness, label: &str| {
+        h.all(label).into_iter().filter(|n| n.role == Role::Button).max_by(|a, b| a.rect.left().total_cmp(&b.rect.left())).unwrap()
+    };
+    let top = picker(&h, "Ship").rect.top();
+    assert!(kinds.iter().all(|k| (picker(&h, k).rect.top() - top).abs() < 0.5), "one row");
+    h.click_at(picker(&h, "Train").rect.center());
+    assert!(h.app.recon_import_kind == UnitKind::Train);
+
+    // Card meta line: file and counts, zero counts left out.
+    let info = &h.app.recon_slots[0].info;
+    assert_eq!(info.ship_count + info.train_count + info.block_count, 0);
+    assert!(h.has(&format!("armor_a.Group · {} vehicles", info.vehicle_count)), "{:?}", h.labels());
+    assert!(h.has("Zone In checkzones"));
+    assert!(!h.labels().iter().any(|l| l.contains("confirm the group is valid")));
+
+    // COPY MIX is its own block below the parking grid.
+    let grid = h.find_prefix("PARKING GRID").rect;
+    let mix = h.find("COPY MIX").rect;
+    assert!(mix.top() > grid.bottom() + 40.0, "COPY MIX sits at the bottom");
+
+    // Activate ratio shows a percent value.
+    assert!(h.has("Activate ratio"));
+    assert!(h.has(&format!("{}%", h.app.recon_percent)), "{:?}", h.labels());
+
+    // Timing stays visible with spawn-all on; its sliders are disabled.
+    h.click("Timing");
+    h.click("Spawn all copies (no randomizer)");
+    assert!(h.app.recon_strip_randomizer);
+    assert!(h.has(&format!("Start {} s · {} ms apart", h.app.recon_start_delay_s, h.app.recon_group_delay_ms)));
+    assert!(h.has("Timing applies only with the randomizer."));
+    let timing = h.find("Timing").rect;
+    let sliders: Vec<Node> = h
+        .nodes
+        .iter()
+        .filter(|n| n.role == Role::Slider && n.rect.top() > timing.top() && n.rect.left() >= timing.left() - 20.0)
+        .cloned()
+        .collect();
+    assert_eq!(sliders.len(), 2, "start delay and group delay");
+    assert!(sliders.iter().all(|n| n.disabled));
+}
+
+#[test]
+fn recon_counts_line_omits_zero_counts() {
+    let info = |vehicle_count, ship_count, train_count, block_count| UnitPlanInfo {
+        name: String::new(),
+        vehicle_count,
+        ship_count,
+        train_count,
+        block_count,
+        checkzones: Vec::new(),
+        suggested_triggers: Vec::new(),
+        restore_starts: Vec::new(),
+        weapon_range_m: None,
+        route: None,
+        wp_ahead: Vec::new(),
+    };
+    assert_eq!(recon_counts_line(&info(6, 0, 0, 0)), "6 vehicles");
+    assert_eq!(recon_counts_line(&info(3, 0, 1, 2)), "2 vehicles, 1 train, 2 blocks");
+    assert_eq!(recon_counts_line(&info(1, 0, 1, 0)), "1 train");
+    assert_eq!(recon_counts_line(&info(2, 2, 0, 1)), "2 ships, 1 block");
+    assert_eq!(recon_counts_line(&info(0, 0, 0, 0)), "no units");
 }
 
 // ── Fighter Pack ──────────────────────────────────────────────────────────
@@ -825,3 +1043,4 @@ fn map_terrain_readout_under_the_pointer() {
     h.settle();
     assert_eq!(h.app.terrain_readout().as_deref(), Some("Ground 321 m · 100 m grid"));
 }
+
