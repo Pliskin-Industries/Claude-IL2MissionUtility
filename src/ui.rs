@@ -1020,14 +1020,17 @@ fn draw_tree_unit_chip(ui: &mut egui::Ui, n: usize, label: &str, country: i32, s
     p.rect_filled(rect, 2.0, fill);
     p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
     paint_seat_marker(p, Pos2::new(rect.left() + 12.0, rect.center().y), 11.0, country);
-    p.with_clip_rect(rect.shrink(3.0)).text(
-        Pos2::new(rect.left() + 22.0, rect.center().y),
-        Align2::LEFT_CENTER,
+    // Elide a long model name with "…" instead of cutting a letter in half.
+    let mut job = egui::text::LayoutJob::single_section(
         format!("{n} · {label}"),
-        FontId::new(13.0, theme::bold_family()),
-        c::TEXT,
+        egui::TextFormat::simple(FontId::new(13.0, theme::bold_family()), c::TEXT),
     );
-    response
+    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.right() - 4.0 - (rect.left() + 22.0));
+    let galley = ui.fonts(|f| f.layout_job(job));
+    let pos = Pos2::new(rect.left() + 22.0, rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(pos, galley, c::TEXT);
+    let full = format!("{n} · {label}");
+    response.on_hover_text(full)
 }
 
 const TREE_ARROW_SLOT: f32 = 28.0;
@@ -5909,6 +5912,9 @@ impl GroupGeneratorApp {
                         egui::ScrollArea::vertical()
                             .id_salt("recon_mix_scroll")
                             .max_height(max_h)
+                            // Without this the area stops at egui's 64 px
+                            // default and hides the table rows.
+                            .min_scrolled_height(max_h)
                             .auto_shrink([false, true])
                             .show(ui, |ui| self.recon_copy_mix(ui));
                     });
@@ -7290,28 +7296,33 @@ impl GroupGeneratorApp {
 
         shell::section_title(ui, "Drawn marks", Some("tools 2–4"));
         ui.horizontal_wrapped(|ui| {
+            // add_enabled keeps each button one unit, so the row wraps whole
+            // buttons instead of wrapping "Clear arrows" onto two lines.
+            let button = |text: &str| egui::Button::new(text).wrap_mode(egui::TextWrapMode::Extend);
             let has_custom = !self.custom_front_xz.is_empty() || self.map_has_marks();
-            ui.add_enabled_ui(has_custom, |ui| {
-                if ui
-                    .button("Clear lines")
-                    .on_hover_text("Clear the drawn front, salients and arrows. Ctrl Z brings them back.")
-                    .clicked()
-                {
-                    self.clear_map_lines(true, true, true);
-                }
-            });
+            if ui
+                .add_enabled(has_custom, button("Clear lines"))
+                .on_hover_text("Clear the drawn front, salients and arrows. Ctrl Z brings them back.")
+                .clicked()
+            {
+                self.clear_map_lines(true, true, true);
+            }
             let has_salients = !self.salients.is_empty() || !self.current_salient.is_empty();
-            ui.add_enabled_ui(has_salients, |ui| {
-                if ui.button("Clear salients").on_hover_text("Ctrl Z brings them back.").clicked() {
-                    self.clear_map_lines(false, true, false);
-                }
-            });
+            if ui
+                .add_enabled(has_salients, button("Clear salients"))
+                .on_hover_text("Ctrl Z brings them back.")
+                .clicked()
+            {
+                self.clear_map_lines(false, true, false);
+            }
             let has_arrows = !self.attack_arrows.is_empty() || self.attack_drag.is_some();
-            ui.add_enabled_ui(has_arrows, |ui| {
-                if ui.button("Clear arrows").on_hover_text("Ctrl Z brings them back.").clicked() {
-                    self.clear_map_lines(false, false, true);
-                }
-            });
+            if ui
+                .add_enabled(has_arrows, button("Clear arrows"))
+                .on_hover_text("Ctrl Z brings them back.")
+                .clicked()
+            {
+                self.clear_map_lines(false, false, true);
+            }
         });
         ui.add_space(6.0);
         if shell::hint(
@@ -9940,8 +9951,12 @@ impl GroupGeneratorApp {
                     .collect::<std::collections::BTreeSet<_>>()
                     .len();
                 let side = if eastern { "DPRK" } else { "NATO" };
+                // One fighter layout at a time: placing again replaces it, undoably.
+                if self.map_fighters.is_some() || !self.map_imported_fighters.is_empty() {
+                    self.record_map_undo("Replaced the placed fighters".into());
+                }
                 self.status = Status::Info(format!(
-                    "{side}: {n} groups in {packs} pack(s). Drag icons in Pan / Select AO to fine-tune."
+                    "{side}: {n} groups in {packs} packs. Drag icons with Select AO / move units (1) to fine-tune."
                 ));
                 self.map_fighters = Some(layout);
                 self.map_imported_fighters.clear();
@@ -10942,15 +10957,20 @@ impl GroupGeneratorApp {
         ui.add_space(4.0);
         let folder_row = |ui: &mut egui::Ui, label: &str, value: &mut String| {
             ui.label(RichText::new(label).small().color(c::NEUTRAL_700));
-            ui.horizontal(|ui| {
-                let browse_w = 72.0;
-                ui.add(egui::TextEdit::singleline(value).desired_width(ui.available_width() - browse_w));
-                if ui.button("Browse…").clicked() {
-                    if let Some(dir) = dialog::FileDialog::new().pick_folder() {
-                        *value = dir.display().to_string();
+            // Right to left: the button takes its real width, the path the rest,
+            // so the row never overflows the 290 px panel.
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 28.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    if ui.button("Browse…").clicked() {
+                        if let Some(dir) = dialog::FileDialog::new().pick_folder() {
+                            *value = dir.display().to_string();
+                        }
                     }
-                }
-            });
+                    ui.add(egui::TextEdit::singleline(value).desired_width(ui.available_width()));
+                },
+            );
         };
         folder_row(ui, "Game Missions folder", &mut self.harvest_missions_dir);
         folder_row(ui, "Database folder", &mut self.harvest_db_dir);
@@ -11798,8 +11818,60 @@ fn fighter_svg_north(eastern: bool, target: u32) -> ColorImage {
 /// 64 px with mipmaps stays crisp from 10 to 18 px, also on HiDPI screens.
 fn ensure_side_textures(ctx: &egui::Context) {
     if shell::side_textures(ctx).is_none() {
-        shell::register_side_textures(ctx, fighter_svg_north(true, 64), fighter_svg_north(false, 64));
+        shell::register_side_textures(ctx, side_marker_image(true), side_marker_image(false));
     }
+}
+
+/// The list-size side marker: the fighter without its ring, cropped to the
+/// plane, so the silhouette and its facing still read at 12–18 px.
+fn side_marker_image(eastern: bool) -> ColorImage {
+    let svg: &[u8] = if eastern {
+        include_bytes!("../assets/EasternFighter.svg")
+    } else {
+        include_bytes!("../assets/NatoFighter.svg")
+    };
+    let text = String::from_utf8_lossy(svg);
+    let no_ring = match text.find("<circle") {
+        Some(start) => match text[start..].find("/>") {
+            Some(end) => format!("{}{}", &text[..start], &text[start + end + 2..]),
+            None => text.into_owned(),
+        },
+        None => text.into_owned(),
+    };
+    let deg = FIGHTER_SVG_TO_NORTH_DEG[if eastern { 0 } else { 1 }];
+    crop_to_content(rasterize_svg_turned(no_ring.as_bytes(), 96, deg))
+}
+
+/// Crops an image to its opaque pixels, centred in a square with a 1 px margin.
+fn crop_to_content(img: ColorImage) -> ColorImage {
+    let [w, h] = img.size;
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if img.pixels[y * w + x].a() > 8 {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    if x1 < x0 || y1 < y0 {
+        return img;
+    }
+    let side = (x1 - x0).max(y1 - y0) + 3;
+    let (ox, oy) = ((x0 + x1) / 2, (y0 + y1) / 2);
+    let mut out = ColorImage::new([side, side], vec![Color32::TRANSPARENT; side * side]);
+    for y in 0..side {
+        for x in 0..side {
+            let sx = ox as isize + x as isize - side as isize / 2;
+            let sy = oy as isize + y as isize - side as isize / 2;
+            if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h {
+                out.pixels[y * side + x] = img.pixels[sy as usize * w + sx as usize];
+            }
+        }
+    }
+    out
 }
 
 fn rasterize_svg(bytes: &[u8], target: u32) -> ColorImage {

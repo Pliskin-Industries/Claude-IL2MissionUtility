@@ -750,7 +750,7 @@ pub fn all_ok(checks: &[Check]) -> bool {
     checks.iter().all(|c| c.ok)
 }
 
-/// Chip beside Generate: "✓ Ready" or "⚠ n to do". Its menu lists every
+/// Chip beside Generate: "✔ Ready" or "⚠ n to do". Its menu lists every
 /// check, so the reason Generate is disabled is never hidden (§6.5).
 pub fn readiness(ui: &mut Ui, checks: &[Check]) {
     if checks.is_empty() {
@@ -758,7 +758,7 @@ pub fn readiness(ui: &mut Ui, checks: &[Check]) {
     }
     let open = checks.iter().filter(|c| !c.ok).count();
     let label = if open == 0 {
-        RichText::new("✓ Ready ▾").color(c::ACCENT_700)
+        RichText::new("✔ Ready ▾").color(c::ACCENT_700)
     } else {
         RichText::new(format!("⚠ {open} to do ▾")).color(c::WARN_TEXT)
     };
@@ -768,10 +768,10 @@ pub fn readiness(ui: &mut Ui, checks: &[Check]) {
         for check in checks {
             ui.horizontal(|ui| {
                 if check.ok {
-                    ui.label(RichText::new("✓").color(c::ACCENT_700));
+                    ui.label(RichText::new("✔").color(c::ACCENT_700));
                     ui.label(&check.text);
                 } else {
-                    ui.label(RichText::new("✗").color(c::WARN_TEXT));
+                    ui.label(RichText::new("✖").color(c::WARN_TEXT));
                     ui.label(RichText::new(&check.text).strong());
                 }
             });

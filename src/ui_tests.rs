@@ -1406,8 +1406,12 @@ fn map_tool_icons_are_painted_inside_their_box() {
 fn side_marker_textures_are_registered_at_startup() {
     let h = Harness::new("sidetex");
     let tex = shell::side_textures(&h.ctx).expect("side textures registered on the first frame");
-    assert_eq!(tex[0].size(), [64, 64]);
-    assert_eq!(tex[1].size(), [64, 64]);
+    // Cropped to the plane (no ring), square, and large enough to stay crisp.
+    for t in &tex {
+        let [w, h] = t.size();
+        assert_eq!(w, h, "side marker texture is square");
+        assert!(w >= 48, "side marker texture is {w} px");
+    }
 }
 
 // ── Map: front strokes, tool switching, line clears (README §6.2, §6.3) ──
@@ -1609,4 +1613,109 @@ fn help_closes_on_escape_and_shortcuts_still_work() {
     assert!(h.app.mode == AppMode::Map, "Ctrl 6 still switches tabs");
     h.key(Key::F1);
     assert!(h.app.help_open && h.app.help_topic == HelpTopic::Front);
+}
+
+/// Every non-ASCII character in the UI code and the manual (shown as Help)
+/// must exist in a loaded font; a missing one draws as an empty box (✓ did).
+#[test]
+fn every_ui_glyph_is_in_a_loaded_font() {
+    let h = Harness::new("glyphs");
+    // The check itself works: U+2713 (check mark) is in none of the fonts.
+    assert!(!h.ctx.fonts(|f| f.has_glyph(&egui::FontId::proportional(13.0), '\u{2713}')));
+    let mut missing = std::collections::BTreeSet::new();
+    let sources = [
+        include_str!("ui.rs"),
+        include_str!("shell.rs"),
+        include_str!("help.rs"),
+        include_str!("../USER_MANUAL.md"),
+    ];
+    for text in sources {
+        for line in text.lines().filter(|l| !l.trim_start().starts_with("//")) {
+            for ch in line.chars().filter(|c| !c.is_ascii()) {
+                let ok = h.ctx.fonts(|f| f.has_glyph(&egui::FontId::proportional(13.0), ch));
+                if !ok {
+                    missing.insert(ch);
+                }
+            }
+        }
+    }
+    assert!(missing.is_empty(), "glyphs no loaded font has: {missing:?}");
+}
+
+/// No control spills out of a side panel (README §4 widths). An overflowing
+/// row (the Airfield folder rows did) pushes egui into an unpainted gap.
+#[test]
+fn side_panel_controls_stay_inside_their_panel() {
+    // (tab, left panel width, right panel width), after the 172 px rail.
+    const PANELS: [(&str, f32, f32); 6] = [
+        ("Template", 270.0, 304.0),
+        ("Army Generator", 330.0, 300.0),
+        ("Fighter Pack", 270.0, 304.0),
+        ("Exclusive Activation", 290.0, 290.0),
+        ("Airfield", 290.0, 270.0),
+        ("Map", 56.0, 304.0),
+    ];
+    let mut h = Harness::new("panelfit");
+    let mut out = Vec::new();
+    for (tab, left_w, right_w) in PANELS {
+        h.tab(tab);
+        let left = (shell::RAIL_W, shell::RAIL_W + left_w);
+        let right = (SCREEN.x - right_w, SCREEN.x);
+        for n in &h.nodes {
+            let control = matches!(n.role, Role::Button | Role::CheckBox | Role::ComboBox | Role::Slider | Role::SpinButton | Role::TextInput);
+            if !control || n.rect.width() <= 0.0 || n.rect.top() < shell::HEADER_H {
+                continue;
+            }
+            let x = n.rect.left();
+            let inside = |(a, b): (f32, f32)| x >= a - 0.5 && x < b;
+            if inside(left) && n.rect.right() > left.1 + 0.5 {
+                out.push(format!("{tab} left: {:?} {:?} ends at {}", n.label, n.role, n.rect.right()));
+            }
+            if inside(right) && n.rect.right() > right.1 + 0.5 {
+                out.push(format!("{tab} right: {:?} {:?} ends at {}", n.label, n.role, n.rect.right()));
+            }
+        }
+    }
+    assert!(out.is_empty(), "controls overflow their panel:\n{}", out.join("\n"));
+}
+
+/// A button label never wraps onto a second line ("Clear arrows" did in a
+/// narrow add_enabled_ui child). Wrapped text makes the button ~44 px tall.
+#[test]
+fn button_labels_stay_on_one_line() {
+    let mut h = Harness::new("onelinebuttons");
+    let mut tall = Vec::new();
+    for (_, label) in MODES {
+        h.tab(label);
+        if label == "Map" {
+            for dock in ["Period", "Forces", "Terrain"] {
+                h.click_prefix_if_present(dock);
+                collect_tall_buttons(&h, &format!("Map › {dock}"), &mut tall);
+            }
+        }
+        collect_tall_buttons(&h, label, &mut tall);
+    }
+    tall.sort();
+    tall.dedup();
+    assert!(tall.is_empty(), "buttons with wrapped labels:\n{}", tall.join("\n"));
+}
+
+fn collect_tall_buttons(h: &Harness, tab: &str, out: &mut Vec<String>) {
+    for n in &h.nodes {
+        // Tree chips are 36 px by design; the Map dock tabs (40 px, top row
+        // of the dock) are skipped. A wrapped label makes a button 40 px.
+        let dock_tab = n.rect.top() < 100.0 && ["Period", "Forces", "References", "Terrain"].iter().any(|t| n.label.starts_with(t));
+        if n.role == Role::Button && !dock_tab && n.rect.height() > 36.5 && !n.label.is_empty() && n.rect.width() < 200.0 {
+            out.push(format!("{tab}: {:?} {}x{}", n.label, n.rect.width(), n.rect.height()));
+        }
+    }
+}
+
+impl Harness {
+    fn click_prefix_if_present(&mut self, prefix: &str) {
+        if let Some(n) = self.nodes.iter().find(|n| n.role == Role::Button && n.label.starts_with(prefix)).cloned() {
+            self.click_at(n.rect.center());
+            self.settle();
+        }
+    }
 }

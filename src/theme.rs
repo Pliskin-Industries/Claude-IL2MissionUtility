@@ -88,7 +88,7 @@ pub fn install_fonts(ctx: &egui::Context) {
         FontData::from_static(include_bytes!("../assets/fonts/BarlowCondensed-SemiBold.ttf"))
             .into(),
     );
-    // Barlow first; egui's defaults stay behind it for symbols (⚠ ▶ ▼ ✓).
+    // Barlow first; egui's defaults stay behind it for symbols (⚠ ▶ ▼ ✔). ✓ and ✗ are in none of them; ui_tests checks every glyph the UI uses.
     // Hack (egui's monospace) goes last: it is the only bundled font with
     // arrows (→ ← ↑ ↓), which Barlow and Ubuntu-Light both lack.
     let prop = fonts.families.get_mut(&FontFamily::Proportional).unwrap();
