@@ -1325,7 +1325,10 @@ pub fn copy_seat_attributes(seats: &mut [TemplateSeat], from: usize) {
             seat.mod_mask = src.mod_mask.clone();
         }
         if src.unit.is_air() && seat.unit.is_air() {
-            seat.altitude = src.altitude;
+            // Never above the receiving plane's own service ceiling.
+            seat.altitude = src
+                .altitude
+                .min(crate::model_spec::ceiling_m(&seat.unit.script));
         }
         if seat.unit.is_air() {
             seat.start_type = PlaneStart::stored_for_altitude(seat.start_type, seat.altitude);
@@ -6686,6 +6689,36 @@ mod tests {
         assert!(!seats[1].vulnerable);
         assert_eq!(seats[1].role, FlightRole::Follows(0));
         assert_eq!(seats[0].role, FlightRole::Lead);
+    }
+
+    #[test]
+    fn copy_seat_attributes_caps_altitude_at_each_ceiling() {
+        let mut seats = vec![
+            TemplateSeat::new(catalog_plane("f86a5")),
+            TemplateSeat::new(catalog_script("il10")),
+            TemplateSeat::new(catalog_plane("mig15bis")),
+        ];
+        seats[0].altitude = 12_000.0;
+        copy_seat_attributes(&mut seats, 0);
+        assert_eq!(seats[1].altitude, 6950.0, "IL-10 capped at its ceiling");
+        assert_eq!(seats[2].altitude, 12_000.0, "MiG ceiling is above 12000 m");
+        assert_eq!(seats[1].start_type, PlaneStart::Air.as_i32());
+    }
+
+    #[test]
+    fn match_lead_altitude_copies_ground_engine_state() {
+        let mut seats = vec![
+            lead_seat(catalog_plane("mig15bis")),
+            wingman_of(catalog_plane("mig15bis"), 0),
+        ];
+        for s in &mut seats {
+            s.altitude = 0.0;
+            s.start_type = PlaneStart::Running.as_i32();
+        }
+        seats[0].start_type = PlaneStart::Warm.as_i32();
+        match_lead_altitude(&mut seats, 0);
+        assert_eq!(seats[1].altitude, 0.0);
+        assert_eq!(seats[1].start_type, PlaneStart::Warm.as_i32());
     }
 
     #[test]
