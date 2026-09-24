@@ -13,6 +13,7 @@ mod duplicate;
 mod flights;
 mod frontlines;
 mod geo;
+mod harvest;
 mod help;
 mod locale;
 mod mapclip;
