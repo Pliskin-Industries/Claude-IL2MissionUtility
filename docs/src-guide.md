@@ -245,6 +245,8 @@ Unit-tested against `TemplateExamples/` fixtures. **Map mode, Army Generator.**
 ### `model_spec.rs` — aircraft / unit model data
 Per-script UI overlay (the AST stays schema-agnostic): `ModelClass` /
 `ModelSpec`, `spec_for`, `class_for` / `classes_in`, `ceiling_m`,
+`auto_altitude_m` / `AUTO_ALTITUDE_FRACTION` (Template auto altitude,
+50% of ceiling),
 `format_cruise`, `suggested_waypoint_speed_kmh` (90 % of the slowest
 moving unit, rounded to 10 km/h), `script_id`, and preview lookup
 (`png_for_script`, `PLACEHOLDER_PNG` from `build.rs`). Infantry squads
@@ -392,7 +394,8 @@ AttackArea and Time on Target in parallel (list order doesn't matter),
 and TOT expiry continues the chain. Seat model + bookkeeping:
 `TemplateSeat` / `CatalogUnit` / `FlightRole` / `PlaneStart`,
 `append_seat` / `replace_seat_unit` / `copy_seat_attributes` /
-`move_seat`, `normalize_order_chain` + index remapping,
+`move_seat`, `apply_auto_altitude(_all)` (plane at 50% of ceiling,
+airstart; ground units untouched), `normalize_order_chain` + index remapping,
 `insert_goto_waypoint_after`, `set_report_following`,
 `order_tree_columns` / `order_tree_layout` / `event_triggers_order`
 (GUI: OnSpawned is its own column; an event that Then's an order

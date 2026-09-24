@@ -25,6 +25,7 @@
 //! * Seats: `TemplateSeat`, `CatalogUnit`, `FlightRole`, `PlaneStart`,
 //!   `append_seat`, `replace_seat_unit`, `copy_seat_attributes`,
 //!   `move_seat`, `apply_formation_numbers`, `last_lead_index`,
+//!   `apply_auto_altitude` / `apply_auto_altitude_all` (50% ceiling),
 //!   `remap_seat_index` / `remap_index_vec` / `remap_event_then`.
 //! * Orders / events: `OrderSpec` (`for_kind` / `for_unit`), `OrderKind`,
 //!   `EntityEvent`, `EventHook` / `EventThen`, `normalize_order_chain`,
@@ -1405,6 +1406,23 @@ pub fn replace_seat_unit(seat: &mut TemplateSeat, unit: CatalogUnit) {
         seat.altitude = 0.0;
     } else {
         seat.start_type = PlaneStart::stored_for_altitude(seat.start_type, seat.altitude);
+    }
+}
+
+/// Auto altitude: put a plane at half its service ceiling (always an
+/// airstart). Ground units, trains, and ships are left alone.
+pub fn apply_auto_altitude(seat: &mut TemplateSeat) {
+    if !seat.unit.is_air() {
+        return;
+    }
+    seat.altitude = crate::model_spec::auto_altitude_m(&seat.unit.script);
+    seat.start_type = PlaneStart::stored_for_altitude(seat.start_type, seat.altitude);
+}
+
+/// [`apply_auto_altitude`] on every seat.
+pub fn apply_auto_altitude_all(seats: &mut [TemplateSeat]) {
+    for seat in seats {
+        apply_auto_altitude(seat);
     }
 }
 
@@ -6305,6 +6323,56 @@ mod tests {
         order.altitude = 0.0;
         order.priority = 2;
         assert_eq!(order_chip_detail(&order, UnitKind::Plane), "WP 2 · High");
+    }
+
+    fn catalog_plane(script_part: &str) -> CatalogUnit {
+        builtin_plane_catalog()
+            .into_iter()
+            .find(|u| u.script.contains(script_part))
+            .expect("plane in builtin catalog")
+    }
+
+    #[test]
+    fn auto_altitude_puts_plane_at_half_ceiling_airstart() {
+        let mut seat = TemplateSeat::new(catalog_plane("mig15bis"));
+        seat.altitude = 1234.0;
+        apply_auto_altitude(&mut seat);
+        assert_eq!(seat.altitude, 7500.0);
+        assert_eq!(seat.start_type, PlaneStart::Air.as_i32());
+    }
+
+    #[test]
+    fn auto_altitude_lifts_ground_start_plane() {
+        let mut seat = TemplateSeat::new(catalog_plane("f86a5"));
+        seat.altitude = 0.0;
+        seat.start_type = PlaneStart::Running.as_i32();
+        apply_auto_altitude(&mut seat);
+        assert_eq!(seat.altitude, 7620.0);
+        assert_eq!(seat.start_type, PlaneStart::Air.as_i32());
+    }
+
+    #[test]
+    fn auto_altitude_leaves_ground_units_alone() {
+        let mut seat = TemplateSeat::new(catalog_vehicle());
+        let start = seat.start_type;
+        apply_auto_altitude(&mut seat);
+        assert_eq!(seat.altitude, 0.0);
+        assert_eq!(seat.start_type, start);
+    }
+
+    #[test]
+    fn auto_altitude_all_uses_each_models_ceiling() {
+        let mut seats = vec![
+            TemplateSeat::new(catalog_plane("mig15bis")),
+            TemplateSeat::new(catalog_vehicle()),
+            TemplateSeat::new(catalog_plane("f86a5")),
+        ];
+        apply_auto_altitude_all(&mut seats);
+        assert_eq!(seats[0].altitude, 7500.0);
+        assert_eq!(seats[1].altitude, 0.0);
+        assert_eq!(seats[2].altitude, 7620.0);
+        assert_eq!(seats[0].start_type, PlaneStart::Air.as_i32());
+        assert_eq!(seats[2].start_type, PlaneStart::Air.as_i32());
     }
 
     #[test]
