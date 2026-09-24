@@ -6,9 +6,10 @@
 //!
 //! ## Public API
 //! * `MANUAL` — the raw markdown
-//! * `enum HelpTopic` — Overview, each mode, Language, Import,
-//!   Troubleshooting (`title`, `ALL`)
-//! * `fn show_window` — immediate viewport; no-op while `open` is false
+//! * `enum HelpTopic` — Overview, Keyboard shortcuts, each mode, Language,
+//!   Import, Troubleshooting (`title`, `ALL`)
+//! * `fn show_window` — immediate viewport; no-op while `open` is false;
+//!   Esc or the window's close button closes it
 //! * `fn section_for` — markdown slice for a topic
 //!
 //! ## Used by
@@ -21,6 +22,7 @@ pub const MANUAL: &str = include_str!("../USER_MANUAL.md");
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum HelpTopic {
     Overview,
+    Shortcuts,
     Template,
     Fighter,
     Exclusive,
@@ -33,8 +35,9 @@ pub enum HelpTopic {
 }
 
 impl HelpTopic {
-    pub const ALL: [HelpTopic; 10] = [
+    pub const ALL: [HelpTopic; 11] = [
         HelpTopic::Overview,
+        HelpTopic::Shortcuts,
         HelpTopic::Template,
         HelpTopic::Recon,
         HelpTopic::Fighter,
@@ -49,6 +52,7 @@ impl HelpTopic {
     pub fn title(self) -> &'static str {
         match self {
             HelpTopic::Overview => "Overview",
+            HelpTopic::Shortcuts => "Keyboard shortcuts",
             HelpTopic::Template => "Template Builder",
             HelpTopic::Fighter => "Fighter Pack",
             HelpTopic::Exclusive => "Exclusive Activation",
@@ -76,6 +80,8 @@ pub fn show_window(ctx: &egui::Context, open: &mut bool, topic: &mut HelpTopic) 
             .with_min_inner_size([480.0, 400.0])
             .with_decorations(true),
         |ctx, _class| {
+            // An open topic list takes Esc first (it closes itself).
+            let popup_was_open = egui::Popup::is_any_open(ctx);
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Topic").strong());
@@ -87,6 +93,9 @@ pub fn show_window(ctx: &egui::Context, open: &mut bool, topic: &mut HelpTopic) 
                                 ui.selectable_value(&mut topic_now, t, t.title());
                             }
                         });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new("Esc closes").small().color(crate::theme::c::NEUTRAL_700));
+                    });
                 });
                 ui.add_space(6.0);
                 ui.separator();
@@ -99,7 +108,10 @@ pub fn show_window(ctx: &egui::Context, open: &mut bool, topic: &mut HelpTopic) 
                         ui.add_space(16.0);
                     });
             });
-            if ctx.input(|i| i.viewport().close_requested()) {
+            // Esc closes Help like any dialog (§6.4). The Help viewport has its
+            // own input, so Esc there never reaches the main window's shortcuts.
+            let esc = !popup_was_open && ctx.input(|i| i.key_pressed(egui::Key::Escape));
+            if esc || ctx.input(|i| i.viewport().close_requested()) {
                 still_open = false;
             }
         },
@@ -113,8 +125,17 @@ pub fn section_for(topic: HelpTopic) -> &'static str {
 }
 
 fn extract_section<'a>(md: &'a str, heading: &str) -> &'a str {
+    // A whole `## heading` line: "### Map" or "## Map limits" must not match "## Map".
     let needle = format!("## {heading}");
-    let Some(start) = md.find(&needle) else {
+    let Some(start) = md
+        .match_indices(&needle)
+        .map(|(i, _)| i)
+        .find(|&i| {
+            let line_start = i == 0 || md.as_bytes()[i - 1] == b'\n';
+            let rest = &md[i + needle.len()..];
+            line_start && (rest.is_empty() || rest.starts_with('\n') || rest.starts_with("\r\n"))
+        })
+    else {
         return md;
     };
     let after = start + needle.len();
@@ -327,6 +348,25 @@ mod tests {
                 topic.title()
             );
         }
+    }
+
+    #[test]
+    fn sections_match_whole_heading_lines() {
+        let md = "# T\n\n### Map\nsub\n\n## Map limits\nx\n\n## Map\nbody\n## Next\n";
+        assert_eq!(extract_section(md, "Map"), "## Map\nbody");
+    }
+
+    #[test]
+    fn shortcuts_section_lists_every_key() {
+        let s = section_for(HelpTopic::Shortcuts);
+        for key in [
+            "Ctrl G", "Ctrl O", "Ctrl Z", "Ctrl Y", "Ctrl 1–6", "F1", "Esc", "Enter", "1–6", "← →", "Shift",
+        ] {
+            assert!(s.contains(key), "Keyboard shortcuts misses {key}");
+        }
+        assert!(s.contains("Remove"), "Ctrl Z covers Remove / Clear / Reset");
+        assert!(s.contains("Reset"));
+        assert!(s.contains("front drag"), "Esc on Map drops a front drag in progress");
     }
 
     #[test]

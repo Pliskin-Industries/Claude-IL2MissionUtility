@@ -10,8 +10,8 @@
 use std::f32::consts::PI;
 
 use eframe::egui::{
-    self, Align, Align2, Color32, FontId, Layout, Pos2, Rect, Response, RichText, Sense, Stroke,
-    StrokeKind, TextStyle, TextureHandle, Ui, Vec2,
+    self, Align, Align2, Color32, ColorImage, FontId, Layout, Pos2, Rect, Response, RichText, Sense,
+    Stroke, StrokeKind, TextStyle, TextureHandle, Ui, Vec2,
 };
 
 use crate::theme::{bold_family, c, heading_family};
@@ -64,10 +64,83 @@ impl Side {
     }
 }
 
-/// Fallback marker (a pentagon pointing the side's way) for when no texture is loaded.
-/// With textures, draw the existing `assets/Eastern*.svg` / `Nato*.svg` via
-/// `paint_rotated_image` at `side.facing_rad()` (plus the unit heading on the map).
+/// Where `register_side_textures` keeps the two fighter silhouettes.
+fn side_textures_id() -> egui::Id {
+    egui::Id::new("shell::side_textures")
+}
+
+/// Registers the side-marker silhouettes once at startup (§8): the DPRK and
+/// NATO fighter icons, both authored pointing north. They become white alpha
+/// masks, so every marker is tinted with its side token, and carry mipmaps so
+/// they stay clean from 10 to 18 px. `paint_side_marker` finds them through
+/// the painter's context; without them it draws the pentagon fallback.
+pub fn register_side_textures(ctx: &egui::Context, dprk: ColorImage, nato: ColorImage) {
+    let options = egui::TextureOptions {
+        mipmap_mode: Some(egui::TextureFilter::Linear),
+        ..egui::TextureOptions::LINEAR
+    };
+    let mask = |mut img: ColorImage| {
+        for p in &mut img.pixels {
+            let a = p.a();
+            *p = Color32::from_rgba_premultiplied(a, a, a, a);
+        }
+        img
+    };
+    let textures = [
+        ctx.load_texture("side_marker_dprk", mask(dprk), options),
+        ctx.load_texture("side_marker_nato", mask(nato), options),
+    ];
+    ctx.data_mut(|d| d.insert_temp(side_textures_id(), textures));
+}
+
+/// The registered side silhouettes `[DPRK, NATO]`, if any.
+pub fn side_textures(ctx: &egui::Context) -> Option<[TextureHandle; 2]> {
+    ctx.data(|d| d.get_temp::<[TextureHandle; 2]>(side_textures_id()))
+}
+
+/// A texture quad turned about its center (clockwise on screen for positive angles).
+pub fn paint_rotated_texture(
+    painter: &egui::Painter,
+    tex: egui::TextureId,
+    center: Pos2,
+    size: Vec2,
+    angle_rad: f32,
+    tint: Color32,
+) {
+    let rot = egui::emath::Rot2::from_angle(angle_rad);
+    let (hx, hy) = (size.x * 0.5, size.y * 0.5);
+    let mut mesh = egui::Mesh::with_texture(tex);
+    for (off, uv) in [
+        (Vec2::new(-hx, -hy), Pos2::new(0.0, 0.0)),
+        (Vec2::new(hx, -hy), Pos2::new(1.0, 0.0)),
+        (Vec2::new(hx, hy), Pos2::new(1.0, 1.0)),
+        (Vec2::new(-hx, hy), Pos2::new(0.0, 1.0)),
+    ] {
+        mesh.vertices.push(egui::epaint::Vertex { pos: center + rot * off, uv, color: tint });
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// Side marker (§8): the side's fighter silhouette in its token colour,
+/// turned to `side.facing_rad()`. DPRK points south and NATO north, so the
+/// two read apart without colour. Falls back to a pentagon pointing the same
+/// way when `register_side_textures` has not run (e.g. headless tests).
 pub fn paint_side_marker(painter: &egui::Painter, center: Pos2, size: f32, side: Side) {
+    if let Some(tex) = side_textures(painter.ctx()) {
+        let tex = match side {
+            Side::Dprk => &tex[0],
+            Side::Nato => &tex[1],
+        };
+        paint_rotated_texture(painter, tex.id(), center, Vec2::splat(size), side.facing_rad(), side.color());
+    } else {
+        paint_side_pentagon(painter, center, size, side);
+    }
+}
+
+/// The fallback side marker: a pentagon pointing the side's way.
+pub fn paint_side_pentagon(painter: &egui::Painter, center: Pos2, size: f32, side: Side) {
     let h = size / 2.0;
     let mut pts = vec![
         Pos2::new(-0.67 * h, 0.75 * h),
@@ -374,6 +447,251 @@ pub fn tool_button(
     resp.on_hover_text(format!("{tooltip}  ({key})"))
 }
 
+/// Line icons for the map tool palette (mockup 2f), drawn with the painter
+/// so no glyph needs a fallback font.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolIcon {
+    Select,
+    Front,
+    Salient,
+    Arrow,
+    Objective,
+    Undo,
+    Redo,
+}
+
+/// Cubic Bézier from `p0` to `p3`, sampled into `out` (without `p0`).
+fn cubic(out: &mut Vec<Pos2>, p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) {
+    for i in 1..=10 {
+        let t = i as f32 / 10.0;
+        let u = 1.0 - t;
+        let v = p0.to_vec2() * (u * u * u)
+            + p1.to_vec2() * (3.0 * u * u * t)
+            + p2.to_vec2() * (3.0 * u * t * t)
+            + p3.to_vec2() * (t * t * t);
+        out.push(v.to_pos2());
+    }
+}
+
+/// Half circle of radius 5 around `center` from its top to its bottom,
+/// bulging right (`right = true`) or left. Appended to `out`.
+fn half_circle(out: &mut Vec<Pos2>, center: Pos2, right: bool) {
+    for i in 0..=12 {
+        let a = -std::f32::consts::FRAC_PI_2 + PI * i as f32 / 12.0;
+        let x = if right { a.cos() } else { -a.cos() };
+        out.push(center + Vec2::new(x, a.sin()) * 5.0);
+    }
+}
+
+/// The icon's strokes in the mockup's 24 × 24 viewBox.
+pub(crate) fn tool_icon_paths(icon: ToolIcon) -> Vec<(Vec<Pos2>, bool)> {
+    let p = Pos2::new;
+    match icon {
+        // M3 3l7 17 2.5-7.5L20 10z
+        ToolIcon::Select => vec![(vec![p(3.0, 3.0), p(10.0, 20.0), p(12.5, 12.5), p(20.0, 10.0)], true)],
+        // M2 16c3-6 6 2 10-4s7-3 10-6
+        ToolIcon::Front => {
+            let mut pts = vec![p(2.0, 16.0)];
+            cubic(&mut pts, p(2.0, 16.0), p(5.0, 10.0), p(8.0, 18.0), p(12.0, 12.0));
+            cubic(&mut pts, p(12.0, 12.0), p(16.0, 6.0), p(19.0, 9.0), p(22.0, 6.0));
+            vec![(pts, false)]
+        }
+        // M2 17h5c2 0 2-9 5-9s3 9 5 9h5
+        ToolIcon::Salient => {
+            let mut pts = vec![p(2.0, 17.0), p(7.0, 17.0)];
+            cubic(&mut pts, p(7.0, 17.0), p(9.0, 17.0), p(9.0, 8.0), p(12.0, 8.0));
+            cubic(&mut pts, p(12.0, 8.0), p(15.0, 8.0), p(15.0, 17.0), p(17.0, 17.0));
+            pts.push(p(22.0, 17.0));
+            vec![(pts, false)]
+        }
+        // M5 19L19 5M10 5h9v9
+        ToolIcon::Arrow => vec![
+            (vec![p(5.0, 19.0), p(19.0, 5.0)], false),
+            (vec![p(10.0, 5.0), p(19.0, 5.0), p(19.0, 14.0)], false),
+        ],
+        // M5 22V3M5 4h12l-2.5 4L17 12H5
+        ToolIcon::Objective => vec![
+            (vec![p(5.0, 22.0), p(5.0, 3.0)], false),
+            (vec![p(5.0, 4.0), p(17.0, 4.0), p(14.5, 8.0), p(17.0, 12.0), p(5.0, 12.0)], false),
+        ],
+        // M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-4
+        ToolIcon::Undo => {
+            let mut tail = vec![p(4.0, 9.0)];
+            half_circle(&mut tail, p(15.0, 14.0), true);
+            tail.push(p(11.0, 19.0));
+            vec![(vec![p(9.0, 14.0), p(4.0, 9.0), p(9.0, 4.0)], false), (tail, false)]
+        }
+        // M15 14l5-5-5-5M20 9H9a5 5 0 000 10h4
+        ToolIcon::Redo => {
+            let mut tail = vec![p(20.0, 9.0)];
+            half_circle(&mut tail, p(9.0, 14.0), false);
+            tail.push(p(13.0, 19.0));
+            vec![(vec![p(15.0, 14.0), p(20.0, 9.0), p(15.0, 4.0)], false), (tail, false)]
+        }
+    }
+}
+
+/// Paints `icon` as 1.5 px lines inside `rect` (the 24-unit viewBox scaled to fit).
+pub fn paint_tool_icon(painter: &egui::Painter, rect: Rect, icon: ToolIcon, color: Color32) {
+    let scale = rect.width().min(rect.height()) / 24.0;
+    let origin = rect.center() - Vec2::splat(12.0 * scale);
+    let stroke = Stroke::new(1.5_f32, color);
+    for (pts, closed) in tool_icon_paths(icon) {
+        let pts: Vec<Pos2> = pts.into_iter().map(|q| origin + q.to_vec2() * scale).collect();
+        if closed {
+            painter.add(egui::Shape::closed_line(pts, stroke));
+        } else {
+            painter.add(egui::Shape::line(pts, stroke));
+        }
+    }
+}
+
+/// 36 × 36 map tool with a painted line icon (mockup 2f). The active tool
+/// is filled ACCENT; `key` (a digit) sits small in the bottom-right corner
+/// when `corner_key` is set, and always goes in the hover text.
+pub fn tool_icon_button(
+    ui: &mut Ui,
+    icon: ToolIcon,
+    tint: Option<Color32>,
+    tooltip: &str,
+    key: &str,
+    corner_key: bool,
+    active: bool,
+) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(TOOL_SIZE), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, tooltip));
+    if ui.is_rect_visible(rect) {
+        let (bg, fg) = if active {
+            (c::ACCENT, c::BG)
+        } else if resp.hovered() {
+            (c::ACCENT_100, tint.unwrap_or(c::TEXT))
+        } else {
+            (Color32::TRANSPARENT, tint.unwrap_or(c::NEUTRAL_800))
+        };
+        let p = ui.painter();
+        p.rect_filled(rect, 0.0, bg);
+        paint_tool_icon(p, Rect::from_center_size(rect.center(), Vec2::splat(18.0)), icon, fg);
+        if corner_key {
+            let key_c = if active { c::ACCENT_100 } else { c::NEUTRAL_700 };
+            p.text(rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, key, FontId::monospace(12.0), key_c);
+        }
+        if resp.has_focus() {
+            p.rect_stroke(rect, 0.0, Stroke::new(2.0_f32, c::ACCENT), StrokeKind::Inside);
+        }
+    }
+    resp.on_hover_text(format!("{tooltip}  ({key})"))
+}
+
+/// Tab strip across the full width (the Map dock, mockup 2f). Cells are
+/// equal when every label fits an equal share; otherwise each cell is its
+/// label's width plus an equal share of the space left, so a long tab
+/// ("References 123") never clips. The selected tab is bold with a 2 px
+/// accent underline; a tab's count follows its label as a separate 12 px
+/// NEUTRAL_700 number. Widths are measured bold, so selecting a tab never
+/// moves the others. Returns true when the selection changed.
+pub fn dock_tabs<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, tabs: &[(T, &str, Option<usize>)]) -> bool {
+    let mut changed = false;
+    let width = ui.available_width();
+    let cells = dock_tab_widths(ui.ctx(), width, tabs);
+    let (strip, _) = ui.allocate_exact_size(Vec2::new(width, DOCK_TAB_H), Sense::hover());
+    let mut x = strip.left();
+    for (i, (v, label, count)) in tabs.iter().enumerate() {
+        let rect = Rect::from_min_size(Pos2::new(x, strip.top()), Vec2::new(cells[i], DOCK_TAB_H));
+        x += cells[i];
+        let selected = *value == *v;
+        let name = match count {
+            Some(n) => format!("{label} {n}"),
+            None => (*label).to_owned(),
+        };
+        let resp = ui.interact(rect, ui.id().with(("dock_tab", i)), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &name));
+        if resp.clicked() && !selected {
+            *value = *v;
+            changed = true;
+        }
+        let (label_g, count_g) = dock_tab_galleys(ui.ctx(), label, *count, selected);
+        let gap = if count_g.is_some() { DOCK_TAB_GAP } else { 0.0 };
+        let total = label_g.size().x + gap + count_g.as_ref().map_or(0.0, |g| g.size().x);
+        let p = ui.painter();
+        if resp.hovered() && !selected {
+            p.rect_filled(rect, 0.0, c::ACCENT_100);
+        }
+        let x0 = rect.center().x - total / 2.0;
+        let y = rect.center().y;
+        let label_w = label_g.size().x;
+        let label_h = label_g.size().y;
+        p.galley(Pos2::new(x0, y - label_h / 2.0), label_g, c::TEXT);
+        if let Some(g) = count_g {
+            // Baselines line up closely enough: both galleys are centred on the row.
+            let h = g.size().y;
+            p.galley(Pos2::new(x0 + label_w + gap, y - h / 2.0 + 1.0), g, c::NEUTRAL_700);
+        }
+        if selected {
+            p.rect_filled(
+                Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 2.0), rect.right_bottom()),
+                0.0,
+                c::ACCENT,
+            );
+        }
+        if resp.has_focus() {
+            p.rect_stroke(rect.shrink(1.0), 0.0, Stroke::new(2.0_f32, c::ACCENT), StrokeKind::Inside);
+        }
+    }
+    ui.painter().line_segment(
+        [strip.left_bottom(), strip.right_bottom()],
+        Stroke::new(1.0_f32, c::DIVIDER),
+    );
+    changed
+}
+
+/// Height of a `dock_tabs` row (the mockup's 40 px line).
+pub const DOCK_TAB_H: f32 = 40.0;
+
+fn dock_tab_galleys(
+    ctx: &egui::Context,
+    label: &str,
+    count: Option<usize>,
+    selected: bool,
+) -> (std::sync::Arc<egui::Galley>, Option<std::sync::Arc<egui::Galley>>) {
+    let (family, fg) = if selected {
+        (bold_family(), c::ACCENT_800)
+    } else {
+        (egui::FontFamily::Proportional, c::TEXT)
+    };
+    ctx.fonts(|f| {
+        let label_g = f.layout_no_wrap(label.to_owned(), FontId::new(13.0, family), fg);
+        let count_g = count.map(|n| f.layout_no_wrap(n.to_string(), FontId::proportional(12.0), c::NEUTRAL_700));
+        (label_g, count_g)
+    })
+}
+
+/// Width a `dock_tabs` cell needs for `label` and `count` (bold, as when
+/// selected), in px. Layout tests compare it with the cell width.
+pub fn dock_tab_needed_width(ctx: &egui::Context, label: &str, count: Option<usize>) -> f32 {
+    let (l, c) = dock_tab_galleys(ctx, label, count, true);
+    l.size().x + c.map_or(0.0, |g| DOCK_TAB_GAP + g.size().x)
+}
+
+/// Space between a tab label and its count.
+const DOCK_TAB_GAP: f32 = 4.0;
+/// Least padding on each side of a tab's label.
+pub const DOCK_TAB_PAD: f32 = 6.0;
+
+/// Cell widths for `dock_tabs` across `width` (see there).
+pub fn dock_tab_widths<T>(ctx: &egui::Context, width: f32, tabs: &[(T, &str, Option<usize>)]) -> Vec<f32> {
+    let n = tabs.len().max(1) as f32;
+    let need: Vec<f32> = tabs
+        .iter()
+        .map(|(_, label, count)| dock_tab_needed_width(ctx, label, *count) + 2.0 * DOCK_TAB_PAD)
+        .collect();
+    let equal = width / n;
+    if need.iter().all(|w| *w <= equal) {
+        return vec![equal; tabs.len()];
+    }
+    let spare = (width - need.iter().sum::<f32>()).max(0.0) / n;
+    need.iter().map(|w| w + spare).collect()
+}
+
 // ── Page chrome ─────────────────────────────────────────────────────────────
 /// Left mode rail. Returns true if Help was clicked.
 pub fn mode_rail(ui: &mut Ui, labels: &[&str], selected: &mut usize) -> bool {
@@ -406,7 +724,7 @@ pub fn mode_rail(ui: &mut Ui, labels: &[&str], selected: &mut usize) -> bool {
     ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if link(ui, "Help").clicked() {
+            if link(ui, "Help").on_hover_text("Help for this tab  (F1)").clicked() {
                 help = true;
             }
             kbd(ui, "F1");
@@ -520,7 +838,7 @@ pub fn status_bar(ui: &mut Ui, severity: Severity, message: &str, undo_label: Op
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if let Some(label) = undo_label {
                 kbd(ui, "Ctrl Z");
-                if link(ui, "Undo").clicked() {
+                if link(ui, "Undo").on_hover_text(format!("Undo: {label}  (Ctrl Z)")).clicked() {
                     undo = true;
                 }
                 ui.label(label);
@@ -613,8 +931,18 @@ impl<T> Undo<T> {
             Some(_) => {}
         }
     }
+    /// The tab changed in a way that keeps the snapshot valid (a drawing
+    /// that has its own undo): take the next `settle` fingerprint as the new
+    /// "after" state instead of dropping the snapshot.
+    pub fn rebase(&mut self) {
+        self.after = None;
+    }
     pub fn label(&self) -> Option<&str> {
         self.slot.as_ref().map(|(l, _)| l.as_str())
+    }
+    /// The snapshot, without taking it.
+    pub fn peek(&self) -> Option<&T> {
+        self.slot.as_ref().map(|(_, s)| s)
     }
     pub fn take(&mut self) -> Option<T> {
         self.slot.take().map(|(_, s)| s)

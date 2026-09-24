@@ -605,7 +605,7 @@ pub fn generate_recon_ex(plans: &[ReconInput], build: ReconBuild) -> Result<Il2E
             }
             if start.is_empty() {
                 return Err(format!(
-                    "{} has no Mission Begin targets or ENABLE / PULSE IN to fire on a win",
+                    "{} has no Mission Begin targets or MCU named \"ENABLE / PULSE IN\" to fire on a win",
                     plan.label
                 ));
             }
@@ -1593,7 +1593,7 @@ fn apply_randomizer_inner(
     let win_targets: Vec<Vec<i32>> = owned.iter().map(win_targets_for_copy).collect();
     if let Some(i) = win_targets.iter().position(|t| t.is_empty()) {
         return Err(format!(
-            "{} has no ENABLE / PULSE IN or Zone IN to fire on a win",
+            "{} has no MCU named \"ENABLE / PULSE IN\" or checkzone named \"Zone IN\" to fire on a win",
             owned[i].name().unwrap_or("copy")
         ));
     }
