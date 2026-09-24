@@ -395,7 +395,8 @@ and TOT expiry continues the chain. Seat model + bookkeeping:
 `TemplateSeat` / `CatalogUnit` / `FlightRole` / `PlaneStart`,
 `append_seat` / `replace_seat_unit` / `copy_seat_attributes` /
 `move_seat`, `apply_auto_altitude(_all)` (plane at 50% of ceiling,
-airstart; ground units untouched), `normalize_order_chain` + index remapping,
+airstart; wingmen match their lead, capped at own ceiling; ground units
+untouched), `match_lead_altitude`, `normalize_order_chain` + index remapping,
 `insert_goto_waypoint_after`, `set_report_following`,
 `order_tree_columns` / `order_tree_layout` / `event_triggers_order`
 (GUI: OnSpawned is its own column; an event that Then's an order
