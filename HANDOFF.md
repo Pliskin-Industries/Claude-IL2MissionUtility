@@ -1,0 +1,149 @@
+# HANDOFF — IL-2 Mission Utility (Claude working copy)
+
+> Read this first in every new session. Update the **Session log** and
+> **State** sections before you stop. Last updated: 2026-09-23.
+
+## 1. Where things live
+
+| What | Path |
+|---|---|
+| **Working copy (all work happens here)** | `C:\Claude\IL2MissionUtility\Claude IL2Mission Utility\` |
+| Original drop (read-only reference, do not edit) | `C:\Claude\IL2MissionUtility\` (everything except this folder) |
+| Module map for `src/` (read before editing) | `docs/src-guide.md` |
+| End-user manual (embedded in the Help window) | `USER_MANUAL.md` |
+| Coding rules | `.cursorrules` (nom parser only, schema-agnostic AST, never skip tests, GUI decoupled from AST, minimal UI) |
+
+**Git.** The working copy is a local git repo (`main`). There is **no
+GitHub remote** yet. The first commit is the untouched 2026-09-04 source.
+`.gitattributes` is `* -text`: files are stored byte-for-byte because `.Group`
+fixtures are line-ending sensitive. Do not remove it.
+
+**Build and test.**
+
+```bash
+cargo test --offline     # baseline: 371 passed, ~45 s cold build
+cargo build --release    # ships target/release/il2_mission_utility.exe
+```
+
+`--offline` works because every crate is already in the local cargo cache.
+
+## 2. Team roles (codex-delegation skill)
+
+| Role | Who | Notes |
+|---|---|---|
+| Overlord / reviewer | **Claude Opus acting as Fable** (Fable quota exhausted, per user 2026-09-23) | Plans, scopes, reviews every diff, merges, owns accountability. |
+| Executor | **GPT-6 Astra via Codex broker** | All coding work. `max` effort for implementation, `ultra` for reviews. |
+
+**Delegation loop in use.** There is no remote, but Claude and Codex share
+this machine's disk. So the loop is:
+
+1. Claude commits on `main`. The primary clone must be clean.
+2. Astra `git clone`s the primary clone into its own temp dir, branches
+   `codex/<slug>`, implements, runs `cargo test --offline`, and commits
+   there. The Codex sandbox cannot write the primary clone's `.git`.
+3. Claude runs `git fetch <temp-clone> codex/<slug>:codex/<slug>`, reviews
+   the diff, and re-runs the tests itself.
+4. Claude merges with `--no-ff` into `main`, or sends it back with `codex_resume`.
+
+Once a GitHub remote exists, switch to the skill's standard `git_push`/`git_pull` flow.
+
+## 3. What the application is
+
+A native Windows desktop tool (Rust 2024, `eframe`/`egui` 0.32, `nom`
+parser) that removes the tedious wiring from building **IL-2 Sturmovik:
+Great Battles** missions on the **Korea** map. It reads and writes the mission
+editor's `.Group` text files; it does not replace the editor. Version
+`0.5.0-alpha`; ~40k lines in `src/` (`ui.rs` 10.2k, `template.rs` 7.9k).
+
+Pipeline: `.Group` text → `parser.rs` (nom) → `ast::Il2Entity` tree (unknown
+keys preserved) → generation modules transform/clone the tree →
+`serialize.rs` writes it back (CRLF, lossless round-trip) → `locale.rs`
+writes the UTF-16 translation sidecars (`.eng`, `.rus`, …).
+
+### The six modes (tabs)
+
+| Mode | What it does | Core modules |
+|---|---|---|
+| **Template Builder** | Builds one self-contained, proximity-triggered unit group: seats (planes/vehicles/trains/ships), a tree of orders (formation → waypoint → attack → complete), Zone IN/OUT checkzones, spawn/cooldown, cleanup on zone-out. | `template.rs`, `payloads.rs`, `model_spec.rs`, `weapon_range.rs` |
+| **Fighter Pack** | Clones a fighter group N times and wires the copies with NodeGates so they take turns spawning. Includes a randomizer, pair skills, finger-four altitudes and tail codes. | `pack.rs`, `flights.rs`, `aircraft.rs` |
+| **Exclusive Activation** | Links several pre-built checkzone "plans" so only one fires (mutex). | `bombers.rs` |
+| **Army Generator** | Clones ground/ship/train templates and adds a per-type randomizer that decides at mission load which copies spawn. | `recon.rs`, `mapground.rs`, `mapnet.rs` |
+| **Map** | Dated Korea front line from a 1950–53 timeline, AO box, salients, arrows, influence areas. Auto-places fighters, ground units, ships, trains and convoys on terrain, roads and rails. Exports a base-map `.Group`. | `frontlines.rs` (+`timeline.rs`), `mapclip.rs`, `mapfighters.rs`, `mapground.rs`, `mapshipping.rs`, `mapnet.rs`, `watermap.rs`, `geo.rs` |
+| **Airfield** | Strips single-player clutter from an SP airfield so it is MP-ready. | `airfield.rs` |
+
+`MapHelper/` is a separate small Rust CLI. It pre-bakes
+`assets/combined_terrain.bin` (water/road/open bitmask) from map images.
+
+### Current state (verified 2026-09-23)
+
+- All six modes are implemented and wired in the UI.
+- `cargo test`: **371 pass, 0 fail**.
+- `cargo build`: **70 warnings**, mostly dead code: unused constants,
+  `mapload::PointKind`, and pack helpers marked `#[allow(dead_code)]`.
+- `mapload.rs` is compiled and tested but **not called from the UI**. Map
+  labels use hardcoded `geo::cities_on_map` instead.
+- The aircraft identity tables (`aircraft.rs`) cover the 7 Korea fighters only.
+- The UI is English-only.
+
+## 4. Next development phases
+
+**Author-stated** (README "Todo"):
+- **Rewrite `USER_MANUAL.md`** into plain, human-readable text. The current
+  manual is dense and reads as AI-written.
+- **Localization** of the app UI. `locale.rs` handles mission sidecars only;
+  UI strings are hardcoded in `ui.rs`.
+
+**Proposed by Claude.** These are inferences from the code and need the user's confirmation.
+
+| # | Phase | Why | Size |
+|---|---|---|---|
+| P1 | **Template altitude defaults** (in progress, see §5) | User request, 2026-09-23. | S |
+| P2 | **Hygiene:** clear the 70 warnings (wire or delete dead code); add a GitHub remote | Warnings hide real regressions. A remote unlocks the standard broker flow. | S |
+| P3 | **Wire `mapload.rs`** reference catalog (airfields/buildings from `References/`) into Map-mode labels and snapping | Already built and tested, but unused. | M |
+| P4 | **Split `ui.rs`** (10k lines) into per-mode panel modules, with no behavior change | Prerequisite for localization. Lowers merge risk for every UI task. | M–L |
+| P5 | **UI localization:** string table plus a language picker | Author todo. Easier after P4. | L |
+| P6 | **Manual rewrite** (author todo) | Should follow the feature changes so it does not go stale twice. | M |
+| P7 | **Template altitude follow-ups** (see §5 open questions) | Smaller correctness items. | S |
+
+## 5. Feature log
+
+### P1 — Auto altitude at 50% of service ceiling (Template Builder)
+
+**Request (2026-09-23):** "allow aircraft under template mode for aircraft
+altitude to automatically be set at 50% of operating ceiling."
+
+**Design (Claude, as Fable):**
+- **Logic.** `model_spec::auto_altitude_m(script)` returns
+  `round(ceiling_m × 0.5)`. For example, MiG-15bis gives 7500 m, F-86A-5
+  gives 7620 m, and an unknown aircraft gives 4000 m.
+  `template::apply_auto_altitude(_all)` sets the seat altitude and re-derives
+  `StartType`, which becomes Airstart.
+- **UI.** A checkbox, **Auto altitude (50% ceiling)**, sits in the Template
+  "Add unit" row and defaults to **on**. When it is on, new planes and model
+  swaps get 50% of their own ceiling. Switching it on re-heights every plane.
+  A per-seat **50% ceiling** button next to the altitude slider works
+  regardless of the checkbox.
+- **Not touched by auto.** Loaded template files, manual slider edits made
+  afterwards, Fighter Pack altitudes (`flights.rs`), and "Copy attributes to all".
+- **Behavior change to note.** Every catalog plane has `YPos = 0`, so new
+  planes used to default to a **ground start**. With auto on (the default)
+  they now airstart at half their ceiling. To build a runway or parked
+  flight, turn auto off.
+
+**Open questions / follow-ups (P7):**
+- **Mixed-model formations.** Each seat uses its own model's ceiling, so a
+  MiG lead and an La-11 wingman spawn at different heights. Should followers
+  match their lead?
+- **Ceiling clamp on copy.** "Copy attributes to all" copies altitude
+  without clamping to the target aircraft's ceiling. This is pre-existing
+  behavior.
+- **Persistence.** The checkbox resets to on at every app start. The app has
+  no settings persistence.
+
+**Status:** see Session log.
+
+## 6. Session log
+
+| Date | Who | What |
+|---|---|---|
+| 2026-09-23 | Claude (Fable role) | Created working copy and git baseline (`.gitattributes * -text`). Verified 371 tests pass. Wrote this handoff. Designed P1 and delegated it to Astra (job `20260924024246-e38e95ca`, branch `codex/auto-altitude`). |
