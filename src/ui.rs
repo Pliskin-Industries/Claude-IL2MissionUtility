@@ -70,6 +70,8 @@ use crate::frontlines::{
 };
 use crate::geo::{self, MAP_MAX, MAP_MIN};
 use crate::help::{self, HelpTopic};
+use crate::shell::{self, Severity};
+use crate::theme::{self, c};
 use crate::locale::{has_sidecars, merge_template_sidecars, write_sidecars, LANG_EXTS};
 use crate::mapclip::{
     apply_salients, can_extend_salient, can_extend_west_east, clip_linestring_to_rect,
@@ -125,7 +127,7 @@ pub fn run() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 1280.0])
-            .with_min_inner_size([900.0, 800.0])
+            .with_min_inner_size([1280.0, 800.0])
             .with_decorations(true),
         ..Default::default()
     };
@@ -133,7 +135,7 @@ pub fn run() -> eframe::Result {
         "IL-2 Group Generator",
         options,
         Box::new(|cc| {
-            apply_readable_style(&cc.egui_ctx);
+            theme::apply(&cc.egui_ctx);
             Ok(Box::new(GroupGeneratorApp::default()))
         }),
     )
@@ -148,6 +150,16 @@ enum AppMode {
     Airfield,
     Map,
 }
+
+/// Rail order (docs/ui-redesign/README.md §4). Ctrl 1–6 follow it.
+const MODES: [(AppMode, &str); 6] = [
+    (AppMode::Template, "Template"),
+    (AppMode::Recon, "Army Generator"),
+    (AppMode::Fighter, "Fighter Pack"),
+    (AppMode::Exclusive, "Exclusive Activation"),
+    (AppMode::Airfield, "Airfield"),
+    (AppMode::Map, "Map"),
+];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ReconSubmode {
@@ -1553,42 +1565,41 @@ impl Default for GroupGeneratorApp {
 
 impl eframe::App for GroupGeneratorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.heading("IL-2 Group Generator");
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Help").clicked() {
-                            let topic = self.page_help_topic();
-                            self.open_help(topic);
-                        }
-                    });
-                });
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.mode, AppMode::Template, "Template");
-                    ui.selectable_value(&mut self.mode, AppMode::Recon, "Army Generator");
-                    ui.selectable_value(&mut self.mode, AppMode::Fighter, "Fighter Pack");
-                    ui.selectable_value(&mut self.mode, AppMode::Exclusive, "Exclusive Activation");
-                    ui.selectable_value(&mut self.mode, AppMode::Airfield, "Airfield");
-                    ui.selectable_value(&mut self.mode, AppMode::Map, "Map");
-                });
-                ui.add_space(8.0);
+        let keys = shell::read_shortcuts(ctx, self.mode == AppMode::Map);
+        self.handle_shortcuts(&keys);
 
-                match self.mode {
+        // Panels added first take the outer space: rail, status, header, then the page.
+        egui::SidePanel::left("rail")
+            .exact_width(shell::RAIL_W)
+            .resizable(false)
+            .show(ctx, |ui| {
+                let mut idx = MODES.iter().position(|(m, _)| *m == self.mode).unwrap_or(0);
+                let labels = MODES.map(|(_, label)| label);
+                if shell::mode_rail(ui, &labels, &mut idx) {
+                    self.open_help(self.page_help_topic());
+                }
+                self.set_mode(MODES[idx].0);
+            });
+        egui::TopBottomPanel::bottom("status")
+            .exact_height(shell::STATUS_H)
+            .show(ctx, |ui| self.status_line(ui));
+        self.status_details(ctx);
+        egui::TopBottomPanel::top("page_header")
+            .exact_height(shell::HEADER_H)
+            .frame(egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin::symmetric(18, 0)))
+            .show(ctx, |ui| self.page_header_bar(ui));
+        egui::CentralPanel::default().show(ctx, |ui| {
+            // One scroll position per tab; the window itself never scrolls.
+            egui::ScrollArea::vertical()
+                .id_salt(("page", self.mode as u8))
+                .show(ui, |ui| match self.mode {
                     AppMode::Template => self.template_panel(ui),
                     AppMode::Fighter => self.fighter_panel(ui),
                     AppMode::Exclusive => self.bomber_panel(ui),
                     AppMode::Recon => self.recon_panel(ui),
                     AppMode::Airfield => self.airfield_panel(ui),
                     AppMode::Map => self.map_panel(ui),
-                }
-
-                ui.add_space(6.0);
-                self.status_line(ui);
-                ui.add_space(8.0);
-            });
+                });
         });
         help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
     }
@@ -1611,52 +1622,197 @@ impl GroupGeneratorApp {
         self.help_open = true;
     }
 
-    fn page_header(&mut self, ui: &mut egui::Ui, title: &str, topic: HelpTopic) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(title).strong());
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Help").clicked() {
-                    self.open_help(topic);
+    /// Leaving Map drops any half-drawn mark and returns to Select.
+    fn set_mode(&mut self, mode: AppMode) {
+        if mode == self.mode {
+            return;
+        }
+        if self.mode == AppMode::Map {
+            self.map_drawing_mode = MapDrawingMode::None;
+            self.current_salient.clear();
+            self.attack_drag = None;
+        }
+        self.mode = mode;
+    }
+
+    fn handle_shortcuts(&mut self, keys: &shell::Shortcuts) {
+        if let Some((mode, _)) = keys.tab.and_then(|i| MODES.get(i)) {
+            self.set_mode(*mode);
+        }
+        if keys.help {
+            self.open_help(self.page_help_topic());
+        }
+        if keys.generate && self.primary_enabled() {
+            self.primary_action();
+        }
+        if keys.load {
+            self.load_action();
+        }
+        // Undo / redo only exist for Map drawings so far.
+        if self.mode == AppMode::Map {
+            if keys.undo {
+                self.remove_last_mark();
+            }
+            if keys.redo {
+                self.redo_last_mark();
+            }
+        }
+    }
+
+    fn primary_enabled(&self) -> bool {
+        match self.mode {
+            AppMode::Airfield => self.airfield_info.is_some(),
+            _ => true,
+        }
+    }
+
+    /// The header's primary button and Ctrl G.
+    fn primary_action(&mut self) {
+        match self.mode {
+            AppMode::Template => self.generate_unit_template(),
+            AppMode::Recon => match self.recon_submode {
+                ReconSubmode::New => self.generate_recon_file(),
+                ReconSubmode::Rework => self.generate_rework_file(),
+            },
+            AppMode::Fighter => self.generate_fighter_file(),
+            AppMode::Exclusive => self.generate_bomber_file(),
+            AppMode::Airfield => self.export_airfield(),
+            AppMode::Map => self.generate_front_file(),
+        }
+    }
+
+    /// The header's first secondary button and Ctrl O. Fighter Pack has none.
+    fn load_action(&mut self) {
+        match self.mode {
+            AppMode::Template => self.load_template_group(),
+            AppMode::Recon => match self.recon_submode {
+                ReconSubmode::New => self.add_recon_template(),
+                ReconSubmode::Rework => self.add_placed_packs(),
+            },
+            AppMode::Fighter => {}
+            AppMode::Exclusive => self.add_bomber_template(),
+            AppMode::Airfield => self.load_airfield(),
+            AppMode::Map => self.load_base_map(),
+        }
+    }
+
+    fn page_header_bar(&mut self, ui: &mut egui::Ui) {
+        fn file_label(path: &Option<PathBuf>, stem_only: bool) -> Option<String> {
+            let p = path.as_ref()?;
+            let name = if stem_only { p.file_stem() } else { p.file_name() };
+            name.and_then(|n| n.to_str()).map(str::to_owned)
+        }
+        let (title, file, primary) = match self.mode {
+            AppMode::Template => (
+                "Template Builder",
+                file_label(&self.tpl_loaded_path, true).map(|n| format!("Editing {n}")),
+                "Generate File",
+            ),
+            AppMode::Recon => ("Army Generator", None, "Generate File"),
+            AppMode::Fighter => (
+                "Fighter Pack",
+                Some(file_label(&self.custom_path, false).unwrap_or_else(|| "Built-in logic".into())),
+                "Generate File",
+            ),
+            AppMode::Exclusive => ("Exclusive Activation", None, "Generate File"),
+            AppMode::Airfield => (
+                "Airfield to Multiplayer",
+                file_label(&self.airfield_path, false),
+                "Generate File",
+            ),
+            AppMode::Map => {
+                let battle = self
+                    .front_focus
+                    .and_then(|id| BATTLES.iter().find(|b| b.id == id))
+                    .map_or("Entire front", |b| b.name);
+                let period = format!("{} {} · {battle}", self.front_season.label(), self.front_year);
+                ("Map", Some(period), "Generate Base Map")
+            }
+        };
+        let mode = self.mode;
+        let submode = self.recon_submode;
+        let mut new_submode = submode;
+        let (mut load, mut reset, mut add_folder) = (false, false, false);
+        let generate = shell::page_header(
+            ui,
+            title,
+            file.as_deref(),
+            primary,
+            self.primary_enabled(),
+            |ui| {
+                if mode == AppMode::Recon {
+                    shell::segmented(
+                        ui,
+                        &mut new_submode,
+                        &[
+                            (ReconSubmode::New, "New from templates"),
+                            (ReconSubmode::Rework, "Rework existing"),
+                        ],
+                    );
                 }
-            });
-        });
+            },
+            // Right-to-left: the button added last sits leftmost.
+            |ui| match mode {
+                AppMode::Template => {
+                    reset = ui
+                        .button("Reset")
+                        .on_hover_text("Clear units and options so you can author a new template from scratch. Catalog stays.")
+                        .clicked();
+                    load = ui
+                        .button("Load…")
+                        .on_hover_text("Open a .Group to edit it here. Files this mode wrote load as-is; other layouts are rebuilt from units and orders.  (Ctrl O)")
+                        .clicked();
+                }
+                AppMode::Recon => match submode {
+                    ReconSubmode::New => {
+                        add_folder = ui.button("Add folder…").clicked();
+                        load = ui.button("Add templates…").on_hover_text("Ctrl O").clicked();
+                    }
+                    ReconSubmode::Rework => {
+                        load = ui.button("Add packs…").on_hover_text("Ctrl O").clicked();
+                    }
+                },
+                AppMode::Fighter => {}
+                AppMode::Exclusive => {
+                    load = ui
+                        .button("Add templates…")
+                        .on_hover_text("Add templates or a generated Exclusive Activation pack.  (Ctrl O)")
+                        .clicked();
+                }
+                AppMode::Airfield => {
+                    load = ui.button("Load airfield…").on_hover_text("Ctrl O").clicked();
+                }
+                AppMode::Map => {
+                    load = ui
+                        .button("Load base map…")
+                        .on_hover_text("Reload a previously generated Korea_BaseMap_*.Group: AO, front, attack arrows, and unit/fighter placement. Objectives are not stored in the file.  (Ctrl O)")
+                        .clicked();
+                }
+            },
+        );
+        self.recon_submode = new_submode;
+        if reset {
+            self.reset_template_builder();
+        }
+        if add_folder {
+            self.add_recon_folder();
+        }
+        if load {
+            self.load_action();
+        }
+        if generate {
+            self.primary_action();
+        }
     }
 
     fn template_panel(&mut self, ui: &mut egui::Ui) {
         self.sync_template_zone_defaults();
-        self.page_header(ui, "Template Builder", HelpTopic::Template);
         ui.label(
             RichText::new(
                 "Build a proximity-triggered unit group. This mode does not write NodeGates, but is intended to be used with the Army Generator mode.",
             )
             .small(),
         );
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if ui
-                .button("Load group…")
-                .on_hover_text(
-                    "Open a .Group to edit it here. Files this mode wrote load as-is; other layouts are rebuilt from units and orders.",
-                )
-                .clicked()
-            {
-                self.load_template_group();
-            }
-            if ui
-                .button("Reset")
-                .on_hover_text("Clear units and options so you can author a new template from scratch. Catalog stays.")
-                .clicked()
-            {
-                self.reset_template_builder();
-            }
-            if let Some(path) = &self.tpl_loaded_path {
-                let name = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("loaded group");
-                ui.label(RichText::new(format!("Editing {name}")).italics());
-            }
-        });
         ui.add_space(8.0);
 
         ui.columns(2, |cols| {
@@ -1674,14 +1830,6 @@ impl GroupGeneratorApp {
         ui.add_space(10.0);
         self.template_catalog_section(ui);
         ui.add_space(12.0);
-
-        ui.with_layout(Layout::top_down(Align::Center), |ui| {
-            let generate = egui::Button::new(RichText::new("Generate File").strong())
-                .min_size(Vec2::new(200.0, 32.0));
-            if ui.add(generate).clicked() {
-                self.generate_unit_template();
-            }
-        });
     }
 
     fn template_catalog_section(&mut self, ui: &mut egui::Ui) {
@@ -4526,7 +4674,6 @@ impl GroupGeneratorApp {
     }
 
     fn fighter_panel(&mut self, ui: &mut egui::Ui) {
-        self.page_header(ui, "Fighter Pack", HelpTopic::Fighter);
         ui.label(
             RichText::new(
                 "Group logic is built in. Configure flights, then generate a linked N-pack.",
@@ -4555,16 +4702,6 @@ impl GroupGeneratorApp {
         ui.separator();
         ui.add_space(10.0);
         self.altitude_section(ui);
-        ui.add_space(16.0);
-
-        ui.with_layout(Layout::top_down(Align::Center), |ui| {
-            let generate = egui::Button::new(RichText::new("Generate File").strong())
-                .min_size(Vec2::new(200.0, 32.0));
-            if ui.add(generate).clicked() {
-                self.generate_fighter_file();
-            }
-        });
-
         ui.add_space(12.0);
         ui.separator();
         ui.add_space(6.0);
@@ -4572,7 +4709,6 @@ impl GroupGeneratorApp {
     }
 
     fn bomber_panel(&mut self, ui: &mut egui::Ui) {
-        self.page_header(ui, "Exclusive Activation", HelpTopic::Exclusive);
         ui.label(
             RichText::new(
                 "This mode takes existing groups that may have complex mission logic or are known to be resource intensive and only allows a single one to activate at a time.
@@ -4588,11 +4724,6 @@ New templates park on a square 10 km grid from 40000, 40000 unless 'export in pl
         );
         ui.add_space(8.0);
 
-        ui.horizontal(|ui| {
-            if ui.button("Add template or pack…").clicked() {
-                self.add_bomber_template();
-            }
-        });
         ui.checkbox(
             &mut self.bomber_keep_positions,
             "Export in place (leave groups where they are)",
@@ -4754,24 +4885,9 @@ New templates park on a square 10 km grid from 40000, 40000 unless 'export in pl
             };
             self.bomber_slots.push(copy);
         }
-
-        ui.add_space(12.0);
-        ui.with_layout(Layout::top_down(Align::Center), |ui| {
-            let generate = egui::Button::new(RichText::new("Generate File").strong())
-                .min_size(Vec2::new(200.0, 32.0));
-            if ui.add(generate).clicked() {
-                self.generate_bomber_file();
-            }
-        });
     }
 
     fn recon_panel(&mut self, ui: &mut egui::Ui) {
-        self.page_header(ui, "Army Generator", HelpTopic::Recon);
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.recon_submode, ReconSubmode::New, "New From Templates");
-            ui.selectable_value(&mut self.recon_submode, ReconSubmode::Rework, "Rework Existing");
-        });
-        ui.add_space(8.0);
         match self.recon_submode {
             ReconSubmode::New => self.recon_new_panel(ui),
             ReconSubmode::Rework => self.recon_rework_panel(ui),
@@ -4779,7 +4895,6 @@ New templates park on a square 10 km grid from 40000, 40000 unless 'export in pl
     }
 
     fn airfield_panel(&mut self, ui: &mut egui::Ui) {
-        self.page_header(ui, "Task Editor Airfield to Multiplayer", HelpTopic::Airfield);
         ui.label(
             RichText::new(
                 "Freeflight airfields from the Task Editor include a player aircraft and SP logic that multiplayer does not use.
@@ -4795,20 +4910,6 @@ Use the offical mission editor to open the /missions/_gen.mission file, select t
 Load the messy airfield group here — it may sit in a Group wrapper or as loose blocks at the root in your group.",
             )
         );
-        ui.add_space(8.0);
-
-        ui.horizontal(|ui| {
-            if ui.button("Load airfield…").clicked() {
-                self.load_airfield();
-            }
-            if let Some(path) = &self.airfield_path {
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("file");
-                ui.label(RichText::new(name).italics());
-            }
-        });
         ui.add_space(8.0);
 
         ui.label("Friendly plane coalition (USA airfields: Western)");
@@ -4888,14 +4989,6 @@ Load the messy airfield group here — it may sit in a Group wrapper or as loose
 					ui.label(RichText::new(format!("  {name}")));
                 }
             }
-            ui.add_space(12.0);
-            ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                let export = egui::Button::new(RichText::new("Export File").strong())
-                    .min_size(Vec2::new(200.0, 32.0));
-                if ui.add(export).clicked() {
-                    self.export_airfield();
-                }
-            });
         } else {
             ui.label(
                 RichText::new("Load an airfield group exported from _gen.mission.")
@@ -4905,7 +4998,6 @@ Load the messy airfield group here — it may sit in a Group wrapper or as loose
     }
 
 	fn map_panel(&mut self, ui: &mut egui::Ui) {
-        self.page_header(ui, "Map", HelpTopic::Front);
         ui.label(
             RichText::new(
                 "Draw a box on Korea to clip the period front and areas of influence.
@@ -5098,24 +5190,6 @@ Add reference groups (airfields, blocks) to stamp at their saved locations; they
             }
         });
         
-        ui.add_space(12.0);
-        ui.with_layout(Layout::top_down(Align::Center), |ui| {
-            let generate = egui::Button::new(RichText::new("Generate Base Map").strong())
-                .min_size(Vec2::new(200.0, 32.0));
-            if ui.add(generate).clicked() {
-                self.generate_front_file();
-            }
-            ui.add_space(6.0);
-            if ui
-                .button("Load Base Map…")
-                .on_hover_text(
-                    "Reload a previously generated Korea_BaseMap_*.Group: AO, front, attack arrows, and unit/fighter placement. Objectives are not stored in the file.",
-                )
-                .clicked()
-            {
-                self.load_base_map();
-            }
-        });
     }
    
 fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
@@ -5137,14 +5211,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
     }
 
 	fn map_draw_toolbar(&mut self, ui: &mut egui::Ui) {
-        // Handle shortcuts
-        if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
-            self.remove_last_mark();
-        }
-        if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
-            self.redo_last_mark();
-        }
-
+        // Ctrl Z / Ctrl Y are read once in `update()` (shell::read_shortcuts).
         ui.horizontal(|ui| {
             ui.label(RichText::new("Map Tools:").strong());
         });
@@ -7846,15 +7913,6 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
         ui.horizontal(|ui| {
             self.unit_kind_picker(ui);
         });
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if ui.button("Add templates…").clicked() {
-                self.add_recon_template();
-            }
-            if ui.button("Add folder…").clicked() {
-                self.add_recon_folder();
-            }
-        });
         ui.add_space(8.0);
 
         labeled_slider(ui, "Templates to create", &mut self.recon_total, 1..=64);
@@ -7951,14 +8009,6 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             );
         }
 
-        ui.add_space(12.0);
-        ui.with_layout(Layout::top_down(Align::Center), |ui| {
-            let generate = egui::Button::new(RichText::new("Generate File").strong())
-                .min_size(Vec2::new(200.0, 32.0));
-            if ui.add(generate).clicked() {
-                self.generate_recon_file();
-            }
-        });
     }
 
     fn recon_rework_panel(&mut self, ui: &mut egui::Ui) {
@@ -7974,13 +8024,6 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
                 "Select the {SUGGESTED_ZONE_NAMES} checkzones so we know each type is valid. Influence is the activate ratio for that type: how many of the copies already on the map will win that type's waterfall."
             ))
         );
-        ui.add_space(8.0);
-
-        ui.horizontal(|ui| {
-            if ui.button("Add pack…").clicked() {
-                self.add_placed_packs();
-            }
-        });
         ui.add_space(8.0);
 
         ui.checkbox(
@@ -8125,14 +8168,6 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             }
         }
 
-        ui.add_space(12.0);
-        ui.with_layout(Layout::top_down(Align::Center), |ui| {
-            let generate = egui::Button::new(RichText::new("Generate File").strong())
-                .min_size(Vec2::new(200.0, 32.0));
-            if ui.add(generate).clicked() {
-                self.generate_rework_file();
-            }
-        });
     }
 
     fn recon_timing_sliders(&mut self, ui: &mut egui::Ui) {
@@ -8321,53 +8356,76 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn status_line(&self, ui: &mut egui::Ui) {
-        match &self.status {
-            Status::Idle => {
-                let msg = match self.mode {
-                    AppMode::Template => "Add units, choose Activate or Spawn, then generate a proximity-triggered group.",
-                    AppMode::Fighter => "Ready — no template file required.",
-                    AppMode::Exclusive => {
-                        "Add templates or a generated Exclusive Activation pack, then generate."
-                    }
-                    AppMode::Recon => match self.recon_submode {
-                        ReconSubmode::New => {
-                            "Add ground-unit templates, set the total and ratio, then generate."
-                        }
-                        ReconSubmode::Rework => {
-                            "Add exported Random Ground Units packs, then generate a new file."
-                        }
-                    },
-                    AppMode::Airfield => {
-                        "Load a Freeflight airfield from _gen.mission, then export the cleaned group."
-                    }
-                    AppMode::Map => {
-                        "Draw a box on the Korea map, then generate icons for that area."
-                    },
-                };
-				ui.label(RichText::new(msg));
-            }
-            Status::Info(msg) => {
-                ui.label(
-                    RichText::new(msg)
-                        .color(Color32::from_rgb(110, 150, 110)),
-                );
-            }
+        let (severity, msg) = match &self.status {
+            Status::Idle => (Severity::Info, self.idle_hint().to_owned()),
+            Status::Info(msg) => (Severity::Info, msg.clone()),
             Status::Warn { lead, items } => {
-                ui.vertical(|ui| {
-                    if !lead.is_empty() {
-                        ui.label(RichText::new(lead).color(STATUS_WARN));
-                    }
-                    for item in items {
-                        ui.label(RichText::new(format!("• {item}")).color(STATUS_WARN));
+                let msg = if lead.is_empty() {
+                    items.first().cloned().unwrap_or_default()
+                } else {
+                    lead.clone()
+                };
+                (Severity::Warn, msg)
+            }
+            Status::Error(msg) => (Severity::Error, msg.clone()),
+        };
+        shell::status_bar(ui, severity, &msg, None);
+    }
+
+    /// What the one-line status bar cannot hold: warning bullets and the rest
+    /// of a multi-line message. Shown above the status bar while it lasts.
+    fn status_details(&self, ctx: &egui::Context) {
+        let lines: Vec<&str> = match &self.status {
+            Status::Idle => return,
+            Status::Warn { lead, items } => items
+                .iter()
+                .skip(usize::from(lead.is_empty()))
+                .map(String::as_str)
+                .collect(),
+            Status::Info(msg) | Status::Error(msg) => msg.lines().skip(1).collect(),
+        };
+        if lines.is_empty() {
+            return;
+        }
+        let warn = matches!(self.status, Status::Warn { .. });
+        egui::TopBottomPanel::bottom("status_details")
+            .resizable(false)
+            .max_height(150.0)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    for line in lines {
+                        if warn {
+                            ui.label(RichText::new(format!("• {line}")).color(c::WARN_TEXT));
+                        } else {
+                            ui.label(line);
+                        }
                     }
                 });
+            });
+    }
+
+    fn idle_hint(&self) -> &'static str {
+        match self.mode {
+            AppMode::Template => "Add units, choose Activate or Spawn, then generate a proximity-triggered group.",
+            AppMode::Fighter => "Ready — no template file required.",
+            AppMode::Exclusive => {
+                "Add templates or a generated Exclusive Activation pack, then generate."
             }
-            Status::Error(msg) => {
-                ui.label(
-                    RichText::new(msg)
-                        .color(Color32::from_rgb(200, 90, 90)),
-                );
+            AppMode::Recon => match self.recon_submode {
+                ReconSubmode::New => {
+                    "Add ground-unit templates, set the total and ratio, then generate."
+                }
+                ReconSubmode::Rework => {
+                    "Add exported Random Ground Units packs, then generate a new file."
+                }
+            },
+            AppMode::Airfield => {
+                "Load a Freeflight airfield from _gen.mission, then export the cleaned group."
             }
+            AppMode::Map => {
+                "Draw a box on the Korea map, then generate icons for that area."
+            },
         }
     }
 
@@ -9956,32 +10014,6 @@ fn group_files_in_dir(dir: &Path) -> Vec<PathBuf> {
         .collect();
     paths.sort();
     paths
-}
-
-fn apply_readable_style(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
-    let prop = FontFamily::Proportional;
-    style.text_styles.insert(
-        TextStyle::Small,
-        FontId::new(10.0, prop.clone()),
-    );
-    style.text_styles.insert(
-        TextStyle::Body,
-        FontId::new(13.0, prop.clone()),
-    );
-    style.text_styles.insert(
-        TextStyle::Button,
-        FontId::new(13.0, prop.clone()),
-    );
-    style.text_styles.insert(
-        TextStyle::Heading,
-        FontId::new(18.0, prop),
-    );
-    style.text_styles.insert(
-        TextStyle::Monospace,
-        FontId::new(12.0, FontFamily::Monospace),
-    );
-    ctx.set_style(style);
 }
 
 fn army_mix_label(copies: &[ArmyCopyInfo]) -> String {
