@@ -207,14 +207,14 @@ enum MapDrawingMode {
 }
 
 /// Map tool palette, top to bottom; keys 1–6 pick them (README §5.6).
-/// (mode, glyph, name, banner / status hint)
-const MAP_TOOLS: [(MapDrawingMode, &str, &str, &str); 6] = [
-    (MapDrawingMode::None, "⬉", "Select AO / move units", "Drag a box for the AO, or drag a unit"),
-    (MapDrawingMode::BaseFront, "≈", "Draw front", "Click west to east, or drag · Esc to cancel"),
-    (MapDrawingMode::Salient, "∩", "Salient", "Click along the front · right-click to finish · Esc to cancel"),
-    (MapDrawingMode::AttackArrow, "➚", "Attack arrow", "Drag from tail to tip · Esc to cancel"),
-    (MapDrawingMode::PlaceEastObjective, "◆", "DPRK objective", "Click to place · Shift for more · right-click removes"),
-    (MapDrawingMode::PlaceNatoObjective, "◆", "NATO objective", "Click to place · Shift for more · right-click removes"),
+/// (mode, icon, name, banner / status hint)
+const MAP_TOOLS: [(MapDrawingMode, shell::ToolIcon, &str, &str); 6] = [
+    (MapDrawingMode::None, shell::ToolIcon::Select, "Select AO / move units", "Drag a box for the AO, or drag a unit"),
+    (MapDrawingMode::BaseFront, shell::ToolIcon::Front, "Draw front", "Click west to east, or drag · Esc to cancel"),
+    (MapDrawingMode::Salient, shell::ToolIcon::Salient, "Salient", "Click along the front · right-click to finish · Esc to cancel"),
+    (MapDrawingMode::AttackArrow, shell::ToolIcon::Arrow, "Attack arrow", "Drag from tail to tip · Esc to cancel"),
+    (MapDrawingMode::PlaceEastObjective, shell::ToolIcon::Objective, "DPRK objective", "Click to place · Shift for more"),
+    (MapDrawingMode::PlaceNatoObjective, shell::ToolIcon::Objective, "NATO objective", "Click to place · Shift for more"),
 ];
 
 /// What Template Reset / Remove / Load can take away; restored by Ctrl Z.
@@ -248,6 +248,25 @@ struct MapForces {
     east_objectives: Vec<(f64, f64)>,
     nato_objectives: Vec<(f64, f64)>,
     refs: Vec<MapRefGroup>,
+    /// Drawn lines, only for Clear lines / salients / arrows; restored only when set.
+    lines: Option<MapLines>,
+}
+
+/// What Clear lines / salients / arrows can take away.
+struct MapLines {
+    custom_front: Vec<(f64, f64)>,
+    salients: Vec<Vec<(f64, f64)>>,
+    attack_arrows: Vec<((f64, f64), (f64, f64))>,
+    drawn_marks: Vec<DrawnMark>,
+}
+
+/// The last undoable Map action, so Ctrl Z and the status bar's Undo label
+/// agree (README §6.3): a drawing (drawn-mark undo) or a Clear / Remove
+/// (the `map_undo` snapshot).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MapAction {
+    Drawing,
+    Clear,
 }
 
 /// A destructive action waiting for its confirmation dialog.
@@ -268,10 +287,39 @@ enum MapDock {
     Terrain,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+impl MapDock {
+    /// The dock's tab strip; References carries its count.
+    fn tabs(refs: usize) -> [(MapDock, &'static str, Option<usize>); 4] {
+        [
+            (MapDock::Period, "Period", None),
+            (MapDock::Forces, "Forces", None),
+            (MapDock::References, "References", Some(refs)),
+            (MapDock::Terrain, "Terrain", None),
+        ]
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum DrawnMark {
     Salient,
     AttackArrow,
+    /// One Draw-front click or drag; undo truncates `custom_front_xz` back to `prev_len`.
+    Front { prev_len: usize },
+}
+
+impl DrawnMark {
+    fn is_front(self) -> bool {
+        matches!(self, DrawnMark::Front { .. })
+    }
+
+    /// Status-bar undo label for this drawing.
+    fn label(self) -> &'static str {
+        match self {
+            DrawnMark::Salient => "Drew a salient",
+            DrawnMark::AttackArrow => "Drew an attack arrow",
+            DrawnMark::Front { .. } => "Drew front line",
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -494,6 +542,13 @@ struct GroupGeneratorApp {
 	redo_marks: Vec<DrawnMark>,
     redo_salients: Vec<Vec<(f64, f64)>>,
     redo_attack_arrows: Vec<((f64, f64), (f64, f64))>,
+    /// Points a front-mark undo took off `custom_front_xz`, for Ctrl Y.
+    redo_fronts: Vec<Vec<(f64, f64)>>,
+    /// `custom_front_xz.len()` when the current Draw-front drag started.
+    front_stroke: Option<usize>,
+    /// A tool was cancelled or switched: ignore the map's left button until
+    /// it is released, so the rest of that drag draws nothing.
+    map_void_drag: bool,
     map_fighters: Option<MapFighterLayout>,
     map_imported_fighters: Vec<ImportedFighterPack>,
     fighter_waves: u32,
@@ -558,8 +613,11 @@ struct GroupGeneratorApp {
     recon_undo: shell::Undo<(ReconSubmode, Vec<ReconSlot>)>,
     bomber_undo: shell::Undo<Vec<BomberSlot>>,
     map_undo: shell::Undo<MapForces>,
-    /// `drawn_marks.len()` when `map_undo` was recorded: later marks undo first.
+    /// `drawn_marks.len()` right after the recorded Clear: marks above it were
+    /// drawn later and undo first; once they are gone the Clear is next.
     map_undo_marks: usize,
+    /// What Ctrl Z undoes next on Map (see `map_undo_kind`).
+    map_last: MapAction,
     map_saved: String,
     confirm: Option<Confirm>,
     /// Unit card being dragged in the Units list (index at drag start).
@@ -1718,7 +1776,10 @@ impl Default for GroupGeneratorApp {
             drawn_marks: Vec::new(),
 			redo_marks: Vec::new(),
             redo_salients: Vec::new(),
-            redo_attack_arrows: Vec::new(),			
+            redo_attack_arrows: Vec::new(),
+            redo_fronts: Vec::new(),
+            front_stroke: None,
+            map_void_drag: false,
             map_fighters: None,
             map_imported_fighters: Vec::new(),
             fighter_waves: 2,
@@ -1777,6 +1838,7 @@ impl Default for GroupGeneratorApp {
             bomber_undo: shell::Undo::default(),
             map_undo: shell::Undo::default(),
             map_undo_marks: 0,
+            map_last: MapAction::Drawing,
             map_saved: String::new(),
             confirm: None,
             tpl_card_drag: None,
@@ -1810,6 +1872,7 @@ impl GroupGeneratorApp {
     /// One frame of the whole app. `update` only forwards here, so the UI
     /// tests (`ui_tests.rs`) can drive frames on a bare `egui::Context`.
     fn ui(&mut self, ctx: &egui::Context) {
+        ensure_side_textures(ctx);
         self.poll_harvest(ctx);
         let keys = shell::read_shortcuts(ctx, self.mode == AppMode::Map);
         self.handle_shortcuts(&keys);
@@ -1913,7 +1976,7 @@ impl GroupGeneratorApp {
                 self.redo_last_mark();
             }
             if let Some(i) = keys.map_tool {
-                self.map_drawing_mode = MAP_TOOLS[i].0;
+                self.pick_map_tool(MAP_TOOLS[i].0);
             }
             if keys.escape {
                 self.cancel_map_tool();
@@ -5120,10 +5183,21 @@ impl GroupGeneratorApp {
             east_objectives: self.east_objectives.clone(),
             nato_objectives: self.nato_objectives.clone(),
             refs: self.map_refs.clone(),
+            lines: None,
         }
     }
 
     fn restore_map_forces(&mut self, f: MapForces) {
+        if let Some(lines) = f.lines {
+            self.custom_front_xz = lines.custom_front;
+            self.salients = lines.salients;
+            self.attack_arrows = lines.attack_arrows;
+            self.drawn_marks = lines.drawn_marks;
+            self.current_salient.clear();
+            self.attack_drag = None;
+            self.front_stroke = None;
+            self.clear_redo_stack();
+        }
         self.map_ships = f.ships;
         self.map_ground_east = f.ground_east;
         self.map_ground_nato = f.ground_nato;
@@ -5148,6 +5222,81 @@ impl GroupGeneratorApp {
     fn record_map_undo(&mut self, label: String) {
         self.map_undo.record(label, self.map_forces());
         self.map_undo_marks = self.drawn_marks.len();
+        self.map_last = MapAction::Clear;
+    }
+
+    /// Clear lines / salients / arrows (Period tab), undoable with Ctrl Z.
+    fn clear_map_lines(&mut self, front: bool, salients: bool, arrows: bool) {
+        let n_front = usize::from(front && !self.custom_front_xz.is_empty());
+        let n_sal = if salients { self.salients.len() } else { 0 };
+        let n_arr = if arrows { self.attack_arrows.len() } else { 0 };
+        let mut parts = Vec::new();
+        if n_front > 0 {
+            parts.push("the drawn front".to_string());
+        }
+        if n_sal > 0 {
+            parts.push(count_noun(n_sal, "salient", "salients"));
+        }
+        if n_arr > 0 {
+            parts.push(count_noun(n_arr, "arrow", "arrows"));
+        }
+        let what = match parts.len() {
+            0 => "a drawing in progress".to_string(),
+            1 => parts.remove(0),
+            _ => {
+                let last = parts.pop().unwrap_or_default();
+                format!("{} and {last}", parts.join(", "))
+            }
+        };
+        let mut snapshot = self.map_forces();
+        snapshot.lines = Some(MapLines {
+            custom_front: self.custom_front_xz.clone(),
+            salients: self.salients.clone(),
+            attack_arrows: self.attack_arrows.clone(),
+            drawn_marks: self.drawn_marks.clone(),
+        });
+        self.map_undo.record(format!("Cleared {what}"), snapshot);
+        self.map_last = MapAction::Clear;
+        if front {
+            self.custom_front_xz.clear();
+            self.front_stroke = None;
+            self.drawn_marks.retain(|m| !m.is_front());
+        }
+        if salients {
+            self.salients.clear();
+            self.current_salient.clear();
+            self.drawn_marks.retain(|m| *m != DrawnMark::Salient);
+        }
+        if arrows {
+            self.attack_arrows.clear();
+            self.attack_drag = None;
+            self.drawn_marks.retain(|m| *m != DrawnMark::AttackArrow);
+        }
+        self.clear_redo_stack();
+        self.map_undo_marks = self.drawn_marks.len();
+    }
+
+    /// What Ctrl Z undoes next on Map: the last action kind, falling back to
+    /// the other kind when nothing of the last kind is left.
+    fn map_undo_kind(&self) -> Option<MapAction> {
+        let drawing = self.map_has_marks();
+        let clear = self.map_undo.label().is_some();
+        match self.map_last {
+            MapAction::Drawing if drawing => Some(MapAction::Drawing),
+            MapAction::Clear if clear => Some(MapAction::Clear),
+            _ if drawing => Some(MapAction::Drawing),
+            _ if clear => Some(MapAction::Clear),
+            _ => None,
+        }
+    }
+
+    /// Status-bar label for what Ctrl Z undoes next on Map.
+    fn map_undo_label(&self) -> Option<&str> {
+        match self.map_undo_kind()? {
+            MapAction::Clear => self.map_undo.label(),
+            MapAction::Drawing if self.map_stroke_in_progress() => Some("Unfinished drawing"),
+            MapAction::Drawing => self.drawn_marks.last().map(|m| m.label()),
+        }
     }
 
     /// Drop the current tab's undo snapshot once the tab is edited after it
@@ -5190,12 +5339,16 @@ impl GroupGeneratorApp {
                 self.bomber_undo.settle(fp);
             }
             AppMode::Map => {
+                // Lines count too when the snapshot holds them (a line Clear).
+                // Drawings with their own undo rebase it instead (`note_map_drawing`).
+                let lines = self.map_undo.peek().is_some_and(|f| f.lines.is_some());
                 let fp = hash(format!(
                     "{:?}",
                     (
                         (&self.map_ships, &self.map_ground_east, &self.map_ground_nato, &self.map_fighters),
                         (&self.east_objectives, &self.nato_objectives, self.map_armies.len(), self.map_refs.len()),
                         self.map_imported_fighters.len(),
+                        lines.then_some((&self.custom_front_xz, &self.salients, &self.attack_arrows)),
                     )
                 ));
                 self.map_undo.settle(fp);
@@ -5214,13 +5367,13 @@ impl GroupGeneratorApp {
             AppMode::Template => self.tpl_undo.label(),
             AppMode::Recon => self.recon_undo.label(),
             AppMode::Exclusive => self.bomber_undo.label(),
-            AppMode::Map => self.map_undo.label(),
+            AppMode::Map => self.map_undo_label(),
             AppMode::Fighter | AppMode::Airfield => None,
         }
     }
 
-    /// Ctrl Z and the status bar's Undo. On Map a drawing made after the
-    /// last Clear is undone first (the existing mark undo).
+    /// Ctrl Z, the status bar's Undo and the Map palette's Undo. On Map it
+    /// undoes the last action: a drawing (the drawn-mark undo) or a Clear.
     fn undo_current_tab(&mut self) {
         let label = self.undo_label().map(str::to_owned);
         match self.mode {
@@ -5243,16 +5396,16 @@ impl GroupGeneratorApp {
                     self.bomber_slots = slots;
                 }
             }
-            AppMode::Map => {
-                if self.map_undo.label().is_some() && self.drawn_marks.len() <= self.map_undo_marks {
+            AppMode::Map => match self.map_undo_kind() {
+                Some(MapAction::Clear) => {
                     if let Some(f) = self.map_undo.take() {
                         self.restore_map_forces(f);
                     }
-                } else {
-                    self.remove_last_mark();
-                    return;
+                    self.map_last = MapAction::Drawing;
                 }
-            }
+                Some(MapAction::Drawing) => self.remove_last_mark(),
+                None => return,
+            },
             AppMode::Fighter | AppMode::Airfield => return,
         }
         if let Some(label) = label {
@@ -5470,14 +5623,14 @@ impl GroupGeneratorApp {
             self.terrain_error = None;
             self.terrain_relief = None;
         }
-        shell::hint(ui, "Generate does not use these heights yet; that is the next terrain phase.", false);
+        shell::hint(ui, "Exports keep their own heights for now.", false);
         ui.add_space(6.0);
         ui.separator();
 
         shell::section_title(ui, "Measure", Some("export probes"));
         if ui
             .button("Export survey pass…")
-            .on_hover_text("390,625 T-34s, 800 m apart over the whole map (sea and frame included)")
+            .on_hover_text("390,625 probe points, 800 m apart over the whole map (sea and frame included)")
             .clicked()
         {
             self.terrain_export_survey();
@@ -5539,6 +5692,10 @@ impl GroupGeneratorApp {
             self.terrain_relief = None;
         }
         shell::hint(ui, "With a layer on, the map shows the ground height under the pointer.", false);
+        ui.add_space(6.0);
+        if shell::hint(ui, "How to measure heights, step by step.", true) {
+            self.open_help(HelpTopic::Front);
+        }
     }
 
     fn terrain_export_survey(&mut self) {
@@ -5589,7 +5746,7 @@ impl GroupGeneratorApp {
             }
         }
         self.status = Status::Info(format!(
-            "Wrote {written} probe tiles ({probes} T-34s) to {}.",
+            "Wrote {written} probe tiles ({probes} probe points) to {}.",
             dir.display()
         ));
     }
@@ -5622,7 +5779,7 @@ impl GroupGeneratorApp {
             {
                 Ok(r) => r,
                 Err(e) => {
-                    lines.push(format!("{name}: FAILED {e}"));
+                    lines.push(format!("{name}: failed, {e}"));
                     refused.push(name);
                     continue;
                 }
@@ -5635,7 +5792,7 @@ impl GroupGeneratorApp {
                 rep.probe_points,
                 rep.learned,
                 rep.unsnapped,
-                if rep.merged { "" } else { " — NOT merged (looks unsnapped)" }
+                if rep.merged { "" } else { " — not merged (looks unsnapped)" }
             ));
             if rep.merged {
                 merged += 1;
@@ -6886,20 +7043,69 @@ impl GroupGeneratorApp {
             });
     }
 
-    /// Esc on Map: drop a half-drawn mark or WP pick and return to Select.
+    /// Esc on Map: drop a half-drawn mark (salient, arrow, or the points of a
+    /// front drag still under way) or WP pick, and return to Select. A
+    /// finished front stays.
     fn cancel_map_tool(&mut self) {
-        self.current_salient.clear();
-        self.attack_drag = None;
+        self.cancel_map_stroke();
         self.wp_selected = None;
         self.wp_drag = None;
+        // The rest of a cancelled drag must not move the AO from a stale origin.
+        self.map_drag_uv = None;
         self.map_drawing_mode = MapDrawingMode::None;
     }
 
+    /// Drop whatever is half drawn. Returns true if there was something.
+    fn cancel_map_stroke(&mut self) -> bool {
+        let had = self.map_stroke_in_progress();
+        self.map_void_drag = true;
+        self.current_salient.clear();
+        self.attack_drag = None;
+        if let Some(prev_len) = self.front_stroke.take() {
+            self.custom_front_xz.truncate(prev_len);
+            self.map_undo.rebase();
+        }
+        had
+    }
+
+    fn map_stroke_in_progress(&self) -> bool {
+        !self.current_salient.is_empty() || self.attack_drag.is_some() || self.front_stroke.is_some()
+    }
+
+    /// Picking a tool (palette, keys 1–6, the Forces objective buttons).
+    /// Switching to another tool drops a half-drawn mark, as Esc does.
+    fn pick_map_tool(&mut self, mode: MapDrawingMode) {
+        if mode != self.map_drawing_mode {
+            self.cancel_map_stroke();
+        }
+        self.map_drawing_mode = mode;
+    }
+
+    /// Anything Ctrl Z can take back as a drawing: finished marks (front
+    /// strokes, salients, arrows) or one still being drawn.
     fn map_has_marks(&self) -> bool {
-        !self.salients.is_empty()
-            || !self.current_salient.is_empty()
+        !self.drawn_marks.is_empty()
+            || !self.salients.is_empty()
             || !self.attack_arrows.is_empty()
-            || self.attack_drag.is_some()
+            || self.map_stroke_in_progress()
+    }
+
+    /// A drawing was finished: it goes on the mark stack and becomes the
+    /// last action (Ctrl Z undoes it before any earlier Clear).
+    fn note_map_drawing(&mut self, mark: DrawnMark) {
+        self.drawn_marks.push(mark);
+        self.clear_redo_stack();
+        self.map_last = MapAction::Drawing;
+        self.map_undo.rebase();
+    }
+
+    /// Front strokes lose their undo when the front is replaced (date slider,
+    /// timeline snap): their stored lengths no longer describe it.
+    fn forget_front_marks(&mut self) {
+        self.front_stroke = None;
+        self.drawn_marks.retain(|m| !m.is_front());
+        self.redo_marks.retain(|m| !m.is_front());
+        self.redo_fronts.clear();
     }
 
     /// "Tool: Salient · right-click to finish · Esc to cancel" while a tool is active.
@@ -6917,25 +7123,35 @@ impl GroupGeneratorApp {
             .map(|t| format!("Tool: {} · {}", t.2, t.3))
     }
 
+    /// Mockup 2f: tools 1–6 with painted icons and their key in the corner,
+    /// a divider between the drawing tools and the objective tools, then
+    /// Undo / Redo at the bottom.
     fn map_tool_palette(&mut self, ui: &mut egui::Ui) {
         ui.spacing_mut().item_spacing.y = 4.0;
-        for (i, (mode, glyph, name, _)) in MAP_TOOLS.iter().enumerate() {
+        for (i, (mode, icon, name, _)) in MAP_TOOLS.iter().enumerate() {
+            if i == 4 {
+                let (r, _) = ui.allocate_exact_size(Vec2::new(shell::TOOL_SIZE, 9.0), Sense::hover());
+                ui.painter().hline(
+                    (r.center().x - 14.0)..=(r.center().x + 14.0),
+                    r.center().y,
+                    Stroke::new(1.0_f32, c::DIVIDER),
+                );
+            }
             let tint = match mode {
                 MapDrawingMode::PlaceEastObjective => Some(c::DPRK),
                 MapDrawingMode::PlaceNatoObjective => Some(c::NATO),
                 _ => None,
             };
             let key = (i + 1).to_string();
-            if shell::tool_button(ui, None, glyph, tint, name, &key, self.map_drawing_mode == *mode).clicked() {
-                self.map_drawing_mode = *mode;
+            let active = self.map_drawing_mode == *mode;
+            if shell::tool_icon_button(ui, *icon, tint, name, &key, true, active).clicked() {
+                self.pick_map_tool(*mode);
             }
         }
-        ui.add_space(2.0);
-        ui.separator();
         ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
             let can_redo = !self.redo_marks.is_empty();
-            let can_undo = self.map_has_marks();
+            let undo_label = self.map_undo_label().map(str::to_owned);
             // Disabled tools fade to 40 % (README §5.6).
             let mut redo = false;
             let mut undo = false;
@@ -6944,39 +7160,30 @@ impl GroupGeneratorApp {
                     ui.disable();
                     ui.set_opacity(0.4);
                 }
-                redo = shell::tool_button(ui, None, "↷", None, "Redo drawing", "Ctrl Y", false).clicked();
+                redo = shell::tool_icon_button(ui, shell::ToolIcon::Redo, None, "Redo drawing", "Ctrl Y", false, false)
+                    .clicked();
             });
             ui.scope(|ui| {
-                if !can_undo {
+                if undo_label.is_none() {
                     ui.disable();
                     ui.set_opacity(0.4);
                 }
-                undo = shell::tool_button(ui, None, "↶", None, "Undo drawing", "Ctrl Z", false).clicked();
+                let tip = undo_label.as_deref().map_or("Undo".to_string(), |l| format!("Undo: {l}"));
+                undo = shell::tool_icon_button(ui, shell::ToolIcon::Undo, None, &tip, "Ctrl Z", false, false)
+                    .clicked();
             });
             if redo {
                 self.redo_last_mark();
             }
             if undo {
-                self.remove_last_mark();
+                self.undo_current_tab();
             }
         });
     }
 
     fn map_dock_panel(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
-        let refs = format!("References {}", self.map_refs.len());
-        shell::segmented(
-            ui,
-            &mut self.map_dock,
-            &[
-                (MapDock::Period, "Period"),
-                (MapDock::Forces, "Forces"),
-                (MapDock::References, refs.as_str()),
-                (MapDock::Terrain, "Terrain"),
-            ],
-        );
+        shell::dock_tabs(ui, &mut self.map_dock, &MapDock::tabs(self.map_refs.len()));
         ui.add_space(4.0);
-        ui.separator();
         egui::ScrollArea::vertical()
             .id_salt("map_dock_scroll")
             .auto_shrink([false, false])
@@ -7085,30 +7292,24 @@ impl GroupGeneratorApp {
         ui.horizontal_wrapped(|ui| {
             let has_custom = !self.custom_front_xz.is_empty() || self.map_has_marks();
             ui.add_enabled_ui(has_custom, |ui| {
-                if ui.button("Clear lines").on_hover_text("Clear the drawn front, salients and arrows").clicked() {
-                    self.custom_front_xz.clear();
-                    self.salients.clear();
-                    self.current_salient.clear();
-                    self.attack_arrows.clear();
-                    self.attack_drag = None;
-                    self.drawn_marks.clear();
-                    self.clear_redo_stack();
+                if ui
+                    .button("Clear lines")
+                    .on_hover_text("Clear the drawn front, salients and arrows. Ctrl Z brings them back.")
+                    .clicked()
+                {
+                    self.clear_map_lines(true, true, true);
                 }
             });
             let has_salients = !self.salients.is_empty() || !self.current_salient.is_empty();
             ui.add_enabled_ui(has_salients, |ui| {
-                if ui.button("Clear salients").clicked() {
-                    self.salients.clear();
-                    self.current_salient.clear();
-                    self.drawn_marks.retain(|m| *m != DrawnMark::Salient);
+                if ui.button("Clear salients").on_hover_text("Ctrl Z brings them back.").clicked() {
+                    self.clear_map_lines(false, true, false);
                 }
             });
             let has_arrows = !self.attack_arrows.is_empty() || self.attack_drag.is_some();
             ui.add_enabled_ui(has_arrows, |ui| {
-                if ui.button("Clear arrows").clicked() {
-                    self.attack_arrows.clear();
-                    self.attack_drag = None;
-                    self.drawn_marks.retain(|m| *m != DrawnMark::AttackArrow);
+                if ui.button("Clear arrows").on_hover_text("Ctrl Z brings them back.").clicked() {
+                    self.clear_map_lines(false, false, true);
                 }
             });
         });
@@ -7152,7 +7353,7 @@ impl GroupGeneratorApp {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let has_fighters = self.map_fighters.as_ref().is_some_and(|l| !l.spots.is_empty());
                 ui.add_enabled_ui(has_fighters, |ui| {
-                    if ui.button("Clear").on_hover_text("Clear placed fighters").clicked() {
+                    if ui.button("Clear").on_hover_text("Clear placed fighters. Ctrl Z brings them back.").clicked() {
                         let n = self.map_fighters.as_ref().map_or(0, |l| l.spots.len());
                         self.record_map_undo(format!("Cleared {n} fighter groups"));
                         self.map_fighters = None;
@@ -7174,19 +7375,19 @@ impl GroupGeneratorApp {
                 .on_hover_text("DPRK objective tool (5): click the map to place one")
                 .clicked()
             {
-                self.map_drawing_mode = MapDrawingMode::PlaceEastObjective;
+                self.pick_map_tool(MapDrawingMode::PlaceEastObjective);
             }
             if ui
                 .selectable_label(n_active, format!("NATO · {}", self.nato_objectives.len()))
                 .on_hover_text("NATO objective tool (6): click the map to place one")
                 .clicked()
             {
-                self.map_drawing_mode = MapDrawingMode::PlaceNatoObjective;
+                self.pick_map_tool(MapDrawingMode::PlaceNatoObjective);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let has_objs = !self.east_objectives.is_empty() || !self.nato_objectives.is_empty();
                 ui.add_enabled_ui(has_objs, |ui| {
-                    if ui.button("Clear").on_hover_text("Clear all objectives").clicked() {
+                    if ui.button("Clear").on_hover_text("Clear all objectives. Ctrl Z brings them back.").clicked() {
                         let n = self.east_objectives.len() + self.nato_objectives.len();
                         self.record_map_undo(format!("Cleared {n} objectives"));
                         self.east_objectives.clear();
@@ -7275,7 +7476,7 @@ impl GroupGeneratorApp {
                     || self.map_ground_nato.is_some()
                     || !self.map_armies.is_empty();
                 ui.add_enabled_ui(has_units, |ui| {
-                    if ui.button("Clear").on_hover_text("Clear placed and loaded units").clicked() {
+                    if ui.button("Clear").on_hover_text("Clear placed and loaded units. Ctrl Z brings them back.").clicked() {
                         self.record_map_undo(format!("Cleared {} units", e_n + n_n + ships));
                         self.map_ships = None;
                         self.map_ground_east = None;
@@ -7402,6 +7603,7 @@ impl GroupGeneratorApp {
                     rail = resp.rect;
                     if resp.changed() {
                         self.custom_front_xz.clear();
+                        self.forget_front_marks();
                         let i = self.front_t.round().clamp(0.0, (n_slots - 1) as f32) as usize;
                         self.apply_timeline_mark(i, true);
                     }
@@ -7469,11 +7671,11 @@ impl GroupGeneratorApp {
             egui::UiBuilder::new().max_rect(legend_rect).layout(Layout::left_to_right(Align::Max)),
             |ui| {
                 chip(ui, &mut |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    legend_swatch(ui, Color32::from_rgb(220, 30, 30), "Front");
-                    legend_swatch(ui, Color32::from_rgb(155, 0, 0), "DPRK");
-                    legend_swatch(ui, Color32::from_rgb(0, 120, 150), "NATO");
-                    legend_swatch(ui, Color32::from_rgb(255, 210, 70), "AO");
+                    ui.spacing_mut().item_spacing.x = 12.0;
+                    legend_line(ui, c::FRONT, false, "Front");
+                    legend_side(ui, shell::Side::Dprk, "DPRK");
+                    legend_side(ui, shell::Side::Nato, "NATO");
+                    legend_line(ui, c::ACCENT_800, true, "AO");
                     ui.menu_button("All layers ▾", |ui| self.draw_map_legend(ui))
                         .response
                         .on_hover_text("Every map layer and its color");
@@ -7514,28 +7716,28 @@ impl GroupGeneratorApp {
         if self.fighter_tex_east.is_none() {
             self.fighter_tex_east = Some(ctx.load_texture(
                 "eastern_fighter",
-                load_fighter_svg(include_bytes!("../assets/EasternFighter.svg")),
+                recolor_to_side(fighter_svg_north(true, 128), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.fighter_tex_nato.is_none() {
             self.fighter_tex_nato = Some(ctx.load_texture(
                 "nato_fighter",
-                load_fighter_svg(include_bytes!("../assets/NatoFighter.svg")),
+                recolor_to_side(fighter_svg_north(false, 128), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.ship_tex_east.is_none() {
             self.ship_tex_east = Some(ctx.load_texture(
                 "eastern_shipping",
-                load_fighter_svg(include_bytes!("../assets/EasternShipping.svg")),
+                load_side_svg(include_bytes!("../assets/EasternShipping.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.ship_tex_nato.is_none() {
             self.ship_tex_nato = Some(ctx.load_texture(
                 "nato_shipping",
-                load_fighter_svg(include_bytes!("../assets/NatoShiping.svg")),
+                load_side_svg(include_bytes!("../assets/NatoShiping.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
@@ -7549,84 +7751,84 @@ impl GroupGeneratorApp {
         if self.obj_tex_east.is_none() {
             self.obj_tex_east = Some(ctx.load_texture(
                 "eastern_objective",
-                load_fighter_svg(include_bytes!("../assets/EasternObjective.svg")),
+                load_side_svg(include_bytes!("../assets/EasternObjective.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.obj_tex_nato.is_none() {
             self.obj_tex_nato = Some(ctx.load_texture(
                 "nato_objective",
-                load_fighter_svg(include_bytes!("../assets/NatoObjective.svg")),
+                load_side_svg(include_bytes!("../assets/NatoObjective.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.armor_tex_east.is_none() {
             self.armor_tex_east = Some(ctx.load_texture(
                 "eastern_armor",
-                load_fighter_svg(include_bytes!("../assets/EasternArmor.svg")),
+                load_side_svg(include_bytes!("../assets/EasternArmor.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.armor_tex_nato.is_none() {
             self.armor_tex_nato = Some(ctx.load_texture(
                 "nato_armor",
-                load_fighter_svg(include_bytes!("../assets/NatoArmor.svg")),
+                load_side_svg(include_bytes!("../assets/NatoArmor.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.supply_tex_east.is_none() {
             self.supply_tex_east = Some(ctx.load_texture(
                 "eastern_supply",
-                load_fighter_svg(include_bytes!("../assets/EasternSupply.svg")),
+                load_side_svg(include_bytes!("../assets/EasternSupply.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.supply_tex_nato.is_none() {
             self.supply_tex_nato = Some(ctx.load_texture(
                 "nato_supply",
-                load_fighter_svg(include_bytes!("../assets/NatoSupply.svg")),
+                load_side_svg(include_bytes!("../assets/NatoSupply.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.arty_tex_east.is_none() {
             self.arty_tex_east = Some(ctx.load_texture(
                 "eastern_arty",
-                load_fighter_svg(include_bytes!("../assets/EasternArty.svg")),
+                load_side_svg(include_bytes!("../assets/EasternArty.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.arty_tex_nato.is_none() {
             self.arty_tex_nato = Some(ctx.load_texture(
                 "nato_arty",
-                load_fighter_svg(include_bytes!("../assets/NatoArty.svg")),
+                load_side_svg(include_bytes!("../assets/NatoArty.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.train_tex_east.is_none() {
             self.train_tex_east = Some(ctx.load_texture(
                 "eastern_train",
-                load_fighter_svg(include_bytes!("../assets/EasternTrain.svg")),
+                load_side_svg(include_bytes!("../assets/EasternTrain.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.train_tex_nato.is_none() {
             self.train_tex_nato = Some(ctx.load_texture(
                 "nato_train",
-                load_fighter_svg(include_bytes!("../assets/NatoTrain.svg")),
+                load_side_svg(include_bytes!("../assets/NatoTrain.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.infantry_tex_east.is_none() {
             self.infantry_tex_east = Some(ctx.load_texture(
                 "eastern_infantry",
-                load_fighter_svg(include_bytes!("../assets/EasternInfantry.svg")),
+                load_side_svg(include_bytes!("../assets/EasternInfantry.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.infantry_tex_nato.is_none() {
             self.infantry_tex_nato = Some(ctx.load_texture(
                 "nato_infantry",
-                load_fighter_svg(include_bytes!("../assets/NatoInfantry.svg")),
+                load_side_svg(include_bytes!("../assets/NatoInfantry.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
@@ -7857,17 +8059,31 @@ impl GroupGeneratorApp {
                 .and_then(|p| snap_to_front(&snap_line, p))
         };
 
-        if let Some(pos) = response.interact_pointer_pos() {
+        // After Esc or a tool switch, the drag that was under way ends unused.
+        if self.map_void_drag && !ui.input(|i| i.pointer.primary_down()) {
+            self.map_void_drag = false;
+        }
+        if self.map_void_drag {
+            // Swallow the rest of the cancelled drag.
+        } else if let Some(pos) = response.interact_pointer_pos() {
             let uv = pos_to_uv(map_rect, pos);
             let (x, z) = uv_to_world(uv);
 
             match self.map_drawing_mode {
                 MapDrawingMode::BaseFront => {
-                    if response.dragged_by(egui::PointerButton::Primary)
-                        || response.clicked_by(egui::PointerButton::Primary)
-                    {
+                    // Each click, or each whole drag, is one undoable front stroke.
+                    let dragging = response.dragged_by(egui::PointerButton::Primary);
+                    if dragging || response.clicked_by(egui::PointerButton::Primary) {
+                        let before = self.custom_front_xz.len();
+                        if dragging && self.front_stroke.is_none() {
+                            self.front_stroke = Some(before);
+                        }
                         if can_extend_west_east(&self.custom_front_xz, (x, z), 2500.0) {
                             self.custom_front_xz.push((x, z));
+                            self.map_undo.rebase();
+                            if !dragging {
+                                self.note_map_drawing(DrawnMark::Front { prev_len: before });
+                            }
                         }
                     }
                 }
@@ -7911,8 +8127,7 @@ impl GroupGeneratorApp {
                             let dz = tip.1 - tail.1;
                             if (dx * dx + dz * dz).sqrt() >= 2_500.0 {
                                 self.attack_arrows.push((tail, tip));
-                                self.drawn_marks.push(DrawnMark::AttackArrow);
-								self.clear_redo_stack();
+                                self.note_map_drawing(DrawnMark::AttackArrow);
                             }
                         }
                     }
@@ -8089,6 +8304,15 @@ impl GroupGeneratorApp {
         {
             self.commit_current_salient(&snap_line);
         }
+        // A Draw-front drag ends: its points become one mark.
+        if let Some(prev_len) = self.front_stroke {
+            if !response.dragged_by(egui::PointerButton::Primary) {
+                self.front_stroke = None;
+                if self.custom_front_xz.len() > prev_len {
+                    self.note_map_drawing(DrawnMark::Front { prev_len });
+                }
+            }
+        }
 
         let (composite_front, patches) = apply_salients(full_dense.clone(), &self.salients);
         let painter = ui.painter_at(rect);
@@ -8113,7 +8337,7 @@ impl GroupGeneratorApp {
 
         if composite_front.len() >= 2 {
             draw_front_inside_outside(&painter, map_rect, &composite_front, self.front_aabb);
-            let salient_stroke = Stroke::new(1.5_f32, Color32::from_rgb(180, 180, 80));
+            let salient_stroke = Stroke::new(1.5_f32, SALIENT_OUTLINE);
             for patch in &patches {
                 for ring in clip_ring_to_aabb(&patch.ring, self.front_aabb) {
                     draw_dashed_world_line(&painter, map_rect, &ring, salient_stroke);
@@ -8211,14 +8435,17 @@ impl GroupGeneratorApp {
         self.draw_map_objectives(&painter, map_rect);
 
         // 8. Draw AABB Box
+        // AO: dashed ACCENT_800 outline over a ~7 % accent wash (mockup 2f).
         let box_rect = aabb_to_screen(map_rect, self.front_aabb);
-        painter.rect_stroke(
-            box_rect,
-            0.0,
-            Stroke::new(2.0_f32, Color32::from_rgb(255, 210, 70)),
-            egui::StrokeKind::Outside,
-        );
-        painter.rect_filled(box_rect, 0.0, Color32::from_rgba_unmultiplied(255, 210, 70, 25));
+        painter.rect_filled(box_rect, 0.0, AO_FILL);
+        let corners = [
+            box_rect.left_top(),
+            box_rect.right_top(),
+            box_rect.right_bottom(),
+            box_rect.left_bottom(),
+            box_rect.left_top(),
+        ];
+        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.5_f32, c::ACCENT_800), 6.0, 4.0));
 
         // Tool banner at the top-center (only while a tool or a WP pick is active).
         let banner = if let Some(t) = MAP_TOOLS
@@ -8337,16 +8564,13 @@ impl GroupGeneratorApp {
             self.fighter_tex_nato.as_ref()
         };
         let size = Vec2::splat(26.0);
-        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+        // Fighters face their side's way (README §8): DPRK south, NATO north.
+        // Fighter spots carry no heading of their own, so nothing overrides it.
+        let facing = shell::Side::from_eastern(layout.eastern).facing_rad();
         for spot in &layout.spots {
             let pos = world_to_pos(map_rect, spot.x, spot.z);
             if let Some(tex) = tex {
-                painter.image(
-                    tex.id(),
-                    Rect::from_center_size(pos, size),
-                    uv,
-                    Color32::WHITE,
-                );
+                paint_rotated_image(painter, tex, pos, size, facing, Color32::WHITE);
             } else {
                 painter.circle_filled(pos, 8.0, faction_map_color(layout.eastern));
             }
@@ -8923,13 +9147,13 @@ impl GroupGeneratorApp {
             painter,
             map_rect,
             mapnet::roads(),
-            Stroke::new(1.15_f32, Color32::from_rgba_unmultiplied(110, 18, 18, 128)),
+            Stroke::new(1.15_f32, ROAD_LINE),
         );
         draw_network_lines(
             painter,
             map_rect,
             mapnet::railroads(),
-            Stroke::new(1.35_f32, Color32::from_rgba_unmultiplied(16, 16, 18, 128)),
+            Stroke::new(1.35_f32, RAIL_LINE),
         );
     }
 
@@ -9810,6 +10034,7 @@ impl GroupGeneratorApp {
         self.salients.clear();
         self.current_salient.clear();
         self.drawn_marks.retain(|m| *m != DrawnMark::Salient);
+        self.forget_front_marks();
         self.apply_timeline_mark(idx, true);
         self.front_t = idx.min(TIMELINE.len().saturating_sub(1)) as f32;
     }
@@ -9838,16 +10063,13 @@ impl GroupGeneratorApp {
             return;
         }
         self.salients.push(std::mem::take(&mut self.current_salient));
-        self.drawn_marks.push(DrawnMark::Salient);
-		self.clear_redo_stack();
+        self.note_map_drawing(DrawnMark::Salient);
     }
 
-	fn remove_last_mark(&mut self) {
-        if self.attack_drag.take().is_some() {
-            return;
-        }
-        if !self.current_salient.is_empty() {
-            self.current_salient.clear();
+    /// Undo the last drawing: first a stroke still in progress, then the
+    /// newest finished mark (front stroke, salient or arrow).
+    fn remove_last_mark(&mut self) {
+        if self.cancel_map_stroke() {
             return;
         }
         if let Some(mark) = self.drawn_marks.pop() {
@@ -9864,7 +10086,17 @@ impl GroupGeneratorApp {
                         self.redo_marks.push(mark);
                     }
                 }
+                DrawnMark::Front { prev_len } => {
+                    let cut = prev_len.min(self.custom_front_xz.len());
+                    self.redo_fronts.push(self.custom_front_xz.split_off(cut));
+                    self.redo_marks.push(mark);
+                }
             }
+            self.map_undo.rebase();
+        }
+        // Back below the marks drawn after the last Clear: that Clear is next.
+        if self.map_undo.label().is_some() && self.drawn_marks.len() <= self.map_undo_marks {
+            self.map_last = MapAction::Clear;
         }
     }
 
@@ -9883,7 +10115,15 @@ impl GroupGeneratorApp {
                         self.drawn_marks.push(mark);
                     }
                 }
+                DrawnMark::Front { .. } => {
+                    if let Some(points) = self.redo_fronts.pop() {
+                        self.custom_front_xz.extend(points);
+                        self.drawn_marks.push(mark);
+                    }
+                }
             }
+            self.map_last = MapAction::Drawing;
+            self.map_undo.rebase();
         }
     }
 
@@ -9891,6 +10131,7 @@ impl GroupGeneratorApp {
         self.redo_marks.clear();
         self.redo_salients.clear();
         self.redo_attack_arrows.clear();
+        self.redo_fronts.clear();
     }
 
     fn apply_timeline_mark(&mut self, idx: usize, clear_focus: bool) {
@@ -9927,21 +10168,26 @@ impl GroupGeneratorApp {
         }
     }
 
-	fn draw_map_legend(&self, ui: &mut egui::Ui) {
-		ui.add_space(4.0);
-		ui.label(RichText::new("Legend").strong());
-		ui.horizontal_wrapped(|ui| {
-			legend_swatch(ui, Color32::from_rgba_unmultiplied(110, 18, 18, 128), "Road");
-			legend_swatch(ui, Color32::from_rgba_unmultiplied(16, 16, 18, 128), "Railroad");
-			legend_swatch(ui, Color32::from_rgb(220, 30, 30), "Front Line");
-			legend_swatch(ui, Color32::from_rgb(240, 220, 80), "Major Battle");
-			legend_swatch(ui, Color32::from_rgb(155, 0, 0), "DPRK");
-			legend_swatch(ui, Color32::from_rgb(0, 120, 150), "NATO");
-			legend_swatch(ui, Color32::from_rgb(30, 90, 220), "Airfield");
-			legend_swatch(ui, Color32::from_rgb(255, 140, 40), "Linked entity");
-			legend_swatch(ui, Color32::from_rgb(255, 210, 70), "Block");
-		});
-	}
+    /// "All layers ▾": every map layer, drawn the way the map draws it.
+    fn draw_map_legend(&self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        ui.label(RichText::new("Legend").strong());
+        ui.set_min_width(220.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(320.0);
+            legend_line(ui, c::FRONT, false, "Front line");
+            legend_line(ui, SALIENT_OUTLINE, true, "Salient");
+            legend_line(ui, c::ACCENT_800, true, "AO box");
+            legend_side(ui, shell::Side::Dprk, "DPRK");
+            legend_side(ui, shell::Side::Nato, "NATO");
+            legend_line(ui, ROAD_LINE, false, "Road");
+            legend_line(ui, RAIL_LINE, false, "Railroad");
+            legend_swatch(ui, Color32::from_rgb(240, 220, 80), "Major battle");
+            legend_swatch(ui, Color32::from_rgb(30, 90, 220), "Airfield");
+            legend_swatch(ui, Color32::from_rgb(255, 140, 40), "Linked entity");
+            legend_swatch(ui, BLOCK_DOT, "Block");
+        });
+    }
 
     fn focus_battle(&mut self, battle: &Battle) {
         self.front_focus = Some(battle.id);
@@ -11060,6 +11306,7 @@ impl GroupGeneratorApp {
         self.current_salient.clear();
         self.attack_arrows = imported.attack_arrows;
         self.attack_drag = None;
+        self.front_stroke = None;
         self.drawn_marks.clear();
         self.clear_redo_stack();
         for _ in &self.salients {
@@ -11298,9 +11545,9 @@ fn preview_dot_style(kind: PreviewKind, in_box: bool) -> (Color32, f32) {
         }
         PreviewKind::Block => {
             let color = if in_box {
-                Color32::from_rgb(255, 210, 70) // Remains Yellow/Gold
+                BLOCK_DOT
             } else {
-                Color32::from_rgba_unmultiplied(255, 210, 70, 90)
+                BLOCK_DOT.gamma_multiply(0.35)
             };
             (color, if in_box { 2.4 } else { 1.7 })
         }
@@ -11381,11 +11628,43 @@ fn skip_only_warnings(warnings: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// "1 salient" / "3 salients".
+fn count_noun(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// Legend entry for a dot layer: a small filled square.
 fn legend_swatch(ui: &mut egui::Ui, color: Color32, label: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());
-    ui.painter().rect_filled(rect, 1.0, color);
-	ui.label(RichText::new(label));
-    ui.add_space(8.0);
+    legend_entry(ui, label, |p, r| {
+        p.rect_filled(r.shrink(2.0), 1.0, color);
+    });
+}
+
+/// Legend entry for a line layer: a 14 px line, solid or dashed.
+fn legend_line(ui: &mut egui::Ui, color: Color32, dashed: bool, label: &str) {
+    legend_entry(ui, label, |p, r| {
+        let (a, b) = (r.left_center(), r.right_center());
+        let stroke = Stroke::new(2.0_f32, color);
+        if dashed {
+            p.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.5_f32, color), 4.0, 3.0));
+        } else {
+            p.line_segment([a, b], stroke);
+        }
+    });
+}
+
+/// Legend entry for a side: its marker, turned the side's way.
+fn legend_side(ui: &mut egui::Ui, side: shell::Side, label: &str) {
+    legend_entry(ui, label, |p, r| shell::paint_side_marker(p, r.center(), 12.0, side));
+}
+
+fn legend_entry(ui: &mut egui::Ui, label: &str, paint: impl FnOnce(&egui::Painter, Rect)) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 5.0;
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 14.0), Sense::hover());
+        paint(ui.painter(), rect);
+        ui.label(RichText::new(label).small().color(c::TEXT));
+    });
 }
 
 fn fighter_icon_button(ui: &mut egui::Ui, tex: Option<&TextureHandle>, fallback: &str) -> bool {
@@ -11480,10 +11759,59 @@ fn paint_rotated_image(
 }
 
 fn load_fighter_svg(bytes: &[u8]) -> ColorImage {
+    rasterize_svg(bytes, 128)
+}
+
+/// A one-colour side icon (`assets/Eastern*.svg` / `Nato*.svg`) recoloured
+/// on screen to its side token (README §8). The SVG colours themselves, and
+/// every colour written into generated files, stay as they are.
+fn load_side_svg(bytes: &[u8], eastern: bool) -> ColorImage {
+    recolor_to_side(rasterize_svg(bytes, 128), eastern)
+}
+
+fn recolor_to_side(mut img: ColorImage, eastern: bool) -> ColorImage {
+    let color = shell::Side::from_eastern(eastern).color();
+    for p in &mut img.pixels {
+        let a = p.a() as f32 / 255.0;
+        let ch = |v: u8| (v as f32 * a).round() as u8;
+        *p = Color32::from_rgba_premultiplied(ch(color.r()), ch(color.g()), ch(color.b()), p.a());
+    }
+    img
+}
+
+/// The fighter SVGs are drawn diagonally: `EasternFighter.svg` points
+/// north-west and `NatoFighter.svg` north-east. Turning them by these angles
+/// (degrees, clockwise) when rasterizing makes both textures point north, the
+/// orientation `shell::Side::facing_rad` assumes.
+const FIGHTER_SVG_TO_NORTH_DEG: [f32; 2] = [45.0, -45.0];
+
+/// A fighter icon rasterized pointing north, in its authored colour.
+fn fighter_svg_north(eastern: bool, target: u32) -> ColorImage {
+    if eastern {
+        rasterize_svg_turned(include_bytes!("../assets/EasternFighter.svg"), target, FIGHTER_SVG_TO_NORTH_DEG[0])
+    } else {
+        rasterize_svg_turned(include_bytes!("../assets/NatoFighter.svg"), target, FIGHTER_SVG_TO_NORTH_DEG[1])
+    }
+}
+
+/// Registers the side-marker silhouettes once (`shell::paint_side_marker`).
+/// 64 px with mipmaps stays crisp from 10 to 18 px, also on HiDPI screens.
+fn ensure_side_textures(ctx: &egui::Context) {
+    if shell::side_textures(ctx).is_none() {
+        shell::register_side_textures(ctx, fighter_svg_north(true, 64), fighter_svg_north(false, 64));
+    }
+}
+
+fn rasterize_svg(bytes: &[u8], target: u32) -> ColorImage {
+    rasterize_svg_turned(bytes, target, 0.0)
+}
+
+/// Rasterizes an SVG to `target` px on its longer side, turned `deg`
+/// degrees clockwise about its centre (the icons are round, so nothing clips).
+fn rasterize_svg_turned(bytes: &[u8], target: u32, deg: f32) -> ColorImage {
     let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default())
         .expect("fighter SVG in assets/ is not valid");
     let size = tree.size().to_int_size();
-    let target = 128u32;
     let src_w = size.width().max(1);
     let src_h = size.height().max(1);
     let scale = target as f32 / src_w.max(src_h) as f32;
@@ -11493,7 +11821,8 @@ fn load_fighter_svg(bytes: &[u8]) -> ColorImage {
     let transform = resvg::tiny_skia::Transform::from_scale(
         w as f32 / tree.size().width(),
         h as f32 / tree.size().height(),
-    );
+    )
+    .post_rotate_at(deg, w as f32 / 2.0, h as f32 / 2.0);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     ColorImage::from_rgba_premultiplied([w as usize, h as usize], pixmap.data())
 }
@@ -11619,8 +11948,8 @@ fn draw_front_inside_outside(
     pts: &[(f64, f64)],
     aabb: WorldAabb,
 ) {
-    let outside = Stroke::new(1.15_f32, Color32::from_rgb(220, 30, 30));
-    let inside = Stroke::new(2.5_f32, Color32::from_rgb(220, 30, 30));
+    let outside = Stroke::new(1.15_f32, c::FRONT);
+    let inside = Stroke::new(2.5_f32, c::FRONT);
     draw_world_line(painter, rect, pts, outside);
     let clipped = clip_linestring_to_rect(&points_to_linestring(pts), &aabb.as_rect());
     for run in &clipped {
@@ -11721,11 +12050,26 @@ fn draw_reference_overlays(painter: &egui::Painter, rect: Rect) {
 
 const STATUS_WARN: Color32 = Color32::from_rgb(220, 140, 40);
 
+/// Map line colours shared by the map and its legend (on screen only).
+const SALIENT_OUTLINE: Color32 = Color32::from_rgb(180, 180, 80);
+/// 50 % dark red / near-black, premultiplied (roads.svg / railroads.svg overlays).
+const ROAD_LINE: Color32 = Color32::from_rgba_premultiplied(55, 9, 9, 128);
+const RAIL_LINE: Color32 = Color32::from_rgba_premultiplied(8, 8, 9, 128);
+
+/// AO box wash: ACCENT (#5980a6) at ~7 %, premultiplied.
+const AO_FILL: Color32 = Color32::from_rgba_premultiplied(6, 9, 12, 18);
+
+/// Reference-group blocks on the map and in the legend: a neutral token, so
+/// they no longer share the old AO yellow.
+const BLOCK_DOT: Color32 = c::NEUTRAL_800;
+
+/// On-screen side colour (tokens). The colours written into the base map
+/// (`RColor` / `GColor` / `BColor` in frontlines.rs) are separate and unchanged.
 fn faction_map_color(eastern: bool) -> Color32 {
     if eastern {
-        Color32::from_rgb(155, 0, 0)
+        c::DPRK
     } else {
-        Color32::from_rgb(0, 120, 150)
+        c::NATO
     }
 }
 

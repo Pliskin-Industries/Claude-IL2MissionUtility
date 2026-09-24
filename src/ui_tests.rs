@@ -1248,7 +1248,12 @@ fn map_places_fighters_from_the_forces_dock() {
     h.tab("Map");
     h.wait_for_map();
     h.click("Forces");
-    let place = h.all("Place DPRK")[0].clone();
+    // The Fighters section's Place DPRK (Units has one too, further down).
+    let place = h
+        .all("Place DPRK")
+        .into_iter()
+        .min_by(|a, b| a.rect.top().total_cmp(&b.rect.top()))
+        .expect("Place DPRK");
     h.click_at(place.rect.center());
     let n = h.app.map_fighters.as_ref().map_or(0, |l| l.spots.len());
     assert!(n > 0, "no fighters placed: {}", h.status());
@@ -1305,3 +1310,303 @@ fn map_terrain_readout_under_the_pointer() {
     assert_eq!(h.app.terrain_readout().as_deref(), Some("Ground 321 m · 100 m grid"));
 }
 
+impl Harness {
+    /// Press the primary button at `from`, move to `to` in steps, but keep it held.
+    fn press_and_move(&mut self, from: Pos2, to: Pos2) {
+        self.move_to(from);
+        let mods = self.mods;
+        self.step(vec![Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: mods }]);
+        for k in 1..=6 {
+            self.move_to(from + (to - from) * (k as f32 / 6.0));
+        }
+    }
+
+    fn release_at(&mut self, pos: Pos2) {
+        let mods = self.mods;
+        self.step(vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: mods }]);
+        self.settle();
+    }
+}
+
+// ── Side markers (README §8) ──────────────────────────────────────────────
+
+/// Opaque pixels in row `y`.
+fn row_fill(img: &egui::ColorImage, y: usize) -> usize {
+    let w = img.size[0];
+    (0..w).filter(|&x| img.pixels[y * w + x].a() > 128).count()
+}
+
+/// The row holding the most of the icon; for a level fighter that is the wing.
+fn widest_row(img: &egui::ColorImage) -> usize {
+    (0..img.size[1]).max_by_key(|&y| row_fill(img, y)).unwrap_or(0)
+}
+
+/// Share of the icon's opaque pixels in the left half.
+fn left_share(img: &egui::ColorImage) -> f32 {
+    let [w, h] = img.size;
+    let (mut left, mut all) = (0usize, 0usize);
+    for y in 0..h {
+        for x in 0..w {
+            if img.pixels[y * w + x].a() > 128 {
+                all += 1;
+                left += usize::from(x < w / 2);
+            }
+        }
+    }
+    left as f32 / all.max(1) as f32
+}
+
+#[test]
+fn side_marker_fighters_point_north_before_facing() {
+    // `Side::facing_rad` turns DPRK by 180° and leaves NATO as drawn, which
+    // is only right if both textures point north. The SVGs are drawn
+    // diagonally (DPRK north-west, NATO north-east), so the rasterizer turns
+    // them: afterwards the wing is forward of the middle and the plane is
+    // left-right symmetric.
+    for (eastern, name, bytes) in [
+        (true, "EasternFighter", &include_bytes!("../assets/EasternFighter.svg")[..]),
+        (false, "NatoFighter", &include_bytes!("../assets/NatoFighter.svg")[..]),
+    ] {
+        // Turned level, the wing spans a row far wider than anything in the
+        // diagonal original.
+        let raw = rasterize_svg(bytes, 64);
+        let img = fighter_svg_north(eastern, 64);
+        let (raw_w, img_w) = (row_fill(&raw, widest_row(&raw)), row_fill(&img, widest_row(&img)));
+        eprintln!("{name}: widest row raw {raw_w}, turned {img_w}");
+        assert!(img_w as f32 >= raw_w as f32 * 1.15, "{name}: turning did not level the wing ({raw_w} → {img_w} px)");
+        let row = widest_row(&img);
+        assert!(row < img.size[1] / 2, "{name}: widest row {row} of {} is not in the top half", img.size[1]);
+        let share = left_share(&img);
+        assert!((share - 0.5).abs() < 0.03, "{name}: {share} of the icon is left of centre");
+    }
+    assert_eq!(shell::Side::Nato.facing_rad(), 0.0);
+    assert!((shell::Side::Dprk.facing_rad() - std::f32::consts::PI).abs() < 1e-6);
+}
+
+#[test]
+fn map_tool_icons_are_painted_inside_their_box() {
+    // Painted line icons (mockup 2f), not font glyphs: each has strokes that
+    // stay inside the 24-unit viewBox the painter scales to 18 px.
+    use shell::ToolIcon::*;
+    for icon in [Select, Front, Salient, Arrow, Objective, Undo, Redo] {
+        let paths = shell::tool_icon_paths(icon);
+        assert!(!paths.is_empty(), "{icon:?} has no strokes");
+        for (pts, _) in paths {
+            assert!(pts.len() >= 2, "{icon:?} has a stroke with {} points", pts.len());
+            for p in pts {
+                assert!((1.0..=23.0).contains(&p.x) && (1.0..=23.0).contains(&p.y), "{icon:?} point {p:?} outside the box");
+            }
+        }
+    }
+    let icons: Vec<_> = MAP_TOOLS.iter().map(|t| t.1).collect();
+    assert_eq!(icons[4], icons[5], "both objective tools use the flag, tinted by side");
+}
+
+#[test]
+fn side_marker_textures_are_registered_at_startup() {
+    let h = Harness::new("sidetex");
+    let tex = shell::side_textures(&h.ctx).expect("side textures registered on the first frame");
+    assert_eq!(tex[0].size(), [64, 64]);
+    assert_eq!(tex[1].size(), [64, 64]);
+}
+
+// ── Map: front strokes, tool switching, line clears (README §6.2, §6.3) ──
+
+#[test]
+fn map_front_strokes_undo_redo_and_escape_mid_drag() {
+    let mut h = Harness::new("frontstrokes");
+    h.tab("Map");
+    h.wait_for_map();
+    let map = h.find("Korea map").rect;
+    let at = |dx: f32| map.center() + Vec2::new(dx, 0.0);
+    h.key(Key::Num2);
+    // Two clicks: two strokes of one point each.
+    h.click_at(at(-200.0));
+    h.click_at(at(-170.0));
+    assert_eq!(h.app.custom_front_xz.len(), 2);
+    assert_eq!(h.app.undo_label().as_deref(), Some("Drew front line"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.custom_front_xz.len(), 1, "Ctrl Z takes back the last click");
+    h.key_with(Key::Y, CTRL);
+    assert_eq!(h.app.custom_front_xz.len(), 2, "Ctrl Y puts it back");
+
+    // A drag is one stroke, however many points it adds.
+    h.drag(at(-140.0), at(-20.0));
+    let after_drag = h.app.custom_front_xz.len();
+    assert!(after_drag > 3, "the drag added points: {after_drag}");
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.custom_front_xz.len(), 2, "one Ctrl Z drops the whole drag");
+    h.key_with(Key::Y, CTRL);
+    assert_eq!(h.app.custom_front_xz.len(), after_drag);
+
+    // Esc during a drag drops that drag's points and returns to Select; the
+    // rest of the drag moves nothing (not the AO either).
+    let ao = h.app.front_aabb;
+    h.press_and_move(at(0.0), at(60.0));
+    assert!(h.app.custom_front_xz.len() > after_drag, "points are being added");
+    h.key(Key::Escape);
+    assert_eq!(h.app.custom_front_xz.len(), after_drag, "Esc dropped the drag in progress");
+    assert!(h.app.map_drawing_mode == MapDrawingMode::None);
+    h.move_to(at(120.0));
+    h.release_at(at(120.0));
+    assert_eq!(h.app.custom_front_xz.len(), after_drag);
+    assert!(h.app.front_aabb == ao, "the cancelled drag did not draw an AO");
+
+    // Esc with no drag keeps the finished front.
+    h.key(Key::Num2);
+    h.key(Key::Escape);
+    assert_eq!(h.app.custom_front_xz.len(), after_drag);
+
+    // The palette's Undo does what Ctrl Z does, and says what it undoes.
+    let undo = h.find("Undo: Drew front line");
+    h.click_at(undo.rect.center());
+    assert_eq!(h.app.custom_front_xz.len(), 2);
+}
+
+#[test]
+fn map_switching_tools_drops_a_half_drawn_mark() {
+    let mut h = Harness::new("toolswitch");
+    h.tab("Map");
+    h.wait_for_map();
+    let map = h.find("Korea map").rect;
+    // Salient in progress, then key 4: dropped, like Esc.
+    h.key(Key::Num3);
+    h.click_at(map.center());
+    h.click_at(map.center() + Vec2::new(30.0, 10.0));
+    assert!(!h.app.current_salient.is_empty());
+    h.key(Key::Num4);
+    assert!(h.app.current_salient.is_empty(), "key 4 dropped the salient");
+    assert!(h.app.map_drawing_mode == MapDrawingMode::AttackArrow);
+    // Arrow drag in progress, then key 3: the arrow is dropped and the rest
+    // of that drag draws nothing with the new tool.
+    h.press_and_move(map.center(), map.center() + Vec2::new(80.0, -40.0));
+    assert!(h.app.attack_drag.is_some(), "arrow being dragged");
+    h.key(Key::Num3);
+    assert!(h.app.attack_drag.is_none(), "key 3 dropped the arrow");
+    h.move_to(map.center() + Vec2::new(120.0, -40.0));
+    h.release_at(map.center() + Vec2::new(120.0, -40.0));
+    assert!(h.app.attack_arrows.is_empty());
+    assert!(h.app.current_salient.is_empty(), "the old drag did not start a salient");
+    // Salient in progress, then the palette's Attack arrow tool: dropped too.
+    h.click_at(map.center());
+    h.click_at(map.center() + Vec2::new(30.0, 10.0));
+    assert!(!h.app.current_salient.is_empty());
+    h.click("Attack arrow");
+    assert!(h.app.current_salient.is_empty(), "the palette dropped the salient");
+    assert!(h.app.map_drawing_mode == MapDrawingMode::AttackArrow);
+}
+
+#[test]
+fn map_clear_lines_salients_and_arrows_undo() {
+    let mut h = Harness::new("clearlines");
+    h.tab("Map");
+    h.wait_for_map();
+    let map = h.find("Korea map").rect;
+    h.key(Key::Num4);
+    h.drag(map.center(), map.center() + Vec2::new(120.0, -60.0));
+    h.drag(map.center() + Vec2::new(0.0, 40.0), map.center() + Vec2::new(120.0, -20.0));
+    assert_eq!(h.app.attack_arrows.len(), 2);
+    h.key(Key::Num2);
+    h.click_at(map.center() + Vec2::new(-200.0, 0.0));
+    h.click_at(map.center() + Vec2::new(-150.0, 0.0));
+    h.key(Key::Escape);
+    h.click("Period");
+
+    h.click("Clear arrows");
+    assert!(h.app.attack_arrows.is_empty());
+    assert_eq!(h.app.undo_label().as_deref(), Some("Cleared 2 arrows"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.attack_arrows.len(), 2, "Ctrl Z restores the arrows");
+    assert_eq!(h.app.custom_front_xz.len(), 2, "and leaves the front alone");
+
+    h.click("Clear lines");
+    assert!(h.app.attack_arrows.is_empty() && h.app.custom_front_xz.is_empty());
+    assert_eq!(h.app.undo_label().as_deref(), Some("Cleared the drawn front and 2 arrows"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.attack_arrows.len(), 2);
+    assert_eq!(h.app.custom_front_xz.len(), 2);
+    // The marks came back with them: Ctrl Z now undoes the last drawing.
+    assert_eq!(h.app.undo_label().as_deref(), Some("Drew front line"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.custom_front_xz.len(), 1);
+}
+
+#[test]
+fn map_undo_label_matches_what_ctrl_z_undoes() {
+    let mut h = Harness::new("undolabel");
+    h.tab("Map");
+    h.wait_for_map();
+    let map = h.find("Korea map").rect;
+    h.key(Key::Num4);
+    h.drag(map.center(), map.center() + Vec2::new(120.0, -60.0));
+    h.key(Key::Num5);
+    h.click_at(map.center() + Vec2::new(-80.0, 0.0));
+    assert_eq!(h.app.map_tool_status(), None, "one-shot objective tool is back to Select");
+    // Clear the objective, then draw: the drawing is undone first, then the Clear.
+    h.click("Forces");
+    let top = h.find("OBJECTIVES").rect.top();
+    let clear = h.all("Clear").into_iter().find(|n| !n.disabled && n.rect.top() > top).expect("objectives Clear");
+    h.click_at(clear.rect.center());
+    assert_eq!(h.app.undo_label().as_deref(), Some("Cleared 1 objectives"));
+    h.key(Key::Num4);
+    h.drag(map.center() + Vec2::new(0.0, 40.0), map.center() + Vec2::new(120.0, -20.0));
+    assert_eq!(h.app.attack_arrows.len(), 2);
+    assert_eq!(h.app.undo_label().as_deref(), Some("Drew an attack arrow"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.attack_arrows.len(), 1);
+    assert_eq!(h.app.undo_label().as_deref(), Some("Cleared 1 objectives"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.east_objectives.len(), 1, "then the Clear");
+    assert_eq!(h.app.attack_arrows.len(), 1, "without touching the older arrow");
+    assert_eq!(h.app.undo_label().as_deref(), Some("Drew an attack arrow"));
+}
+
+#[test]
+fn map_objective_tool_hint_is_short() {
+    let mut h = Harness::new("objhint");
+    h.tab("Map");
+    h.key(Key::Num5);
+    assert_eq!(h.app.map_tool_status().as_deref(), Some("Tool: DPRK objective · Click to place · Shift for more"));
+    h.key(Key::Num6);
+    assert_eq!(h.app.map_tool_status().as_deref(), Some("Tool: NATO objective · Click to place · Shift for more"));
+}
+
+#[test]
+fn map_dock_tabs_fit_a_three_digit_reference_count() {
+    let mut h = Harness::new("docktabs");
+    h.tab("Map");
+    let group = crate::frontlines::MapRefGroup { path: PathBuf::from("K13 AFB_mp.Group"), entity: crate::ast::Il2Entity::new("Group") };
+    h.app.map_refs = vec![group; 123];
+    h.settle();
+    let tabs: Vec<Node> = ["Period", "Forces", "References 123", "Terrain"].iter().map(|l| h.find(l)).collect();
+    // One row of cells, left to right, filling the 288 px dock content.
+    for pair in tabs.windows(2) {
+        assert!((pair[1].rect.top() - pair[0].rect.top()).abs() < 0.5, "{:?} is on another row", pair[1].label);
+        assert!((pair[1].rect.left() - pair[0].rect.right()).abs() < 0.5, "{:?} does not follow {:?}", pair[1].label, pair[0].label);
+    }
+    let span = tabs[3].rect.right() - tabs[0].rect.left();
+    assert!((287.0..=288.5).contains(&span), "tabs span {span} px, not the 288 px dock");
+    // Each label (bold, as when selected) with its count fits its cell with padding.
+    for ((_, label, count), node) in MapDock::tabs(123).into_iter().zip(&tabs) {
+        let need = shell::dock_tab_needed_width(&h.ctx, label, count);
+        let cell = node.rect.width();
+        assert!(need + 2.0 * shell::DOCK_TAB_PAD <= cell + 0.5, "{label} {count:?} needs {need} px of a {cell} px cell");
+    }
+    h.click("References 123");
+    assert!(h.app.map_dock == MapDock::References);
+}
+
+// ── Help (README §6.4) ────────────────────────────────────────────────────
+
+#[test]
+fn help_closes_on_escape_and_shortcuts_still_work() {
+    let mut h = Harness::new("helpesc");
+    h.key(Key::F1);
+    assert!(h.app.help_open);
+    h.key(Key::Escape);
+    assert!(!h.app.help_open, "Esc closes Help");
+    h.key_with(Key::Num6, CTRL);
+    assert!(h.app.mode == AppMode::Map, "Ctrl 6 still switches tabs");
+    h.key(Key::F1);
+    assert!(h.app.help_open && h.app.help_topic == HelpTopic::Front);
+}
