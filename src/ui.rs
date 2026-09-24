@@ -823,7 +823,7 @@ fn skill_name(skill: i32) -> &'static str {
         0 => "Plain",
         1 => "Low",
         2 => "Normal",
-        3 => "High",
+        3 => "Veteran",
         _ => "Ace",
     }
 }
