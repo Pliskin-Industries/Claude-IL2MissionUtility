@@ -2568,6 +2568,9 @@ impl GroupGeneratorApp {
                                     .clicked()
                                 {
                                     self.tpl_seats[si].start_type = start.as_i32();
+                                    if self.tpl_auto_altitude {
+                                        match_lead_altitude(&mut self.tpl_seats, si);
+                                    }
                                 }
                             }
                         });
@@ -3369,7 +3372,7 @@ impl GroupGeneratorApp {
                 && ui
                     .button("Copy attributes to all")
                     .on_hover_text(
-                        "Copy country, skill, fuel, and flags to every unit. Payload and modifications copy only to the same aircraft type.",
+                        "Copy country, skill, fuel, and flags to every unit, and altitude to every plane (capped at each plane’s ceiling). Payload and modifications copy only to the same aircraft type.",
                     )
                     .clicked()
             {
