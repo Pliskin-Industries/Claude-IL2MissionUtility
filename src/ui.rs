@@ -826,7 +826,7 @@ fn draw_tree_unit_chip(ui: &mut egui::Ui, n: usize, label: &str, country: i32, s
     response
 }
 
-const TREE_ARROW_SLOT: f32 = 18.0;
+const TREE_ARROW_SLOT: f32 = 28.0;
 /// Two text lines at 13 + 12 px; README §6.6 asks for at least 28.
 const TREE_CHIP_H: f32 = 36.0;
 const TREE_CHIP_W: f32 = 140.0;
@@ -996,7 +996,7 @@ fn draw_template_order_chip(
         if tree_arrow_slot(ui, selected, false, oi + 1 < n_orders) {
             *move_order = Some((si, oi, 1));
         }
-        if ui.small_button("×").on_hover_text("Remove order").clicked() {
+        if ui.button("×").on_hover_text("Remove order").clicked() {
             *remove_order = Some((si, oi));
         }
     });
@@ -1033,7 +1033,7 @@ fn draw_template_event_chip(
         }
         chip_rect = resp.rect;
         ui.add_space(TREE_ARROW_SLOT);
-        if ui.small_button("×").on_hover_text("Remove event").clicked() {
+        if ui.button("×").on_hover_text("Remove event").clicked() {
             *remove_event = Some((si, ei));
         }
     });
@@ -2036,7 +2036,7 @@ impl GroupGeneratorApp {
         });
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
+            ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
             for kind in CatalogKind::ALL {
                 if ui.selectable_label(self.tpl_kind == kind, kind.label()).clicked() {
                     self.tpl_kind = kind;
@@ -2124,7 +2124,7 @@ impl GroupGeneratorApp {
                                     .truncate(),
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if ui.small_button("×").on_hover_text("Remove unit").clicked() {
+                                    if ui.button("×").on_hover_text("Remove unit").clicked() {
                                         remove = Some(si);
                                     }
                                     if !tag.is_empty() {
@@ -2801,7 +2801,7 @@ impl GroupGeneratorApp {
                         move_at = Some((ci, 1));
                     }
                 });
-                if ui.small_button("×").on_hover_text("Remove carriage").clicked() {
+                if ui.button("×").on_hover_text("Remove carriage").clicked() {
                     remove_at = Some(ci);
                 }
             });
@@ -3142,7 +3142,7 @@ impl GroupGeneratorApp {
                                 }
                             }
                         });
-                    if ui.small_button("Remove order").clicked() {
+                    if ui.button("Remove order").clicked() {
                         self.record_tpl_undo(format!("Removed {}", self.tpl_seats[seat].orders[order].kind.label()));
                         self.tpl_seats[seat].orders.remove(order);
                         for hook in &mut self.tpl_seats[seat].events {
@@ -3392,7 +3392,7 @@ impl GroupGeneratorApp {
                                 .suffix(" m"),
                             );
                             if ui
-                                .small_button("Match range")
+                                .button("Match range")
                                 .on_hover_text(
                                     "Set the area to this unit’s (and Also-apply) system range, capped at 3 km.",
                                 )
@@ -3420,7 +3420,7 @@ impl GroupGeneratorApp {
                                         area,
                                         limit / 1000.0
                                     ))
-                                    .color(Color32::from_rgb(200, 160, 80)),
+                                    .color(c::WARN_TEXT),
                                 );
                             } else {
                                 ui.label(
@@ -3729,7 +3729,7 @@ impl GroupGeneratorApp {
                                 );
                             }
                         });
-                    if ui.small_button("Remove event").clicked() {
+                    if ui.button("Remove event").clicked() {
                         self.record_tpl_undo(format!("Removed {}", self.tpl_seats[seat].events[event].kind.label()));
                         self.tpl_seats[seat].events.remove(event);
                         self.tpl_select = Some(TplSelect::Seat(seat));
@@ -5604,7 +5604,7 @@ impl GroupGeneratorApp {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Skill 0–4").small().color(c::NEUTRAL_700));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.link("Select all").clicked() {
+                if shell::link(ui, "Select all").clicked() {
                     self.type_enabled.iter_mut().for_each(|e| *e = true);
                 }
             });
@@ -6133,7 +6133,7 @@ impl GroupGeneratorApp {
             "Open /missions/_gen.mission in the mission editor. Select the field, then File › Save Selection to File.",
         );
         numbered_step(ui, 3, "Load that file here.");
-        if ui.link(RichText::new("Help ›").small()).clicked() {
+        if shell::link(ui, "Help ›").clicked() {
             self.open_help(HelpTopic::Airfield);
         }
         ui.add_space(6.0);
@@ -6667,7 +6667,7 @@ impl GroupGeneratorApp {
                         shell::side_marker(ui, side, 12.0);
                         ui.add(egui::Label::new(RichText::new(name).font(FontId::new(13.0, theme::bold_family()))).truncate());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.small_button("Remove").clicked() {
+                            if ui.button("Remove").clicked() {
                                 remove_at = Some(i);
                             }
                         });
@@ -6725,7 +6725,7 @@ impl GroupGeneratorApp {
                 ui.horizontal(|ui| {
                     ui.add(egui::Label::new(RichText::new(label).font(FontId::new(13.0, theme::bold_family()))).truncate());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("Remove").clicked() {
+                        if ui.button("Remove").clicked() {
                             remove_at = Some(i);
                         }
                     });
@@ -10488,7 +10488,7 @@ fn preview_dot_style(kind: PreviewKind, in_box: bool) -> (Color32, f32) {
 }
 
 fn move_row_button(ui: &mut egui::Ui, up: bool) -> egui::Response {
-    let size = Vec2::splat(18.0);
+    let size = Vec2::splat(28.0); // minimum target (README §6.6)
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let visuals = ui.style().interact(&response);
     ui.painter().rect(
@@ -10520,7 +10520,7 @@ fn move_row_button(ui: &mut egui::Ui, up: bool) -> egui::Response {
 }
 
 fn move_col_button(ui: &mut egui::Ui, left: bool) -> egui::Response {
-    let size = Vec2::splat(18.0);
+    let size = Vec2::splat(28.0); // minimum target (README §6.6)
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let visuals = ui.style().interact(&response);
     ui.painter().rect(
@@ -10952,7 +10952,7 @@ fn draw_dashed_world_line(painter: &egui::Painter, rect: Rect, pts: &[(f64, f64)
 }
 
 fn draw_map_label(painter: &egui::Painter, pos: Pos2, text: &str, color: Color32, align: Align2) {
-    let font = FontId::new(10.0, FontFamily::Proportional);
+    let font = FontId::new(12.0, FontFamily::Proportional); // 12 px minimum (README §6.6)
     painter.text(
         pos + Vec2::new(0.6, 0.6),
         align,
@@ -11130,7 +11130,7 @@ fn recon_slot_list(
                     .truncate(),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.link("Remove").clicked() {
+                    if shell::link(ui, "Remove").clicked() {
                         remove = Some(i);
                     }
                 });
@@ -11251,7 +11251,7 @@ fn show_missing_locale_hint(ui: &mut egui::Ui, group_path: &Path) {
         RichText::new(
             "No translation files (.eng, …) next to this group. Re-export from the editor to create them.",
         )
-        .color(Color32::from_rgb(180, 150, 70)),
+        .color(c::WARN_TEXT),
     );
 }
 

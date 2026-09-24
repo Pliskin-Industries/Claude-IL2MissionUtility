@@ -9,9 +9,10 @@
 - Binary crate (`src/main.rs` only — there is no `lib.rs`). It generates
   IL-2 Sturmovik: Great Battles `.Group` / `.Mission` text files for the
   Korea map.
-- `ui.rs` is the GUI entry point. `help.rs` is the only other egui file
-  (detached Help window). Every other file is logic/data with no egui
-  imports.
+- `ui.rs` is the GUI entry point. The other egui files are `shell.rs`
+  (shared page chrome and widgets), `theme.rs` (design tokens, fonts,
+  visuals) and `help.rs` (detached Help window). Every other file is
+  logic/data with no egui imports.
 - Files are parsed by `parser` into an `ast::Il2Entity` tree (named
   blocks). Generation modules build trees; `serialize` writes them back
   to text. Unknown keys are kept; never invent a schema.
@@ -38,6 +39,27 @@ map UV/world/`Pos2` conversions, SVG/JPEG loading, and
 `save_with_sidecars`. Calls into logic modules only through their public
 APIs; contains no AST work and no generation logic. Help content is
 rendered by `help.rs`. **All modes.**
+
+Since the 2026 redesign (`docs/ui-redesign/README.md`) every tab is a
+`*_page(ctx)` that adds fixed side panels and a center, each scrolling
+on its own; `update()` draws the mode rail, header and status bar
+around them. Per-tab undo snapshots (`shell::Undo`), confirmation
+dialogs (`Confirm`) and unsaved-edit checks (`tpl_fingerprint`,
+`map_fingerprint`) live here too.
+
+### `theme.rs` — design tokens
+Color tokens (`theme::c`: ground, accent and neutral ramps, DPRK / NATO /
+FRONT / WARN), the embedded Barlow fonts (Hack as the last fallback for
+arrows), text sizes (12 px minimum) and light-only egui visuals.
+`theme::apply` runs once at startup. **All modes.**
+
+### `shell.rs` — page chrome and shared widgets
+Mode rail, page header with the `Ctrl G` primary button, status bar with
+Undo, cards, blueprint panels, section titles, hints with "Help ›",
+28 px links, tags, segmented controls, map tool buttons and banner,
+settings sections, confirmation dialog, `Undo<T>`, side markers, and
+`read_shortcuts` (Ctrl G / O / Z / Y / 1–6, F1, Esc, map keys 1–6).
+Presentation only. **All modes.**
 
 ### `ast.rs` — `Il2Entity`: the .Group AST
 The schema-agnostic in-memory tree every loaded or generated `.Group`
@@ -155,7 +177,7 @@ flag, label side — hardcoded so labels sit on the JPEG, not the
 projection). **Map mode.** Distinct from `placement::MAP_MIN` (parking).
 
 ### `help.rs` — help window
-The only egui code outside `ui.rs`. Embeds `USER_MANUAL.md`, splits it
+Egui code outside `ui.rs`, like `shell.rs` and `theme.rs`. Embeds `USER_MANUAL.md`, splits it
 by `##` heading (`section_for`), and opens a decorated native viewport
 (`show_window`) with a topic combo. `HelpTopic` covers every mode plus
 Language / Import / Troubleshooting. Does not touch the AST.

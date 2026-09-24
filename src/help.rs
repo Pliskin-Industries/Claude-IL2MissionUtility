@@ -14,7 +14,7 @@
 //! ## Used by
 //! * ui.rs — Help buttons on every mode set `help_open` + `help_topic`
 
-use eframe::egui::{self, Color32, RichText, ViewportBuilder, ViewportId};
+use eframe::egui::{self, RichText, ViewportBuilder, ViewportId};
 
 pub const MANUAL: &str = include_str!("../USER_MANUAL.md");
 
@@ -258,7 +258,7 @@ fn emit_spans(ui: &mut egui::Ui, text: &str) {
     for (chunk, bold, code) in inline_spans(text) {
         let mut rich = RichText::new(chunk);
         if code {
-            rich = rich.monospace().color(Color32::from_rgb(140, 190, 150));
+            rich = rich.monospace().color(crate::theme::c::ACCENT_800);
         } else if bold {
             rich = rich.strong();
         }

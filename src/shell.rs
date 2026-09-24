@@ -219,11 +219,33 @@ pub fn hint(ui: &mut Ui, text: &str, with_help: bool) -> bool {
     let mut help = false;
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(text).small().color(c::NEUTRAL_700));
-        if with_help && ui.link(RichText::new("Help ›").small()).clicked() {
+        if with_help && link(ui, "Help ›").clicked() {
             help = true;
         }
     });
     help
+}
+
+/// Text link with a 28 px tall hit target (README §6.6) that keeps the
+/// line height of the text around it.
+pub fn link(ui: &mut Ui, text: &str) -> Response {
+    let resp = ui.add(
+        egui::Label::new(RichText::new(text).color(c::ACCENT_700))
+            .sense(Sense::click())
+            .selectable(false),
+    );
+    let pad = ((28.0 - resp.rect.height()) / 2.0).max(0.0);
+    let hit = ui.interact(resp.rect.expand2(Vec2::new(2.0, pad)), resp.id.with("hit"), Sense::click());
+    let resp = resp.union(hit);
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        let r = resp.rect.shrink2(Vec2::new(2.0, pad));
+        ui.painter().line_segment(
+            [r.left_bottom(), r.right_bottom()],
+            Stroke::new(1.0_f32, c::ACCENT_700),
+        );
+    }
+    resp
 }
 
 pub fn kbd(ui: &mut Ui, keys: &str) {
@@ -365,7 +387,7 @@ pub fn mode_rail(ui: &mut Ui, labels: &[&str], selected: &mut usize) -> bool {
     ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if ui.link("Help").clicked() {
+            if link(ui, "Help").clicked() {
                 help = true;
             }
             kbd(ui, "F1");
@@ -426,7 +448,7 @@ pub fn status_bar(ui: &mut Ui, severity: Severity, message: &str, undo_label: Op
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if let Some(label) = undo_label {
                 kbd(ui, "Ctrl Z");
-                if ui.link("Undo").clicked() {
+                if link(ui, "Undo").clicked() {
                     undo = true;
                 }
                 ui.label(label);
