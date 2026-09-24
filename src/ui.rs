@@ -60,7 +60,7 @@ use crate::bombers::{
     BomberInput, BomberPlanInfo, SUGGESTED_END_NAMES, SUGGESTED_TRIGGER_NAMES,
 };
 use crate::duplicate::apply_overrides;
-use crate::flights::{configure_aircraft, flight_sizes, FlightConfig};
+use crate::flights::{configure_aircraft, FlightConfig};
 use crate::frontlines::{
     attack_arrow_points, battles_in_period, generate_front, inspect_base_map, looks_like_base_map,
     mark_for_battle, preview_dots, preview_front_xz, suggested_aircraft, timeline_index,
@@ -73,9 +73,26 @@ use crate::harvest::{
     default_missions_dir, find_gen_file, harvest_file, GenWatcher, HarvestConfig,
     HarvestOutcome, DEFAULT_DB_DIR,
 };
+use crate::heightprobe;
 use crate::help::{self, HelpTopic};
 use crate::shell::{self, Severity};
+use crate::terrain::HeightStore;
 use crate::theme::{self, c};
+
+/// Native file dialogs. Tests swap in `ui_tests::dialog`, which answers
+/// from a queue of prepared paths instead of opening a window.
+#[cfg(not(test))]
+mod dialog {
+    pub use rfd::FileDialog;
+}
+#[cfg(test)]
+use ui_tests::dialog;
+#[cfg(test)]
+#[path = "ui_tests.rs"]
+mod ui_tests;
+
+/// Terrain lattice spacing in metres (terrain::STEP_M).
+const TERRAIN_STEP: f64 = crate::terrain::STEP_M;
 use crate::locale::{has_sidecars, merge_template_sidecars, write_sidecars, LANG_EXTS};
 use crate::mapclip::{
     apply_salients, can_extend_salient, can_extend_west_east, clip_linestring_to_rect,
@@ -140,7 +157,10 @@ pub fn run() -> eframe::Result {
         options,
         Box::new(|cc| {
             theme::apply(&cc.egui_ctx);
-            Ok(Box::new(GroupGeneratorApp::default()))
+            let mut app = GroupGeneratorApp::default();
+            app.mark_saved(AppMode::Template);
+            app.mark_saved(AppMode::Map);
+            Ok(Box::new(app))
         }),
     )
 }
@@ -153,6 +173,11 @@ enum AppMode {
     Recon,
     Airfield,
     Map,
+}
+
+/// Index of `mode` in `MODES` (the per-tab status slots follow it).
+fn mode_slot(mode: AppMode) -> usize {
+    MODES.iter().position(|(m, _)| *m == mode).unwrap_or(0)
 }
 
 /// Rail order (docs/ui-redesign/README.md §4). Ctrl 1–6 follow it.
@@ -181,12 +206,123 @@ enum MapDrawingMode {
     PlaceNatoObjective,
 }
 
+/// Map tool palette, top to bottom; keys 1–6 pick them (README §5.6).
+/// (mode, icon, name, banner / status hint)
+const MAP_TOOLS: [(MapDrawingMode, shell::ToolIcon, &str, &str); 6] = [
+    (MapDrawingMode::None, shell::ToolIcon::Select, "Select AO / move units", "Drag a box for the AO, or drag a unit"),
+    (MapDrawingMode::BaseFront, shell::ToolIcon::Front, "Draw front", "Click west to east, or drag · Esc to cancel"),
+    (MapDrawingMode::Salient, shell::ToolIcon::Salient, "Salient", "Click along the front · right-click to finish · Esc to cancel"),
+    (MapDrawingMode::AttackArrow, shell::ToolIcon::Arrow, "Attack arrow", "Drag from tail to tip · Esc to cancel"),
+    (MapDrawingMode::PlaceEastObjective, shell::ToolIcon::Objective, "DPRK objective", "Click to place · Shift for more"),
+    (MapDrawingMode::PlaceNatoObjective, shell::ToolIcon::Objective, "NATO objective", "Click to place · Shift for more"),
+];
+
+/// What Template Reset / Remove / Load can take away; restored by Ctrl Z.
+struct TemplateSnapshot {
+    seats: Vec<TemplateSeat>,
+    select: Option<TplSelect>,
+    bring_up: BringUp,
+    spawn_reset: bool,
+    spawn_cooldown_min: f32,
+    place_layout: PlaceLayout,
+    per_group: u32,
+    zone_in: f32,
+    zone_out: f32,
+    zone_mix: Option<ZoneMix>,
+    wp_spacing: f32,
+    wp_speed: f32,
+    wp_altitude: f32,
+    wp_priority: i32,
+    zone_coalition: ZoneCoalition,
+    loaded_path: Option<PathBuf>,
+}
+
+/// What a Map Clear or Remove can take away (README §6.3).
+struct MapForces {
+    ships: Option<MapShipLayout>,
+    ground_east: Option<MapGroundLayout>,
+    ground_nato: Option<MapGroundLayout>,
+    armies: Vec<MapArmySlot>,
+    fighters: Option<MapFighterLayout>,
+    imported_fighters: Vec<ImportedFighterPack>,
+    east_objectives: Vec<(f64, f64)>,
+    nato_objectives: Vec<(f64, f64)>,
+    refs: Vec<MapRefGroup>,
+    /// Drawn lines, only for Clear lines / salients / arrows; restored only when set.
+    lines: Option<MapLines>,
+}
+
+/// What Clear lines / salients / arrows can take away.
+struct MapLines {
+    custom_front: Vec<(f64, f64)>,
+    salients: Vec<Vec<(f64, f64)>>,
+    attack_arrows: Vec<((f64, f64), (f64, f64))>,
+    drawn_marks: Vec<DrawnMark>,
+}
+
+/// The last undoable Map action, so Ctrl Z and the status bar's Undo label
+/// agree (README §6.3): a drawing (drawn-mark undo) or a Clear / Remove
+/// (the `map_undo` snapshot).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MapAction {
+    Drawing,
+    Clear,
+}
+
+/// A destructive action waiting for its confirmation dialog.
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum Confirm {
+    ResetTemplate,
+    ResetFighter,
+    LoadTemplate,
+    LoadBaseMap,
+}
+
+/// Tabs of the Map tab's right dock.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MapDock {
+    Period,
+    Forces,
+    References,
+    Terrain,
+}
+
+impl MapDock {
+    /// The dock's tab strip; References carries its count.
+    fn tabs(refs: usize) -> [(MapDock, &'static str, Option<usize>); 4] {
+        [
+            (MapDock::Period, "Period", None),
+            (MapDock::Forces, "Forces", None),
+            (MapDock::References, "References", Some(refs)),
+            (MapDock::Terrain, "Terrain", None),
+        ]
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum DrawnMark {
     Salient,
     AttackArrow,
+    /// One Draw-front click or drag; undo truncates `custom_front_xz` back to `prev_len`.
+    Front { prev_len: usize },
 }
 
+impl DrawnMark {
+    fn is_front(self) -> bool {
+        matches!(self, DrawnMark::Front { .. })
+    }
+
+    /// Status-bar undo label for this drawing.
+    fn label(self) -> &'static str {
+        match self {
+            DrawnMark::Salient => "Drew a salient",
+            DrawnMark::AttackArrow => "Drew an attack arrow",
+            DrawnMark::Front { .. } => "Drew front line",
+        }
+    }
+}
+
+#[derive(Clone)]
 struct BomberSlot {
     path: PathBuf,
     root: crate::ast::Il2Entity,
@@ -273,6 +409,7 @@ impl UnitKind {
     }
 }
 
+#[derive(Clone)]
 struct ReconSlot {
     path: PathBuf,
     info: UnitPlanInfo,
@@ -287,6 +424,7 @@ struct ReconSlot {
 }
 
 /// A .Group loaded in Map mode as an army (not a reference stamp).
+#[derive(Clone)]
 struct MapArmySlot {
     path: PathBuf,
     entity: crate::ast::Il2Entity,
@@ -343,6 +481,10 @@ struct GroupGeneratorApp {
     altitude_max: f32,
     bomber_slots: Vec<BomberSlot>,
     bomber_keep_positions: bool,
+    /// Plan shown in the Exclusive Activation center.
+    bomber_selected: Option<usize>,
+    /// The generated Exclusive Activation pack whose plans were added (header "Editing {stem}").
+    bomber_loaded_path: Option<PathBuf>,
     recon_submode: ReconSubmode,
     recon_slots: Vec<ReconSlot>,
     recon_rework: Vec<ReconSlot>,
@@ -380,6 +522,18 @@ struct GroupGeneratorApp {
     drawing_custom_front: bool,
     custom_front_xz: Vec<(f64, f64)>,
     map_drawing_mode: MapDrawingMode,
+    map_dock: MapDock,
+    /// World (x, z) under the pointer on the map, for the height readout.
+    map_hover_xz: Option<(f64, f64)>,
+    terrain_store_path: PathBuf,
+    /// Loaded on first use; `terrain_error` holds why it could not be.
+    terrain_store: Option<HeightStore>,
+    terrain_error: Option<String>,
+    terrain_tiles: Option<Vec<(usize, usize, usize)>>,
+    terrain_log: Vec<String>,
+    terrain_show_coverage: bool,
+    terrain_show_relief: bool,
+    terrain_relief: Option<TextureHandle>,
     current_salient: Vec<(f64, f64)>,
     salients: Vec<Vec<(f64, f64)>>,
     attack_arrows: Vec<((f64, f64), (f64, f64))>,
@@ -388,6 +542,13 @@ struct GroupGeneratorApp {
 	redo_marks: Vec<DrawnMark>,
     redo_salients: Vec<Vec<(f64, f64)>>,
     redo_attack_arrows: Vec<((f64, f64), (f64, f64))>,
+    /// Points a front-mark undo took off `custom_front_xz`, for Ctrl Y.
+    redo_fronts: Vec<Vec<(f64, f64)>>,
+    /// `custom_front_xz.len()` when the current Draw-front drag started.
+    front_stroke: Option<usize>,
+    /// A tool was cancelled or switched: ignore the map's left button until
+    /// it is released, so the rest of that drag draws nothing.
+    map_void_drag: bool,
     map_fighters: Option<MapFighterLayout>,
     map_imported_fighters: Vec<ImportedFighterPack>,
     fighter_waves: u32,
@@ -427,21 +588,38 @@ struct GroupGeneratorApp {
     help_open: bool,
     help_topic: HelpTopic,
     status: Status,
+    /// Each tab's status while another tab is shown, in `MODES` order (`set_mode` swaps).
+    tab_status: [Status; 6],
     tpl_path: Option<PathBuf>,
     /// Group currently being edited (Load group…), not the catalog path.
     tpl_loaded_path: Option<PathBuf>,
     tpl_catalog: Vec<CatalogUnit>,
     tpl_kind: CatalogKind,
     tpl_class: Option<ModelClass>,
-    /// When Kind is Infantry, filter the grid by catalog Country.
+    /// Country filter for the model list (prototype `Country`, any kind).
     tpl_country: Option<i32>,
     tpl_add_pick: usize,
+    /// Scroll the left panel to the model list on the next frame.
+    tpl_show_models: bool,
     /// When true, the formation-view card shows the catalog pick (adding a unit).
     /// Otherwise it follows the highlighted seat.
     tpl_preview_from_catalog: bool,
     tpl_model_tex: HashMap<String, TextureHandle>,
     tpl_seats: Vec<TemplateSeat>,
     tpl_select: Option<TplSelect>,
+    tpl_undo: shell::Undo<TemplateSnapshot>,
+    /// `tpl_fingerprint` at the last Load / Generate / Reset.
+    tpl_saved: String,
+    recon_undo: shell::Undo<(ReconSubmode, Vec<ReconSlot>)>,
+    bomber_undo: shell::Undo<Vec<BomberSlot>>,
+    map_undo: shell::Undo<MapForces>,
+    /// `drawn_marks.len()` right after the recorded Clear: marks above it were
+    /// drawn later and undo first; once they are gone the Clear is next.
+    map_undo_marks: usize,
+    /// What Ctrl Z undoes next on Map (see `map_undo_kind`).
+    map_last: MapAction,
+    map_saved: String,
+    confirm: Option<Confirm>,
     /// Unit card being dragged in the Units list (index at drag start).
     tpl_card_drag: Option<usize>,
     tpl_bring_up: BringUp,
@@ -608,6 +786,99 @@ fn section_heading(text: &str) -> RichText {
     RichText::new(text.to_uppercase()).text_style(TextStyle::Name("section".into()))
 }
 
+/// Segmented control in rows of equal-width cells (README §5.1: the kind
+/// selector has more options than fit one row of the 270 px panel).
+fn segmented_rows<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)], per_row: usize) -> bool {
+    let mut changed = false;
+    let w = ui.available_width();
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        for row in options.chunks(per_row.max(1)) {
+            let cell = (w / row.len() as f32).floor();
+            ui.horizontal(|ui| {
+                for (v, label) in row {
+                    let selected = *value == *v;
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(cell, 28.0), Sense::click());
+                    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, *label));
+                    if ui.is_rect_visible(rect) {
+                        let visuals = ui.style().interact_selectable(&resp, selected);
+                        let p = ui.painter();
+                        p.rect(rect, visuals.corner_radius, visuals.weak_bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+                        p.text(rect.center(), Align2::CENTER_CENTER, *label, FontId::proportional(13.0), visuals.text_color());
+                    }
+                    if resp.clicked() && *value != *v {
+                        *value = *v;
+                        changed = true;
+                    }
+                }
+            });
+        }
+    });
+    changed
+}
+
+/// IL-2 AI level names for `AILevel` 0–4, as the mission editor lists them.
+fn skill_name(skill: i32) -> &'static str {
+    match skill.clamp(0, 4) {
+        0 => "Plain",
+        1 => "Low",
+        2 => "Normal",
+        3 => "Veteran",
+        _ => "Ace",
+    }
+}
+
+/// Label column of the right-panel field grids (README §5.1).
+const FIELD_LABEL_W: f32 = 96.0;
+
+/// Two-column field grid: a 96 px label column, one label/control pair per row.
+fn field_grid<R>(ui: &mut egui::Ui, id: impl std::hash::Hash, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Grid::new(id)
+        .num_columns(2)
+        .min_col_width(FIELD_LABEL_W)
+        .spacing([8.0, 6.0])
+        .show(ui, add)
+        .inner
+}
+
+/// Label cell of a `field_grid`: wraps inside the 96 px column instead of
+/// widening it.
+fn field_label(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> egui::Response {
+    ui.scope(|ui| {
+        ui.set_max_width(FIELD_LABEL_W);
+        ui.add(egui::Label::new(text).wrap())
+    })
+    .inner
+}
+
+#[derive(Clone, Copy)]
+enum NoteStyle {
+    Plain,
+    Italic,
+    Warn,
+}
+
+/// Explanations shown under a `field_grid`, in small type.
+fn show_field_notes(ui: &mut egui::Ui, notes: &[(String, NoteStyle)]) {
+    if notes.is_empty() {
+        return;
+    }
+    ui.add_space(4.0);
+    for (text, style) in notes {
+        let text = match style {
+            NoteStyle::Plain => RichText::new(text).small().color(c::NEUTRAL_700),
+            NoteStyle::Italic => RichText::new(text).italics().small(),
+            NoteStyle::Warn => RichText::new(text).color(c::WARN_TEXT),
+        };
+        ui.add(egui::Label::new(text).wrap());
+    }
+}
+
+/// Width left for the control column of a `field_grid`.
+fn field_control_w(ui: &egui::Ui) -> f32 {
+    (ui.available_width() - FIELD_LABEL_W - 8.0).max(96.0)
+}
+
 fn default_template_seats() -> Vec<TemplateSeat> {
     Vec::new()
 }
@@ -705,6 +976,7 @@ fn draw_tree_chip(
     size: Vec2,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, title));
     let p = ui.painter();
     let (fill, stroke) = if selected {
         (c::ACCENT_200, Stroke::new(1.5_f32, c::ACCENT))
@@ -736,6 +1008,7 @@ fn draw_tree_chip(
 /// The unit chip that starts each order-tree row: side marker, "{n} · {model}".
 fn draw_tree_unit_chip(ui: &mut egui::Ui, n: usize, label: &str, country: i32, selected: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(TREE_UNIT_W, TREE_CHIP_H), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, format!("{n} · {label}")));
     let p = ui.painter();
     let (fill, stroke) = if selected {
         (c::ACCENT_200, Stroke::new(1.5_f32, c::ACCENT))
@@ -747,17 +1020,20 @@ fn draw_tree_unit_chip(ui: &mut egui::Ui, n: usize, label: &str, country: i32, s
     p.rect_filled(rect, 2.0, fill);
     p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
     paint_seat_marker(p, Pos2::new(rect.left() + 12.0, rect.center().y), 11.0, country);
-    p.with_clip_rect(rect.shrink(3.0)).text(
-        Pos2::new(rect.left() + 22.0, rect.center().y),
-        Align2::LEFT_CENTER,
+    // Elide a long model name with "…" instead of cutting a letter in half.
+    let mut job = egui::text::LayoutJob::single_section(
         format!("{n} · {label}"),
-        FontId::new(13.0, theme::bold_family()),
-        c::TEXT,
+        egui::TextFormat::simple(FontId::new(13.0, theme::bold_family()), c::TEXT),
     );
-    response
+    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.right() - 4.0 - (rect.left() + 22.0));
+    let galley = ui.fonts(|f| f.layout_job(job));
+    let pos = Pos2::new(rect.left() + 22.0, rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(pos, galley, c::TEXT);
+    let full = format!("{n} · {label}");
+    response.on_hover_text(full)
 }
 
-const TREE_ARROW_SLOT: f32 = 18.0;
+const TREE_ARROW_SLOT: f32 = 28.0;
 /// Two text lines at 13 + 12 px; README §6.6 asks for at least 28.
 const TREE_CHIP_H: f32 = 36.0;
 const TREE_CHIP_W: f32 = 140.0;
@@ -927,7 +1203,7 @@ fn draw_template_order_chip(
         if tree_arrow_slot(ui, selected, false, oi + 1 < n_orders) {
             *move_order = Some((si, oi, 1));
         }
-        if ui.small_button("×").on_hover_text("Remove order").clicked() {
+        if ui.button("×").on_hover_text("Remove order").clicked() {
             *remove_order = Some((si, oi));
         }
     });
@@ -964,7 +1240,7 @@ fn draw_template_event_chip(
         }
         chip_rect = resp.rect;
         ui.add_space(TREE_ARROW_SLOT);
-        if ui.small_button("×").on_hover_text("Remove event").clicked() {
+        if ui.button("×").on_hover_text("Remove event").clicked() {
             *remove_event = Some((si, ei));
         }
     });
@@ -1413,7 +1689,9 @@ fn draw_order_tree_columns(
     paint_order_tree_lines(ui, line_idx, &geom, orders, events);
 }
 
+#[derive(Default)]
 enum Status {
+    #[default]
     Idle,
     Info(String),
     /// Soft placement / reposition notes (orange bullets). Hard failures use [`Status::Error`].
@@ -1446,6 +1724,8 @@ impl Default for GroupGeneratorApp {
             altitude_max: 5500.0,
             bomber_slots: Vec::new(),
             bomber_keep_positions: false,
+            bomber_selected: None,
+            bomber_loaded_path: None,
             recon_submode: ReconSubmode::New,
             recon_slots: Vec::new(),
             recon_rework: Vec::new(),
@@ -1482,6 +1762,16 @@ impl Default for GroupGeneratorApp {
             drawing_custom_front: false,
             custom_front_xz: Vec::new(),
 			map_drawing_mode: MapDrawingMode::None,
+            map_dock: MapDock::Period,
+            map_hover_xz: None,
+            terrain_store_path: crate::terrain::default_store_path(),
+            terrain_store: None,
+            terrain_error: None,
+            terrain_tiles: None,
+            terrain_log: Vec::new(),
+            terrain_show_coverage: false,
+            terrain_show_relief: false,
+            terrain_relief: None,
             current_salient: Vec::new(),
             salients: Vec::new(),
             attack_arrows: Vec::new(),
@@ -1489,7 +1779,10 @@ impl Default for GroupGeneratorApp {
             drawn_marks: Vec::new(),
 			redo_marks: Vec::new(),
             redo_salients: Vec::new(),
-            redo_attack_arrows: Vec::new(),			
+            redo_attack_arrows: Vec::new(),
+            redo_fronts: Vec::new(),
+            front_stroke: None,
+            map_void_drag: false,
             map_fighters: None,
             map_imported_fighters: Vec::new(),
             fighter_waves: 2,
@@ -1529,6 +1822,7 @@ impl Default for GroupGeneratorApp {
             help_open: false,
             help_topic: HelpTopic::Overview,
             status: Status::Idle,
+            tab_status: Default::default(),
             tpl_path: None,
             tpl_loaded_path: None,
             tpl_catalog: bundled_catalog(),
@@ -1536,10 +1830,20 @@ impl Default for GroupGeneratorApp {
             tpl_class: None,
             tpl_country: None,
             tpl_add_pick: 0,
+            tpl_show_models: false,
             tpl_preview_from_catalog: false,
             tpl_model_tex: HashMap::new(),
             tpl_seats: default_template_seats(),
             tpl_select: None,
+            tpl_undo: shell::Undo::default(),
+            tpl_saved: String::new(),
+            recon_undo: shell::Undo::default(),
+            bomber_undo: shell::Undo::default(),
+            map_undo: shell::Undo::default(),
+            map_undo_marks: 0,
+            map_last: MapAction::Drawing,
+            map_saved: String::new(),
+            confirm: None,
             tpl_card_drag: None,
             tpl_bring_up: BringUp::Activate,
             tpl_spawn_reset: false,
@@ -1563,6 +1867,15 @@ impl Default for GroupGeneratorApp {
 
 impl eframe::App for GroupGeneratorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.ui(ctx);
+    }
+}
+
+impl GroupGeneratorApp {
+    /// One frame of the whole app. `update` only forwards here, so the UI
+    /// tests (`ui_tests.rs`) can drive frames on a bare `egui::Context`.
+    fn ui(&mut self, ctx: &egui::Context) {
+        ensure_side_textures(ctx);
         self.poll_harvest(ctx);
         let keys = shell::read_shortcuts(ctx, self.mode == AppMode::Map);
         self.handle_shortcuts(&keys);
@@ -1579,32 +1892,30 @@ impl eframe::App for GroupGeneratorApp {
                 }
                 self.set_mode(MODES[idx].0);
             });
+        let mut undo = false;
         egui::TopBottomPanel::bottom("status")
             .exact_height(shell::STATUS_H)
-            .show(ctx, |ui| self.status_line(ui));
+            .show(ctx, |ui| undo = self.status_line(ui));
+        if undo {
+            self.undo_current_tab();
+        }
         self.status_details(ctx);
         egui::TopBottomPanel::top("page_header")
             .exact_height(shell::HEADER_H)
             .frame(egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin::symmetric(18, 0)))
             .show(ctx, |ui| self.page_header_bar(ui));
-        if self.mode == AppMode::Template {
-            self.template_page(ctx);
-        } else {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                // One scroll position per tab; the window itself never scrolls.
-                egui::ScrollArea::vertical()
-                    .id_salt(("page", self.mode as u8))
-                    .show(ui, |ui| match self.mode {
-                        AppMode::Template => {}
-                        AppMode::Fighter => self.fighter_panel(ui),
-                        AppMode::Exclusive => self.bomber_panel(ui),
-                        AppMode::Recon => self.recon_panel(ui),
-                        AppMode::Airfield => self.airfield_panel(ui),
-                        AppMode::Map => self.map_panel(ui),
-                    });
-            });
+        // Each page adds its own side and center panels; only panels scroll.
+        match self.mode {
+            AppMode::Template => self.template_page(ctx),
+            AppMode::Recon => self.recon_page(ctx),
+            AppMode::Fighter => self.fighter_page(ctx),
+            AppMode::Exclusive => self.bomber_page(ctx),
+            AppMode::Airfield => self.airfield_page(ctx),
+            AppMode::Map => self.map_page(ctx),
         }
+        self.confirm_dialogs(ctx);
         help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
+        self.settle_undo();
     }
 }
 
@@ -1631,14 +1942,25 @@ impl GroupGeneratorApp {
             return;
         }
         if self.mode == AppMode::Map {
-            self.map_drawing_mode = MapDrawingMode::None;
-            self.current_salient.clear();
-            self.attack_drag = None;
+            self.cancel_map_tool();
         }
+        // Each tab keeps its own status line: park the outgoing one, restore the incoming one.
+        let incoming = std::mem::take(&mut self.tab_status[mode_slot(mode)]);
+        self.tab_status[mode_slot(self.mode)] = std::mem::replace(&mut self.status, incoming);
         self.mode = mode;
     }
 
     fn handle_shortcuts(&mut self, keys: &shell::Shortcuts) {
+        // An open confirmation takes the keyboard: Esc cancels it (Enter is in the dialog).
+        if self.confirm.is_some() {
+            if keys.escape {
+                self.confirm = None;
+            }
+            return;
+        }
+        if keys.undo {
+            self.undo_current_tab();
+        }
         if let Some((mode, _)) = keys.tab.and_then(|i| MODES.get(i)) {
             self.set_mode(*mode);
         }
@@ -1651,26 +1973,97 @@ impl GroupGeneratorApp {
         if keys.load {
             self.load_action();
         }
-        // Undo / redo only exist for Map drawings so far.
+        // Redo exists for Map drawings only.
         if self.mode == AppMode::Map {
-            if keys.undo {
-                self.remove_last_mark();
-            }
             if keys.redo {
                 self.redo_last_mark();
+            }
+            if let Some(i) = keys.map_tool {
+                self.pick_map_tool(MAP_TOOLS[i].0);
+            }
+            if keys.escape {
+                self.cancel_map_tool();
             }
         }
     }
 
     fn primary_enabled(&self) -> bool {
+        shell::all_ok(&self.readiness_checks())
+    }
+
+    /// The smallest output each tab allows (README §10). These mirror the
+    /// errors the generate functions already return; Generate stays disabled
+    /// until all pass. Map has none: any period makes a valid base map.
+    fn readiness_checks(&self) -> Vec<shell::Check> {
+        use shell::Check;
         match self.mode {
-            AppMode::Airfield => self.airfield_info.is_some(),
-            _ => true,
+            AppMode::Template => vec![Check::new(!self.tpl_seats.is_empty(), "At least one unit")],
+            AppMode::Recon => match self.recon_submode {
+                ReconSubmode::New => {
+                    let mut checks = vec![Check::new(!self.recon_slots.is_empty(), "At least one template")];
+                    if !self.recon_slots.is_empty() {
+                        let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
+                        checks.push(Check::new(
+                            weights.iter().any(|w| *w > 0),
+                            "Influence above 0 on at least one template",
+                        ));
+                        let copies = allocate_copies(&weights, self.recon_total as usize);
+                        for (slot, n) in self.recon_slots.iter().zip(copies) {
+                            if n > 0 {
+                                checks.push(Check::new(
+                                    !slot.selected_triggers.is_empty(),
+                                    format!("Zone In for {}", slot.info.name),
+                                ));
+                            }
+                        }
+                    }
+                    checks
+                }
+                ReconSubmode::Rework => {
+                    let mut checks = vec![Check::new(!self.recon_rework.is_empty(), "At least one placed pack")];
+                    for slot in &self.recon_rework {
+                        checks.push(if self.recon_strip_randomizer {
+                            Check::new(
+                                !slot.restore_start.is_empty(),
+                                format!("Start timer or checkzone for {}", slot.info.name),
+                            )
+                        } else {
+                            Check::new(!slot.selected_triggers.is_empty(), format!("Zone In for {}", slot.info.name))
+                        });
+                    }
+                    checks
+                }
+            },
+            AppMode::Fighter => vec![Check::new(
+                !self.selected_types().0.is_empty(),
+                "At least one aircraft type",
+            )],
+            AppMode::Exclusive => {
+                let mut checks = vec![Check::new(!self.bomber_slots.is_empty(), "At least one plan")];
+                for (n, slot) in self.bomber_slots.iter().enumerate() {
+                    checks.push(Check::new(
+                        !slot.selected_triggers.is_empty(),
+                        format!("Plan {}: a start checkzone", n + 1),
+                    ));
+                    checks.push(Check::new(
+                        slot.selected_completion.is_some(),
+                        format!("Plan {}: an end timer", n + 1),
+                    ));
+                }
+                checks
+            }
+            AppMode::Airfield => vec![Check::new(self.airfield_info.is_some(), "An airfield file loaded")],
+            AppMode::Map => Vec::new(),
         }
     }
 
     /// The header's primary button and Ctrl G.
     fn primary_action(&mut self) {
+        let mode = self.mode;
+        self.run_io(mode, |s| s.primary_action_inner());
+    }
+
+    fn primary_action_inner(&mut self) {
         match self.mode {
             AppMode::Template => self.generate_unit_template(),
             AppMode::Recon => match self.recon_submode {
@@ -1687,7 +2080,10 @@ impl GroupGeneratorApp {
     /// The header's first secondary button and Ctrl O. Fighter Pack has none.
     fn load_action(&mut self) {
         match self.mode {
-            AppMode::Template => self.load_template_group(),
+            AppMode::Template if self.is_dirty(AppMode::Template) => self.confirm = Some(Confirm::LoadTemplate),
+            AppMode::Template => self.load_template_now(),
+            AppMode::Map if self.is_dirty(AppMode::Map) => self.confirm = Some(Confirm::LoadBaseMap),
+            AppMode::Map => self.run_io(AppMode::Map, |s| s.load_base_map()),
             AppMode::Recon => match self.recon_submode {
                 ReconSubmode::New => self.add_recon_template(),
                 ReconSubmode::Rework => self.add_placed_packs(),
@@ -1695,7 +2091,6 @@ impl GroupGeneratorApp {
             AppMode::Fighter => {}
             AppMode::Exclusive => self.add_bomber_template(),
             AppMode::Airfield => self.load_airfield(),
-            AppMode::Map => self.load_base_map(),
         }
     }
 
@@ -1717,7 +2112,17 @@ impl GroupGeneratorApp {
                 Some(file_label(&self.custom_path, false).unwrap_or_else(|| "Built-in logic".into())),
                 "Generate File",
             ),
-            AppMode::Exclusive => ("Exclusive Activation", None, "Generate File"),
+            AppMode::Exclusive => (
+                "Exclusive Activation",
+                // Only while plans from that generated pack are still listed.
+                self.bomber_loaded_path
+                    .as_ref()
+                    .filter(|p| self.bomber_slots.iter().any(|s| &s.path == *p))
+                    .and_then(|p| p.file_stem())
+                    .and_then(|n| n.to_str())
+                    .map(|n| format!("Editing {n}")),
+                "Generate File",
+            ),
             AppMode::Airfield => (
                 "Airfield to Multiplayer",
                 file_label(&self.airfield_path, false),
@@ -1736,12 +2141,14 @@ impl GroupGeneratorApp {
         let submode = self.recon_submode;
         let mut new_submode = submode;
         let (mut load, mut reset, mut add_folder) = (false, false, false);
+        let checks = self.readiness_checks();
         let generate = shell::page_header(
             ui,
             title,
             file.as_deref(),
             primary,
-            self.primary_enabled(),
+            shell::all_ok(&checks),
+            &checks,
             |ui| {
                 if mode == AppMode::Recon {
                     shell::segmented(
@@ -1775,7 +2182,12 @@ impl GroupGeneratorApp {
                         load = ui.button("Add packs…").on_hover_text("Ctrl O").clicked();
                     }
                 },
-                AppMode::Fighter => {}
+                AppMode::Fighter => {
+                    reset = ui
+                        .button("Reset")
+                        .on_hover_text("Back to the default pack, flights, types, country, altitudes and timers.")
+                        .clicked();
+                }
                 AppMode::Exclusive => {
                     load = ui
                         .button("Add templates…")
@@ -1795,7 +2207,14 @@ impl GroupGeneratorApp {
         );
         self.recon_submode = new_submode;
         if reset {
-            self.reset_template_builder();
+            self.confirm = match mode {
+                AppMode::Fighter => Some(Confirm::ResetFighter),
+                _ if self.tpl_seats.is_empty() => {
+                    self.reset_template_confirmed();
+                    None
+                }
+                _ => Some(Confirm::ResetTemplate),
+            };
         }
         if add_folder {
             self.add_recon_folder();
@@ -1937,18 +2356,16 @@ impl GroupGeneratorApp {
             });
         });
         ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
-            for kind in CatalogKind::ALL {
-                if ui.selectable_label(self.tpl_kind == kind, kind.label()).clicked() {
-                    self.tpl_kind = kind;
-                    self.tpl_class = None;
-                    self.tpl_country = None;
-                    self.tpl_add_pick = 0;
-                    self.tpl_preview_from_catalog = true;
-                }
-            }
-        });
+        // Seven kinds do not fit one 270 px row: two rows of equal cells.
+        let kinds: Vec<(CatalogKind, &str)> = CatalogKind::ALL.iter().map(|k| (*k, k.label())).collect();
+        let mut kind = self.tpl_kind;
+        if segmented_rows(ui, &mut kind, &kinds, 4) {
+            self.tpl_kind = kind;
+            self.tpl_class = None;
+            self.tpl_country = None;
+            self.tpl_add_pick = 0;
+            self.tpl_preview_from_catalog = true;
+        }
         ui.add_space(4.0);
         self.draw_template_model_browser(ui);
     }
@@ -2001,12 +2418,13 @@ impl GroupGeneratorApp {
                     k => format!("{k} orders"),
                 }
             } else {
-                "follows lead".to_string()
+                // A wingman flies its lead's orders; its own are not written.
+                "lead's orders".to_string()
             };
             let country_name = country_short(seat.country);
             // "601 USA" → "USA": the code is in the Country field when it matters.
             let country_name = country_name.split_once(' ').map_or(country_name.as_str(), |(_, n)| n.trim());
-            let meta = format!("{country_name} · Skill {} · {tail}", seat.skill);
+            let meta = format!("{country_name} · {} · {tail}", skill_name(seat.skill));
             let title = format!("{} · {}", si + 1, seat.unit.label());
             let country = seat.country;
             let resp = ui
@@ -2026,7 +2444,7 @@ impl GroupGeneratorApp {
                                     .truncate(),
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    if ui.small_button("×").on_hover_text("Remove unit").clicked() {
+                                    if ui.button("×").on_hover_text("Remove unit").clicked() {
                                         remove = Some(si);
                                     }
                                     if !tag.is_empty() {
@@ -2039,6 +2457,7 @@ impl GroupGeneratorApp {
                     },
                 )
                 .response;
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected == Some(si), format!("Unit card {}", si + 1)));
             if resp.clicked() {
                 clicked = Some(si);
             }
@@ -2051,10 +2470,19 @@ impl GroupGeneratorApp {
             rects.push(resp.rect);
             ui.add_space(4.0);
         }
-        if ui.button("Copy attributes to all").on_hover_text(
-            "Copy the selected unit's country, skill, fuel, and flags to every unit, and its altitude to every plane (capped at each plane's ceiling). Payload and modifications copy only to the same aircraft type.",
-        ).clicked() {
-            copy_seat_attributes(&mut self.tpl_seats, selected.unwrap_or(0));
+        let copy = ui
+            .add_enabled(selected.is_some(), egui::Button::new("Copy attributes to all"))
+            .on_hover_text(
+                "Copy the selected unit's country, skill, fuel, and flags to every unit, and its altitude to every plane (capped at each plane's ceiling). Payload and modifications copy only to the same aircraft type.",
+            )
+            .clicked();
+        if selected.is_none() {
+            // The reason is shown, not only on hover (README §6.5).
+            shell::hint(ui, "Select a unit to copy its attributes from.", false);
+        }
+        if let (true, Some(from)) = (copy, selected) {
+            self.record_tpl_undo(format!("Copied attributes from {}", self.tpl_seats[from].unit.label()));
+            copy_seat_attributes(&mut self.tpl_seats, from);
         }
 
         // Drag to reorder: an accent line marks where the card will land.
@@ -2083,6 +2511,7 @@ impl GroupGeneratorApp {
             self.tpl_preview_from_catalog = false;
         }
         if let Some(si) = remove {
+            self.record_tpl_undo(format!("Removed {}", self.tpl_seats[si].unit.label()));
             self.remove_tpl_seat(si);
         }
     }
@@ -2148,7 +2577,7 @@ impl GroupGeneratorApp {
             .show(ui, |ui| self.draw_template_seat_list(ui));
         if shell::hint(
             ui,
-            "UNIT → OnSpawned → orders. Select a unit, then + Order or + Event. ‹ › move the selected chip.",
+            "UNIT → OnSpawned → orders. ‹ › move the selected chip.",
             true,
         ) {
             self.open_help(HelpTopic::Template);
@@ -2209,13 +2638,9 @@ impl GroupGeneratorApp {
             self.draw_model_preview(ui, unit.as_ref(), None, None, None);
             if self.tpl_seats.is_empty() {
                 ui.add_space(6.0);
-                ui.label(
-                    RichText::new(
-                        "Build a proximity-triggered unit group. This mode does not write NodeGates; use it with the Army Generator.",
-                    )
-                    .small()
-                    .color(c::NEUTRAL_700),
-                );
+                if shell::hint(ui, "One proximity-triggered unit group per file.", true) {
+                    self.open_help(HelpTopic::Template);
+                }
             }
             return;
         };
@@ -2292,7 +2717,7 @@ impl GroupGeneratorApp {
                 ui.horizontal_wrapped(|ui| {
                     ui.checkbox(&mut self.tpl_spawn_reset, "Allow multiple spawns")
                         .on_hover_text(
-                            "One-shot: leave unchecked. Repeat spawn: Zone Out always cleans up and zeros DeathCount. If every unit is destroyed (OnPlaneDestroyed / OnKilled), cooldown pulses the spawner even while the player stays. A hiding unit is cleaned up when the player leaves, not mid-fight.",
+                            "Respawns after the cooldown once every unit is destroyed. Zone Out cleanup details are in Help › Template.",
                         );
                     if self.tpl_spawn_reset {
                         ui.label("Cooldown");
@@ -2319,72 +2744,78 @@ impl GroupGeneratorApp {
             let visual = visual_range_m(self.template_zone_mix());
             let zone_label = |ui: &mut egui::Ui, text: &str, near: bool| {
                 ui.vertical(|ui| {
-                    ui.label(text);
+                    field_label(ui, text);
                     if near {
                         ui.label(RichText::new("visual range").small().color(c::WARN_TEXT));
                     }
                 });
             };
-            egui::Grid::new("tpl_place_grid")
-                .num_columns(2)
-                .min_col_width(84.0)
-                .spacing([8.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label("Layout");
+            let ctrl_w = field_control_w(ui);
+            // Zone sliders show km with one decimal; the stored values stay metres.
+            let km = |v: f64, _: std::ops::RangeInclusive<usize>| format!("{:.1} km", v / 1000.0);
+            let parse_km = |t: &str| {
+                let t = t.trim().trim_end_matches("km").trim();
+                t.parse::<f64>().ok().map(|v| v * 1000.0)
+            };
+            field_grid(ui, "tpl_place_grid", |ui| {
+                field_label(ui, "Layout");
+                ui.horizontal(|ui| {
                     let prev_layout = self.tpl_place_layout;
-                    egui::ComboBox::from_id_salt("tpl_place_layout")
-                        .selected_text(self.tpl_place_layout.label())
-                        .width(128.0)
-                        .truncate()
-                        .show_ui(ui, |ui| {
-                            for layout in PlaceLayout::ALL {
-                                ui.selectable_value(&mut self.tpl_place_layout, layout, layout.label());
-                            }
-                        });
+                    let combo_w = (ctrl_w - 52.0).max(80.0);
+                    ui.scope(|ui| {
+                        // The combo truncates to the space it is given.
+                        ui.set_max_width(combo_w);
+                        egui::ComboBox::from_id_salt("tpl_place_layout")
+                            .selected_text(self.tpl_place_layout.label())
+                            .width(combo_w)
+                            .truncate()
+                            .show_ui(ui, |ui| {
+                                for layout in PlaceLayout::ALL {
+                                    ui.selectable_value(&mut self.tpl_place_layout, layout, layout.label());
+                                }
+                            });
+                    });
                     if self.tpl_place_layout != prev_layout {
                         self.tpl_per_group = self.tpl_place_layout.default_per_group();
                     }
-                    ui.end_row();
-
-                    ui.label("Per group");
-                    ui.add(egui::DragValue::new(&mut self.tpl_per_group).range(1..=8));
-                    ui.end_row();
-
-                    ui.label("Trigger coalition");
-                    egui::ComboBox::from_id_salt("tpl_zone_coalition")
-                        .selected_text(self.tpl_zone_coalition.label())
-                        .width(128.0)
-                        .show_ui(ui, |ui| {
-                            for co in ZoneCoalition::ALL {
-                                ui.selectable_value(&mut self.tpl_zone_coalition, co, co.label());
-                            }
-                        });
-                    ui.end_row();
-
-                    zone_label(ui, "Zone In", near_visual_range(self.tpl_zone_in, visual));
-                    ui.add(
-                        egui::Slider::new(&mut self.tpl_zone_in, 500.0..=40_000.0)
-                            .suffix(" m")
-                            .logarithmic(true),
-                    );
-                    ui.end_row();
-
-                    if self.tpl_zone_out < self.tpl_zone_in + 200.0 {
-                        self.tpl_zone_out = self.tpl_zone_in + 200.0;
-                    }
-                    zone_label(ui, "Zone Out", near_visual_range(self.tpl_zone_out, visual));
-                    ui.add(
-                        egui::Slider::new(&mut self.tpl_zone_out, 700.0..=50_000.0)
-                            .suffix(" m")
-                            .logarithmic(true),
-                    );
-                    ui.end_row();
+                    ui.add(egui::DragValue::new(&mut self.tpl_per_group).range(1..=8))
+                        .on_hover_text("Units per group");
                 });
-            help = shell::hint(
-                ui,
-                "Spacing is 150 m. Inverted Vee is finger-four (4). Combat Box is two 3-ship vees (6). Ground and ships usually use Column.",
-                true,
-            );
+                ui.end_row();
+
+                field_label(ui, "Trigger coalition");
+                egui::ComboBox::from_id_salt("tpl_zone_coalition")
+                    .selected_text(self.tpl_zone_coalition.label())
+                    .width(ctrl_w.min(160.0))
+                    .show_ui(ui, |ui| {
+                        for co in ZoneCoalition::ALL {
+                            ui.selectable_value(&mut self.tpl_zone_coalition, co, co.label());
+                        }
+                    });
+                ui.end_row();
+
+                zone_label(ui, "Zone In", near_visual_range(self.tpl_zone_in, visual));
+                ui.add(
+                    egui::Slider::new(&mut self.tpl_zone_in, 500.0..=40_000.0)
+                        .logarithmic(true)
+                        .custom_formatter(km)
+                        .custom_parser(parse_km),
+                );
+                ui.end_row();
+
+                if self.tpl_zone_out < self.tpl_zone_in + 200.0 {
+                    self.tpl_zone_out = self.tpl_zone_in + 200.0;
+                }
+                zone_label(ui, "Zone Out", near_visual_range(self.tpl_zone_out, visual));
+                ui.add(
+                    egui::Slider::new(&mut self.tpl_zone_out, 700.0..=50_000.0)
+                        .logarithmic(true)
+                        .custom_formatter(km)
+                        .custom_parser(parse_km),
+                );
+                ui.end_row();
+            });
+            help = shell::hint(ui, "Inverted Vee is finger-four. Spacing 150 m.", true);
         });
         if help {
             self.open_help(HelpTopic::Template);
@@ -2398,7 +2829,7 @@ impl GroupGeneratorApp {
         shell::settings_section(ui, "tpl_waypoints", "Waypoints", &summary, false, |ui| {
             egui::Grid::new("tpl_wp_grid")
                 .num_columns(2)
-                .min_col_width(84.0)
+                .min_col_width(FIELD_LABEL_W)
                 .spacing([8.0, 6.0])
                 .show(ui, |ui| {
                     ui.label("Waypoints");
@@ -2606,19 +3037,10 @@ impl GroupGeneratorApp {
             self.tpl_preview_from_catalog = false;
         }
         if let Some((si, oi)) = remove_order {
-            if si < self.tpl_seats.len() && oi < self.tpl_seats[si].orders.len() {
-                self.tpl_seats[si].orders.remove(oi);
-                for hook in &mut self.tpl_seats[si].events {
-                    remap_event_then(&mut hook.then, oi);
-                }
-                self.tpl_select = Some(TplSelect::Seat(si));
-            }
+            self.remove_tpl_order(si, oi);
         }
         if let Some((si, ei)) = remove_event {
-            if si < self.tpl_seats.len() && ei < self.tpl_seats[si].events.len() {
-                self.tpl_seats[si].events.remove(ei);
-                self.tpl_select = Some(TplSelect::Seat(si));
-            }
+            self.remove_tpl_event(si, ei);
         }
         if let Some((si, oi, dir)) = move_order {
             let n = self.tpl_seats[si].orders.len();
@@ -2700,7 +3122,7 @@ impl GroupGeneratorApp {
                         move_at = Some((ci, 1));
                     }
                 });
-                if ui.small_button("×").on_hover_text("Remove carriage").clicked() {
+                if ui.button("×").on_hover_text("Remove carriage").clicked() {
                     remove_at = Some(ci);
                 }
             });
@@ -2748,918 +3170,21 @@ impl GroupGeneratorApp {
         }
     }
 
+    /// Selection fields (README §5.1): one label / control pair per row in a
+    /// 96 px label grid; explanations follow the grid in small type.
     fn draw_template_details(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         match self.tpl_select {
-            Some(TplSelect::Seat(si)) if si < self.tpl_seats.len() => {
-                let mut moved = false;
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(format!(
-                        "{} · position {}",
-                        self.tpl_seats[si].unit.kind.label(),
-                        si + 1
-                    ));
-                    ui.add_enabled_ui(si > 0, |ui| {
-                        if move_row_button(ui, true).on_hover_text("Move unit up").clicked() {
-                            if let Some(dest) = move_seat(&mut self.tpl_seats, si, -1) {
-                                swap_tpl_select(&mut self.tpl_select, si, dest);
-                            }
-                            moved = true;
-                        }
-                    });
-                    ui.add_enabled_ui(si + 1 < self.tpl_seats.len(), |ui| {
-                        if move_row_button(ui, false).on_hover_text("Move unit down").clicked() {
-                            if let Some(dest) = move_seat(&mut self.tpl_seats, si, 1) {
-                                swap_tpl_select(&mut self.tpl_select, si, dest);
-                            }
-                            moved = true;
-                        }
-                    });
-                });
-                if moved {
-                    return;
-                }
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Role");
-                    let follow_choices: Vec<(usize, String)> = lead_indexes(&self.tpl_seats)
-                        .into_iter()
-                        .filter(|&i| i != si)
-                        .map(|i| {
-                            (
-                                i,
-                                format!(
-                                    "Follows seat {} ({})",
-                                    i + 1,
-                                    self.tpl_seats[i].unit.label()
-                                ),
-                            )
-                        })
-                        .collect();
-                    let current = match self.tpl_seats[si].role {
-                        FlightRole::Independent => "Independent".to_string(),
-                        FlightRole::Lead => "Lead".to_string(),
-                        FlightRole::Follows(i) => format!("Follows seat {}", i + 1),
-                    };
-                    egui::ComboBox::from_id_salt(format!("tpl_role_{si}"))
-                        .selected_text(current)
-                        .width(200.0)
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(
-                                    self.tpl_seats[si].role == FlightRole::Independent,
-                                    "Independent",
-                                )
-                                .clicked()
-                            {
-                                let was_lead = self.tpl_seats[si].role == FlightRole::Lead;
-                                self.tpl_seats[si].role = FlightRole::Independent;
-                                if was_lead {
-                                    for (j, seat) in self.tpl_seats.iter_mut().enumerate() {
-                                        if j != si && seat.role == FlightRole::Follows(si) {
-                                            seat.role = FlightRole::Independent;
-                                        }
-                                    }
-                                }
-                            }
-                            if ui
-                                .selectable_label(
-                                    self.tpl_seats[si].role == FlightRole::Lead,
-                                    "Lead",
-                                )
-                                .on_hover_text("Wingmen can follow this unit. Orders go only to the lead.")
-                                .clicked()
-                            {
-                                self.tpl_seats[si].role = FlightRole::Lead;
-                                self.tpl_seats[si].number_in_formation = 0;
-                                let count = if self.tpl_seats[si].formation_count == 0 {
-                                    self.tpl_per_group
-                                } else {
-                                    self.tpl_seats[si].formation_count
-                                };
-                                apply_formation_numbers(&mut self.tpl_seats, si, count);
-                            }
-                            for (i, text) in &follow_choices {
-                                if ui
-                                    .selectable_label(
-                                        self.tpl_seats[si].role == FlightRole::Follows(*i),
-                                        text,
-                                    )
-                                    .clicked()
-                                {
-                                    self.tpl_seats[si].role = FlightRole::Follows(*i);
-                                    if self.tpl_auto_altitude {
-                                        apply_auto_altitude(&mut self.tpl_seats, si);
-                                    }
-                                    let n = self
-                                        .tpl_seats
-                                        .iter()
-                                        .enumerate()
-                                        .filter(|(j, s)| {
-                                            *j != si && s.role == FlightRole::Follows(*i)
-                                        })
-                                        .count() as i32
-                                        + 1;
-                                    self.tpl_seats[si].number_in_formation = n;
-                                }
-                            }
-                        });
-                });
-                if self.tpl_seats[si].role == FlightRole::Lead {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("In formation");
-                        let mut count = if self.tpl_seats[si].formation_count == 0 {
-                            self.tpl_per_group
-                        } else {
-                            self.tpl_seats[si].formation_count.min(self.tpl_per_group)
-                        };
-                        if ui
-                            .add(egui::DragValue::new(&mut count).range(1..=self.tpl_per_group))
-                            .on_hover_text("Number in this flight (0 = lead). Mods the per-group count.")
-                            .changed()
-                        {
-                            apply_formation_numbers(&mut self.tpl_seats, si, count);
-                        }
-                    });
-                }
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Country");
-                    egui::ComboBox::from_id_salt(format!("tpl_seat_country_{si}"))
-                        .selected_text(
-                            COUNTRIES
-                                .iter()
-                                .find(|(id, _)| *id == self.tpl_seats[si].country)
-                                .map(|(_, l)| *l)
-                                .unwrap_or("?"),
-                        )
-                        .width(200.0)
-                        .show_ui(ui, |ui| {
-                            for (id, label) in COUNTRIES {
-                                ui.selectable_value(
-                                    &mut self.tpl_seats[si].country,
-                                    *id,
-                                    *label,
-                                );
-                            }
-                        });
-                    ui.end_row();
-                    ui.label("Skill");
-                    ui.add(egui::Slider::new(&mut self.tpl_seats[si].skill, 0..=4));
-                });
-                if self.tpl_seats[si].unit.is_air() {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Altitude");
-                        let ceiling = model_spec::ceiling_m(&self.tpl_seats[si].unit.script);
-                        let slid = ui
-                            .add(
-                                egui::Slider::new(&mut self.tpl_seats[si].altitude, 0.0..=ceiling)
-                                    .suffix(" m")
-                                    .integer(),
-                            )
-                            .changed();
-                        let (label, hover) = if is_follower(&self.tpl_seats, si) {
-                            let lead = flight_lead_of(&self.tpl_seats, si);
-                            let lead_alt = self.tpl_seats[lead].altitude.min(ceiling);
-                            (
-                                "Match lead",
-                                format!("Set to the flight lead’s altitude ({lead_alt:.0} m)."),
-                            )
-                        } else {
-                            let half = model_spec::auto_altitude_m(&self.tpl_seats[si].unit.script);
-                            (
-                                "50% ceiling",
-                                format!(
-                                    "Set to {half:.0} m (half of {ceiling:.0} m service ceiling). Wingmen follow."
-                                ),
-                            )
-                        };
-                        if ui.button(label).on_hover_text(hover).clicked() {
-                            apply_auto_altitude(&mut self.tpl_seats, si);
-                        }
-                        if self.tpl_seats[si].altitude <= 0.0 {
-                            self.tpl_seats[si].altitude = 0.0;
-                        }
-                        self.tpl_seats[si].start_type = PlaneStart::stored_for_altitude(
-                            self.tpl_seats[si].start_type,
-                            self.tpl_seats[si].altitude,
-                        );
-                        if slid && self.tpl_auto_altitude {
-                            match_lead_altitude(&mut self.tpl_seats, si);
-                        }
-                    });
-                    if self.tpl_seats[si].altitude <= 0.0 {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Engine");
-                            let current = PlaneStart::from_i32(self.tpl_seats[si].start_type);
-                            for start in PlaneStart::GROUND {
-                                if ui
-                                    .selectable_label(current == start, start.label())
-                                    .on_hover_text(match start {
-                                        PlaneStart::Running => {
-                                            "On the runway, engines running (StartType 1)."
-                                        }
-                                        PlaneStart::Warm => {
-                                            "Parked with a warm engine (StartType 3)."
-                                        }
-                                        PlaneStart::Cold => {
-                                            "Parked cold and dark (StartType 2)."
-                                        }
-                                        PlaneStart::Air => "",
-                                    })
-                                    .clicked()
-                                {
-                                    self.tpl_seats[si].start_type = start.as_i32();
-                                    if self.tpl_auto_altitude {
-                                        match_lead_altitude(&mut self.tpl_seats, si);
-                                    }
-                                }
-                            }
-                        });
-                    }
-                }
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Number in formation");
-                    ui.add(
-                        egui::DragValue::new(&mut self.tpl_seats[si].number_in_formation)
-                            .range(0..=8),
-                    );
-                    ui.label("Fuel");
-                    ui.add(
-                        egui::DragValue::new(&mut self.tpl_seats[si].fuel)
-                            .range(0.0..=1.0)
-                            .speed(0.05),
-                    );
-                });
-                self.draw_seat_payload_mods(ui, si);
-                ui.horizontal_wrapped(|ui| {
-                    ui.checkbox(&mut self.tpl_seats[si].vulnerable, "Vulnerable");
-                    ui.checkbox(&mut self.tpl_seats[si].engageable, "Engageable");
-                    ui.checkbox(&mut self.tpl_seats[si].limit_ammo, "Limit ammo");
-                    if self.tpl_seats[si].unit.is_air() {
-                        ui.checkbox(&mut self.tpl_seats[si].ai_rtb, "AI RTB");
-                    }
-                });
-                if is_follower(&self.tpl_seats, si) {
-                    ui.label(
-                        RichText::new("This unit follows its lead (entity target link). Orders are given to the lead only.")
-                            .italics()
-                            .small(),
-                    );
-                }
-                ui.label(
-                    RichText::new(self.tpl_seats[si].unit.script.as_str())
-                        .italics()
-                        .small(),
-                );
-                if self.tpl_seats[si].unit.is_train() {
-                    self.draw_train_carriages(ui, si);
-                }
-            }
+            Some(TplSelect::Seat(si)) if si < self.tpl_seats.len() => self.draw_template_seat_fields(ui, si),
             Some(TplSelect::Order { seat, order })
                 if seat < self.tpl_seats.len() && order < self.tpl_seats[seat].orders.len() =>
             {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Kind");
-                    let kind = self.tpl_seats[seat].orders[order].kind;
-                    let unit_kind = if self.tpl_seats[seat].unit.is_air() {
-                        CatalogKind::Plane
-                    } else {
-                        CatalogKind::Vehicle
-                    };
-                    egui::ComboBox::from_id_salt(format!("tpl_ord_kind_{seat}_{order}"))
-                        .selected_text(kind.label())
-                        .width(180.0)
-                        .show_ui(ui, |ui| {
-                            for k in kinds_in_same_group(kind, unit_kind) {
-                                if ui
-                                    .selectable_label(
-                                        self.tpl_seats[seat].orders[order].kind == k,
-                                        k.label(),
-                                    )
-                                    .clicked()
-                                {
-                                    apply_order_kind(&mut self.tpl_seats, seat, order, k);
-                                }
-                            }
-                        });
-                    if ui.small_button("Remove order").clicked() {
-                        self.tpl_seats[seat].orders.remove(order);
-                        for hook in &mut self.tpl_seats[seat].events {
-                            remap_event_then(&mut hook.then, order);
-                        }
-                        self.tpl_select = Some(TplSelect::Seat(seat));
-                        return;
-                    }
-                });
-                let order = {
-                    let s = &mut self.tpl_seats[seat];
-                    normalize_order_chain(&mut s.orders, &mut s.events, order)
-                };
-                self.tpl_select = Some(TplSelect::Order { seat, order });
-                if seat >= self.tpl_seats.len() || order >= self.tpl_seats[seat].orders.len() {
-                    return;
-                }
-                match self.tpl_seats[seat].orders[order].kind {
-                    OrderKind::Attack => {
-                        ui.label(
-                            "MCU_CMD_AttackTarget: Objects = this unit (or its lead), Targets = the unit to attack.",
-                        );
-                        let others = order_seat_indexes(&self.tpl_seats)
-                            .into_iter()
-                            .filter(|&i| i != seat)
-                            .collect::<Vec<_>>();
-                        if others.is_empty() {
-                            ui.label(RichText::new("Add another unit to attack.").italics());
-                        } else {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label("Target");
-                                let current = self.tpl_seats[seat].orders[order]
-                                    .attack_seat
-                                    .and_then(|i| {
-                                        self.tpl_seats.get(i).map(|s| {
-                                            format!("Seat {} ({})", i + 1, s.unit.label())
-                                        })
-                                    })
-                                    .unwrap_or_else(|| "Choose unit…".into());
-                                egui::ComboBox::from_id_salt(format!("tpl_atk_{seat}_{order}"))
-                                    .selected_text(current)
-                                    .width(220.0)
-                                    .show_ui(ui, |ui| {
-                                        for i in &others {
-                                            let text = format!(
-                                                "Seat {} ({})",
-                                                i + 1,
-                                                self.tpl_seats[*i].unit.label()
-                                            );
-                                            ui.selectable_value(
-                                                &mut self.tpl_seats[seat].orders[order].attack_seat,
-                                                Some(*i),
-                                                text,
-                                            );
-                                        }
-                                    });
-                            });
-                        }
-                        ui.horizontal_wrapped(|ui| {
-                            ui.checkbox(
-                                &mut self.tpl_seats[seat].orders[order].attack_group,
-                                "Attack group",
-                            );
-                            draw_priority_combo(
-                                ui,
-                                format!("tpl_atk_pri_{seat}_{order}"),
-                                &mut self.tpl_seats[seat].orders[order].priority,
-                            );
-                        });
-                    }
-                    OrderKind::GotoWaypoint => {
-                        ui.label(
-                            "Pulses waypoint MCU WP n (there is no Goto command). On arrival that WP pulses the next order's timer — AttackArea, Time on Target, or the next Goto WP — not the MCU itself. The next waypoint is reached through that timer, not a WP n → WP n+1 MCU link.",
-                        );
-                        ui.label(
-                            RichText::new(
-                                "Bombers: put Time on Target after the attack. The IP waypoint pulses the attack timer and the TOT timer; when TOT expires the chain continues. Use Mission Complete at the end to pulse MISSION END (Force Complete, RTB, Land cleanup).",
-                            )
-                            .italics()
-                            .small(),
-                        );
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Waypoint");
-                            let max_wp = used_waypoint_count(&self.tpl_seats).max(1);
-                            let wp = self.tpl_seats[seat].orders[order]
-                                .waypoint
-                                .clamp(1, max_wp);
-                            self.tpl_seats[seat].orders[order].waypoint = wp;
-                            egui::ComboBox::from_id_salt(format!("tpl_goto_{seat}_{order}"))
-                                .selected_text(format!("WP {wp}"))
-                                .width(100.0)
-                                .show_ui(ui, |ui| {
-                                    for n in 1..=max_wp {
-                                        ui.selectable_value(
-                                            &mut self.tpl_seats[seat].orders[order].waypoint,
-                                            n,
-                                            format!("WP {n}"),
-                                        );
-                                    }
-                                });
-                            if ui.button("New").on_hover_text("Add another waypoint after this hop").clicked()
-                            {
-                                let idx = insert_goto_waypoint_after(
-                                    &mut self.tpl_seats,
-                                    seat,
-                                    order,
-                                );
-                                if let Some(spec) = self.tpl_seats[seat].orders.get_mut(idx) {
-                                    spec.priority = self.tpl_wp_priority;
-                                }
-                                self.tpl_select = Some(TplSelect::Order { seat, order: idx });
-                            }
-                        });
-                        ui.horizontal_wrapped(|ui| {
-                            draw_priority_combo(
-                                ui,
-                                format!("tpl_goto_pri_{seat}_{order}"),
-                                &mut self.tpl_seats[seat].orders[order].priority,
-                            );
-                        });
-                        if self.tpl_seats[seat].unit.is_air() {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label("Altitude");
-                                let hop_ceiling =
-                                    model_spec::ceiling_m(&self.tpl_seats[seat].unit.script);
-                                let inherited = path_waypoint_display_m(
-                                    &self.tpl_seats,
-                                    self.tpl_wp_altitude,
-                                );
-                                let mut shown =
-                                    if self.tpl_seats[seat].orders[order].altitude > 0.0 {
-                                        self.tpl_seats[seat].orders[order].altitude
-                                    } else {
-                                        inherited
-                                    };
-                                if ui
-                                    .add(
-                                        egui::DragValue::new(&mut shown)
-                                            .range(0.0..=hop_ceiling)
-                                            .suffix(" m"),
-                                    )
-                                    .on_hover_text(
-                                        "Follows the Waypoints altitude until you enter a value.",
-                                    )
-                                    .changed()
-                                {
-                                    self.tpl_seats[seat].orders[order].altitude =
-                                        if (shown - inherited).abs() < 0.5 {
-                                            0.0
-                                        } else {
-                                            shown
-                                        };
-                                }
-                            });
-                        }
-                        ui.label(
-                            RichText::new("Click a WP diamond on the diagram to pick it.")
-                                .italics()
-                                .small(),
-                        );
-                    }
-                    OrderKind::TimeOnTarget => {
-                        ui.label(
-                            "Timer pulsed from the waypoint before Attack / AttackArea (not the previous delay). When it expires, the next order in the chain fires. Use this so the flight is updated after hanging on the target.",
-                        );
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Time on target");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.tpl_seats[seat].orders[order].time_s,
-                                )
-                                .range(0.0..=3600.0)
-                                .suffix(" s"),
-                            );
-                        });
-                    }
-                    OrderKind::MissionComplete => {
-                        ui.label(
-                            "Pulses MISSION END: Force Complete, then deactivate / delete. The previous order (or Time on Target) starts this timer only when no event Then's it. When events Then this chip, cleanup waits for one of those events. Put Land or Force Complete before this if the flight should receive those commands first.",
-                        );
-                    }
-                    OrderKind::Timer => {
-                        ui.label(
-                            "MCU_Timer pause in the order chain. The previous order pulses this timer; when it expires the next order runs.",
-                        );
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Pause");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.tpl_seats[seat].orders[order].time_s,
-                                )
-                                .range(0.0..=3600.0)
-                                .suffix(" s"),
-                            );
-                        });
-                    }
-                    OrderKind::ForceComplete => {
-                        ui.label(
-                            "MCU_CMD_ForceComplete on this unit (or shared Objects). Mission Complete pulses the shared MISSION END hub instead.",
-                        );
-                        ui.horizontal_wrapped(|ui| {
-                            draw_priority_combo(
-                                ui,
-                                format!("tpl_fc_pri_{seat}_{order}"),
-                                &mut self.tpl_seats[seat].orders[order].priority,
-                            );
-                        });
-                    }
-                    OrderKind::RtbOnZoneOut => {
-                        ui.label(
-                            "On Zone Out this unit (or its lead) flies to an RTB waypoint. Deactivate waits 1 minute. Each placement group and coalition gets its own RTB. No RTB waypoint is written unless at least one unit has this order.",
-                        );
-                    }
-                    OrderKind::AttackArea => {
-                        let ground = self.tpl_seats[seat].orders[order].attack_ground
-                            || self.tpl_seats[seat].orders[order].attack_g_targets;
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Attack");
-                            let current = self.tpl_seats[seat].orders[order].attack_area_target();
-                            egui::ComboBox::from_id_salt(format!("tpl_aa_tgt_{seat}_{order}"))
-                                .selected_text(current.label())
-                                .width(200.0)
-                                .show_ui(ui, |ui| {
-                                    for t in AttackAreaTarget::ALL {
-                                        if ui
-                                            .selectable_label(current == t, t.label())
-                                            .clicked()
-                                        {
-                                            self.tpl_seats[seat].orders[order]
-                                                .set_attack_area_target(t);
-                                        }
-                                    }
-                                });
-                            draw_priority_combo(
-                                ui,
-                                format!("tpl_aa_pri_{seat}_{order}"),
-                                &mut self.tpl_seats[seat].orders[order].priority,
-                            );
-                        });
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Area");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.tpl_seats[seat].orders[order].attack_area,
-                                )
-                                .range(100.0..=20_000.0)
-                                .suffix(" m"),
-                            );
-                            if ui
-                                .small_button("Match range")
-                                .on_hover_text(
-                                    "Set the area to this unit’s (and Also-apply) system range, capped at 3 km.",
-                                )
-                                .clicked()
-                            {
-                                apply_suggested_attack_area(&mut self.tpl_seats, seat, order);
-                            }
-                            ui.label("Time");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.tpl_seats[seat].orders[order].time_s,
-                                )
-                                .range(0.0..=3600.0)
-                                .suffix(" s"),
-                            );
-                        });
-                        let area = self.tpl_seats[seat].orders[order].attack_area;
-                        if let Some(limit) =
-                            attack_area_range_limit(&self.tpl_seats, seat, order)
-                        {
-                            if f64::from(area) > limit + 0.5 {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "Area {:.0} m is larger than this unit’s {:.1} km range. The far edge of the bubble is out of reach.",
-                                        area,
-                                        limit / 1000.0
-                                    ))
-                                    .color(Color32::from_rgb(200, 160, 80)),
-                                );
-                            } else {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "This system reaches {:.1} km. On the map the group parks within that of a hashed objective, and this MCU (ground / ground targets) is moved onto that objective.",
-                                        limit / 1000.0
-                                    ))
-                                    .italics()
-                                    .small(),
-                                );
-                            }
-                        } else if ground {
-                            ui.label(
-                                RichText::new(
-                                    "Ground / ground-target AttackArea sits on the group origin here. Generate on the Map moves it onto the hashed objective, or across the front along the unit's heading when none is marked.",
-                                )
-                                .italics()
-                                .small(),
-                            );
-                        }
-                        ui.label(
-                            RichText::new(
-                                "MCU Time is how long AttackArea runs. Time on Target in the chain is a separate timer from the waypoint, for leaving the target.",
-                            )
-                            .italics()
-                            .small(),
-                        );
-                    }
-                    OrderKind::Formation => {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Formation");
-                            let current = formation_label(
-                                self.tpl_seats[seat].orders[order].formation_type,
-                                if self.tpl_seats[seat].unit.is_air() {
-                                    CatalogKind::Plane
-                                } else {
-                                    CatalogKind::Vehicle
-                                },
-                            );
-                            egui::ComboBox::from_id_salt(format!("tpl_form_{seat}_{order}"))
-                                .selected_text(current)
-                                .width(200.0)
-                                .show_ui(ui, |ui| {
-                                    let kind = if self.tpl_seats[seat].unit.is_air() {
-                                        CatalogKind::Plane
-                                    } else {
-                                        CatalogKind::Vehicle
-                                    };
-                                    for preset in formations_for(kind) {
-                                        ui.selectable_value(
-                                            &mut self.tpl_seats[seat].orders[order].formation_type,
-                                            preset.id,
-                                            preset.label,
-                                        );
-                                    }
-                                });
-                        });
-                    }
-                    OrderKind::Behaviour => {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Filter");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.tpl_seats[seat].orders[order].behaviour_filter,
-                                )
-                                .range(0..=32),
-                            );
-                        });
-                    }
-                    OrderKind::Flare => {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Color");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.tpl_seats[seat].orders[order].flare_color,
-                                )
-                                .range(0..=4),
-                            );
-                        });
-                    }
-                    OrderKind::Effect => {
-                        ui.checkbox(
-                            &mut self.tpl_seats[seat].orders[order].effect_start,
-                            "Start (off = stop)",
-                        );
-                    }
-                    OrderKind::Cover => {
-                        ui.label(
-                            "Cover another unit. If this seat is a flight lead with wingmen, CoverGroup is set and the order goes to the lead (lead-to-lead). Independent units cover the chosen unit directly.",
-                        );
-                        let others = order_seat_indexes(&self.tpl_seats)
-                            .into_iter()
-                            .filter(|&i| i != seat)
-                            .collect::<Vec<_>>();
-                        if others.is_empty() {
-                            ui.label(
-                                RichText::new("Add another unit to cover.")
-                                    .italics(),
-                            );
-                            ui.horizontal_wrapped(|ui| {
-                                draw_priority_combo(
-                                    ui,
-                                    format!("tpl_cover_pri_{seat}_{order}"),
-                                    &mut self.tpl_seats[seat].orders[order].priority,
-                                );
-                            });
-                        } else {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label("Cover");
-                                let current = self.tpl_seats[seat].orders[order]
-                                    .cover_lead
-                                    .and_then(|i| {
-                                        self.tpl_seats.get(i).map(|s| {
-                                            format!("Seat {} ({})", i + 1, s.unit.label())
-                                        })
-                                    })
-                                    .unwrap_or_else(|| "Choose unit…".into());
-                                egui::ComboBox::from_id_salt(format!("tpl_cover_{seat}_{order}"))
-                                    .selected_text(current)
-                                    .width(220.0)
-                                    .show_ui(ui, |ui| {
-                                        for i in &others {
-                                            let text = format!(
-                                                "Seat {} ({})",
-                                                i + 1,
-                                                self.tpl_seats[*i].unit.label()
-                                            );
-                                            ui.selectable_value(
-                                                &mut self.tpl_seats[seat].orders[order].cover_lead,
-                                                Some(*i),
-                                                text,
-                                            );
-                                        }
-                                    });
-                                draw_priority_combo(
-                                    ui,
-                                    format!("tpl_cover_pri_{seat}_{order}"),
-                                    &mut self.tpl_seats[seat].orders[order].priority,
-                                );
-                            });
-                        }
-                    }
-                    OrderKind::Land => {
-                        ui.horizontal_wrapped(|ui| {
-                            draw_priority_combo(
-                                ui,
-                                format!("tpl_land_pri_{seat}_{order}"),
-                                &mut self.tpl_seats[seat].orders[order].priority,
-                            );
-                        });
-                    }
-                    OrderKind::TakeOff => {
-                        ui.label(
-                            "MCU_CMD_TakeOff. Put OnTookOff after this so the next order waits until airborne.",
-                        );
-                    }
-                    OrderKind::OnSpawned
-                    | OrderKind::OnTargetAttacked
-                    | OrderKind::OnAreaAttacked
-                    | OrderKind::OnTookOff
-                    | OrderKind::OnLanded => {
-                        let hint = match self.tpl_seats[seat].orders[order].kind {
-                            OrderKind::OnSpawned => {
-                                "OnSpawned: CmdId = spawner, TarId = this timer, then the next order. Use Spawn Units."
-                            }
-                            OrderKind::OnTargetAttacked => {
-                                "OnTargetAttacked: waits until Attack finishes, then this timer, then the next order."
-                            }
-                            OrderKind::OnAreaAttacked => {
-                                "OnAreaAttacked: waits until AttackArea Time runs out, then this timer, then the next order."
-                            }
-                            OrderKind::OnTookOff => {
-                                "OnTookOff: waits until Take Off finishes, then this timer, then the next order."
-                            }
-                            OrderKind::OnLanded => {
-                                "OnLanded: waits until Land finishes, then this timer, then the next order."
-                            }
-                            _ => "",
-                        };
-                        ui.label(hint);
-                        if self.tpl_seats[seat].orders[order].kind == OrderKind::OnSpawned
-                            && self.tpl_bring_up != BringUp::Spawn
-                        {
-                            ui.label(
-                                RichText::new(
-                                    "Spawn Units is off: this timer still starts the chain from AFTER BRING UP.",
-                                )
-                                .italics()
-                                .small(),
-                            );
-                        }
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Timer");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.tpl_seats[seat].orders[order].delay_s,
-                                )
-                                .range(0.0..=60.0)
-                                .suffix(" s")
-                                .speed(0.1),
-                            );
-                        });
-                        let unit_kind = if self.tpl_seats[seat].unit.is_air() {
-                            CatalogKind::Plane
-                        } else {
-                            CatalogKind::Vehicle
-                        };
-                        let then_label = self.tpl_seats[seat]
-                            .orders
-                            .get(order + 1)
-                            .filter(|o| !o.kind.is_report())
-                            .map(|o| o.kind.label())
-                            .unwrap_or("Choose next order…");
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Then");
-                            egui::ComboBox::from_id_salt(format!("tpl_rep_then_{seat}_{order}"))
-                                .selected_text(then_label)
-                                .width(180.0)
-                                .show_ui(ui, |ui| {
-                                    for k in OrderKind::following(unit_kind) {
-                                        let selected = self
-                                            .tpl_seats[seat]
-                                            .orders
-                                            .get(order + 1)
-                                            .is_some_and(|o| o.kind == k);
-                                        if ui.selectable_label(selected, k.label()).clicked() {
-                                            set_report_following(
-                                                &mut self.tpl_seats[seat].orders,
-                                                order,
-                                                k,
-                                                unit_kind,
-                                            );
-                                        }
-                                    }
-                                });
-                        });
-                    }
-                }
-                if self.tpl_seats[seat].orders[order].kind.has_command_mcu() {
-                    ui.add_space(4.0);
-                    ui.label(RichText::new("Also apply to").strong());
-                    ui.label(
-                        RichText::new(
-                            "Checked units share this command (one MCU, multiple Objects). Leave unchecked for a private order.",
-                        )
-                        .italics()
-                        .small(),
-                    );
-                    let others: Vec<(usize, String)> = (0..self.tpl_seats.len())
-                        .filter(|&i| i != seat)
-                        .map(|i| {
-                            (
-                                i,
-                                format!("Seat {} ({})", i + 1, self.tpl_seats[i].unit.label()),
-                            )
-                        })
-                        .collect();
-                    if others.is_empty() {
-                        ui.label(RichText::new("Add another unit to share this order.").italics());
-                    } else {
-                        ui.horizontal_wrapped(|ui| {
-                            for (i, label) in &others {
-                                let mut on = self.tpl_seats[seat].orders[order]
-                                    .shared_with
-                                    .contains(i);
-                                if ui.checkbox(&mut on, label).changed() {
-                                    let list =
-                                        &mut self.tpl_seats[seat].orders[order].shared_with;
-                                    if on {
-                                        if !list.contains(i) {
-                                            list.push(*i);
-                                        }
-                                    } else {
-                                        list.retain(|s| s != i);
-                                    }
-                                }
-                            }
-                        });
-                    }
-                }
+                self.draw_template_order_fields(ui, seat, order);
             }
             Some(TplSelect::Event { seat, event })
                 if seat < self.tpl_seats.len() && event < self.tpl_seats[seat].events.len() =>
             {
-                ui.label(
-                    "OnEvent (TarId only). Links this unit to Force Complete or an order timer.",
-                );
-                let unit_kind = self.tpl_seats[seat].unit.kind;
-                let chain_si = if receives_orders(&self.tpl_seats, seat) {
-                    seat
-                } else {
-                    flight_lead_of(&self.tpl_seats, seat)
-                };
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Event");
-                    let kind = self.tpl_seats[seat].events[event].kind;
-                    egui::ComboBox::from_id_salt(format!("tpl_evt_kind_{seat}_{event}"))
-                        .selected_text(kind.label())
-                        .width(220.0)
-                        .show_ui(ui, |ui| {
-                            for k in EntityEvent::available(unit_kind) {
-                                ui.selectable_value(
-                                    &mut self.tpl_seats[seat].events[event].kind,
-                                    *k,
-                                    k.label(),
-                                );
-                            }
-                        });
-                    if ui.small_button("Remove event").clicked() {
-                        self.tpl_seats[seat].events.remove(event);
-                        self.tpl_select = Some(TplSelect::Seat(seat));
-                        return;
-                    }
-                });
-                if seat >= self.tpl_seats.len() || event >= self.tpl_seats[seat].events.len() {
-                    return;
-                }
-                let then_orders = self.tpl_seats[chain_si].orders.clone();
-                let current = self.tpl_seats[seat].events[event]
-                    .then
-                    .label(&then_orders);
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Then");
-                    egui::ComboBox::from_id_salt(format!("tpl_evt_then_{seat}_{event}"))
-                        .selected_text(current)
-                        .width(200.0)
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.tpl_seats[seat].events[event].then,
-                                EventThen::ForceComplete,
-                                "Force Complete",
-                            );
-                            for (i, o) in then_orders.iter().enumerate() {
-                                ui.selectable_value(
-                                    &mut self.tpl_seats[seat].events[event].then,
-                                    EventThen::Order(i),
-                                    format!("{} {}", i + 1, o.kind.label()),
-                                );
-                            }
-                        });
-                });
+                self.draw_template_event_fields(ui, seat, event);
             }
             _ => {
                 ui.label(
@@ -3670,68 +3195,794 @@ impl GroupGeneratorApp {
         }
     }
 
+    fn draw_template_seat_fields(&mut self, ui: &mut egui::Ui, si: usize) {
+        let ctrl_w = field_control_w(ui);
+        let mut moved = false;
+        let mut payload_note = None;
+        field_grid(ui, ("tpl_seat_fields", si), |ui| {
+            field_label(ui, "Position");
+            ui.horizontal(|ui| {
+                ui.label(format!("{} · {}", self.tpl_seats[si].unit.kind.label(), si + 1));
+                ui.add_enabled_ui(si > 0, |ui| {
+                    if move_row_button(ui, true).on_hover_text("Move unit up").clicked() {
+                        if let Some(dest) = move_seat(&mut self.tpl_seats, si, -1) {
+                            swap_tpl_select(&mut self.tpl_select, si, dest);
+                        }
+                        moved = true;
+                    }
+                });
+                ui.add_enabled_ui(si + 1 < self.tpl_seats.len(), |ui| {
+                    if move_row_button(ui, false).on_hover_text("Move unit down").clicked() {
+                        if let Some(dest) = move_seat(&mut self.tpl_seats, si, 1) {
+                            swap_tpl_select(&mut self.tpl_select, si, dest);
+                        }
+                        moved = true;
+                    }
+                });
+            });
+            ui.end_row();
+            if moved {
+                // `si` now names another seat: draw the rest next frame.
+                return;
+            }
+
+            field_label(ui, "Role");
+            let follow_choices: Vec<(usize, String)> = lead_indexes(&self.tpl_seats)
+                .into_iter()
+                .filter(|&i| i != si)
+                .map(|i| (i, format!("Follows seat {} ({})", i + 1, self.tpl_seats[i].unit.label())))
+                .collect();
+            let current = match self.tpl_seats[si].role {
+                FlightRole::Independent => "Independent".to_string(),
+                FlightRole::Lead => "Lead".to_string(),
+                FlightRole::Follows(i) => format!("Follows seat {}", i + 1),
+            };
+            egui::ComboBox::from_id_salt(format!("tpl_role_{si}"))
+                .selected_text(current)
+                .width(ctrl_w)
+                .truncate()
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.tpl_seats[si].role == FlightRole::Independent, "Independent")
+                        .clicked()
+                    {
+                        let was_lead = self.tpl_seats[si].role == FlightRole::Lead;
+                        self.tpl_seats[si].role = FlightRole::Independent;
+                        if was_lead {
+                            for (j, seat) in self.tpl_seats.iter_mut().enumerate() {
+                                if j != si && seat.role == FlightRole::Follows(si) {
+                                    seat.role = FlightRole::Independent;
+                                }
+                            }
+                        }
+                    }
+                    if ui
+                        .selectable_label(self.tpl_seats[si].role == FlightRole::Lead, "Lead")
+                        .on_hover_text("Wingmen can follow this unit. Orders go only to the lead.")
+                        .clicked()
+                    {
+                        self.tpl_seats[si].role = FlightRole::Lead;
+                        self.tpl_seats[si].number_in_formation = 0;
+                        let count = if self.tpl_seats[si].formation_count == 0 {
+                            self.tpl_per_group
+                        } else {
+                            self.tpl_seats[si].formation_count
+                        };
+                        apply_formation_numbers(&mut self.tpl_seats, si, count);
+                    }
+                    for (i, text) in &follow_choices {
+                        if ui
+                            .selectable_label(self.tpl_seats[si].role == FlightRole::Follows(*i), text)
+                            .clicked()
+                        {
+                            self.tpl_seats[si].role = FlightRole::Follows(*i);
+                            if self.tpl_auto_altitude {
+                                apply_auto_altitude(&mut self.tpl_seats, si);
+                            }
+                            let n = self
+                                .tpl_seats
+                                .iter()
+                                .enumerate()
+                                .filter(|(j, s)| *j != si && s.role == FlightRole::Follows(*i))
+                                .count() as i32
+                                + 1;
+                            self.tpl_seats[si].number_in_formation = n;
+                        }
+                    }
+                });
+            ui.end_row();
+
+            if self.tpl_seats[si].role == FlightRole::Lead {
+                field_label(ui, "In formation");
+                let mut count = if self.tpl_seats[si].formation_count == 0 {
+                    self.tpl_per_group
+                } else {
+                    self.tpl_seats[si].formation_count.min(self.tpl_per_group)
+                };
+                if ui
+                    .add(egui::DragValue::new(&mut count).range(1..=self.tpl_per_group))
+                    .on_hover_text("Number in this flight (0 = lead). Mods the per-group count.")
+                    .changed()
+                {
+                    apply_formation_numbers(&mut self.tpl_seats, si, count);
+                }
+                ui.end_row();
+            }
+
+            field_label(ui, "Country");
+            egui::ComboBox::from_id_salt(format!("tpl_seat_country_{si}"))
+                .selected_text(
+                    COUNTRIES
+                        .iter()
+                        .find(|(id, _)| *id == self.tpl_seats[si].country)
+                        .map(|(_, l)| *l)
+                        .unwrap_or("?"),
+                )
+                .width(ctrl_w)
+                .truncate()
+                .show_ui(ui, |ui| {
+                    for (id, label) in COUNTRIES {
+                        ui.selectable_value(&mut self.tpl_seats[si].country, *id, *label);
+                    }
+                });
+            ui.end_row();
+
+            field_label(ui, "Skill");
+            ui.add(
+                egui::Slider::new(&mut self.tpl_seats[si].skill, 0..=4)
+                    .custom_formatter(|v, _| format!("{v:.0} {}", skill_name(v as i32)))
+                    .custom_parser(|t| t.split_whitespace().next().and_then(|n| n.parse::<f64>().ok())),
+            )
+            .on_hover_text("AILevel 0–4: Plain, Low, Normal, High, Ace");
+            ui.end_row();
+
+            if self.tpl_seats[si].unit.is_air() {
+                field_label(ui, "Altitude");
+                let ceiling = model_spec::ceiling_m(&self.tpl_seats[si].unit.script);
+                let slid = ui
+                    .add(
+                        egui::Slider::new(&mut self.tpl_seats[si].altitude, 0.0..=ceiling)
+                            .suffix(" m")
+                            .integer(),
+                    )
+                    .changed();
+                ui.end_row();
+                let (label, hover) = if is_follower(&self.tpl_seats, si) {
+                    let lead = flight_lead_of(&self.tpl_seats, si);
+                    let lead_alt = self.tpl_seats[lead].altitude.min(ceiling);
+                    ("Match lead", format!("Set to the flight lead’s altitude ({lead_alt:.0} m)."))
+                } else {
+                    let half = model_spec::auto_altitude_m(&self.tpl_seats[si].unit.script);
+                    (
+                        "50% ceiling",
+                        format!("Set to {half:.0} m (half of {ceiling:.0} m service ceiling). Wingmen follow."),
+                    )
+                };
+                field_label(ui, "Set altitude");
+                if ui.button(label).on_hover_text(hover).clicked() {
+                    apply_auto_altitude(&mut self.tpl_seats, si);
+                }
+                ui.end_row();
+                if self.tpl_seats[si].altitude <= 0.0 {
+                    self.tpl_seats[si].altitude = 0.0;
+                }
+                self.tpl_seats[si].start_type =
+                    PlaneStart::stored_for_altitude(self.tpl_seats[si].start_type, self.tpl_seats[si].altitude);
+                if slid && self.tpl_auto_altitude {
+                    match_lead_altitude(&mut self.tpl_seats, si);
+                }
+                if self.tpl_seats[si].altitude <= 0.0 {
+                    field_label(ui, "Engine");
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        let current = PlaneStart::from_i32(self.tpl_seats[si].start_type);
+                        for start in PlaneStart::GROUND {
+                            if ui
+                                .selectable_label(current == start, start.label())
+                                .on_hover_text(match start {
+                                    PlaneStart::Running => "On the runway, engines running (StartType 1).",
+                                    PlaneStart::Warm => "Parked with a warm engine (StartType 3).",
+                                    PlaneStart::Cold => "Parked cold and dark (StartType 2).",
+                                    PlaneStart::Air => "",
+                                })
+                                .clicked()
+                            {
+                                self.tpl_seats[si].start_type = start.as_i32();
+                                if self.tpl_auto_altitude {
+                                    match_lead_altitude(&mut self.tpl_seats, si);
+                                }
+                            }
+                        }
+                    });
+                    ui.end_row();
+                }
+            }
+
+            field_label(ui, "Number in formation");
+            ui.add(egui::DragValue::new(&mut self.tpl_seats[si].number_in_formation).range(0..=8));
+            ui.end_row();
+
+            field_label(ui, "Fuel");
+            ui.add(egui::DragValue::new(&mut self.tpl_seats[si].fuel).range(0.0..=1.0).speed(0.05));
+            ui.end_row();
+
+            payload_note = self.draw_seat_payload_mods(ui, si, ctrl_w);
+
+            field_label(ui, "Flags");
+            ui.vertical(|ui| {
+                ui.checkbox(&mut self.tpl_seats[si].vulnerable, "Vulnerable");
+                ui.checkbox(&mut self.tpl_seats[si].engageable, "Engageable");
+                ui.checkbox(&mut self.tpl_seats[si].limit_ammo, "Limit ammo");
+                if self.tpl_seats[si].unit.is_air() {
+                    ui.checkbox(&mut self.tpl_seats[si].ai_rtb, "AI RTB");
+                }
+            });
+            ui.end_row();
+        });
+        if moved {
+            return;
+        }
+        if let Some(note) = payload_note {
+            ui.add(egui::Label::new(RichText::new(note).small().weak()).wrap());
+        }
+        if is_follower(&self.tpl_seats, si) {
+            ui.label(
+                RichText::new("This unit follows its lead (entity target link). Orders are given to the lead only.")
+                    .italics()
+                    .small(),
+            );
+        }
+        ui.label(RichText::new(self.tpl_seats[si].unit.script.as_str()).italics().small());
+        if self.tpl_seats[si].unit.is_train() {
+            self.draw_train_carriages(ui, si);
+        }
+    }
+
+    fn draw_template_order_fields(&mut self, ui: &mut egui::Ui, seat: usize, order: usize) {
+        let ctrl_w = field_control_w(ui);
+        let unit_kind = if self.tpl_seats[seat].unit.is_air() { CatalogKind::Plane } else { CatalogKind::Vehicle };
+        field_grid(ui, ("tpl_order_kind", seat, order), |ui| {
+            field_label(ui, "Kind");
+            let kind = self.tpl_seats[seat].orders[order].kind;
+            egui::ComboBox::from_id_salt(format!("tpl_ord_kind_{seat}_{order}"))
+                .selected_text(kind.label())
+                .width(ctrl_w)
+                .truncate()
+                .show_ui(ui, |ui| {
+                    for k in kinds_in_same_group(kind, unit_kind) {
+                        if ui.selectable_label(self.tpl_seats[seat].orders[order].kind == k, k.label()).clicked() {
+                            apply_order_kind(&mut self.tpl_seats, seat, order, k);
+                        }
+                    }
+                });
+            ui.end_row();
+        });
+        let order = {
+            let s = &mut self.tpl_seats[seat];
+            normalize_order_chain(&mut s.orders, &mut s.events, order)
+        };
+        self.tpl_select = Some(TplSelect::Order { seat, order });
+        if order >= self.tpl_seats[seat].orders.len() {
+            return;
+        }
+
+        // Explanations under the fields: (text, style).
+        let mut notes: Vec<(String, NoteStyle)> = Vec::new();
+        let kind = self.tpl_seats[seat].orders[order].kind;
+        field_grid(ui, ("tpl_order_fields", seat, order), |ui| match kind {
+            OrderKind::Attack => {
+                notes.push((
+                    "MCU_CMD_AttackTarget: Objects = this unit (or its lead), Targets = the unit to attack.".into(),
+                    NoteStyle::Plain,
+                ));
+                let others = order_seat_indexes(&self.tpl_seats)
+                    .into_iter()
+                    .filter(|&i| i != seat)
+                    .collect::<Vec<_>>();
+                field_label(ui, "Target");
+                if others.is_empty() {
+                    ui.label(RichText::new("Add another unit to attack.").italics());
+                } else {
+                    let current = self.tpl_seats[seat].orders[order]
+                        .attack_seat
+                        .and_then(|i| self.tpl_seats.get(i).map(|s| format!("Seat {} ({})", i + 1, s.unit.label())))
+                        .unwrap_or_else(|| "Choose unit…".into());
+                    egui::ComboBox::from_id_salt(format!("tpl_atk_{seat}_{order}"))
+                        .selected_text(current)
+                        .width(ctrl_w)
+                        .truncate()
+                        .show_ui(ui, |ui| {
+                            for i in &others {
+                                let text = format!("Seat {} ({})", i + 1, self.tpl_seats[*i].unit.label());
+                                ui.selectable_value(&mut self.tpl_seats[seat].orders[order].attack_seat, Some(*i), text);
+                            }
+                        });
+                }
+                ui.end_row();
+                field_label(ui, "Group");
+                ui.checkbox(&mut self.tpl_seats[seat].orders[order].attack_group, "Attack group");
+                ui.end_row();
+                draw_priority_combo(ui, format!("tpl_atk_pri_{seat}_{order}"), &mut self.tpl_seats[seat].orders[order].priority);
+                ui.end_row();
+            }
+            OrderKind::GotoWaypoint => {
+                notes.push((
+                    "Pulses waypoint MCU WP n (there is no Goto command). On arrival that WP pulses the next order's timer — AttackArea, Time on Target, or the next Goto WP — not the MCU itself. The next waypoint is reached through that timer, not a WP n → WP n+1 MCU link.".into(),
+                    NoteStyle::Plain,
+                ));
+                notes.push((
+                    "Bombers: put Time on Target after the attack. The IP waypoint pulses the attack timer and the TOT timer; when TOT expires the chain continues. Use Mission Complete at the end to pulse MISSION END (Force Complete, RTB, Land cleanup).".into(),
+                    NoteStyle::Italic,
+                ));
+                field_label(ui, "Waypoint");
+                ui.horizontal(|ui| {
+                    let max_wp = used_waypoint_count(&self.tpl_seats).max(1);
+                    let wp = self.tpl_seats[seat].orders[order].waypoint.clamp(1, max_wp);
+                    self.tpl_seats[seat].orders[order].waypoint = wp;
+                    egui::ComboBox::from_id_salt(format!("tpl_goto_{seat}_{order}"))
+                        .selected_text(format!("WP {wp}"))
+                        .width(90.0)
+                        .show_ui(ui, |ui| {
+                            for n in 1..=max_wp {
+                                ui.selectable_value(&mut self.tpl_seats[seat].orders[order].waypoint, n, format!("WP {n}"));
+                            }
+                        });
+                    if ui.button("New").on_hover_text("Add another waypoint after this hop").clicked() {
+                        let idx = insert_goto_waypoint_after(&mut self.tpl_seats, seat, order);
+                        if let Some(spec) = self.tpl_seats[seat].orders.get_mut(idx) {
+                            spec.priority = self.tpl_wp_priority;
+                        }
+                        self.tpl_select = Some(TplSelect::Order { seat, order: idx });
+                    }
+                });
+                ui.end_row();
+                draw_priority_combo(ui, format!("tpl_goto_pri_{seat}_{order}"), &mut self.tpl_seats[seat].orders[order].priority);
+                ui.end_row();
+                if self.tpl_seats[seat].unit.is_air() {
+                    field_label(ui, "Altitude");
+                    let hop_ceiling = model_spec::ceiling_m(&self.tpl_seats[seat].unit.script);
+                    let inherited = path_waypoint_display_m(&self.tpl_seats, self.tpl_wp_altitude);
+                    let mut shown = if self.tpl_seats[seat].orders[order].altitude > 0.0 {
+                        self.tpl_seats[seat].orders[order].altitude
+                    } else {
+                        inherited
+                    };
+                    if ui
+                        .add(egui::DragValue::new(&mut shown).range(0.0..=hop_ceiling).suffix(" m"))
+                        .on_hover_text("Follows the Waypoints altitude until you enter a value.")
+                        .changed()
+                    {
+                        self.tpl_seats[seat].orders[order].altitude =
+                            if (shown - inherited).abs() < 0.5 { 0.0 } else { shown };
+                    }
+                    ui.end_row();
+                }
+                notes.push(("Click a WP diamond on the diagram to pick it.".into(), NoteStyle::Italic));
+            }
+            OrderKind::TimeOnTarget => {
+                notes.push((
+                    "Timer pulsed from the waypoint before Attack / AttackArea (not the previous delay). When it expires, the next order in the chain fires. Use this so the flight is updated after hanging on the target.".into(),
+                    NoteStyle::Plain,
+                ));
+                field_label(ui, "Time on target");
+                ui.add(egui::DragValue::new(&mut self.tpl_seats[seat].orders[order].time_s).range(0.0..=3600.0).suffix(" s"));
+                ui.end_row();
+            }
+            OrderKind::MissionComplete => {
+                notes.push((
+                    "Pulses MISSION END: Force Complete, then deactivate / delete. The previous order (or Time on Target) starts this timer only when no event Then's it. When events Then this chip, cleanup waits for one of those events. Put Land or Force Complete before this if the flight should receive those commands first.".into(),
+                    NoteStyle::Plain,
+                ));
+            }
+            OrderKind::Timer => {
+                notes.push((
+                    "MCU_Timer pause in the order chain. The previous order pulses this timer; when it expires the next order runs.".into(),
+                    NoteStyle::Plain,
+                ));
+                field_label(ui, "Pause");
+                ui.add(egui::DragValue::new(&mut self.tpl_seats[seat].orders[order].time_s).range(0.0..=3600.0).suffix(" s"));
+                ui.end_row();
+            }
+            OrderKind::ForceComplete => {
+                notes.push((
+                    "MCU_CMD_ForceComplete on this unit (or shared Objects). Mission Complete pulses the shared MISSION END hub instead.".into(),
+                    NoteStyle::Plain,
+                ));
+                draw_priority_combo(ui, format!("tpl_fc_pri_{seat}_{order}"), &mut self.tpl_seats[seat].orders[order].priority);
+                ui.end_row();
+            }
+            OrderKind::RtbOnZoneOut => {
+                notes.push((
+                    "On Zone Out this unit (or its lead) flies to an RTB waypoint. Deactivate waits 1 minute. Each placement group and coalition gets its own RTB. No RTB waypoint is written unless at least one unit has this order.".into(),
+                    NoteStyle::Plain,
+                ));
+            }
+            OrderKind::AttackArea => {
+                let ground = self.tpl_seats[seat].orders[order].attack_ground
+                    || self.tpl_seats[seat].orders[order].attack_g_targets;
+                field_label(ui, "Attack");
+                let current = self.tpl_seats[seat].orders[order].attack_area_target();
+                egui::ComboBox::from_id_salt(format!("tpl_aa_tgt_{seat}_{order}"))
+                    .selected_text(current.label())
+                    .width(ctrl_w)
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        for t in AttackAreaTarget::ALL {
+                            if ui.selectable_label(current == t, t.label()).clicked() {
+                                self.tpl_seats[seat].orders[order].set_attack_area_target(t);
+                            }
+                        }
+                    });
+                ui.end_row();
+                draw_priority_combo(ui, format!("tpl_aa_pri_{seat}_{order}"), &mut self.tpl_seats[seat].orders[order].priority);
+                ui.end_row();
+                field_label(ui, "Area");
+                ui.horizontal(|ui| {
+                    ui.add(egui::DragValue::new(&mut self.tpl_seats[seat].orders[order].attack_area).range(100.0..=20_000.0).suffix(" m"));
+                    if ui
+                        .button("Match range")
+                        .on_hover_text("Set the area to this unit’s (and Also-apply) system range, capped at 3 km.")
+                        .clicked()
+                    {
+                        apply_suggested_attack_area(&mut self.tpl_seats, seat, order);
+                    }
+                });
+                ui.end_row();
+                field_label(ui, "Time");
+                ui.add(egui::DragValue::new(&mut self.tpl_seats[seat].orders[order].time_s).range(0.0..=3600.0).suffix(" s"));
+                ui.end_row();
+                let area = self.tpl_seats[seat].orders[order].attack_area;
+                if let Some(limit) = attack_area_range_limit(&self.tpl_seats, seat, order) {
+                    if f64::from(area) > limit + 0.5 {
+                        notes.push((
+                            format!(
+                                "Area {:.0} m is larger than this unit’s {:.1} km range. The far edge of the bubble is out of reach.",
+                                area,
+                                limit / 1000.0
+                            ),
+                            NoteStyle::Warn,
+                        ));
+                    } else {
+                        notes.push((
+                            format!(
+                                "This system reaches {:.1} km. On the map the group parks within that of a hashed objective, and this MCU (ground / ground targets) is moved onto that objective.",
+                                limit / 1000.0
+                            ),
+                            NoteStyle::Italic,
+                        ));
+                    }
+                } else if ground {
+                    notes.push((
+                        "Ground / ground-target AttackArea sits on the group origin here. Generate on the Map moves it onto the hashed objective, or across the front along the unit's heading when none is marked.".into(),
+                        NoteStyle::Italic,
+                    ));
+                }
+                notes.push((
+                    "MCU Time is how long AttackArea runs. Time on Target in the chain is a separate timer from the waypoint, for leaving the target.".into(),
+                    NoteStyle::Italic,
+                ));
+            }
+            OrderKind::Formation => {
+                field_label(ui, "Formation");
+                let current = formation_label(self.tpl_seats[seat].orders[order].formation_type, unit_kind);
+                egui::ComboBox::from_id_salt(format!("tpl_form_{seat}_{order}"))
+                    .selected_text(current)
+                    .width(ctrl_w)
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        for preset in formations_for(unit_kind) {
+                            ui.selectable_value(&mut self.tpl_seats[seat].orders[order].formation_type, preset.id, preset.label);
+                        }
+                    });
+                ui.end_row();
+            }
+            OrderKind::Behaviour => {
+                field_label(ui, "Filter");
+                ui.add(egui::DragValue::new(&mut self.tpl_seats[seat].orders[order].behaviour_filter).range(0..=32));
+                ui.end_row();
+            }
+            OrderKind::Flare => {
+                field_label(ui, "Color");
+                ui.add(egui::DragValue::new(&mut self.tpl_seats[seat].orders[order].flare_color).range(0..=4));
+                ui.end_row();
+            }
+            OrderKind::Effect => {
+                field_label(ui, "Effect");
+                ui.checkbox(&mut self.tpl_seats[seat].orders[order].effect_start, "Start (off = stop)");
+                ui.end_row();
+            }
+            OrderKind::Cover => {
+                notes.push((
+                    "Cover another unit. If this seat is a flight lead with wingmen, CoverGroup is set and the order goes to the lead (lead-to-lead). Independent units cover the chosen unit directly.".into(),
+                    NoteStyle::Plain,
+                ));
+                let others = order_seat_indexes(&self.tpl_seats)
+                    .into_iter()
+                    .filter(|&i| i != seat)
+                    .collect::<Vec<_>>();
+                field_label(ui, "Cover");
+                if others.is_empty() {
+                    ui.label(RichText::new("Add another unit to cover.").italics());
+                } else {
+                    let current = self.tpl_seats[seat].orders[order]
+                        .cover_lead
+                        .and_then(|i| self.tpl_seats.get(i).map(|s| format!("Seat {} ({})", i + 1, s.unit.label())))
+                        .unwrap_or_else(|| "Choose unit…".into());
+                    egui::ComboBox::from_id_salt(format!("tpl_cover_{seat}_{order}"))
+                        .selected_text(current)
+                        .width(ctrl_w)
+                        .truncate()
+                        .show_ui(ui, |ui| {
+                            for i in &others {
+                                let text = format!("Seat {} ({})", i + 1, self.tpl_seats[*i].unit.label());
+                                ui.selectable_value(&mut self.tpl_seats[seat].orders[order].cover_lead, Some(*i), text);
+                            }
+                        });
+                }
+                ui.end_row();
+                draw_priority_combo(ui, format!("tpl_cover_pri_{seat}_{order}"), &mut self.tpl_seats[seat].orders[order].priority);
+                ui.end_row();
+            }
+            OrderKind::Land => {
+                draw_priority_combo(ui, format!("tpl_land_pri_{seat}_{order}"), &mut self.tpl_seats[seat].orders[order].priority);
+                ui.end_row();
+            }
+            OrderKind::TakeOff => {
+                notes.push((
+                    "MCU_CMD_TakeOff. Put OnTookOff after this so the next order waits until airborne.".into(),
+                    NoteStyle::Plain,
+                ));
+            }
+            OrderKind::OnSpawned
+            | OrderKind::OnTargetAttacked
+            | OrderKind::OnAreaAttacked
+            | OrderKind::OnTookOff
+            | OrderKind::OnLanded => {
+                let hint = match kind {
+                    OrderKind::OnSpawned => {
+                        "OnSpawned: CmdId = spawner, TarId = this timer, then the next order. Use Spawn Units."
+                    }
+                    OrderKind::OnTargetAttacked => {
+                        "OnTargetAttacked: waits until Attack finishes, then this timer, then the next order."
+                    }
+                    OrderKind::OnAreaAttacked => {
+                        "OnAreaAttacked: waits until AttackArea Time runs out, then this timer, then the next order."
+                    }
+                    OrderKind::OnTookOff => "OnTookOff: waits until Take Off finishes, then this timer, then the next order.",
+                    OrderKind::OnLanded => "OnLanded: waits until Land finishes, then this timer, then the next order.",
+                    _ => "",
+                };
+                notes.push((hint.into(), NoteStyle::Plain));
+                if kind == OrderKind::OnSpawned && self.tpl_bring_up != BringUp::Spawn {
+                    notes.push((
+                        "Spawn Units is off: this timer still starts the chain from AFTER BRING UP.".into(),
+                        NoteStyle::Italic,
+                    ));
+                }
+                field_label(ui, "Timer");
+                ui.add(
+                    egui::DragValue::new(&mut self.tpl_seats[seat].orders[order].delay_s)
+                        .range(0.0..=60.0)
+                        .suffix(" s")
+                        .speed(0.1),
+                );
+                ui.end_row();
+                let then_label = self.tpl_seats[seat]
+                    .orders
+                    .get(order + 1)
+                    .filter(|o| !o.kind.is_report())
+                    .map(|o| o.kind.label())
+                    .unwrap_or("Choose next order…");
+                field_label(ui, "Then");
+                egui::ComboBox::from_id_salt(format!("tpl_rep_then_{seat}_{order}"))
+                    .selected_text(then_label)
+                    .width(ctrl_w)
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        for k in OrderKind::following(unit_kind) {
+                            let selected = self.tpl_seats[seat].orders.get(order + 1).is_some_and(|o| o.kind == k);
+                            if ui.selectable_label(selected, k.label()).clicked() {
+                                set_report_following(&mut self.tpl_seats[seat].orders, order, k, unit_kind);
+                            }
+                        }
+                    });
+                ui.end_row();
+            }
+        });
+        show_field_notes(ui, &notes);
+        // Fields above may have inserted an order and moved the selection.
+        if order >= self.tpl_seats[seat].orders.len() {
+            return;
+        }
+        if self.tpl_seats[seat].orders[order].kind.has_command_mcu() {
+            ui.add_space(4.0);
+            ui.label(RichText::new("Also apply to").strong());
+            ui.label(
+                RichText::new(
+                    "Checked units share this command (one MCU, multiple Objects). Leave unchecked for a private order.",
+                )
+                .italics()
+                .small(),
+            );
+            let others: Vec<(usize, String)> = (0..self.tpl_seats.len())
+                .filter(|&i| i != seat)
+                .map(|i| (i, format!("Seat {} ({})", i + 1, self.tpl_seats[i].unit.label())))
+                .collect();
+            if others.is_empty() {
+                ui.label(RichText::new("Add another unit to share this order.").italics());
+            } else {
+                ui.horizontal_wrapped(|ui| {
+                    for (i, label) in &others {
+                        let mut on = self.tpl_seats[seat].orders[order].shared_with.contains(i);
+                        if ui.checkbox(&mut on, label).changed() {
+                            let list = &mut self.tpl_seats[seat].orders[order].shared_with;
+                            if on {
+                                if !list.contains(i) {
+                                    list.push(*i);
+                                }
+                            } else {
+                                list.retain(|s| s != i);
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        ui.add_space(6.0);
+        if ui.button("Remove order").on_hover_text("Ctrl Z undoes it").clicked() {
+            self.remove_tpl_order(seat, order);
+        }
+    }
+
+    fn draw_template_event_fields(&mut self, ui: &mut egui::Ui, seat: usize, event: usize) {
+        let ctrl_w = field_control_w(ui);
+        let unit_kind = self.tpl_seats[seat].unit.kind;
+        let chain_si = if receives_orders(&self.tpl_seats, seat) { seat } else { flight_lead_of(&self.tpl_seats, seat) };
+        let then_orders = self.tpl_seats[chain_si].orders.clone();
+        field_grid(ui, ("tpl_event_fields", seat, event), |ui| {
+            field_label(ui, "Event");
+            let kind = self.tpl_seats[seat].events[event].kind;
+            egui::ComboBox::from_id_salt(format!("tpl_evt_kind_{seat}_{event}"))
+                .selected_text(kind.label())
+                .width(ctrl_w)
+                .truncate()
+                .show_ui(ui, |ui| {
+                    for k in EntityEvent::available(unit_kind) {
+                        ui.selectable_value(&mut self.tpl_seats[seat].events[event].kind, *k, k.label());
+                    }
+                });
+            ui.end_row();
+
+            field_label(ui, "Then");
+            let current = self.tpl_seats[seat].events[event].then.label(&then_orders);
+            egui::ComboBox::from_id_salt(format!("tpl_evt_then_{seat}_{event}"))
+                .selected_text(current)
+                .width(ctrl_w)
+                .truncate()
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.tpl_seats[seat].events[event].then, EventThen::ForceComplete, "Force Complete");
+                    for (i, o) in then_orders.iter().enumerate() {
+                        ui.selectable_value(
+                            &mut self.tpl_seats[seat].events[event].then,
+                            EventThen::Order(i),
+                            format!("{} {}", i + 1, o.kind.label()),
+                        );
+                    }
+                });
+            ui.end_row();
+        });
+        show_field_notes(
+            ui,
+            &[("OnEvent (TarId only). Links this unit to Force Complete or an order timer.".into(), NoteStyle::Plain)],
+        );
+        ui.add_space(6.0);
+        if ui.button("Remove event").on_hover_text("Ctrl Z undoes it").clicked() {
+            self.remove_tpl_event(seat, event);
+        }
+    }
+
+    /// Removes one order (undoable) and selects its unit, like the tree's ×.
+    fn remove_tpl_order(&mut self, si: usize, oi: usize) {
+        if si < self.tpl_seats.len() && oi < self.tpl_seats[si].orders.len() {
+            self.record_tpl_undo(format!("Removed {}", self.tpl_seats[si].orders[oi].kind.label()));
+            self.tpl_seats[si].orders.remove(oi);
+            for hook in &mut self.tpl_seats[si].events {
+                remap_event_then(&mut hook.then, oi);
+            }
+            self.tpl_select = Some(TplSelect::Seat(si));
+        }
+    }
+
+    /// Removes one event (undoable) and selects its unit, like the tree's ×.
+    fn remove_tpl_event(&mut self, si: usize, ei: usize) {
+        if si < self.tpl_seats.len() && ei < self.tpl_seats[si].events.len() {
+            self.record_tpl_undo(format!("Removed {}", self.tpl_seats[si].events[ei].kind.label()));
+            self.tpl_seats[si].events.remove(ei);
+            self.tpl_select = Some(TplSelect::Seat(si));
+        }
+    }
+
     /// Filter combo, then one 28 px row per model: click a row to preview it,
     /// click its "+ Add" (or double-click the row) to add a unit.
     fn draw_template_model_browser(&mut self, ui: &mut egui::Ui) {
         let full_w = ui.available_width();
-        if self.tpl_kind == CatalogKind::Infantry {
-            let countries = self.countries_for_infantry();
-            if self.tpl_country.is_some_and(|c| !countries.contains(&c)) {
-                self.tpl_country = None;
+        // Class and country filters, each shown when the kind has that data.
+        // `displayed_catalog` applies both, so the list always matches them.
+        let classes = self.classes_for_kind(self.tpl_kind);
+        if self.tpl_class.is_some_and(|c| !classes.contains(&c)) {
+            self.tpl_class = None;
+        }
+        let countries = self.countries_for_kind(self.tpl_kind);
+        if self.tpl_country.is_some_and(|c| !countries.contains(&c)) {
+            self.tpl_country = None;
+        }
+        // A filter with a single choice filters nothing: show it from two up.
+        let (classes, countries) = (
+            if classes.len() > 1 { classes } else { Vec::new() },
+            if countries.len() > 1 { countries } else { Vec::new() },
+        );
+        let shown = usize::from(!classes.is_empty()) + usize::from(!countries.is_empty());
+        let combo_w = if shown == 2 { (full_w - 8.0 - 6.0) / 2.0 } else { full_w - 8.0 };
+        let mut filter_changed = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if !classes.is_empty() {
+                let current = self.tpl_class.map_or("All types", |c| c.label());
+                egui::ComboBox::from_id_salt("tpl_class_filter")
+                    .selected_text(current)
+                    .width(combo_w)
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(self.tpl_class.is_none(), "All types").clicked() {
+                            self.tpl_class = None;
+                            filter_changed = true;
+                        }
+                        for class in &classes {
+                            if ui.selectable_label(self.tpl_class == Some(*class), class.label()).clicked() {
+                                self.tpl_class = Some(*class);
+                                filter_changed = true;
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Filter the models by type");
             }
             if !countries.is_empty() {
                 let current = self.tpl_country.map_or_else(|| "All countries".to_string(), country_short);
                 egui::ComboBox::from_id_salt("tpl_country_filter")
                     .selected_text(current)
-                    .width(full_w - 8.0)
+                    .width(combo_w)
+                    .truncate()
                     .show_ui(ui, |ui| {
                         if ui.selectable_label(self.tpl_country.is_none(), "All countries").clicked() {
                             self.tpl_country = None;
-                            self.tpl_add_pick = 0;
-                            self.tpl_preview_from_catalog = true;
+                            filter_changed = true;
                         }
-                        for country in countries {
+                        for country in &countries {
                             if ui
-                                .selectable_label(self.tpl_country == Some(country), country_short(country))
+                                .selectable_label(self.tpl_country == Some(*country), country_short(*country))
                                 .clicked()
                             {
-                                self.tpl_country = Some(country);
-                                self.tpl_add_pick = 0;
-                                self.tpl_preview_from_catalog = true;
+                                self.tpl_country = Some(*country);
+                                filter_changed = true;
                             }
                         }
-                    });
+                    })
+                    .response
+                    .on_hover_text("Filter the models by the prototype's country");
             }
-        } else {
-            let classes = self.classes_for_kind(self.tpl_kind);
-            if self.tpl_class.is_some_and(|c| !classes.contains(&c)) {
-                self.tpl_class = None;
-            }
-            if !classes.is_empty() {
-                let current = self.tpl_class.map_or("All types", |c| c.label());
-                egui::ComboBox::from_id_salt("tpl_class_filter")
-                    .selected_text(current)
-                    .width(full_w - 8.0)
-                    .show_ui(ui, |ui| {
-                        if ui.selectable_label(self.tpl_class.is_none(), "All types").clicked() {
-                            self.tpl_class = None;
-                            self.tpl_add_pick = 0;
-                            self.tpl_preview_from_catalog = true;
-                        }
-                        for class in classes {
-                            if ui.selectable_label(self.tpl_class == Some(class), class.label()).clicked() {
-                                self.tpl_class = Some(class);
-                                self.tpl_add_pick = 0;
-                                self.tpl_preview_from_catalog = true;
-                            }
-                        }
-                    });
-            }
+        });
+        if filter_changed {
+            self.tpl_add_pick = 0;
+            self.tpl_preview_from_catalog = true;
         }
 
         let models = self.displayed_catalog();
         if models.is_empty() {
-            ui.label(RichText::new("No models of this kind in the catalog yet.").color(c::NEUTRAL_700));
+            let resp = ui.label(RichText::new("No models of this kind in the catalog yet.").color(c::NEUTRAL_700));
+            if std::mem::take(&mut self.tpl_show_models) {
+                resp.scroll_to_me(Some(Align::Center));
+            }
             return;
         }
         if self.tpl_add_pick >= models.len() {
@@ -3741,7 +3992,8 @@ impl GroupGeneratorApp {
         ui.add_space(4.0);
         let mut pick = None;
         let mut add = None;
-        egui::ScrollArea::vertical()
+        let show_models = std::mem::take(&mut self.tpl_show_models);
+        let list = egui::ScrollArea::vertical()
             .id_salt("tpl_model_list")
             .max_height(260.0)
             .auto_shrink([false, true])
@@ -3751,6 +4003,7 @@ impl GroupGeneratorApp {
                 for (i, unit) in models.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 28.0), Sense::click());
                     let sel = i == self.tpl_add_pick;
+                    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, format!("Model {}", unit.label())));
                     let add_rect = Rect::from_min_max(Pos2::new(rect.right() - 58.0, rect.top()), rect.max);
                     let over_add = resp.hover_pos().is_some_and(|p| add_rect.contains(p));
                     let p = ui.painter();
@@ -3775,6 +4028,9 @@ impl GroupGeneratorApp {
                     if over_add {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
+                    if sel && show_models {
+                        resp.scroll_to_me(Some(Align::Center));
+                    }
                     let resp = resp.on_hover_text(format!("{}. Double-click or + Add to add a unit.", unit.label()));
                     if resp.double_clicked() || (resp.clicked() && over_add) {
                         add = Some(i);
@@ -3783,6 +4039,9 @@ impl GroupGeneratorApp {
                     }
                 }
             });
+        if show_models {
+            ui.scroll_to_rect(list.inner_rect, Some(Align::Min));
+        }
         if let Some(i) = pick {
             self.tpl_add_pick = i;
             self.tpl_preview_from_catalog = true;
@@ -3805,131 +4064,126 @@ impl GroupGeneratorApp {
         }
     }
 
-    fn draw_seat_payload_mods(&mut self, ui: &mut egui::Ui, si: usize) {
+    /// Payload and Modifications rows of the seat `field_grid`. Returns the
+    /// payload description, which the caller shows under the grid.
+    fn draw_seat_payload_mods(&mut self, ui: &mut egui::Ui, si: usize, ctrl_w: f32) -> Option<String> {
         let script = self.tpl_seats[si].unit.script.clone();
         let loadout = payloads::catalog().for_script(&script);
         let has_payloads = loadout.is_some_and(|a| a.has_payloads());
         let has_mods = loadout.is_some_and(|a| a.has_mods());
+        let mut note = None;
 
         if has_payloads {
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Payload");
-                let current = self.tpl_seats[si].payload_id;
-                let selected_text = payloads::payload_preview(&script, current);
-                egui::ComboBox::from_id_salt(format!("tpl_payload_{si}"))
-                    .selected_text(selected_text)
-                    .width(196.0)
-                    .show_ui(ui, |ui| {
-                        let ac = payloads::catalog().for_script(&script).unwrap();
-                        for p in &ac.payloads {
-                            let summary = format!("{}  {}", p.id, p.summary());
-                            let desc = p.description(payloads::catalog());
-                            if ui
-                                .selectable_label(current == p.id, summary)
-                                .on_hover_text(desc)
-                                .clicked()
-                            {
-                                self.tpl_seats[si].payload_id = p.id;
-                            }
+            field_label(ui, "Payload");
+            let current = self.tpl_seats[si].payload_id;
+            let selected_text = payloads::payload_preview(&script, current);
+            egui::ComboBox::from_id_salt(format!("tpl_payload_{si}"))
+                .selected_text(selected_text)
+                .width(ctrl_w)
+                .truncate()
+                .show_ui(ui, |ui| {
+                    let ac = payloads::catalog().for_script(&script).unwrap();
+                    for p in &ac.payloads {
+                        let summary = format!("{}  {}", p.id, p.summary());
+                        let desc = p.description(payloads::catalog());
+                        if ui
+                            .selectable_label(current == p.id, summary)
+                            .on_hover_text(desc)
+                            .clicked()
+                        {
+                            self.tpl_seats[si].payload_id = p.id;
                         }
-                    });
-            });
+                    }
+                });
+            ui.end_row();
             if let Some(ac) = payloads::catalog().for_script(&script) {
                 if let Some(p) = ac.payload(self.tpl_seats[si].payload_id) {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(p.description(payloads::catalog()))
-                                .small()
-                                .weak(),
-                        )
-                        .wrap(),
-                    );
+                    note = Some(p.description(payloads::catalog()));
                 }
             }
         } else if self.tpl_seats[si].unit.is_air() && !has_mods {
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Payload");
-                ui.add(egui::DragValue::new(&mut self.tpl_seats[si].payload_id).range(0..=99));
-            });
+            field_label(ui, "Payload");
+            ui.add(egui::DragValue::new(&mut self.tpl_seats[si].payload_id).range(0..=99));
+            ui.end_row();
         }
 
         if has_mods {
             let is_train = self.tpl_seats[si].unit.is_train();
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Modifications");
-                let preview = payloads::mods_preview(&script, &self.tpl_seats[si].mod_mask);
-                let label = if preview == "—" {
-                    "Select…".to_string()
-                } else {
-                    preview
-                };
-                ui.menu_button(label, |ui| {
-                    ui.set_min_width(240.0);
-                    ui.label(
-                        RichText::new(if is_train {
-                            "Stock is none (ModMask 0). Hospital is on or off. Boxcars, wagons, and platforms each pick one style."
-                        } else if payloads::empty_mod_mask(&script) == 0 {
-                            "Stock is none (ModMask 0). Equipment, cargo, and trailer slots each pick one option."
-                        } else {
-                            "More than one mod may be selected when the aircraft has several slots."
-                        })
-                        .small()
-                        .weak(),
-                    );
-                    let ac = payloads::catalog().for_script(&script).unwrap();
-                    let mut mask = payloads::parse_mod_mask_for(&script, &self.tpl_seats[si].mod_mask);
-                    let mut changed = false;
-                    let mut shown = 0usize;
-                    for slot in &ac.mod_slots {
-                        if !payloads::slot_has_choices(slot) {
-                            continue;
-                        }
-                        if shown > 0 {
-                            ui.separator();
-                        }
-                        shown += 1;
-                        let exclusive = payloads::slot_choice_count(slot) > 1;
-                        if exclusive {
-                            let title = payloads::mod_slot_title(&script, slot.number);
-                            ui.label(RichText::new(title).small().weak());
-                            let has_none = slot
-                                .options
-                                .iter()
-                                .any(|o| payloads::extra_bits(&o.binary_id) == 0);
-                            if !has_none {
-                                let none_on = payloads::exclusive_selection(mask, slot).is_none();
-                                if ui.radio(none_on, "None").clicked() {
-                                    mask = payloads::clear_exclusive_for(&script, mask, slot);
-                                    changed = true;
-                                }
-                            }
-                            for opt in &slot.options {
-                                if payloads::extra_bits(&opt.binary_id) == 0 {
-                                    continue;
-                                }
-                                let selected = payloads::exclusive_selection(mask, slot)
-                                    .is_some_and(|s| s.binary_id == opt.binary_id);
-                                if ui.radio(selected, &opt.description).clicked() {
-                                    mask = payloads::select_exclusive_for(&script, mask, slot, opt);
-                                    changed = true;
-                                }
-                            }
-                        } else if let Some(opt) = slot.options.iter().find(|o| {
-                            payloads::extra_bits(&o.binary_id) != 0
-                        }) {
-                            let mut on = payloads::option_selected(mask, opt);
-                            if ui.checkbox(&mut on, &opt.description).changed() {
-                                mask = payloads::set_toggle_for(&script, mask, opt, on);
+            field_label(ui, "Modifications");
+            let preview = payloads::mods_preview(&script, &self.tpl_seats[si].mod_mask);
+            let label = if preview == "—" {
+                "Select…".to_string()
+            } else {
+                preview
+            };
+            ui.menu_button(label, |ui| {
+                ui.set_min_width(240.0);
+                ui.label(
+                    RichText::new(if is_train {
+                        "Stock is none (ModMask 0). Hospital is on or off. Boxcars, wagons, and platforms each pick one style."
+                    } else if payloads::empty_mod_mask(&script) == 0 {
+                        "Stock is none (ModMask 0). Equipment, cargo, and trailer slots each pick one option."
+                    } else {
+                        "More than one mod may be selected when the aircraft has several slots."
+                    })
+                    .small()
+                    .weak(),
+                );
+                let ac = payloads::catalog().for_script(&script).unwrap();
+                let mut mask = payloads::parse_mod_mask_for(&script, &self.tpl_seats[si].mod_mask);
+                let mut changed = false;
+                let mut shown = 0usize;
+                for slot in &ac.mod_slots {
+                    if !payloads::slot_has_choices(slot) {
+                        continue;
+                    }
+                    if shown > 0 {
+                        ui.separator();
+                    }
+                    shown += 1;
+                    let exclusive = payloads::slot_choice_count(slot) > 1;
+                    if exclusive {
+                        let title = payloads::mod_slot_title(&script, slot.number);
+                        ui.label(RichText::new(title).small().weak());
+                        let has_none = slot
+                            .options
+                            .iter()
+                            .any(|o| payloads::extra_bits(&o.binary_id) == 0);
+                        if !has_none {
+                            let none_on = payloads::exclusive_selection(mask, slot).is_none();
+                            if ui.radio(none_on, "None").clicked() {
+                                mask = payloads::clear_exclusive_for(&script, mask, slot);
                                 changed = true;
                             }
                         }
+                        for opt in &slot.options {
+                            if payloads::extra_bits(&opt.binary_id) == 0 {
+                                continue;
+                            }
+                            let selected = payloads::exclusive_selection(mask, slot)
+                                .is_some_and(|s| s.binary_id == opt.binary_id);
+                            if ui.radio(selected, &opt.description).clicked() {
+                                mask = payloads::select_exclusive_for(&script, mask, slot, opt);
+                                changed = true;
+                            }
+                        }
+                    } else if let Some(opt) = slot.options.iter().find(|o| {
+                        payloads::extra_bits(&o.binary_id) != 0
+                    }) {
+                        let mut on = payloads::option_selected(mask, opt);
+                        if ui.checkbox(&mut on, &opt.description).changed() {
+                            mask = payloads::set_toggle_for(&script, mask, opt, on);
+                            changed = true;
+                        }
                     }
-                    if changed {
-                        self.tpl_seats[si].mod_mask = payloads::encode_mod_mask(mask);
-                    }
-                });
+                }
+                if changed {
+                    self.tpl_seats[si].mod_mask = payloads::encode_mod_mask(mask);
+                }
             });
+            ui.end_row();
         }
+        note
     }
 
     /// Model picture and specs. The caller draws the name (selection title).
@@ -4016,11 +4270,12 @@ impl GroupGeneratorApp {
         )
     }
 
-    fn countries_for_infantry(&self) -> Vec<i32> {
+    /// Countries on the catalog prototypes of `kind`, sorted.
+    fn countries_for_kind(&self, kind: CatalogKind) -> Vec<i32> {
         let mut ids: Vec<i32> = self
             .tpl_catalog
             .iter()
-            .filter(|u| u.kind == CatalogKind::Infantry)
+            .filter(|u| u.kind == kind)
             .map(|u| u.country())
             .collect();
         ids.sort();
@@ -4028,22 +4283,14 @@ impl GroupGeneratorApp {
         ids
     }
 
+    /// Models of the current kind that pass both the class and the country filter.
     fn displayed_catalog(&self) -> Vec<CatalogUnit> {
         let mut models: Vec<CatalogUnit> = self
             .tpl_catalog
             .iter()
             .filter(|u| u.kind == self.tpl_kind)
-            .filter(|u| {
-                if self.tpl_kind == CatalogKind::Infantry {
-                    self.tpl_country
-                        .map(|c| u.country() == c)
-                        .unwrap_or(true)
-                } else {
-                    self.tpl_class
-                        .map(|c| model_spec::class_for(&u.script) == c)
-                        .unwrap_or(true)
-                }
-            })
+            .filter(|u| self.tpl_class.is_none_or(|c| model_spec::class_for(&u.script) == c))
+            .filter(|u| self.tpl_country.is_none_or(|c| u.country() == c))
             .cloned()
             .collect();
         models.sort_by(|a, b| a.label().cmp(b.label()));
@@ -4051,7 +4298,7 @@ impl GroupGeneratorApp {
     }
 
     fn load_unit_catalog(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .pick_file()
         else {
@@ -4089,7 +4336,7 @@ impl GroupGeneratorApp {
     }
 
     fn add_user_catalog_group(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .pick_file()
         else {
@@ -4195,7 +4442,7 @@ impl GroupGeneratorApp {
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str())
             .unwrap_or("Unit_Template.Group");
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(default_name)
             .save_file()
@@ -4213,7 +4460,7 @@ impl GroupGeneratorApp {
             &text,
             &locale,
             &format!(
-                "Wrote {} units ({}) with Zone IN/Out and MISSION END cleanup",
+                "Wrote {} units ({}) with Zone In / Zone Out and MISSION END cleanup",
                 opts.seats.len(),
                 opts.bring_up.label()
             ),
@@ -4246,7 +4493,7 @@ impl GroupGeneratorApp {
     }
 
     fn load_template_group(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .pick_file()
         else {
@@ -4327,6 +4574,7 @@ impl GroupGeneratorApp {
     fn draw_template_schematic(&mut self, ui: &mut egui::Ui) {
         let rect = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(rect, Sense::click_and_drag());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Formation view"));
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, c::BG);
         let grid = Stroke::new(1.0_f32, c::NEUTRAL_200);
@@ -4780,12 +5028,7 @@ impl GroupGeneratorApp {
             c::NEUTRAL_700,
         );
         if n == 0 {
-            let msg = "Pick a model on the left, then click + Add to begin.";
-            let g = painter.layout_no_wrap(msg.into(), FontId::proportional(13.0), c::NEUTRAL_800);
-            let box_rect = Rect::from_center_size(rect.center() + Vec2::new(0.0, 60.0), g.size() + Vec2::new(24.0, 14.0));
-            painter.rect_filled(box_rect, 2.0, c::BG);
-            painter.rect_stroke(box_rect, 2.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
-            painter.galley(box_rect.min + Vec2::new(12.0, 7.0), g, c::NEUTRAL_800);
+            self.template_empty_state(ui, rect);
         }
         painter.text(
             rect.left_bottom() + Vec2::new(14.0, -14.0),
@@ -4855,135 +5098,1687 @@ impl GroupGeneratorApp {
         }
     }
 
-    fn fighter_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-                "Group logic is built in. Configure flights, then generate a linked N-pack.",
-            )
+    /// Empty formation view: names the first step and offers its button
+    /// (README §4). Adds the model picked in the list, or, when the kind has
+    /// no models, scrolls the left panel to the list.
+    fn template_empty_state(&mut self, ui: &mut egui::Ui, canvas: Rect) {
+        let pick = self.displayed_catalog().get(self.tpl_add_pick).cloned();
+        let area = Rect::from_center_size(canvas.center() + Vec2::new(0.0, 60.0), Vec2::new(canvas.width().min(420.0), 84.0));
+        ui.painter().rect_filled(area, 2.0, c::BG);
+        ui.painter().rect_stroke(area, 2.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(area.shrink(8.0)).layout(Layout::top_down(Align::Center)),
+            |ui| {
+                ui.label(RichText::new("Pick a model on the left, then + Add to begin.").color(c::NEUTRAL_800));
+                ui.add_space(6.0);
+                match pick {
+                    Some(unit) => {
+                        if ui
+                            .button(format!("+ Add {}", unit.label()))
+                            .on_hover_text("Add the model selected in the list on the left")
+                            .clicked()
+                        {
+                            self.template_add_model(unit);
+                        }
+                    }
+                    None => {
+                        if ui.button("Show model list").on_hover_text("Scroll the left panel to the models").clicked() {
+                            self.tpl_show_models = true;
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                }
+            },
         );
-        ui.add_space(10.0);
-
-        self.pack_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.flight_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.types_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.country_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.timers_section(ui);
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(10.0);
-        self.altitude_section(ui);
-        ui.add_space(12.0);
-        ui.separator();
-        ui.add_space(6.0);
-        self.optional_template_section(ui);
     }
 
-    fn bomber_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-                "This mode takes existing groups that may have complex mission logic or are known to be resource intensive and only allows a single one to activate at a time.
-The start checkzones triggers it's mission profile and closes the others until the end timer fires.
-A good example of when to use this, is preplanned bomber flights. 
-New templates park on a square 10 km grid from 40000, 40000 unless 'export in place' is selected.",
-            )
-        );
-        ui.label(
-            RichText::new(format!(
-                "Name start zones {SUGGESTED_TRIGGER_NAMES}. Name the end timer {SUGGESTED_END_NAMES}; it should target a Deactivate and/or Delete MCU whose Objects are the units in the template."
-            ))
-        );
-        ui.add_space(8.0);
+    // ── Undo, confirmations, unsaved edits (README §6.3) ──────────────────
 
-        ui.checkbox(
-            &mut self.bomber_keep_positions,
-            "Export in place (leave groups where they are)",
-        );
-        ui.label(
-            RichText::new(
-                "Load a generated Exclusive Activation .Group to list its plans, add another template, and write back without moving them.",
-            )
-            .color(Color32::from_rgb(160, 160, 170)),
-        );
-        ui.add_space(6.0);
+    fn tpl_snapshot(&self) -> TemplateSnapshot {
+        TemplateSnapshot {
+            seats: self.tpl_seats.clone(),
+            select: self.tpl_select,
+            bring_up: self.tpl_bring_up,
+            spawn_reset: self.tpl_spawn_reset,
+            spawn_cooldown_min: self.tpl_spawn_cooldown_min,
+            place_layout: self.tpl_place_layout,
+            per_group: self.tpl_per_group,
+            zone_in: self.tpl_zone_in,
+            zone_out: self.tpl_zone_out,
+            zone_mix: self.tpl_zone_mix,
+            wp_spacing: self.tpl_wp_spacing,
+            wp_speed: self.tpl_wp_speed,
+            wp_altitude: self.tpl_wp_altitude,
+            wp_priority: self.tpl_wp_priority,
+            zone_coalition: self.tpl_zone_coalition,
+            loaded_path: self.tpl_loaded_path.clone(),
+        }
+    }
 
-        if self.bomber_slots.is_empty() {
+    fn tpl_restore(&mut self, s: TemplateSnapshot) {
+        self.tpl_seats = s.seats;
+        self.tpl_select = s.select;
+        self.tpl_bring_up = s.bring_up;
+        self.tpl_spawn_reset = s.spawn_reset;
+        self.tpl_spawn_cooldown_min = s.spawn_cooldown_min;
+        self.tpl_place_layout = s.place_layout;
+        self.tpl_per_group = s.per_group;
+        self.tpl_zone_in = s.zone_in;
+        self.tpl_zone_out = s.zone_out;
+        self.tpl_zone_mix = s.zone_mix;
+        self.tpl_wp_spacing = s.wp_spacing;
+        self.tpl_wp_speed = s.wp_speed;
+        self.tpl_wp_altitude = s.wp_altitude;
+        self.tpl_wp_priority = s.wp_priority;
+        self.tpl_zone_coalition = s.zone_coalition;
+        self.tpl_loaded_path = s.loaded_path;
+        clamp_tpl_select(&mut self.tpl_select, &self.tpl_seats);
+    }
+
+    fn map_forces(&self) -> MapForces {
+        MapForces {
+            ships: self.map_ships.clone(),
+            ground_east: self.map_ground_east.clone(),
+            ground_nato: self.map_ground_nato.clone(),
+            armies: self.map_armies.clone(),
+            fighters: self.map_fighters.clone(),
+            imported_fighters: self.map_imported_fighters.clone(),
+            east_objectives: self.east_objectives.clone(),
+            nato_objectives: self.nato_objectives.clone(),
+            refs: self.map_refs.clone(),
+            lines: None,
+        }
+    }
+
+    fn restore_map_forces(&mut self, f: MapForces) {
+        if let Some(lines) = f.lines {
+            self.custom_front_xz = lines.custom_front;
+            self.salients = lines.salients;
+            self.attack_arrows = lines.attack_arrows;
+            self.drawn_marks = lines.drawn_marks;
+            self.current_salient.clear();
+            self.attack_drag = None;
+            self.front_stroke = None;
+            self.clear_redo_stack();
+        }
+        self.map_ships = f.ships;
+        self.map_ground_east = f.ground_east;
+        self.map_ground_nato = f.ground_nato;
+        self.map_armies = f.armies;
+        self.map_fighters = f.fighters;
+        self.map_imported_fighters = f.imported_fighters;
+        self.east_objectives = f.east_objectives;
+        self.nato_objectives = f.nato_objectives;
+        self.map_refs = f.refs;
+        self.ship_drag = None;
+        self.ship_heading_drag = None;
+        self.ground_drag = None;
+        self.ground_heading_drag = None;
+        self.wp_drag = None;
+        self.wp_selected = None;
+        self.fighter_drag = None;
+        self.objective_drag = None;
+        self.reaim_map_ground();
+    }
+
+    /// Call before a Map Clear / Remove so Ctrl Z can bring the forces back.
+    fn record_map_undo(&mut self, label: String) {
+        self.map_undo.record(label, self.map_forces());
+        self.map_undo_marks = self.drawn_marks.len();
+        self.map_last = MapAction::Clear;
+    }
+
+    /// Clear lines / salients / arrows (Period tab), undoable with Ctrl Z.
+    fn clear_map_lines(&mut self, front: bool, salients: bool, arrows: bool) {
+        let n_front = usize::from(front && !self.custom_front_xz.is_empty());
+        let n_sal = if salients { self.salients.len() } else { 0 };
+        let n_arr = if arrows { self.attack_arrows.len() } else { 0 };
+        let mut parts = Vec::new();
+        if n_front > 0 {
+            parts.push("the drawn front".to_string());
+        }
+        if n_sal > 0 {
+            parts.push(count_noun(n_sal, "salient", "salients"));
+        }
+        if n_arr > 0 {
+            parts.push(count_noun(n_arr, "arrow", "arrows"));
+        }
+        let what = match parts.len() {
+            0 => "a drawing in progress".to_string(),
+            1 => parts.remove(0),
+            _ => {
+                let last = parts.pop().unwrap_or_default();
+                format!("{} and {last}", parts.join(", "))
+            }
+        };
+        let mut snapshot = self.map_forces();
+        snapshot.lines = Some(MapLines {
+            custom_front: self.custom_front_xz.clone(),
+            salients: self.salients.clone(),
+            attack_arrows: self.attack_arrows.clone(),
+            drawn_marks: self.drawn_marks.clone(),
+        });
+        self.map_undo.record(format!("Cleared {what}"), snapshot);
+        self.map_last = MapAction::Clear;
+        if front {
+            self.custom_front_xz.clear();
+            self.front_stroke = None;
+            self.drawn_marks.retain(|m| !m.is_front());
+        }
+        if salients {
+            self.salients.clear();
+            self.current_salient.clear();
+            self.drawn_marks.retain(|m| *m != DrawnMark::Salient);
+        }
+        if arrows {
+            self.attack_arrows.clear();
+            self.attack_drag = None;
+            self.drawn_marks.retain(|m| *m != DrawnMark::AttackArrow);
+        }
+        self.clear_redo_stack();
+        self.map_undo_marks = self.drawn_marks.len();
+    }
+
+    /// What Ctrl Z undoes next on Map: the last action kind, falling back to
+    /// the other kind when nothing of the last kind is left.
+    fn map_undo_kind(&self) -> Option<MapAction> {
+        let drawing = self.map_has_marks();
+        let clear = self.map_undo.label().is_some();
+        match self.map_last {
+            MapAction::Drawing if drawing => Some(MapAction::Drawing),
+            MapAction::Clear if clear => Some(MapAction::Clear),
+            _ if drawing => Some(MapAction::Drawing),
+            _ if clear => Some(MapAction::Clear),
+            _ => None,
+        }
+    }
+
+    /// Status-bar label for what Ctrl Z undoes next on Map.
+    fn map_undo_label(&self) -> Option<&str> {
+        match self.map_undo_kind()? {
+            MapAction::Clear => self.map_undo.label(),
+            MapAction::Drawing if self.map_stroke_in_progress() => Some("Unfinished drawing"),
+            MapAction::Drawing => self.drawn_marks.last().map(|m| m.label()),
+        }
+    }
+
+    /// Drop the current tab's undo snapshot once the tab is edited after it
+    /// (shell::Undo::settle). Only cheap fields go into the fingerprint.
+    fn settle_undo(&mut self) {
+        use std::hash::{Hash, Hasher};
+        fn hash(text: String) -> u64 {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut h);
+            h.finish()
+        }
+        match self.mode {
+            AppMode::Template => {
+                let fp = hash(self.tpl_fingerprint());
+                self.tpl_undo.settle(fp);
+            }
+            AppMode::Recon => {
+                let slots = match self.recon_submode {
+                    ReconSubmode::New => &self.recon_slots,
+                    ReconSubmode::Rework => &self.recon_rework,
+                };
+                let fp = hash(format!(
+                    "{}{:?}",
+                    self.recon_submode == ReconSubmode::New,
+                    slots
+                        .iter()
+                        .map(|s| (&s.path, s.kind, &s.selected_triggers, s.influence, &s.restore_start))
+                        .collect::<Vec<_>>()
+                ));
+                self.recon_undo.settle(fp);
+            }
+            AppMode::Exclusive => {
+                let fp = hash(format!(
+                    "{:?}",
+                    self.bomber_slots
+                        .iter()
+                        .map(|s| (&s.path, &s.selected_triggers, s.selected_completion))
+                        .collect::<Vec<_>>()
+                ));
+                self.bomber_undo.settle(fp);
+            }
+            AppMode::Map => {
+                // Lines count too when the snapshot holds them (a line Clear).
+                // Drawings with their own undo rebase it instead (`note_map_drawing`).
+                let lines = self.map_undo.peek().is_some_and(|f| f.lines.is_some());
+                let fp = hash(format!(
+                    "{:?}",
+                    (
+                        (&self.map_ships, &self.map_ground_east, &self.map_ground_nato, &self.map_fighters),
+                        (&self.east_objectives, &self.nato_objectives, self.map_armies.len(), self.map_refs.len()),
+                        self.map_imported_fighters.len(),
+                        lines.then_some((&self.custom_front_xz, &self.salients, &self.attack_arrows)),
+                    )
+                ));
+                self.map_undo.settle(fp);
+            }
+            AppMode::Fighter | AppMode::Airfield => {}
+        }
+    }
+
+    fn record_tpl_undo(&mut self, label: String) {
+        self.tpl_undo.record(label, self.tpl_snapshot());
+    }
+
+    /// The undo label shown in the status bar for the current tab.
+    fn undo_label(&self) -> Option<&str> {
+        match self.mode {
+            AppMode::Template => self.tpl_undo.label(),
+            AppMode::Recon => self.recon_undo.label(),
+            AppMode::Exclusive => self.bomber_undo.label(),
+            AppMode::Map => self.map_undo_label(),
+            AppMode::Fighter | AppMode::Airfield => None,
+        }
+    }
+
+    /// Ctrl Z, the status bar's Undo and the Map palette's Undo. On Map it
+    /// undoes the last action: a drawing (the drawn-mark undo) or a Clear.
+    fn undo_current_tab(&mut self) {
+        let label = self.undo_label().map(str::to_owned);
+        match self.mode {
+            AppMode::Template => {
+                if let Some(s) = self.tpl_undo.take() {
+                    self.tpl_restore(s);
+                    self.sync_template_waypoint_speed();
+                }
+            }
+            AppMode::Recon => {
+                if let Some((sub, slots)) = self.recon_undo.take() {
+                    match sub {
+                        ReconSubmode::New => self.recon_slots = slots,
+                        ReconSubmode::Rework => self.recon_rework = slots,
+                    }
+                }
+            }
+            AppMode::Exclusive => {
+                if let Some(slots) = self.bomber_undo.take() {
+                    self.bomber_slots = slots;
+                }
+            }
+            AppMode::Map => match self.map_undo_kind() {
+                Some(MapAction::Clear) => {
+                    if let Some(f) = self.map_undo.take() {
+                        self.restore_map_forces(f);
+                    }
+                    self.map_last = MapAction::Drawing;
+                }
+                Some(MapAction::Drawing) => self.remove_last_mark(),
+                None => return,
+            },
+            AppMode::Fighter | AppMode::Airfield => return,
+        }
+        if let Some(label) = label {
+            self.status = Status::Info(format!("Undone: {label}."));
+        }
+    }
+
+    /// Everything the Template's Generate reads, as text. Equal text means no edits.
+    fn tpl_fingerprint(&self) -> String {
+        format!(
+            "{:?}",
+            (
+                &self.tpl_seats,
+                self.tpl_bring_up,
+                self.tpl_spawn_reset,
+                self.tpl_spawn_cooldown_min,
+                self.tpl_place_layout,
+                self.tpl_per_group,
+                self.tpl_zone_in,
+                self.tpl_zone_out,
+                self.tpl_wp_speed,
+                self.tpl_wp_altitude,
+                self.tpl_wp_priority,
+                self.tpl_zone_coalition,
+            )
+        )
+    }
+
+    fn map_fingerprint(&self) -> String {
+        let a = self.front_aabb;
+        format!(
+            "{:?}",
+            (
+                (&self.map_ships, &self.map_ground_east, &self.map_ground_nato, &self.map_fighters),
+                (&self.east_objectives, &self.nato_objectives, self.map_armies.len(), self.map_refs.len()),
+                (&self.custom_front_xz, &self.salients, &self.attack_arrows),
+                (a.x_min, a.x_max, a.z_min, a.z_max, self.front_t),
+            )
+        )
+    }
+
+    /// The current state counts as saved (startup, Load, Generate, Reset).
+    fn mark_saved(&mut self, mode: AppMode) {
+        match mode {
+            AppMode::Template => self.tpl_saved = self.tpl_fingerprint(),
+            AppMode::Map => self.map_saved = self.map_fingerprint(),
+            _ => {}
+        }
+    }
+
+    fn is_dirty(&self, mode: AppMode) -> bool {
+        match mode {
+            AppMode::Template => !self.tpl_seats.is_empty() && self.tpl_fingerprint() != self.tpl_saved,
+            AppMode::Map => self.map_fingerprint() != self.map_saved,
+            _ => false,
+        }
+    }
+
+    /// The status as one string (tests read it).
+    #[cfg(test)]
+    fn status_text(&self) -> String {
+        match &self.status {
+            Status::Idle => String::new(),
+            Status::Info(m) | Status::Error(m) => m.clone(),
+            Status::Warn { lead, items } => format!("{lead}{}", items.join("|")),
+        }
+    }
+
+    /// Runs a Load / Generate and marks the tab saved if it reported success.
+    /// The status is cleared first, so the signal is "`f` reported a result
+    /// that is not an error" — a second identical Generate counts too. A
+    /// cancelled dialog reports nothing and keeps the previous status.
+    fn run_io(&mut self, mode: AppMode, f: impl FnOnce(&mut Self)) {
+        let before = std::mem::take(&mut self.status);
+        f(self);
+        match self.status {
+            Status::Idle => self.status = before,
+            Status::Error(_) => {}
+            Status::Info(_) | Status::Warn { .. } => self.mark_saved(mode),
+        }
+    }
+
+    fn confirm_dialogs(&mut self, ctx: &egui::Context) {
+        let Some(kind) = self.confirm else {
+            return;
+        };
+        let (title, body, button) = match kind {
+            Confirm::ResetTemplate => {
+                let orders: usize = self.tpl_seats.iter().map(|s| s.orders.len()).sum();
+                (
+                    "Reset the template?",
+                    format!(
+                        "This clears {} units, {orders} orders and the placement settings. The catalog stays. You can undo with Ctrl Z.",
+                        self.tpl_seats.len()
+                    ),
+                    "Reset",
+                )
+            }
+            Confirm::ResetFighter => (
+                "Reset Fighter Pack?",
+                "This sets linked groups, flights, aircraft types and skills, country, altitudes and timers back to their defaults.".to_string(),
+                "Reset",
+            ),
+            Confirm::LoadTemplate => (
+                "Replace the template?",
+                "The template has edits that are not in a generated file. Loading replaces them. You can undo with Ctrl Z.".to_string(),
+                "Load…",
+            ),
+            Confirm::LoadBaseMap => (
+                "Replace the map?",
+                "The map has changes that are not in a generated base map. Loading replaces the AO, front, arrows and placed forces.".to_string(),
+                "Load…",
+            ),
+        };
+        let mut open = true;
+        if shell::confirm_dialog(ctx, &mut open, title, &body, button) {
+            match kind {
+                Confirm::ResetTemplate => self.reset_template_confirmed(),
+                Confirm::ResetFighter => self.reset_fighter_pack(),
+                Confirm::LoadTemplate => self.load_template_now(),
+                Confirm::LoadBaseMap => self.run_io(AppMode::Map, |s| s.load_base_map()),
+            }
+        }
+        if !open {
+            self.confirm = None;
+        }
+    }
+
+    fn reset_template_confirmed(&mut self) {
+        self.record_tpl_undo("Reset the template".into());
+        self.reset_template_builder();
+        self.mark_saved(AppMode::Template);
+    }
+
+    /// Load… on Template. Recorded for undo only when something was loaded.
+    fn load_template_now(&mut self) {
+        let before = self.tpl_snapshot();
+        let fp = self.tpl_fingerprint();
+        self.run_io(AppMode::Template, |s| s.load_template_group());
+        if self.tpl_fingerprint() != fp {
+            self.tpl_undo.record("Replaced by Load", before);
+        }
+    }
+
+    // ── Map › Terrain: measured ground heights (terrain.rs, heightprobe.rs) ──
+
+    /// The height store, loaded from disk the first time it is needed.
+    fn terrain_store(&mut self) -> Option<&HeightStore> {
+        if self.terrain_store.is_none() && self.terrain_error.is_none() {
+            match HeightStore::load(&self.terrain_store_path, crate::terrain::KOREA_MAP_ID) {
+                Ok(s) => self.terrain_store = Some(s),
+                Err(e) => self.terrain_error = Some(e),
+            }
+        }
+        self.terrain_store.as_ref()
+    }
+
+    /// (tile row, tile col, land probes) for every tile with probes; cached.
+    fn terrain_tiles(&mut self) -> &[(usize, usize, usize)] {
+        self.terrain_tiles.get_or_insert_with(heightprobe::probe_tiles)
+    }
+
+    /// Tiles with probes that overlap the AO.
+    fn terrain_ao_tiles(&mut self) -> Vec<(usize, usize, usize)> {
+        let ao = self.front_aabb;
+        self.terrain_tiles()
+            .iter()
+            .copied()
+            .filter(|&(ti, tj, _)| {
+                let (i_lo, i_hi, j_lo, j_hi) = crate::terrain::tile_node_range(ti, tj);
+                let (x0, x1) = (i_lo as f64 * TERRAIN_STEP, i_hi as f64 * TERRAIN_STEP);
+                let (z0, z1) = (j_lo as f64 * TERRAIN_STEP, j_hi as f64 * TERRAIN_STEP);
+                x1 >= ao.x_min && x0 <= ao.x_max && z1 >= ao.z_min && z0 <= ao.z_max
+            })
+            .collect()
+    }
+
+    /// "Ground 412 m · 100 m grid" for the point under the pointer, while a
+    /// terrain layer is on.
+    fn terrain_readout(&mut self) -> Option<String> {
+        if !(self.terrain_show_coverage || self.terrain_show_relief) {
+            return None;
+        }
+        let (x, z) = self.map_hover_xz?;
+        Some(match self.terrain_store().and_then(|s| s.lookup(x, z)) {
+            Some(h) if h.spacing_m == 0.0 => format!("Ground {:.0} m · measured point", h.y),
+            Some(h) => format!("Ground {:.0} m · {:.0} m grid", h.y, h.spacing_m),
+            None => "Ground not measured".to_string(),
+        })
+    }
+
+    fn map_terrain_tab(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        shell::section_title(ui, "Height store", None);
+        let path = self.terrain_store_path.display().to_string();
+        ui.add(egui::Label::new(RichText::new(path).small().monospace().color(c::NEUTRAL_700)).truncate());
+        let total_probes: usize = self.terrain_tiles().iter().map(|t| t.2).sum();
+        let tiles = self.terrain_tiles().to_vec();
+        if let Some(err) = self.terrain_error.clone() {
+            shell::warning(ui, &err);
+        } else if let Some(store) = self.terrain_store() {
+            let measured = store.measured_nodes();
+            let tiles_done = tiles.iter().filter(|&&(ti, tj, _)| store.tile_measured(ti, tj) > 0).count();
+            let points = store.points().len();
+            let pct = if total_probes > 0 { measured as f64 * 100.0 / total_probes as f64 } else { 0.0 };
+            ui.label(format!("{measured} of {total_probes} land nodes measured ({pct:.1}%)"));
             ui.label(
-                RichText::new("No templates yet — add a .Group to begin.")
-                    .italics()
+                RichText::new(format!("{tiles_done} of {} tiles started · {points} extra points", tiles.len()))
+                    .small()
+                    .color(c::NEUTRAL_700),
             );
         }
+        if ui.button("Reload").on_hover_text("Read the store from disk again").clicked() {
+            self.terrain_store = None;
+            self.terrain_error = None;
+            self.terrain_relief = None;
+        }
+        shell::hint(ui, "Exports keep their own heights for now.", false);
+        ui.add_space(6.0);
+        ui.separator();
 
-        let mut remove = None;
-        let mut duplicate = None;
-        for i in 0..self.bomber_slots.len() {
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{}.", i + 1)).strong());
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(&self.bomber_slots[i].info.name).strong());
-                        let file = self.bomber_slots[i]
-                            .path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("file")
-                            .to_string();
-						ui.label(RichText::new(file));
-                        ui.label(
-                            RichText::new(format!(
-                                "{} units",
-                                self.bomber_slots[i].info.unit_count
-                            ))
-                        );
+        shell::section_title(ui, "Measure", Some("export probes"));
+        if ui
+            .button("Export survey pass…")
+            .on_hover_text("390,625 probe points, 800 m apart over the whole map (sea and frame included)")
+            .clicked()
+        {
+            self.terrain_export_survey();
+        }
+        let ao_tiles = self.terrain_ao_tiles();
+        let ao_probes: usize = ao_tiles.iter().map(|t| t.2).sum();
+        ui.add_enabled_ui(!ao_tiles.is_empty(), |ui| {
+            if ui
+                .button(format!("Export AO tiles ({})…", ao_tiles.len()))
+                .on_hover_text("One .Group per 224 × 224-node tile the AO touches, 100 m apart")
+                .clicked()
+            {
+                self.terrain_export_tiles(&ao_tiles);
+            }
+        });
+        shell::hint(
+            ui,
+            &format!(
+                "The AO touches {} tiles, {ao_probes} probes. Import a file in the editor, select all, set to ground, save, then Import snapped.",
+                ao_tiles.len()
+            ),
+            false,
+        );
+        ui.add_space(6.0);
+        ui.separator();
+
+        shell::section_title(ui, "Import", Some("snapped files"));
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button("Import snapped…")
+                .on_hover_text("Merge probe files you ran set to ground on into the store")
+                .clicked()
+            {
+                self.terrain_import(false);
+            }
+            if ui
+                .button("Learn from mission…")
+                .on_hover_text("Also keep the snapped height of pinned ground units in a mission you ran set to ground on")
+                .clicked()
+            {
+                self.terrain_import(true);
+            }
+        });
+        for line in self.terrain_log.iter().take(8) {
+            ui.add(egui::Label::new(RichText::new(line).small().monospace()).wrap());
+        }
+        ui.add_space(6.0);
+        ui.separator();
+
+        shell::section_title(ui, "Map layers", None);
+        ui.checkbox(&mut self.terrain_show_coverage, "Coverage")
+            .on_hover_text("Tiles shaded by how much of their land is measured");
+        if ui
+            .checkbox(&mut self.terrain_show_relief, "Relief")
+            .on_hover_text("Measured heights: color by height, with hillshade")
+            .changed()
+            && self.terrain_show_relief
+        {
+            self.terrain_relief = None;
+        }
+        shell::hint(ui, "With a layer on, the map shows the ground height under the pointer.", false);
+        ui.add_space(6.0);
+        if shell::hint(ui, "How to measure heights, step by step.", true) {
+            self.open_help(HelpTopic::Front);
+        }
+    }
+
+    fn terrain_export_survey(&mut self) {
+        let Some(path) = dialog::FileDialog::new()
+            .add_filter("IL-2 Group", &["Group"])
+            .set_file_name("HG800_survey.Group")
+            .save_file()
+        else {
+            return;
+        };
+        match heightprobe::survey_group().and_then(|g| {
+            let n = g.children.len();
+            std::fs::write(&path, serialize_group(&g)).map_err(|e| format!("{}: {e}", path.display()))?;
+            Ok(n)
+        }) {
+            Ok(n) => {
+                self.status = Status::Info(format!(
+                    "Wrote {n} survey probes to {}. Import it, select all, set to ground, save, then Import snapped.",
+                    path.display()
+                ));
+            }
+            Err(e) => self.status = Status::Error(e),
+        }
+    }
+
+    fn terrain_export_tiles(&mut self, tiles: &[(usize, usize, usize)]) {
+        let Some(dir) = dialog::FileDialog::new().pick_folder() else {
+            return;
+        };
+        let mut written = 0;
+        let mut probes = 0;
+        for &(ti, tj, _) in tiles {
+            match heightprobe::tile_probe_group(ti, tj) {
+                Ok(Some(g)) => {
+                    let path = dir.join(format!("{}.Group", heightprobe::tile_name(ti, tj)));
+                    if let Err(e) = std::fs::write(&path, serialize_group(&g)) {
+                        self.status = Status::Error(format!("{}: {e}", path.display()));
+                        return;
+                    }
+                    written += 1;
+                    probes += g.children.len();
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    self.status = Status::Error(e);
+                    return;
+                }
+            }
+        }
+        self.status = Status::Info(format!(
+            "Wrote {written} probe tiles ({probes} probe points) to {}.",
+            dir.display()
+        ));
+    }
+
+    /// Merge snapped files into the store and save it (the CLI's --probe-ingest).
+    fn terrain_import(&mut self, learn: bool) {
+        let Some(paths) = dialog::FileDialog::new()
+            .add_filter("Snapped group or mission", &["Group", "group", "Mission", "mission"])
+            .pick_files()
+        else {
+            return;
+        };
+        self.terrain_import_paths(&paths, learn);
+    }
+
+    fn terrain_import_paths(&mut self, paths: &[PathBuf], learn: bool) {
+        if self.terrain_store().is_none() {
+            self.status = Status::Error(self.terrain_error.clone().unwrap_or_else(|| "No height store.".into()));
+            return;
+        }
+        let mut store = self.terrain_store.take().unwrap_or_else(|| HeightStore::new(crate::terrain::KOREA_MAP_ID));
+        let mut refused = Vec::new();
+        let mut merged = 0;
+        let mut lines = Vec::new();
+        for path in paths {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+            let root = match std::fs::read_to_string(path)
+                .map_err(|e| e.to_string())
+                .and_then(|t| parse_il2_document(&t).map_err(|e| e.to_string()))
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    lines.push(format!("{name}: failed, {e}"));
+                    refused.push(name);
+                    continue;
+                }
+            };
+            let rep = heightprobe::ingest(&root, &mut store, learn);
+            lines.push(format!(
+                "{name}: {} heights, {} water, {} extra, {} learned, {} unsnapped{}",
+                rep.lattice,
+                rep.water,
+                rep.probe_points,
+                rep.learned,
+                rep.unsnapped,
+                if rep.merged { "" } else { " — not merged (looks unsnapped)" }
+            ));
+            if rep.merged {
+                merged += 1;
+            } else {
+                refused.push(name);
+            }
+        }
+        let saved = store.save(&self.terrain_store_path);
+        self.terrain_store = Some(store);
+        self.terrain_relief = None;
+        for line in lines.into_iter().rev() {
+            self.terrain_log.insert(0, line);
+        }
+        self.terrain_log.truncate(30);
+        self.status = match saved {
+            Err(e) => Status::Error(format!("Heights merged but not saved: {e}")),
+            Ok(()) if refused.is_empty() => Status::Info(format!("Merged {merged} snapped file(s) into the height store.")),
+            Ok(()) => Status::Warn {
+                lead: format!("Merged {merged} file(s); {} not merged:", refused.len()),
+                items: refused
+                    .into_iter()
+                    .map(|n| format!("{n}: select all, set to ground, save, then import again"))
+                    .collect(),
+            },
+        };
+    }
+
+    /// Relief texture over the whole map at 800 m: hypsometric color plus a
+    /// hillshade from the north-west; unmeasured ground stays transparent.
+    fn terrain_relief_texture(&mut self, ctx: &egui::Context) -> Option<TextureHandle> {
+        if let Some(t) = &self.terrain_relief {
+            return Some(t.clone());
+        }
+        let store = self.terrain_store()?;
+        const N: usize = 624; // 800 m per pixel over the 499.2 km map
+        let mut h = vec![f32::NAN; N * N];
+        for py in 0..N {
+            for px in 0..N {
+                let uv = Pos2::new((px as f32 + 0.5) / N as f32, (py as f32 + 0.5) / N as f32);
+                let (x, z) = uv_to_world(uv);
+                if let Some(y) = store.height_at(x, z) {
+                    h[py * N + px] = y as f32;
+                }
+            }
+        }
+        let mut img = ColorImage::new([N, N], vec![Color32::TRANSPARENT; N * N]);
+        for py in 0..N {
+            for px in 0..N {
+                let y = h[py * N + px];
+                if y.is_nan() {
+                    continue;
+                }
+                let at = |dx: isize, dy: isize| {
+                    let (qx, qy) = (px as isize + dx, py as isize + dy);
+                    if qx < 0 || qy < 0 || qx >= N as isize || qy >= N as isize {
+                        return y;
+                    }
+                    let v = h[qy as usize * N + qx as usize];
+                    if v.is_nan() { y } else { v }
+                };
+                let (gx, gy) = ((at(1, 0) - at(-1, 0)) / 1600.0, (at(0, 1) - at(0, -1)) / 1600.0);
+                let shade = (0.75 - (gx + gy) * 1.2).clamp(0.35, 1.15);
+                let base = relief_color(y);
+                let c = |v: u8| ((v as f32 * shade).min(255.0)) as u8;
+                img.pixels[py * N + px] = Color32::from_rgba_unmultiplied(c(base.r()), c(base.g()), c(base.b()), 170);
+            }
+        }
+        let tex = ctx.load_texture("terrain_relief", img, egui::TextureOptions::LINEAR);
+        self.terrain_relief = Some(tex.clone());
+        Some(tex)
+    }
+
+    /// Terrain layers over the map (drawn under units and the AO box).
+    fn draw_terrain_layers(&mut self, ctx: &egui::Context, painter: &egui::Painter, map_rect: Rect) {
+        if self.terrain_show_relief {
+            if let Some(tex) = self.terrain_relief_texture(ctx) {
+                painter.image(tex.id(), map_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            }
+        }
+        if self.terrain_show_coverage {
+            let tiles = self.terrain_tiles().to_vec();
+            let Some(store) = self.terrain_store() else { return };
+            for (ti, tj, probes) in tiles {
+                let (i_lo, i_hi, j_lo, j_hi) = crate::terrain::tile_node_range(ti, tj);
+                let r = Rect::from_two_pos(
+                    world_to_pos(map_rect, i_lo as f64 * TERRAIN_STEP, j_lo as f64 * TERRAIN_STEP),
+                    world_to_pos(map_rect, (i_hi + 1) as f64 * TERRAIN_STEP, (j_hi + 1) as f64 * TERRAIN_STEP),
+                );
+                let frac = (store.tile_measured(ti, tj) as f32 / probes.max(1) as f32).min(1.0);
+                if frac > 0.0 {
+                    painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(0x41, 0x61, 0x80, (40.0 + 110.0 * frac) as u8));
+                }
+                painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(0x2c, 0x45, 0x5d, 90)), egui::StrokeKind::Inside);
+            }
+        }
+    }
+
+    // ── Army Generator (README §5.2) ───────────────────────────────────────
+
+    fn recon_page(&mut self, ctx: &egui::Context) {
+        self.ensure_map_assets(ctx);
+        side_panel(ctx, "recon_left", true, 330.0, |ui| self.recon_templates_panel(ui));
+        side_panel(ctx, "recon_right", false, 300.0, |ui| self.recon_settings_panel(ui));
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let rework = self.recon_submode == ReconSubmode::Rework;
+            let empty = if rework { self.recon_rework.is_empty() } else { self.recon_slots.is_empty() };
+            if !empty {
+                // COPY MIX is its own block at the bottom, sized to its rows.
+                let max_h = (ui.available_height() * 0.45).max(120.0);
+                egui::TopBottomPanel::bottom("recon_mix")
+                    .resizable(false)
+                    .frame(egui::Frame::new().inner_margin(egui::Margin { left: 0, right: 0, top: 8, bottom: 4 }))
+                    .show_inside(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("recon_mix_scroll")
+                            .max_height(max_h)
+                            // Without this the area stops at egui's 64 px
+                            // default and hides the table rows.
+                            .min_scrolled_height(max_h)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| self.recon_copy_mix(ui));
                     });
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("recon_center")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add_space(6.0);
+                    self.recon_center(ui);
+                });
+        });
+    }
+
+    fn recon_templates_panel(&mut self, ui: &mut egui::Ui) {
+        let rework = self.recon_submode == ReconSubmode::Rework;
+        let n = if rework { self.recon_rework.len() } else { self.recon_slots.len() };
+        shell::section_title(
+            ui,
+            &format!("Templates · {n}"),
+            (!rework && n > 0).then_some("click a type to change it"),
+        );
+        if n == 0 {
+            shell::hint(
+                ui,
+                if rework {
+                    "Add the Random Ground Units packs this utility exported with Add packs… (Ctrl O)."
+                } else {
+                    "Add ground-unit .Group templates, or a folder of them, with Add templates… (Ctrl O)."
+                },
+                false,
+            );
+            return;
+        }
+        let side = shell::Side::from_eastern(self.recon_eastern);
+        let removed = if rework {
+            let label = (!self.recon_strip_randomizer).then_some("Activate %");
+            recon_slot_list(ui, &mut self.recon_rework, label, None, side)
+        } else {
+            let icons = self.type_icons(self.recon_eastern);
+            recon_slot_list(ui, &mut self.recon_slots, Some("Influence"), Some(icons), side)
+        };
+        if let Some(i) = removed {
+            let (sub, slots) = if rework {
+                (ReconSubmode::Rework, &mut self.recon_rework)
+            } else {
+                (ReconSubmode::New, &mut self.recon_slots)
+            };
+            self.recon_undo.record(format!("Removed {}", slots[i].info.name), (sub, slots.clone()));
+            slots.remove(i);
+        }
+    }
+
+    fn recon_center(&mut self, ui: &mut egui::Ui) {
+        let rework = self.recon_submode == ReconSubmode::Rework;
+        let sentence = if rework {
+            "Reworks packs this utility exported: copies stay where they are and get a new activate mix."
+        } else {
+            "Copies templates onto a 10 km parking grid and picks which copies activate each mission."
+        };
+        if shell::hint(ui, sentence, true) {
+            self.open_help(HelpTopic::Recon);
+        }
+        ui.add_space(8.0);
+        let empty = if rework { self.recon_rework.is_empty() } else { self.recon_slots.is_empty() };
+        if empty {
+            let label = if rework { "Add packs…" } else { "Add templates…" };
+            if empty_state(ui, &format!("{label} to begin."), label) {
+                self.load_action();
+            }
+            return;
+        }
+        if !rework {
+            self.recon_parking_grid(ui);
+        }
+    }
+
+    /// Schematic of the parking grid: one square block per template, sized
+    /// to its copies (2×2 for 4, 3×3 for 9), with a side marker per copy.
+    fn recon_parking_grid(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Parking grid · 10 km cells from 40000, 40000", None);
+        if self.recon_keep_positions {
+            shell::hint(ui, "Keep loaded positions is on: copies stay where they were authored.", false);
+            return;
+        }
+        let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
+        let mix = allocate_mix(&weights, self.recon_total as usize, self.recon_percent);
+        let side = shell::Side::from_eastern(self.recon_eastern);
+        const CELL: f32 = 18.0;
+        const BLOCK_W: f32 = 132.0;
+        let blocks: Vec<(String, usize)> = self
+            .recon_slots
+            .iter()
+            .zip(&mix)
+            .filter(|(_, m)| m.copies > 0)
+            .map(|(slot, m)| (slot.info.name.clone(), m.copies))
+            .collect();
+        let per_row = ((ui.available_width() / BLOCK_W).floor() as usize).max(1);
+        let rows = blocks.len().div_ceil(per_row).max(1);
+        let max_side = blocks
+            .iter()
+            .map(|(_, n)| (*n as f32).sqrt().ceil() as usize)
+            .max()
+            .unwrap_or(1);
+        let row_h = max_side as f32 * CELL + 30.0;
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), rows as f32 * row_h),
+            Sense::hover(),
+        );
+        let p = ui.painter_at(rect);
+        for (bi, (name, copies)) in blocks.iter().enumerate() {
+            let side_n = (*copies as f32).sqrt().ceil() as usize;
+            let origin = rect.min
+                + Vec2::new((bi % per_row) as f32 * BLOCK_W, (bi / per_row) as f32 * row_h);
+            for k in 0..side_n * side_n {
+                let cell = Rect::from_min_size(
+                    origin + Vec2::new((k % side_n) as f32 * CELL, (k / side_n) as f32 * CELL),
+                    Vec2::splat(CELL),
+                );
+                p.rect_stroke(cell, 0.0, Stroke::new(1.0_f32, c::NEUTRAL_400), egui::StrokeKind::Inside);
+                if k < *copies {
+                    shell::paint_side_marker(&p, cell.center(), 10.0, side);
+                }
+            }
+            p.with_clip_rect(Rect::from_min_size(
+                origin + Vec2::new(0.0, side_n as f32 * CELL + 4.0),
+                Vec2::new(BLOCK_W - 8.0, 20.0),
+            ))
+            .text(
+                origin + Vec2::new(0.0, side_n as f32 * CELL + 4.0),
+                Align2::LEFT_TOP,
+                format!("{name} · {copies}"),
+                FontId::proportional(12.0),
+                c::NEUTRAL_800,
+            );
+        }
+    }
+
+    fn recon_copy_mix(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Copy mix", None);
+        let rework = self.recon_submode == ReconSubmode::Rework;
+        let strip = self.recon_strip_randomizer;
+        let verb = if strip { "spawn" } else { "activate" };
+        let mut placed = 0usize;
+        let mut live = 0usize;
+        egui::Grid::new("recon_mix")
+            .num_columns(if rework { 3 } else { 4 })
+            .striped(true)
+            .spacing([18.0, 6.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new("Template").font(FontId::new(12.0, theme::bold_family())));
+                if rework {
+                    ui.label(RichText::new("On map").font(FontId::new(12.0, theme::bold_family())));
+                } else {
+                    ui.label(RichText::new("Type").font(FontId::new(12.0, theme::bold_family())));
+                    ui.label(RichText::new("Placed").font(FontId::new(12.0, theme::bold_family())));
+                }
+                ui.label(RichText::new(if strip { "Spawn" } else { "Activate" }).font(FontId::new(12.0, theme::bold_family())));
+                ui.end_row();
+                if rework {
+                    for slot in &self.recon_rework {
+                        let n = slot.detected.unwrap_or(0);
+                        let mix = TypeMix::from_copies(n, slot.influence.clamp(1, 100));
+                        let act = if strip { mix.copies } else { mix.activate };
+                        placed += mix.copies;
+                        live += act;
+                        ui.label(&slot.info.name);
+                        ui.label(mix.copies.to_string());
+                        ui.label(act.to_string());
+                        ui.end_row();
+                    }
+                } else {
+                    let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
+                    let mix = allocate_mix(&weights, self.recon_total as usize, self.recon_percent);
+                    for (slot, m) in self.recon_slots.iter().zip(mix.iter()) {
+                        let act = if strip { m.copies } else { m.activate };
+                        placed += m.copies;
+                        live += act;
+                        ui.label(&slot.info.name);
+                        ui.label(slot.kind.label());
+                        ui.label(m.copies.to_string());
+                        ui.label(act.to_string());
+                        ui.end_row();
+                    }
+                }
+            });
+        ui.add_space(6.0);
+        if placed > 0 {
+            ui.label(
+                RichText::new(format!("{live} of {placed} copies will {verb}."))
+                    .font(FontId::new(13.0, theme::bold_family()))
+                    .color(c::ACCENT_800),
+            );
+        }
+        if !strip {
+            let text = if rework {
+                "Copies stay where they are. Each type's Activate % runs its own waterfall."
+            } else {
+                "Activate % applies per type, not to the pack total."
+            };
+            if shell::hint(ui, text, true) {
+                self.open_help(HelpTopic::Recon);
+            }
+        }
+    }
+
+    fn recon_settings_panel(&mut self, ui: &mut egui::Ui) {
+        let rework = self.recon_submode == ReconSubmode::Rework;
+        shell::section_title(ui, "Army", None);
+        shell::segmented(ui, &mut self.recon_eastern, &[(true, "DPRK"), (false, "NATO")]);
+        shell::hint(ui, "Sets the icons on this page. Map › Place picks the side.", false);
+        if !rework {
+            ui.add_space(4.0);
+            ui.label("Import new templates as");
+            self.unit_kind_picker(ui);
+        }
+        ui.add_space(6.0);
+        ui.separator();
+        shell::section_title(ui, "Copies", None);
+        if rework {
+            ui.checkbox(&mut self.recon_strip_randomizer, "Spawn all copies (no randomizer)");
+            if self.recon_strip_randomizer {
+                shell::hint(ui, "Every copy starts. Pick what Mission Begin fires for each pack below.", false);
+            }
+            let detected_total: usize = self.recon_rework.iter().filter_map(|s| s.detected).sum();
+            ui.label(format!("{detected_total} groups detected on the map"));
+            if !self.recon_strip_randomizer {
+                ui.label("Activate ratio");
+                ui.horizontal(|ui| {
+                    let changed = ui
+                        .add(egui::Slider::new(&mut self.recon_percent, 1..=100).show_value(false).trailing_fill(true))
+                        .changed();
+                    let typed = ui
+                        .add(egui::DragValue::new(&mut self.recon_percent).range(1..=100).speed(0.2).suffix("%"))
+                        .changed();
+                    if changed || typed {
+                        for slot in &mut self.recon_rework {
+                            slot.influence = self.recon_percent;
+                        }
+                    }
+                });
+                shell::hint(ui, "Sets every pack's Activate %. Adjust one pack on its card.", false);
+            }
+        } else {
+            labeled_slider(ui, "Templates to create", &mut self.recon_total, 1..=64);
+            ui.checkbox(&mut self.recon_strip_randomizer, "Spawn all copies (no randomizer)");
+            if self.recon_strip_randomizer {
+                shell::hint(ui, "Every copy keeps its Mission Begin chain and starts.", false);
+            } else {
+                labeled_slider_suffix(ui, "Activate ratio", &mut self.recon_percent, 1..=100, "%");
+                if shell::hint(ui, "Share of each type's copies that start.", true) {
+                    self.open_help(HelpTopic::Recon);
+                }
+            }
+            ui.checkbox(&mut self.recon_keep_positions, "Keep loaded positions");
+        }
+        recon_dserver_note(ui);
+        ui.add_space(4.0);
+        ui.separator();
+        let summary = format!(
+            "Start {} s · {} ms apart",
+            self.recon_start_delay_s, self.recon_group_delay_ms
+        );
+        shell::settings_section(ui, "recon_timing", "Timing", &summary, false, |ui| {
+            let strip = self.recon_strip_randomizer;
+            if strip {
+                // Disabled, not hidden: the values come back with the randomizer.
+                shell::hint(ui, "Timing applies only with the randomizer.", false);
+            }
+            ui.add_enabled_ui(!strip, |ui| self.recon_timing_sliders(ui));
+        });
+        if rework && self.recon_strip_randomizer && !self.recon_rework.is_empty() {
+            shell::section_title(ui, "Reconnect Mission Begin", None);
+            let detected_total: usize = self.recon_rework.iter().filter_map(|s| s.detected).sum();
+            for (i, slot) in self.recon_rework.iter_mut().enumerate() {
+                if slot.restore_start.is_empty() {
+                    if let Some(c) = slot.info.suggested_restore() {
+                        slot.restore_start = c.name.clone();
+                    }
+                }
+                let selected = slot.restore_start.clone();
+                ui.label(RichText::new(&slot.info.name).font(FontId::new(13.0, theme::bold_family())));
+                egui::ComboBox::from_id_salt(format!("restore_start_{i}"))
+                    .selected_text(if selected.is_empty() {
+                        "Select a timer or checkzone".to_string()
+                    } else {
+                        selected
+                    })
+                    .width(ui.available_width() - 8.0)
+                    .show_ui(ui, |ui| {
+                        for choice in &slot.info.restore_starts {
+                            let kind = match choice.kind {
+                                RestoreKind::Timer => "Timer",
+                                RestoreKind::CheckZone => "CheckZone",
+                            };
+                            let rec = if choice.recommended { "  (recommended)" } else { "" };
+                            let label = format!("{}  [{kind}]{rec}", choice.name);
+                            if ui.selectable_label(slot.restore_start == choice.name, label).clicked() {
+                                slot.restore_start = choice.name.clone();
+                            }
+                        }
+                    });
+                if let Some(c) = slot.info.restore_starts.iter().find(|c| c.name == slot.restore_start) {
+                    ui.label(RichText::new(&c.hint).small().color(c::WARN_TEXT));
+                }
+                ui.add_space(4.0);
+            }
+            ui.label(
+                RichText::new(format!("All {detected_total} copies will start (no randomizer)."))
+                    .font(FontId::new(13.0, theme::bold_family()))
+                    .color(c::ACCENT_800),
+            );
+        }
+    }
+
+    fn recon_timing_sliders(&mut self, ui: &mut egui::Ui) {
+        labeled_slider(ui, "Start delay (s)", &mut self.recon_start_delay_s, 0..=180);
+        shell::hint(ui, "Wait after Mission Begin, so several Army Generator packs do not all fire at t=0.", false);
+        labeled_slider(ui, "Delay between groups (ms)", &mut self.recon_group_delay_ms, 0..=5000);
+        shell::hint(ui, "Each following type waits this long so MCU load does not spike.", false);
+    }
+
+    // ── Fighter Pack (README §5.3) ─────────────────────────────────────────
+
+    fn fighter_page(&mut self, ctx: &egui::Context) {
+        side_panel(ctx, "fighter_left", true, 270.0, |ui| self.fighter_types_panel(ui));
+        side_panel(ctx, "fighter_right", false, 304.0, |ui| self.fighter_settings_panel(ui));
+        egui::CentralPanel::default().show(ctx, |ui| {
+            paint_blueprint_grid(ui.painter(), ui.max_rect());
+            egui::ScrollArea::vertical()
+                .id_salt("fighter_center")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.fighter_preview(ui));
+        });
+    }
+
+    fn fighter_flight_config(&self) -> FlightConfig {
+        let (type_ids, type_skills) = self.selected_types();
+        FlightConfig {
+            flight_count: self.flight_count,
+            max_in_flight: self.max_in_flight,
+            type_ids,
+            type_skills,
+            country: self.country,
+            cooldown: self.cooldown,
+            reinforcement: self.reinforcement,
+            delete_orders: self.delete_orders,
+            altitude_min: self.altitude_min,
+            altitude_max: self.altitude_max,
+        }
+    }
+
+    fn fighter_types_panel(&mut self, ui: &mut egui::Ui) {
+        let n = self.type_enabled.iter().filter(|e| **e).count();
+        shell::section_title(ui, &format!("Aircraft types · {n} selected"), None);
+        shell::hint(ui, "Flights cycle through the selected types. Lead skill ≥ wingman.", false);
+        ui.add_space(4.0);
+        ui.spacing_mut().slider_width = 90.0;
+        for (i, ac) in AIRCRAFT_TYPES.iter().enumerate() {
+            ui.scope(|ui| {
+                if !self.type_enabled[i] {
+                    ui.set_opacity(0.55);
+                }
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.type_enabled[i], ac.label);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("Remove").clicked() {
-                            remove = Some(i);
-                        }
-                        if ui.small_button("Add again").clicked() {
-                            duplicate = Some(i);
-                        }
+                        ui.add_enabled(
+                            self.type_enabled[i],
+                            egui::Slider::new(&mut self.type_skill[i], 0..=4)
+                                .integer()
+                                .trailing_fill(true),
+                        )
+                        .on_hover_text("Skill 0–4 for this type's leads");
                     });
                 });
+            });
+        }
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Skill 0–4").small().color(c::NEUTRAL_700));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if shell::link(ui, "Select all").clicked() {
+                    self.type_enabled.iter_mut().for_each(|e| *e = true);
+                }
+            });
+        });
+        if n == 0 {
+            shell::warning(ui, "Select at least one aircraft type.");
+        }
+    }
 
-                show_missing_locale_hint(ui, &self.bomber_slots[i].path);
+    fn fighter_preview(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(6.0);
+        shell::section_title(ui, "Pack preview", None);
+        // No types: generation would refuse, so do not preview the fallback type.
+        if self.selected_types().0.is_empty() {
+            ui.label("Select at least one aircraft type to preview the pack.");
+            return;
+        }
+        let flights = crate::flights::preview_flights(&self.fighter_flight_config());
+        let total: usize = flights.iter().map(|f| f.seats.len()).sum();
+        let groups = self.linked_groups.max(1) as usize;
+        let custom = self.custom_path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str());
+        ui.label(Self::fighter_pack_sentence(custom, groups));
+        ui.add_space(12.0);
+        Self::fighter_group_cards(ui, groups, total, self.country);
+        ui.add_space(12.0);
 
-                let slot = &mut self.bomber_slots[i];
-                let zones = slot.info.checkzones.clone();
-                let suggested_triggers = slot.info.suggested_triggers.clone();
-                let timers = slot.info.timers.clone();
-                let suggested_end = slot.info.suggested_completion;
-                let many_zones = zones.len() > 1;
-                let end_missing = slot.selected_completion.is_none();
+        let sizes: Vec<String> = flights.iter().map(|f| f.seats.len().to_string()).collect();
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            shell::section_title(
+                ui,
+                "Group 1 · flights",
+                Some(&format!("{total} aircraft · sizes {}", sizes.join("/"))),
+            );
+            egui::Grid::new("fighter_flights")
+                .num_columns(5)
+                .striped(true)
+                .spacing([22.0, 6.0])
+                .show(ui, |ui| {
+                    for h in ["Flight", "Type", "Aircraft", "Role", "Altitude"] {
+                        ui.label(RichText::new(h).font(FontId::new(12.0, theme::bold_family())));
+                    }
+                    ui.end_row();
+                    for (f, fl) in flights.iter().enumerate() {
+                        let (low, high) = Self::flight_element_altitudes(&fl.seats);
+                        ui.label(crate::aircraft::plane_display_name(f, 0));
+                        ui.label(fl.type_label);
+                        ui.label(fl.seats.len().to_string());
+                        ui.label(Self::flight_role_text(&fl.seats));
+                        ui.label(RichText::new(Self::altitude_text(low, high)).monospace());
+                        ui.end_row();
+                    }
+                });
+            ui.add_space(10.0);
+            Self::fighter_altitude_strip(ui, &flights, self.altitude_min, self.altitude_max);
+        });
+    }
 
-                if many_zones {
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new("Multiple checkzones — select which ones this plan should enable and disable.")
-                            .color(Color32::from_rgb(180, 150, 70)),
+    /// "Group logic is built in. 3 linked groups, chained through NodeGates,
+    /// parked on a 10 km grid from 40000, 40000." — `generate_pack` parks
+    /// each group with `placement::move_to_grid` (square grid from MAP_MIN).
+    fn fighter_pack_sentence(custom: Option<&str>, groups: usize) -> String {
+        let logic = match custom {
+            Some(file) => format!("Group logic from {file}."),
+            None => "Group logic is built in.".to_string(),
+        };
+        let (x, z) = crate::placement::grid_xz(0, groups);
+        let parking = if groups <= 1 {
+            format!("One group, parked at {x:.0}, {z:.0}.")
+        } else {
+            format!(
+                "{groups} linked groups, chained through NodeGates, parked on a {:.0} km grid from {x:.0}, {z:.0}.",
+                crate::placement::GRID_STEP / 1000.0
+            )
+        };
+        format!("{logic} {parking}")
+    }
+
+    /// Group cards and NodeGate links, broken into rows so a link always
+    /// travels with the card after it (a row never ends on a link).
+    fn fighter_group_cards(ui: &mut egui::Ui, groups: usize, total: usize, country: i32) {
+        let width = ui.available_width();
+        for (r, row) in Self::pack_card_rows(groups, width).into_iter().enumerate() {
+            let n = row.len() as f32;
+            let links = if r == 0 { n - 1.0 } else { n };
+            let row_w = n * PACK_CARD_W + links * PACK_LINK_W;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.add_space(((width - row_w) / 2.0).max(0.0));
+                for g in row {
+                    if g > 0 {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(PACK_LINK_W, PACK_CARD_H), Sense::hover());
+                        let y = rect.center().y;
+                        let p = ui.painter();
+                        p.line_segment(
+                            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+                            Stroke::new(1.0_f32, c::NEUTRAL_500),
+                        );
+                        p.text(
+                            Pos2::new(rect.center().x, y + 4.0),
+                            Align2::CENTER_TOP,
+                            "NodeGate",
+                            FontId::proportional(12.0),
+                            c::NEUTRAL_700,
+                        );
+                    }
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(PACK_CARD_W, PACK_CARD_H), Sense::hover());
+                    let title = format!("Group {}", g + 1);
+                    let note = format!("{total} aircraft");
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{title} · {note}"))
+                    });
+                    let p = ui.painter();
+                    let border = if g == 0 { c::ACCENT } else { c::DIVIDER };
+                    p.rect_filled(rect, 0.0, c::BG);
+                    p.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, border), egui::StrokeKind::Inside);
+                    shell::corner_marks(p, rect, c::MARK);
+                    let left = rect.left() + 10.0;
+                    paint_seat_marker(p, Pos2::new(left + 6.0, rect.top() + 18.0), 12.0, country);
+                    p.text(
+                        Pos2::new(left + 18.0, rect.top() + 18.0),
+                        Align2::LEFT_CENTER,
+                        title,
+                        FontId::new(13.0, theme::bold_family()),
+                        c::TEXT,
+                    );
+                    p.text(
+                        Pos2::new(left, rect.top() + 36.0),
+                        Align2::LEFT_CENTER,
+                        note,
+                        FontId::proportional(12.0),
+                        c::NEUTRAL_700,
                     );
                 }
+            });
+            ui.add_space(8.0);
+        }
+    }
 
-                for zone in &zones {
-                    let mut on = slot.selected_triggers.contains(&zone.index);
-                    let suggested = suggested_triggers.contains(&zone.index);
-                    let label = if suggested {
-                        format!("{}  (suggested)", zone.name)
-                    } else {
-                        zone.name.clone()
-                    };
-                    if ui.checkbox(&mut on, label).changed() {
+    /// Which groups share a row of `width`. The first row starts with a card;
+    /// every later row starts with the link to its first card.
+    fn pack_card_rows(groups: usize, width: f32) -> Vec<std::ops::Range<usize>> {
+        let unit = PACK_CARD_W + PACK_LINK_W;
+        let first = 1 + ((width - PACK_CARD_W).max(0.0) / unit).floor() as usize;
+        let rest = ((width / unit).floor() as usize).max(1);
+        let mut rows = Vec::new();
+        let (mut start, mut cap) = (0, first);
+        while start < groups {
+            let end = (start + cap).min(groups);
+            rows.push(start..end);
+            start = end;
+            cap = rest;
+        }
+        rows
+    }
+
+    /// Low and high element altitudes of a flight: its AttackArea leads.
+    /// A complete 4-ship has a high pair; wingmen stack 25–50 m on their lead
+    /// and are not shown.
+    fn flight_element_altitudes(seats: &[(f64, bool)]) -> (f64, Option<f64>) {
+        if seats.is_empty() {
+            return (0.0, None);
+        }
+        let leads = seats.iter().filter(|s| s.1).map(|s| s.0);
+        let low = leads.clone().fold(f64::MAX, f64::min);
+        let high = leads.fold(f64::MIN, f64::max);
+        (low, (high - low >= 1.0).then_some(high))
+    }
+
+    /// "1 800 / 3 800 m" or "5 200 m".
+    fn altitude_text(low: f64, high: Option<f64>) -> String {
+        match high {
+            Some(high) => format!("{} / {} m", group_digits(low), group_digits(high)),
+            None => format!("{} m", group_digits(low)),
+        }
+    }
+
+    /// Role column: leads fly AttackArea, wingmen Cover their lead.
+    fn flight_role_text(seats: &[(f64, bool)]) -> String {
+        let leads = seats.iter().filter(|s| s.1).count();
+        let covers = seats.len() - leads;
+        match (leads, covers) {
+            (1, 0) => "AttackArea".into(),
+            (1, 1) => "AttackArea + Cover".into(),
+            (l, 0) => format!("{l} AttackArea"),
+            (l, c) => format!("{l} AttackArea · {c} Cover"),
+        }
+    }
+
+    /// The altitude band with one tick per flight (at its low element), the
+    /// range at the ends and flight names below. A name that would touch the
+    /// one drawn before it is skipped; its tick still names it on hover.
+    fn fighter_altitude_strip(ui: &mut egui::Ui, flights: &[crate::flights::FlightPreview], min: f32, max: f32) {
+        let lo = min.min(max) as f64;
+        let hi = (min.max(max) as f64).max(lo + 1.0);
+        let font = FontId::proportional(12.0);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 42.0), Sense::hover());
+        let p = ui.painter().clone();
+        let lo_g = p.layout_no_wrap(format!("{} m", group_digits(lo)), font.clone(), c::NEUTRAL_700);
+        let hi_g = p.layout_no_wrap(format!("{} m", group_digits(hi)), font.clone(), c::NEUTRAL_700);
+        let y = rect.top() + 10.0;
+        let bar = Rect::from_min_max(
+            Pos2::new(rect.left() + lo_g.size().x + 10.0, y - 4.0),
+            Pos2::new(rect.right() - hi_g.size().x - 10.0, y + 4.0),
+        );
+        p.galley(Pos2::new(rect.left(), y - lo_g.size().y / 2.0), lo_g, c::NEUTRAL_700);
+        p.galley(Pos2::new(rect.right() - hi_g.size().x, y - hi_g.size().y / 2.0), hi_g, c::NEUTRAL_700);
+        p.rect_filled(bar, 0.0, c::ACCENT_200);
+        p.rect_stroke(bar, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
+        let x_of = |alt: f64| bar.left() + ((alt - lo) / (hi - lo)).clamp(0.0, 1.0) as f32 * bar.width();
+
+        let ticks: Vec<(f32, String, String)> = flights
+            .iter()
+            .enumerate()
+            .map(|(f, fl)| {
+                let (low, high) = Self::flight_element_altitudes(&fl.seats);
+                let name = crate::aircraft::plane_display_name(f, 0);
+                let hover = format!("{name} · {} · {}", fl.type_label, Self::altitude_text(low, high));
+                (x_of(low), name, hover)
+            })
+            .collect();
+        let galleys: Vec<_> = ticks
+            .iter()
+            .map(|(_, name, _)| p.layout_no_wrap(name.clone(), font.clone(), c::NEUTRAL_700))
+            .collect();
+        let lefts: Vec<f32> = ticks
+            .iter()
+            .zip(&galleys)
+            .map(|((x, _, _), g)| (x - g.size().x / 2.0).clamp(rect.left(), (rect.right() - g.size().x).max(rect.left())))
+            .collect();
+        let widths: Vec<f32> = galleys.iter().map(|g| g.size().x).collect();
+        let shown = strip_labels_shown(&lefts, &widths, 6.0);
+        for (f, ((x, name, _), galley)) in ticks.iter().zip(galleys).enumerate() {
+            p.line_segment(
+                [Pos2::new(*x, bar.top() - 3.0), Pos2::new(*x, bar.bottom() + 3.0)],
+                Stroke::new(2.0_f32, c::ACCENT_800),
+            );
+            if shown[f] {
+                p.galley(Pos2::new(lefts[f], bar.bottom() + 6.0), galley, c::NEUTRAL_700);
+            }
+            // Hover names every flight on this tick, so a skipped label is still identifiable.
+            let hover: Vec<&str> = ticks
+                .iter()
+                .filter(|(other, _, _)| (other - x).abs() < 3.0)
+                .map(|(_, _, h)| h.as_str())
+                .collect();
+            let hit = Rect::from_center_size(Pos2::new(*x, bar.center().y), Vec2::new(9.0, 22.0));
+            let resp = ui.interact(hit, ui.id().with(("altitude_tick", f)), Sense::hover());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, format!("Altitude tick {name}")));
+            resp.on_hover_text(hover.join("\n"));
+        }
+    }
+
+    fn fighter_settings_panel(&mut self, ui: &mut egui::Ui) {
+        ui.spacing_mut().slider_width = 110.0;
+        shell::section_title(ui, "Pack", None);
+        labeled_slider(ui, "Linked groups", &mut self.linked_groups, 1..=10);
+        labeled_slider(ui, "Flights", &mut self.flight_count, 1..=10);
+        labeled_slider(ui, "Max in a flight", &mut self.max_in_flight, 1..=8);
+        if shell::hint(ui, "Each flight is one randomizer slot.", true) {
+            self.open_help(HelpTopic::Fighter);
+        }
+        ui.add_space(4.0);
+        ui.separator();
+
+        shell::section_title(ui, "Country", None);
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+            paint_seat_marker(ui.painter(), r.center(), 12.0, self.country);
+            let selected = COUNTRIES
+                .iter()
+                .find(|(id, _)| *id == self.country)
+                .map(|(_, label)| *label)
+                .unwrap_or("501  USSR");
+            egui::ComboBox::from_id_salt("country")
+                .selected_text(selected)
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    for (id, label) in COUNTRIES {
+                        ui.selectable_value(&mut self.country, *id, *label);
+                    }
+                });
+        });
+        shell::hint(
+            ui,
+            if self.country / 100 == 6 {
+                "Zone In / Zone Out trigger on DPRK [1]."
+            } else {
+                "Zone In / Zone Out trigger on NATO [2]."
+            },
+            false,
+        );
+        ui.add_space(4.0);
+        ui.separator();
+
+        let summary = format!("{:.0}–{:.0} m", self.altitude_min, self.altitude_max);
+        let mut help = false;
+        shell::settings_section(ui, "fighter_alt", "Altitude range", &summary, true, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Min");
+                ui.add(egui::DragValue::new(&mut self.altitude_min).range(100.0..=9000.0).speed(25.0).suffix(" m"));
+                ui.label("Max");
+                ui.add(egui::DragValue::new(&mut self.altitude_max).range(100.0..=9000.0).speed(25.0).suffix(" m"));
+            });
+            help = shell::hint(ui, "Complete 4-ships split 2 low / 2 high.", true);
+        });
+        if self.altitude_min > self.altitude_max {
+            std::mem::swap(&mut self.altitude_min, &mut self.altitude_max);
+        }
+        if help {
+            self.open_help(HelpTopic::Fighter);
+        }
+        let summary = format!(
+            "Cooldown {:.0} s · Reinf. {:.0} s · Delete {:.0} s",
+            self.cooldown, self.reinforcement, self.delete_orders
+        );
+        shell::settings_section(ui, "fighter_timers", "Timers", &summary, false, |ui| {
+            egui::Grid::new("fighter_timer_grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+                ui.label("Cooldown");
+                ui.add(egui::DragValue::new(&mut self.cooldown).range(0.0..=1800.0).speed(1.0).suffix(" s"));
+                ui.end_row();
+                ui.label("Reinforcement");
+                ui.add(egui::DragValue::new(&mut self.reinforcement).range(0.0..=1800.0).speed(1.0).suffix(" s"));
+                ui.end_row();
+                ui.label("Delete orders");
+                ui.add(egui::DragValue::new(&mut self.delete_orders).range(0.0..=600.0).speed(1.0).suffix(" s"));
+                ui.end_row();
+            });
+        });
+        let custom = self
+            .custom_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(str::to_owned);
+        let summary = custom.clone().unwrap_or_else(|| "Built-in · experimental".into());
+        shell::settings_section(ui, "fighter_custom", "Custom pack template", &summary, false, |ui| {
+            shell::hint(ui, "Experimental. Leave unloaded to use the built-in logic.", false);
+            ui.horizontal(|ui| {
+                if ui.button("Load…").clicked() {
+                    self.pick_template();
+                }
+                if self.custom_path.is_some() && ui.button("Use built-in").clicked() {
+                    self.custom_path = None;
+                    self.status = Status::Info("Using built-in logic.".into());
+                }
+            });
+            ui.label(RichText::new(custom.as_deref().unwrap_or("Built-in")).italics().color(c::NEUTRAL_700));
+        });
+    }
+
+    /// Header Reset on Fighter Pack: back to the startup settings.
+    fn reset_fighter_pack(&mut self) {
+        let d = Self::default();
+        self.custom_path = d.custom_path;
+        self.linked_groups = d.linked_groups;
+        self.flight_count = d.flight_count;
+        self.max_in_flight = d.max_in_flight;
+        self.type_enabled = d.type_enabled;
+        self.type_skill = d.type_skill;
+        self.country = d.country;
+        self.cooldown = d.cooldown;
+        self.reinforcement = d.reinforcement;
+        self.delete_orders = d.delete_orders;
+        self.altitude_min = d.altitude_min;
+        self.altitude_max = d.altitude_max;
+        self.status = Status::Info("Fighter Pack reset to the default settings.".into());
+    }
+
+    // ── Exclusive Activation (README §5.4) ─────────────────────────────────
+
+    fn bomber_page(&mut self, ctx: &egui::Context) {
+        if let Some(i) = self.bomber_selected {
+            if i >= self.bomber_slots.len() {
+                self.bomber_selected = self.bomber_slots.len().checked_sub(1);
+            }
+        } else if !self.bomber_slots.is_empty() {
+            self.bomber_selected = Some(0);
+        }
+        side_panel(ctx, "bomber_left", true, 290.0, |ui| self.bomber_plans_panel(ui));
+        side_panel(ctx, "bomber_right", false, 290.0, |ui| self.bomber_settings_panel(ui));
+        center_panel(ctx, "bomber_center", |ui| self.bomber_center(ui));
+    }
+
+    fn bomber_plans_panel(&mut self, ui: &mut egui::Ui) {
+        let n = self.bomber_slots.len();
+        shell::section_title(ui, &format!("Plans · {n}"), Some("one active at a time"));
+        if n == 0 {
+            shell::hint(ui, "Add templates… (Ctrl O) to list plans here.", false);
+            return;
+        }
+        let mut clicked = None;
+        for i in 0..n {
+            let slot = &self.bomber_slots[i];
+            let file = slot.path.file_name().and_then(|f| f.to_str()).unwrap_or("file").to_string();
+            let title = format!("{} · {}", i + 1, slot.info.name);
+            let meta = format!("{file} · {} units", slot.info.unit_count);
+            let tags = plan_tags(slot);
+            let selected = self.bomber_selected == Some(i);
+            let resp = ui
+                .scope_builder(
+                    egui::UiBuilder::new().id_salt(("bomber_card", i)).sense(Sense::click()),
+                    |ui| {
+                        let hovered = ui.response().hovered();
+                        plan_card(ui, selected, hovered, |ui| {
+                            ui.horizontal(|ui| {
+                                // Tags first (right to left), so a long name truncates instead of pushing them out.
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    for (text, accent) in tags.iter().rev() {
+                                        shell::tag(ui, text, *accent);
+                                    }
+                                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(title).font(FontId::new(13.0, theme::bold_family())),
+                                            )
+                                            .truncate(),
+                                        );
+                                    });
+                                });
+                            });
+                            ui.label(RichText::new(meta).small().color(c::NEUTRAL_700));
+                        });
+                    },
+                )
+                .response;
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, self.bomber_selected == Some(i), format!("Plan card {}", i + 1)));
+            if resp.clicked() {
+                clicked = Some(i);
+            }
+            ui.add_space(4.0);
+        }
+        if clicked.is_some() {
+            self.bomber_selected = clicked;
+        }
+    }
+
+    fn bomber_center(&mut self, ui: &mut egui::Ui) {
+        if self.bomber_slots.is_empty() {
+            if empty_state(ui, "Add templates… to begin.", "Add templates…") {
+                self.add_bomber_template();
+            }
+            return;
+        }
+        let i = self.bomber_selected.unwrap_or(0).min(self.bomber_slots.len() - 1);
+        let mut remove = false;
+        let mut duplicate = false;
+        {
+            let slot = &self.bomber_slots[i];
+            let file = slot.path.file_name().and_then(|f| f.to_str()).unwrap_or("file").to_string();
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(format!("Plan {}", i + 1)).small().color(c::NEUTRAL_700));
+                    ui.label(RichText::new(&slot.info.name).font(FontId::new(24.0, theme::heading_family())));
+                    ui.label(
+                        RichText::new(format!("{file} · {} units", slot.info.unit_count))
+                            .small()
+                            .color(c::NEUTRAL_700),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    remove = ui.button("Remove").clicked();
+                    duplicate = ui.button("Add again").on_hover_text("Add this template again as another plan").clicked();
+                });
+            });
+            show_missing_locale_hint(ui, &slot.path);
+        }
+        ui.add_space(8.0);
+
+        let slot = &mut self.bomber_slots[i];
+        let zones = slot.info.checkzones.clone();
+        let suggested_triggers = slot.info.suggested_triggers.clone();
+        let timers = slot.info.timers.clone();
+        let suggested_end = slot.info.suggested_completion;
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            shell::section_title(ui, "Start checkzones", Some("opens this plan, closes the others"));
+            if zones.len() > 1 {
+                shell::warning(ui, "Several checkzones found. Pick the ones this plan enables and disables.");
+            }
+            for zone in &zones {
+                let mut on = slot.selected_triggers.contains(&zone.index);
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut on, &zone.name).changed() {
                         if on {
                             if !slot.selected_triggers.contains(&zone.index) {
                                 slot.selected_triggers.push(zone.index);
@@ -4992,278 +6787,475 @@ New templates park on a square 10 km grid from 40000, 40000 unless 'export in pl
                             slot.selected_triggers.retain(|id| *id != zone.index);
                         }
                     }
-                }
-                if slot.selected_triggers.is_empty() {
-                    ui.label(
-                        RichText::new("Select at least one checkzone.")
-                            .color(Color32::from_rgb(200, 90, 90)),
-                    );
-                }
-                for id in &slot.selected_triggers {
-                    if let Some(msg) = slot.info.trigger_warnings.get(id) {
-                        ui.add_space(2.0);
-                        ui.label(
-                            RichText::new(msg)
-                                .color(Color32::from_rgb(200, 90, 90)),
-                        );
+                    if suggested_triggers.contains(&zone.index) {
+                        ui.label(RichText::new("(suggested)").small().color(c::NEUTRAL_700))
+                            .on_hover_text(format!("Picked because it is named {SUGGESTED_TRIGGER_NAMES}."));
                     }
+                });
+            }
+            if slot.selected_triggers.is_empty() {
+                shell::warning(ui, "Select at least one checkzone.");
+            }
+            for id in &slot.selected_triggers {
+                if let Some(msg) = slot.info.trigger_warnings.get(id) {
+                    shell::warning(ui, msg);
                 }
-
-                ui.add_space(6.0);
-                if end_missing {
-                    ui.label(
-                        RichText::new(format!(
-                            "No end timer was detected. Select the MCU_Timer that finishes the plan. Name it {SUGGESTED_END_NAMES}; it should target a Deactivate and/or Delete MCU that lists the units."
-                        ))
-                        .color(Color32::from_rgb(180, 150, 70)),
-                    );
-                } else {
-					ui.label(RichText::new("End timer"));
-                }
-
-                let selected_label = slot
-                    .selected_completion
-                    .and_then(|id| timers.iter().find(|t| t.index == id).map(|t| t.name.clone()))
-                    .unwrap_or_else(|| "Select end trigger timer…".into());
-                egui::ComboBox::from_id_salt(format!("bomber-end-{i}"))
-                    .selected_text(selected_label)
-                    .width(280.0)
-                    .show_ui(ui, |ui| {
-                        for timer in &timers {
-                            let text = if suggested_end == Some(timer.index) {
-                                format!("{}  (suggested)", timer.name)
-                            } else {
-                                timer.name.clone()
-                            };
-                            ui.selectable_value(
-                                &mut slot.selected_completion,
-                                Some(timer.index),
-                                text,
-                            );
-                        }
-                    });
-                if let Some(id) = slot.selected_completion {
-                    if let Some(msg) = slot.info.cleanup_warnings.get(&id) {
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(msg)
-                                .color(Color32::from_rgb(200, 90, 90)),
-                        );
+            }
+        });
+        ui.add_space(10.0);
+        let end_missing = slot.selected_completion.is_none();
+        shell::blueprint(ui, if end_missing { c::WARN } else { c::DIVIDER }, |ui| {
+            shell::section_title(ui, "End timer", Some("finishes the plan"));
+            if end_missing {
+                shell::warning(
+                    ui,
+                    "No end timer was detected. Select the MCU_Timer that finishes the plan. It should target a Deactivate and/or Delete MCU that lists the units.",
+                );
+            }
+            let selected_label = slot
+                .selected_completion
+                .and_then(|id| timers.iter().find(|t| t.index == id).map(|t| t.name.clone()))
+                .unwrap_or_else(|| "Select end timer…".into());
+            egui::ComboBox::from_id_salt(format!("bomber-end-{i}"))
+                .selected_text(selected_label)
+                .width(280.0)
+                .show_ui(ui, |ui| {
+                    for timer in &timers {
+                        let text = if suggested_end == Some(timer.index) {
+                            format!("{}  (suggested)", timer.name)
+                        } else {
+                            timer.name.clone()
+                        };
+                        ui.selectable_value(&mut slot.selected_completion, Some(timer.index), text);
                     }
+                })
+                .response
+                .on_hover_text(format!("A timer named {SUGGESTED_END_NAMES} is picked automatically."));
+            if let Some(id) = slot.selected_completion {
+                if let Some(msg) = slot.info.cleanup_warnings.get(&id) {
+                    shell::warning(ui, msg);
                 }
-            });
+            }
+        });
+        ui.add_space(12.0);
+
+        shell::section_title(ui, "Sequence", None);
+        let mut pick = None;
+        for (j, s) in self.bomber_slots.iter().enumerate() {
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+            let sel = j == i;
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, format!("Sequence {}", j + 1)));
+            let (fill, stroke) = if sel {
+                (c::ACCENT_100, Stroke::new(1.5_f32, c::ACCENT))
+            } else {
+                (c::NEUTRAL_100, Stroke::new(1.0_f32, c::DIVIDER))
+            };
+            let p = ui.painter();
+            p.rect_filled(rect, 0.0, fill);
+            p.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
+            p.text(
+                rect.left_center() + Vec2::new(10.0, 0.0),
+                Align2::LEFT_CENTER,
+                format!("Plan {}", j + 1),
+                FontId::new(13.0, if sel { theme::bold_family() } else { FontFamily::Proportional }),
+                c::TEXT,
+            );
+            if resp.on_hover_text(format!("{} · {}", j + 1, s.info.name)).clicked() {
+                pick = Some(j);
+            }
             ui.add_space(4.0);
         }
-        if let Some(i) = remove {
-            self.bomber_slots.remove(i);
+        shell::hint(ui, "A start zone opens one plan and closes the rest until its end timer fires.", false);
+        if let Some(j) = pick {
+            self.bomber_selected = Some(j);
         }
-        if let Some(i) = duplicate {
+        if remove {
+            self.bomber_undo
+                .record(format!("Removed plan {}", self.bomber_slots[i].info.name), self.bomber_slots.clone());
+            self.bomber_slots.remove(i);
+            self.bomber_selected = if self.bomber_slots.is_empty() { None } else { Some(i.min(self.bomber_slots.len() - 1)) };
+        } else if duplicate {
+            let s = &self.bomber_slots[i];
             let copy = BomberSlot {
-                path: self.bomber_slots[i].path.clone(),
-                root: self.bomber_slots[i].root.clone(),
-                info: self.bomber_slots[i].info.clone(),
-                selected_triggers: self.bomber_slots[i].selected_triggers.clone(),
-                selected_completion: self.bomber_slots[i].selected_completion,
+                path: s.path.clone(),
+                root: s.root.clone(),
+                info: s.info.clone(),
+                selected_triggers: s.selected_triggers.clone(),
+                selected_completion: s.selected_completion,
             };
             self.bomber_slots.push(copy);
         }
     }
 
-    fn recon_panel(&mut self, ui: &mut egui::Ui) {
-        match self.recon_submode {
-            ReconSubmode::New => self.recon_new_panel(ui),
-            ReconSubmode::Rework => self.recon_rework_panel(ui),
-        }
-    }
-
-    fn airfield_panel(&mut self, ui: &mut egui::Ui) {
-        self.harvest_section(ui);
-        ui.add_space(8.0);
-        ui.separator();
-        ui.add_space(6.0);
-        ui.label(RichText::new("Single airfield (manual)").strong());
-        ui.label(
-            RichText::new(
-                "Freeflight airfields from the Task Editor include a player aircraft and SP logic that multiplayer does not use.
-This mode strips the player and retargets the checkzones that were object-linked to it quickly making it multiplayer ready.
-Be advised, adding in planes to fly and setting the starting location is still required.",
-            )
+    fn bomber_settings_panel(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Output", None);
+        ui.checkbox(&mut self.bomber_keep_positions, "Export in place");
+        shell::hint(
+            ui,
+            "Off: new templates park on a 10 km grid from 40000, 40000. On: groups stay where they are.",
+            false,
         );
         ui.add_space(4.0);
-        ui.label(
-            RichText::new(
-                "In game open a Freeflight mission and select takeoff from the desired airfield.
-Use the offical mission editor to open the /missions/_gen.mission file, select the desired field and use File, Save Selection to File. 
-Load the messy airfield group here — it may sit in a Group wrapper or as loose blocks at the root in your group.",
-            )
-        );
-        ui.add_space(8.0);
-
-        ui.label("Friendly plane coalition (USA airfields: Western)");
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.airfield_western, true, "Western  [2]");
-            ui.selectable_value(&mut self.airfield_western, false, "Eastern  [1]");
-        });
-        ui.add_space(8.0);
-
-        if let Some(info) = &self.airfield_info {
-            ui.separator();
-            ui.add_space(6.0);
-            ui.label(RichText::new("Airfield").strong());
-            ui.label(format!("Name: {}", info.name));
-            ui.label(format!(
-                "Layout: {}",
-                if info.in_group {
-                    "inside a Group"
-                } else {
-                    "blocks at the root"
-                }
-            ));
-            if let Some((x, z)) = info.origin_xz {
-                ui.label(format!("Origin: {x:.0}, {z:.0}"));
-            }
-            ui.add_space(6.0);
-            ui.label(RichText::new("On the field").strong());
-            ui.label(format!("{} vehicles/ships", info.vehicle_count));
-            ui.label(format!("{} AI aircraft", info.ai_plane_count));
-            ui.label(format!("{} blocks", info.block_count));
-            ui.label(format!("{} checkzones", info.checkzone_count));
-            ui.add_space(6.0);
-            ui.label(RichText::new("Player (will be removed)").strong());
-            if info.player_planes.is_empty() {
-                ui.label(
-                    RichText::new("No player aircraft found — this file may already be cleaned.")
-                        .color(Color32::from_rgb(180, 150, 70)),
-                );
-            } else {
-                for p in &info.player_planes {
-                    let country = COUNTRIES
-                        .iter()
-                        .find(|(id, _)| *id == p.country)
-                        .map(|(_, label)| *label)
-                        .unwrap_or("unknown country");
-                    ui.label(format!("{}  ({country})", p.name));
-                }
-            }
-            if info.has_autoremove {
-                ui.label(
-                    RichText::new("AutoRemove subgroup will be deleted.")
-                );
-            }
-            ui.label(format!(
-                "{} objects in the player / SP graph will be stripped",
-                info.strip_count
-            ));
-            ui.add_space(6.0);
-            ui.label(RichText::new("Checkzones to unlink").strong());
-            if info.unlink_zones.is_empty() {
-                ui.label(
-                    RichText::new("None object-linked to the player.")
-                );
-            } else {
-                ui.label(
-                    RichText::new(format!(
-                        "{} zone(s) will drop the player object link and use {}.",
-                        info.unlink_zones.len(),
-                        if self.airfield_western {
-                            "Western [2]"
-                        } else {
-                            "Eastern [1]"
-                        }
-                    ))
-                );
-                for name in &info.unlink_zones {
-					ui.label(RichText::new(format!("  {name}")));
-                }
-            }
-        } else {
-            ui.label(
-                RichText::new("Load an airfield group exported from _gen.mission.")
-                    .italics()
-            );
+        ui.separator();
+        shell::section_title(ui, "Naming", None);
+        if shell::hint(
+            ui,
+            "Name start zones and the end timer as listed in Help so they are found automatically.",
+            true,
+        ) {
+            self.open_help(HelpTopic::Exclusive);
         }
+        ui.add_space(4.0);
+        ui.separator();
+        shell::section_title(ui, "Use it for", None);
+        shell::hint(
+            ui,
+            "Groups with heavy logic where only one should run at a time, such as preplanned bomber flights.",
+            false,
+        );
     }
 
-	fn map_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-                "Draw a box on Korea to clip the period front and areas of influence.
-Add reference groups (airfields, blocks) to stamp at their saved locations; they are trimmed to the box plus 10 km.",
-            )
+    // ── Airfield (README §5.5) ─────────────────────────────────────────────
+
+    fn airfield_page(&mut self, ctx: &egui::Context) {
+        side_panel(ctx, "airfield_left", true, 290.0, |ui| self.airfield_left_panel(ui));
+        side_panel(ctx, "airfield_right", false, 270.0, |ui| self.airfield_right_panel(ui));
+        center_panel(ctx, "airfield_center", |ui| self.airfield_center(ui));
+    }
+
+    fn airfield_left_panel(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Get the file", None);
+        numbered_step(ui, 1, "In game, open a Freeflight mission and take off from the airfield.");
+        numbered_step(
+            ui,
+            2,
+            "Open /missions/_gen.mission in the mission editor. Select the field, then File › Save Selection to File.",
         );
+        numbered_step(ui, 3, "Load that file here.");
+        if shell::link(ui, "Help ›").clicked() {
+            self.open_help(HelpTopic::Airfield);
+        }
         ui.add_space(6.0);
+        ui.separator();
+        shell::section_title(ui, "Friendly plane coalition", None);
+        shell::segmented(ui, &mut self.airfield_western, &[(true, "NATO [2]"), (false, "DPRK [1]")]);
+        shell::hint(ui, "USA airfields use NATO.", false);
+        ui.add_space(6.0);
+        ui.separator();
+        self.harvest_section(ui);
+    }
 
-        self.handle_map_timeline_keys(ui);
+    fn airfield_center(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "What Generate will change", None);
+        ui.label("Strips the player and SP logic, then retargets the checkzones that were linked to the player.");
+        ui.add_space(10.0);
+        let Some(info) = &self.airfield_info else {
+            if empty_state(ui, "Load an airfield group exported from _gen.mission.", "Load airfield…") {
+                self.load_airfield();
+            }
+            self.harvest_log_panel(ui);
+            return;
+        };
+        let side = if self.airfield_western { "NATO [2]" } else { "DPRK [1]" };
+        ui.columns(2, |cols| {
+            shell::blueprint(&mut cols[0], c::DIVIDER, |ui| {
+                shell::section_title(ui, "Removed", None);
+                if info.player_planes.is_empty() {
+                    shell::warning(ui, "No player aircraft found; this file may already be cleaned.");
+                } else {
+                    for p in &info.player_planes {
+                        fact_row(ui, &format!("Player · {}", p.name), &country_name(p.country));
+                    }
+                }
+                if info.has_autoremove {
+                    fact_row(ui, "AutoRemove subgroup", "");
+                }
+                fact_row(ui, "Player / SP graph objects", &info.strip_count.to_string());
+            });
+            shell::blueprint(&mut cols[1], c::ACCENT, |ui| {
+                let n = info.unlink_zones.len();
+                let note = format!("{n} checkzone{}", if n == 1 { "" } else { "s" });
+                shell::section_title(ui, &format!("Relinked to {side}"), Some(&note));
+                if info.unlink_zones.is_empty() {
+                    ui.label("No checkzones are linked to the player.");
+                }
+                for name in &info.unlink_zones {
+                    fact_row(ui, name, "");
+                }
+            });
+        });
+        ui.add_space(10.0);
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            shell::section_title(ui, "Kept", None);
+            ui.columns(4, |cols| {
+                for (col, (n, label)) in cols.iter_mut().zip([
+                    (info.vehicle_count, "vehicles / ships"),
+                    (info.ai_plane_count, "AI aircraft"),
+                    (info.block_count, "blocks"),
+                    (info.checkzone_count, "checkzones"),
+                ]) {
+                    col.label(RichText::new(n.to_string()).font(FontId::new(24.0, theme::heading_family())));
+                    col.label(RichText::new(label).small().color(c::NEUTRAL_700));
+                }
+            });
+        });
+        ui.add_space(10.0);
+        shell::warning(ui, "Still required after export: add planes to fly and set the starting location.");
+        self.harvest_log_panel(ui);
+    }
 
+    fn airfield_right_panel(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Airfield", None);
+        let Some(info) = &self.airfield_info else {
+            shell::hint(ui, "Load an airfield to see it here.", false);
+            return;
+        };
+        egui::Grid::new("airfield_facts").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+            ui.label(RichText::new("Name").color(c::NEUTRAL_700));
+            ui.label(RichText::new(&info.name).font(FontId::new(13.0, theme::bold_family())));
+            ui.end_row();
+            ui.label(RichText::new("Layout").color(c::NEUTRAL_700));
+            ui.label(if info.in_group { "Inside a Group" } else { "Blocks at the root" });
+            ui.end_row();
+            if let Some((x, z)) = info.origin_xz {
+                ui.label(RichText::new("Origin").color(c::NEUTRAL_700));
+                ui.label(RichText::new(format!("{}, {}", group_digits(x), group_digits(z))).monospace());
+                ui.end_row();
+            }
+        });
+    }
+
+    /// Map tab (README §5.6): tool palette, the map with a front-date strip,
+    /// and a right dock with Period / Forces / References.
+    fn map_page(&mut self, ctx: &egui::Context) {
+        self.ensure_map_assets(ctx);
+        egui::SidePanel::left("map_tools")
+            .exact_width(shell::TOOL_PALETTE_W)
+            .resizable(false)
+            .frame(egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin::symmetric(10, 8)))
+            .show(ctx, |ui| self.map_tool_palette(ui));
+        egui::SidePanel::right("map_dock")
+            .exact_width(304.0)
+            .resizable(false)
+            .show(ctx, |ui| self.map_dock_panel(ui));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0))
+            .show(ctx, |ui| {
+                egui::TopBottomPanel::bottom("map_date")
+                    .exact_height(64.0)
+                    .show_inside(ui, |ui| self.map_date_strip(ui));
+                self.handle_map_timeline_keys(ui);
+                self.draw_korea_map(ui);
+            });
+    }
+
+    /// Esc on Map: drop a half-drawn mark (salient, arrow, or the points of a
+    /// front drag still under way) or WP pick, and return to Select. A
+    /// finished front stays.
+    fn cancel_map_tool(&mut self) {
+        self.cancel_map_stroke();
+        self.wp_selected = None;
+        self.wp_drag = None;
+        // The rest of a cancelled drag must not move the AO from a stale origin.
+        self.map_drag_uv = None;
+        self.map_drawing_mode = MapDrawingMode::None;
+    }
+
+    /// Drop whatever is half drawn. Returns true if there was something.
+    fn cancel_map_stroke(&mut self) -> bool {
+        let had = self.map_stroke_in_progress();
+        self.map_void_drag = true;
+        self.current_salient.clear();
+        self.attack_drag = None;
+        if let Some(prev_len) = self.front_stroke.take() {
+            self.custom_front_xz.truncate(prev_len);
+            self.map_undo.rebase();
+        }
+        had
+    }
+
+    fn map_stroke_in_progress(&self) -> bool {
+        !self.current_salient.is_empty() || self.attack_drag.is_some() || self.front_stroke.is_some()
+    }
+
+    /// Picking a tool (palette, keys 1–6, the Forces objective buttons).
+    /// Switching to another tool drops a half-drawn mark, as Esc does.
+    fn pick_map_tool(&mut self, mode: MapDrawingMode) {
+        if mode != self.map_drawing_mode {
+            self.cancel_map_stroke();
+        }
+        self.map_drawing_mode = mode;
+    }
+
+    /// Anything Ctrl Z can take back as a drawing: finished marks (front
+    /// strokes, salients, arrows) or one still being drawn.
+    fn map_has_marks(&self) -> bool {
+        !self.drawn_marks.is_empty()
+            || !self.salients.is_empty()
+            || !self.attack_arrows.is_empty()
+            || self.map_stroke_in_progress()
+    }
+
+    /// A drawing was finished: it goes on the mark stack and becomes the
+    /// last action (Ctrl Z undoes it before any earlier Clear).
+    fn note_map_drawing(&mut self, mark: DrawnMark) {
+        self.drawn_marks.push(mark);
+        self.clear_redo_stack();
+        self.map_last = MapAction::Drawing;
+        self.map_undo.rebase();
+    }
+
+    /// Front strokes lose their undo when the front is replaced (date slider,
+    /// timeline snap): their stored lengths no longer describe it.
+    fn forget_front_marks(&mut self) {
+        self.front_stroke = None;
+        self.drawn_marks.retain(|m| !m.is_front());
+        self.redo_marks.retain(|m| !m.is_front());
+        self.redo_fronts.clear();
+    }
+
+    /// "Tool: Salient · right-click to finish · Esc to cancel" while a tool is active.
+    fn map_tool_status(&self) -> Option<String> {
+        if let Some((hit, wi)) = self.wp_selected {
+            return Some(format!(
+                "Placing unit {} WP{} · click the map · right-click or Esc to cancel",
+                hit.spot_i() + 1,
+                wi + 1
+            ));
+        }
+        MAP_TOOLS
+            .iter()
+            .find(|t| t.0 == self.map_drawing_mode && t.0 != MapDrawingMode::None)
+            .map(|t| format!("Tool: {} · {}", t.2, t.3))
+    }
+
+    /// Mockup 2f: tools 1–6 with painted icons and their key in the corner,
+    /// a divider between the drawing tools and the objective tools, then
+    /// Undo / Redo at the bottom.
+    fn map_tool_palette(&mut self, ui: &mut egui::Ui) {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        for (i, (mode, icon, name, _)) in MAP_TOOLS.iter().enumerate() {
+            if i == 4 {
+                let (r, _) = ui.allocate_exact_size(Vec2::new(shell::TOOL_SIZE, 9.0), Sense::hover());
+                ui.painter().hline(
+                    (r.center().x - 14.0)..=(r.center().x + 14.0),
+                    r.center().y,
+                    Stroke::new(1.0_f32, c::DIVIDER),
+                );
+            }
+            let tint = match mode {
+                MapDrawingMode::PlaceEastObjective => Some(c::DPRK),
+                MapDrawingMode::PlaceNatoObjective => Some(c::NATO),
+                _ => None,
+            };
+            let key = (i + 1).to_string();
+            let active = self.map_drawing_mode == *mode;
+            if shell::tool_icon_button(ui, *icon, tint, name, &key, true, active).clicked() {
+                self.pick_map_tool(*mode);
+            }
+        }
+        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            let can_redo = !self.redo_marks.is_empty();
+            let undo_label = self.map_undo_label().map(str::to_owned);
+            // Disabled tools fade to 40 % (README §5.6).
+            let mut redo = false;
+            let mut undo = false;
+            ui.scope(|ui| {
+                if !can_redo {
+                    ui.disable();
+                    ui.set_opacity(0.4);
+                }
+                redo = shell::tool_icon_button(ui, shell::ToolIcon::Redo, None, "Redo drawing", "Ctrl Y", false, false)
+                    .clicked();
+            });
+            ui.scope(|ui| {
+                if undo_label.is_none() {
+                    ui.disable();
+                    ui.set_opacity(0.4);
+                }
+                let tip = undo_label.as_deref().map_or("Undo".to_string(), |l| format!("Undo: {l}"));
+                undo = shell::tool_icon_button(ui, shell::ToolIcon::Undo, None, &tip, "Ctrl Z", false, false)
+                    .clicked();
+            });
+            if redo {
+                self.redo_last_mark();
+            }
+            if undo {
+                self.undo_current_tab();
+            }
+        });
+    }
+
+    fn map_dock_panel(&mut self, ui: &mut egui::Ui) {
+        shell::dock_tabs(ui, &mut self.map_dock, &MapDock::tabs(self.map_refs.len()));
+        ui.add_space(4.0);
+        egui::ScrollArea::vertical()
+            .id_salt("map_dock_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().slider_width = 110.0;
+                match self.map_dock {
+                    MapDock::Period => self.map_period_tab(ui),
+                    MapDock::Forces => self.map_forces_tab(ui),
+                    MapDock::References => self.map_references_tab(ui),
+                    MapDock::Terrain => self.map_terrain_tab(ui),
+                }
+            });
+    }
+
+    fn map_period_tab(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label("Year");
             egui::ComboBox::from_id_salt("front_year")
                 .selected_text(self.front_year.to_string())
                 .width(80.0)
                 .show_ui(ui, |ui| {
                     for y in YEARS {
-                        if ui
-                            .selectable_label(self.front_year == y, y.to_string())
-                            .clicked()
-                        {
+                        if ui.selectable_label(self.front_year == y, y.to_string()).clicked() {
                             self.front_year = y;
                             self.front_focus = None;
                             self.snap_timeline(timeline_index(self.front_year, self.front_season));
                         }
                     }
-                });
-            ui.label("Season");
+                })
+                .response
+                .on_hover_text("Year");
             egui::ComboBox::from_id_salt("front_season")
                 .selected_text(self.front_season.label())
-                .width(140.0)
+                .width(150.0)
                 .show_ui(ui, |ui| {
                     for s in Season::ALL {
-                        if ui
-                            .selectable_label(self.front_season == s, s.label())
-                            .clicked()
-                        {
+                        if ui.selectable_label(self.front_season == s, s.label()).clicked() {
                             self.front_season = s;
                             self.front_focus = None;
                             self.snap_timeline(timeline_index(self.front_year, self.front_season));
                         }
                     }
-                });
+                })
+                .response
+                .on_hover_text("Season");
         });
-
+        ui.add_space(8.0);
         let mark = self.current_mark();
-        ui.label(RichText::new(mark.title).strong());
-        ui.label(RichText::new(mark.note));
-        ui.label(
-            RichText::new(mark.editor_hint())
-                .strong()
-                .color(Color32::from_rgb(170, 200, 255)),
-        );
-        ui.add_space(4.0);
-        let n_slots = TIMELINE.len().max(1);
-        ui.label(RichText::new("Front date").strong());
-        let slider_w = ui.available_width().max(640.0);
-        let slider = egui::Slider::new(&mut self.front_t, 0.0..=(n_slots - 1) as f32)
-            .show_value(false);
-        if ui.add_sized([slider_w, 22.0], slider).changed() {
-            self.custom_front_xz.clear();
-            let i = self
-                .front_t
-                .round()
-                .clamp(0.0, (n_slots - 1) as f32) as usize;
-            self.apply_timeline_mark(i, true);
-        }
-        ui.add_space(6.0);
-        ui.label("Focus on a battle");
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            ui.label(RichText::new(mark.title).font(FontId::new(16.0, theme::heading_family())));
+            ui.label(mark.note);
+            ui.label(
+                RichText::new(mark.editor_hint())
+                    .font(FontId::new(13.0, theme::bold_family()))
+                    .color(c::ACCENT_700),
+            );
+        });
+        ui.add_space(10.0);
+
+        ui.label(RichText::new("Battle focus").font(FontId::new(13.0, theme::bold_family())));
         let period_battles = battles_in_period(self.front_year, self.front_season);
-        let selected_battle = self
-            .front_focus
-            .and_then(|id| BATTLES.iter().find(|b| b.id == id));
-        let focus_text = selected_battle
-            .map(|b| b.name)
-            .unwrap_or("Entire front (this period)");
+        let selected_battle = self.front_focus.and_then(|id| BATTLES.iter().find(|b| b.id == id));
+        let focus_text = selected_battle.map_or("Entire front (this period)", |b| b.name);
         egui::ComboBox::from_id_salt("front_battle")
             .selected_text(focus_text)
-            .width(360.0)
+            .width(ui.available_width() - 8.0)
             .show_ui(ui, |ui| {
                 if ui
                     .selectable_label(self.front_focus.is_none(), "Entire front (this period)")
@@ -5272,344 +7264,281 @@ Add reference groups (airfields, blocks) to stamp at their saved locations; they
                     self.front_focus = None;
                 }
                 ui.separator();
-                ui.label(RichText::new("This period"));
+                ui.label(RichText::new("This period").small().color(c::NEUTRAL_700));
                 for b in &period_battles {
-                    if ui
-                        .selectable_label(self.front_focus == Some(b.id), b.name)
-                        .clicked()
-                    {
+                    if ui.selectable_label(self.front_focus == Some(b.id), b.name).clicked() {
                         self.focus_battle(b);
                     }
                 }
                 ui.separator();
-                ui.label(RichText::new("Jump to any battle"));
+                ui.label(RichText::new("Jump to any battle").small().color(c::NEUTRAL_700));
                 for b in BATTLES {
                     let label = format!("{}  ({} {})", b.name, b.season.label(), b.year);
-                    if ui
-                        .selectable_label(self.front_focus == Some(b.id), label)
-                        .clicked()
-                    {
+                    if ui.selectable_label(self.front_focus == Some(b.id), label).clicked() {
                         self.focus_battle(b);
                     }
                 }
             });
         if let Some(b) = selected_battle {
-            ui.label(RichText::new(b.note));
+            ui.label(RichText::new(b.note).small().color(c::NEUTRAL_700));
         }
-        ui.add_space(6.0);
+        ui.add_space(10.0);
 
-        ui.label(
-            RichText::new(
-                suggested_aircraft(self.front_year, self.front_season)
-                    .iter()
-                    .map(|a| a.label)
-                    .collect::<Vec<_>>()
-                    .join("  ·  "),
-            )
-            .color(Color32::from_rgb(110, 150, 110)),
-        );
-        ui.add_space(6.0);
-
-        ui.with_layout(Layout::top_down(Align::Center), |ui| { 
-            self.ensure_map_assets(ui.ctx());
-            self.draw_korea_map(ui);
-        });
-        
-        ui.add_space(8.0);
-
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                self.map_view_toolbar(ui);
-                ui.separator();
-                self.map_draw_toolbar(ui);
-            });
-        });
-
-        ui.add_space(4.0);
-
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                self.map_fighter_toolbar(ui);
-                ui.separator();
-                self.map_objectives_toolbar(ui);
-                ui.separator();
-                self.map_units_toolbar(ui);
-            });
-        });
-
-        ui.add_space(4.0);
-        
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!(
-                    "AABB  XPos {:.0} – {:.0}   ZPos {:.0} – {:.0}",
-                    self.front_aabb.x_min, self.front_aabb.x_max, self.front_aabb.z_min, self.front_aabb.z_max
-                )).monospace(),
-            );
-        });
-
-        self.draw_map_legend(ui);
-        ui.add_space(6.0);
-
-        ui.collapsing("Loaded Reference Groups", |ui| {
-            ui.label(RichText::new("Airfields/blocks/entities are stamped in the box plus 10 km. Landscape MCU_Waypoint marks show on the preview as nested dots but are not exported.").italics());
-            ui.horizontal(|ui| {
-                if ui.button("Add reference groups…").clicked() {
-                    self.add_map_refs();
-                }
-            });
-            let mut remove_at: Option<usize> = None;
-            for (i, g) in self.map_refs.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    let label = g.path.file_stem().and_then(|s| s.to_str()).unwrap_or("group");
-                    let xz = g.entity.first_xz().map(|(x, z)| format!("  X {x:.0}  Z {z:.0}")).unwrap_or_default();
-                    ui.label(format!("{label}{xz}"));
-                    if ui.small_button("Remove").clicked() {
-                        remove_at = Some(i);
-                    }
-                });
-            }
-            if let Some(i) = remove_at {
-                self.map_refs.remove(i);
-            }
-            if self.map_refs.is_empty() {
-                ui.label(RichText::new("No reference groups loaded.").italics());
+        ui.label(RichText::new("Suggested aircraft").font(FontId::new(13.0, theme::bold_family())));
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+            for a in suggested_aircraft(self.front_year, self.front_season) {
+                shell::tag(ui, a.label, false);
             }
         });
-        
-    }
-   
-fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if ui.button("Reset AO").on_hover_text("Reset Area of Operations box to full map").clicked() {
-                self.front_aabb = WorldAabb::full_map();
-                self.map_drag_uv = None;
+        ui.add_space(10.0);
+        ui.separator();
+
+        shell::section_title(ui, "Drawn marks", Some("tools 2–4"));
+        ui.horizontal_wrapped(|ui| {
+            // add_enabled keeps each button one unit, so the row wraps whole
+            // buttons instead of wrapping "Clear arrows" onto two lines.
+            let button = |text: &str| egui::Button::new(text).wrap_mode(egui::TextWrapMode::Extend);
+            let has_custom = !self.custom_front_xz.is_empty() || self.map_has_marks();
+            if ui
+                .add_enabled(has_custom, button("Clear lines"))
+                .on_hover_text("Clear the drawn front, salients and arrows. Ctrl Z brings them back.")
+                .clicked()
+            {
+                self.clear_map_lines(true, true, true);
             }
-            ui.label("Zoom:");
-            if ui.add(egui::Slider::new(&mut self.map_zoom, 1.0..=12.0).show_value(false)).changed() {
-                self.clamp_map_pan();
-            }
-            ui.label(RichText::new(format!("{:.0}%", self.map_zoom * 100.0)));
-            if ui.button("Reset View").on_hover_text("Reset map zoom and pan position").clicked() {
-                self.map_zoom = 1.0;
-                self.map_pan = Pos2::new(0.5, 0.5);
-            }
-        });
-    }
-
-	fn map_draw_toolbar(&mut self, ui: &mut egui::Ui) {
-        // Ctrl Z / Ctrl Y are read once in `update()` (shell::read_shortcuts).
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Map Tools:").strong());
-        });
-		
-        // Top Row: Primary Creation
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.map_drawing_mode, MapDrawingMode::None, "Select AO / Move Units")
-                .on_hover_text("Left Click and drag to select Area of Operations (AO) or to move a placed unit / Right Click to Pan the map view.");
-            ui.selectable_value(&mut self.map_drawing_mode, MapDrawingMode::BaseFront, "Draw Custom Front")
-                .on_hover_text("Left Click sequentially (or Click and drag) from  West to East to draw a custom front.");
-            ui.selectable_value(&mut self.map_drawing_mode, MapDrawingMode::Salient, "Draw Salient")
-                .on_hover_text("Left Click sequentially (or Click and drag) to draw along the front. Right-click to finish.");
-            ui.selectable_value(&mut self.map_drawing_mode, MapDrawingMode::AttackArrow, "Draw Attack Arrow")
-                .on_hover_text("Drag from tail to tip. Colour follows the tail's side of the front.");
-        });
-
-        // Second Row: Modifiers
-        ui.horizontal(|ui| {
-            let has_custom = !self.custom_front_xz.is_empty() || !self.salients.is_empty() || !self.attack_arrows.is_empty();
-            ui.add_enabled_ui(has_custom, |ui| {
-                if ui.button("Clear Custom Lines").clicked() {
-                    self.custom_front_xz.clear();
-                    self.salients.clear();
-                    self.current_salient.clear();
-                    self.attack_arrows.clear();
-                    self.attack_drag = None;
-                    self.drawn_marks.clear();
-                    self.clear_redo_stack();
-                }
-            });
-
-            let has_marks = !self.salients.is_empty() || !self.current_salient.is_empty() || !self.attack_arrows.is_empty() || self.attack_drag.is_some();
-            ui.add_enabled_ui(has_marks, |ui| {
-                if ui.button("Undo").on_hover_text("Ctrl-Z").clicked() {
-                    self.remove_last_mark();
-                }
-            });
-
-            let has_redo = !self.redo_marks.is_empty();
-            ui.add_enabled_ui(has_redo, |ui| {
-                if ui.button("Redo").on_hover_text("Ctrl-Y").clicked() {
-                    self.redo_last_mark();
-                }
-            });
-
             let has_salients = !self.salients.is_empty() || !self.current_salient.is_empty();
-            ui.add_enabled_ui(has_salients, |ui| {
-                if ui.button("Clear Salients").clicked() {
-                    self.salients.clear();
-                    self.current_salient.clear();
-                    self.drawn_marks.retain(|m| *m != DrawnMark::Salient);
-                }
-            });
-
+            if ui
+                .add_enabled(has_salients, button("Clear salients"))
+                .on_hover_text("Ctrl Z brings them back.")
+                .clicked()
+            {
+                self.clear_map_lines(false, true, false);
+            }
             let has_arrows = !self.attack_arrows.is_empty() || self.attack_drag.is_some();
-            ui.add_enabled_ui(has_arrows, |ui| {
-                if ui.button("Clear Attack Arrows").clicked() {
-                    self.attack_arrows.clear();
-                    self.attack_drag = None;
-                    self.drawn_marks.retain(|m| *m != DrawnMark::AttackArrow);
-                }
-            });
+            if ui
+                .add_enabled(has_arrows, button("Clear arrows"))
+                .on_hover_text("Ctrl Z brings them back.")
+                .clicked()
+            {
+                self.clear_map_lines(false, false, true);
+            }
         });
+        ui.add_space(6.0);
+        if shell::hint(
+            ui,
+            "Drag a box on the map to set the AO; the period front and areas of influence are clipped to it.",
+            true,
+        ) {
+            self.open_help(HelpTopic::Front);
+        }
     }
 
-    fn map_fighter_toolbar(&mut self, ui: &mut egui::Ui) {
-		ui.horizontal(|ui| {
-            ui.label(RichText::new("Fighters").strong());
-			ui.label(RichText::new("Set in the 'Fighter Pack' mode"));
-        });
-		
+    fn map_forces_tab(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        shell::section_title(ui, "Fighters", Some("from Fighter Pack"));
         ui.horizontal(|ui| {
-            if ui.button("Eastern").on_hover_text("Place Eastern fighters in their coalition zone").clicked() { self.place_map_fighters(true); }
-            if ui.button("NATO").on_hover_text("Place NATO fighters in their coalition zone").clicked() { self.place_map_fighters(false); }
-            
-            ui.separator();
-            labeled_slider(ui, "Number of Groups active at once:", &mut self.fighter_waves, 1..=6);
-            ui.checkbox(&mut self.fighter_fill, format!("Fill AO (will allow up to {MAX_PACKS} at once)")).on_hover_text("Fill AO at Zone IN spacing");
-            
-            let has_fighters = self.map_fighters.as_ref().is_some_and(|l| !l.spots.is_empty());
-            ui.add_enabled_ui(has_fighters, |ui| {
-                if ui.button("Clear fighters").clicked() {
-                    self.map_fighters = None;
-                    self.map_imported_fighters.clear();
-                    self.fighter_drag = None;
-                }
-            });
-
+            if ui.button("Place DPRK").on_hover_text("Place DPRK fighters in their coalition zone").clicked() {
+                self.place_map_fighters(true);
+            }
+            if ui.button("Place NATO").on_hover_text("Place NATO fighters in their coalition zone").clicked() {
+                self.place_map_fighters(false);
+            }
+        });
+        labeled_slider(ui, "Groups at once", &mut self.fighter_waves, 1..=6);
+        ui.checkbox(&mut self.fighter_fill, format!("Fill AO (up to {MAX_PACKS} at once)"))
+            .on_hover_text("Fill the AO at Zone In spacing");
+        ui.horizontal(|ui| {
             if let Some(layout) = &self.map_fighters {
                 let n = layout.spots.len();
-                let packs = layout.spots.iter().map(|s| s.pack).collect::<std::collections::BTreeSet<_>>().len();
-                let side = if layout.eastern { "Eastern" } else { "NATO" };
-                ui.label(RichText::new(format!("{side}: {n} grps in {packs} pack(s)")).color(Color32::from_rgb(180, 180, 190)));
+                let packs = layout
+                    .spots
+                    .iter()
+                    .map(|s| s.pack)
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len();
+                let side = shell::Side::from_eastern(layout.eastern);
+                shell::side_marker(ui, side, 12.0);
+                ui.label(format!("{}: {n} groups in {packs} packs", side.label()));
             }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let has_fighters = self.map_fighters.as_ref().is_some_and(|l| !l.spots.is_empty());
+                ui.add_enabled_ui(has_fighters, |ui| {
+                    if ui.button("Clear").on_hover_text("Clear placed fighters. Ctrl Z brings them back.").clicked() {
+                        let n = self.map_fighters.as_ref().map_or(0, |l| l.spots.len());
+                        self.record_map_undo(format!("Cleared {n} fighter groups"));
+                        self.map_fighters = None;
+                        self.map_imported_fighters.clear();
+                        self.fighter_drag = None;
+                    }
+                });
+            });
         });
-    }
+        ui.add_space(6.0);
+        ui.separator();
 
-    fn map_objectives_toolbar(&mut self, ui: &mut egui::Ui) {
-		ui.horizontal(|ui| {
-            ui.label(RichText::new("Objectives").strong());
-        });
+        shell::section_title(ui, "Objectives", Some("one click each · Shift for more"));
         ui.horizontal(|ui| {
             let e_active = self.map_drawing_mode == MapDrawingMode::PlaceEastObjective;
             let n_active = self.map_drawing_mode == MapDrawingMode::PlaceNatoObjective;
+            if ui
+                .selectable_label(e_active, format!("DPRK · {}", self.east_objectives.len()))
+                .on_hover_text("DPRK objective tool (5): click the map to place one")
+                .clicked()
+            {
+                self.pick_map_tool(MapDrawingMode::PlaceEastObjective);
+            }
+            if ui
+                .selectable_label(n_active, format!("NATO · {}", self.nato_objectives.len()))
+                .on_hover_text("NATO objective tool (6): click the map to place one")
+                .clicked()
+            {
+                self.pick_map_tool(MapDrawingMode::PlaceNatoObjective);
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let has_objs = !self.east_objectives.is_empty() || !self.nato_objectives.is_empty();
+                ui.add_enabled_ui(has_objs, |ui| {
+                    if ui.button("Clear").on_hover_text("Clear all objectives. Ctrl Z brings them back.").clicked() {
+                        let n = self.east_objectives.len() + self.nato_objectives.len();
+                        self.record_map_undo(format!("Cleared {n} objectives"));
+                        self.east_objectives.clear();
+                        self.nato_objectives.clear();
+                        self.objective_drag = None;
+                        self.reaim_map_ground();
+                    }
+                });
+            });
+        });
+        shell::hint(ui, "Preview markers that aim placed units. Right-click one to remove it. Not exported.", false);
+        ui.add_space(6.0);
+        ui.separator();
 
-            if ui.selectable_label(e_active, "Eastern").on_hover_text("Select Eastern objective, then click map").clicked() {
-                self.map_drawing_mode = if e_active { MapDrawingMode::None } else { MapDrawingMode::PlaceEastObjective };
-            }
-            if ui.selectable_label(n_active, "NATO").on_hover_text("Select NATO objective, then click map").clicked() {
-                self.map_drawing_mode = if n_active { MapDrawingMode::None } else { MapDrawingMode::PlaceNatoObjective };
-            }
-            
-            let has_objs = !self.east_objectives.is_empty() || !self.nato_objectives.is_empty();
-            ui.add_enabled_ui(has_objs, |ui| {
-                if ui.button("Clear objectives").clicked() {
-                    self.east_objectives.clear();
-                    self.nato_objectives.clear();
-                    self.objective_drag = None;
-                    self.reaim_map_ground();
+        shell::section_title(ui, "Units", Some("from Army Generator"));
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(!self.recon_keep_positions, |ui| {
+                if ui
+                    .button("Place DPRK")
+                    .on_hover_text("Place Army Generator units along the front as DPRK")
+                    .on_disabled_hover_text("Keep loaded positions is on in Army Generator.")
+                    .clicked()
+                {
+                    self.place_map_units(true);
+                }
+                if ui
+                    .button("Place NATO")
+                    .on_hover_text("Place Army Generator units along the front as NATO")
+                    .on_disabled_hover_text("Keep loaded positions is on in Army Generator.")
+                    .clicked()
+                {
+                    self.place_map_units(false);
                 }
             });
-            ui.label(RichText::new(format!("Eastern {} · NATO {}", self.east_objectives.len(), self.nato_objectives.len())).color(Color32::from_rgb(180, 180, 190)));
         });
-    }
-
-    fn map_units_toolbar(&mut self, ui: &mut egui::Ui) {
-		ui.horizontal(|ui| {
-            ui.label(RichText::new("Units").strong());
-			ui.label(RichText::new(
-                "Units details may be set in the 'Army Generator' mode, or load groups to reposition.",
-            ));
-        });
-        ui.horizontal(|ui| {            
-            ui.add_enabled_ui(!self.recon_keep_positions, |ui| {
-                if ui.button("Eastern").on_hover_text("Place Army Generator units along the front as Eastern").clicked() { self.place_map_units(true); }
-                if ui.button("NATO").on_hover_text("Place Army Generator units along the front as NATO").clicked() { self.place_map_units(false); }
-            });
-            if ui.button("Load Eastern…").on_hover_text("Load a .Group as the Eastern army. Reposition along the front, or keep authored positions.").clicked() {
+        if self.recon_keep_positions {
+            shell::hint(ui, "Place is off: Keep loaded positions is on in Army Generator.", false);
+        }
+        ui.horizontal(|ui| {
+            if ui
+                .button("Load DPRK…")
+                .on_hover_text("Load a .Group as the DPRK army. Reposition along the front, or keep authored positions.")
+                .clicked()
+            {
                 self.load_map_armies(true);
             }
-            if ui.button("Load NATO…").on_hover_text("Load a .Group as the NATO army. Reposition along the front, or keep authored positions.").clicked() {
+            if ui
+                .button("Load NATO…")
+                .on_hover_text("Load a .Group as the NATO army. Reposition along the front, or keep authored positions.")
+                .clicked()
+            {
                 self.load_map_armies(false);
             }
-
-            let has_units = self.map_ships.is_some()
-                || self.map_ground_east.is_some()
-                || self.map_ground_nato.is_some()
-                || !self.map_armies.is_empty();
-            ui.add_enabled_ui(has_units, |ui| {
-                if ui.button("Clear units").clicked() {
-                    self.map_ships = None;
-                    self.map_ground_east = None;
-                    self.map_ground_nato = None;
-                    self.map_armies.clear();
-                    self.ship_drag = None;
-                    self.ship_heading_drag = None;
-                    self.ground_drag = None;
-                    self.ground_heading_drag = None;
-                    self.wp_drag = None;
-                    self.wp_selected = None;
-                }
-            });
-
+        });
+        let army_count = |eastern: bool| -> usize {
+            self.map_armies
+                .iter()
+                .filter(|a| a.eastern == eastern)
+                .map(|a| {
+                    a.ground.as_ref().map_or(0, |g| g.spots.len()) + a.ships.as_ref().map_or(0, |s| s.spots.len())
+                })
+                .sum()
+        };
+        let e_n = self.map_ground_east.as_ref().map_or(0, |l| l.spots.len()) + army_count(true);
+        let n_n = self.map_ground_nato.as_ref().map_or(0, |l| l.spots.len()) + army_count(false);
+        let ships = self.map_ships.as_ref().map_or(0, |l| l.spots.len());
+        ui.horizontal(|ui| {
             let mut parts = Vec::new();
-            let e_n = self.map_ground_east.as_ref().map(|l| l.spots.len()).unwrap_or(0)
-                + self.map_armies.iter().filter(|a| a.eastern).map(|a| {
-                    a.ground.as_ref().map(|g| g.spots.len()).unwrap_or(0)
-                        + a.ships.as_ref().map(|s| s.spots.len()).unwrap_or(0)
-                }).sum::<usize>();
-            let n_n = self.map_ground_nato.as_ref().map(|l| l.spots.len()).unwrap_or(0)
-                + self.map_armies.iter().filter(|a| !a.eastern).map(|a| {
-                    a.ground.as_ref().map(|g| g.spots.len()).unwrap_or(0)
-                        + a.ships.as_ref().map(|s| s.spots.len()).unwrap_or(0)
-                }).sum::<usize>();
-            let ships = self.map_ships.as_ref().map(|l| l.spots.len()).unwrap_or(0);
-            if e_n > 0 { parts.push(format!("E: {e_n}")); }
-            if n_n > 0 { parts.push(format!("N: {n_n}")); }
-            if ships > 0 { parts.push(format!("Ships: {ships}")); }
-            
-            if !parts.is_empty() {
-                ui.label(RichText::new(parts.join(" · ")).color(Color32::from_rgb(180, 180, 190)));
-            } else if self.recon_keep_positions {
-                ui.label(RichText::new("Keep loaded positions is ON").color(Color32::from_rgb(200, 160, 80)));
+            if e_n > 0 {
+                parts.push(format!("DPRK {e_n}"));
             }
+            if n_n > 0 {
+                parts.push(format!("NATO {n_n}"));
+            }
+            if ships > 0 {
+                parts.push(format!("Ships {ships}"));
+            }
+            if !parts.is_empty() {
+                ui.label(parts.join(" · "));
+            } else if self.recon_keep_positions {
+                shell::warning(ui, "Keep loaded positions is on");
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let has_units = self.map_ships.is_some()
+                    || self.map_ground_east.is_some()
+                    || self.map_ground_nato.is_some()
+                    || !self.map_armies.is_empty();
+                ui.add_enabled_ui(has_units, |ui| {
+                    if ui.button("Clear").on_hover_text("Clear placed and loaded units. Ctrl Z brings them back.").clicked() {
+                        self.record_map_undo(format!("Cleared {} units", e_n + n_n + ships));
+                        self.map_ships = None;
+                        self.map_ground_east = None;
+                        self.map_ground_nato = None;
+                        self.map_armies.clear();
+                        self.ship_drag = None;
+                        self.ship_heading_drag = None;
+                        self.ground_drag = None;
+                        self.ground_heading_drag = None;
+                        self.wp_drag = None;
+                        self.wp_selected = None;
+                    }
+                });
+            });
         });
         if !self.map_armies.is_empty() {
+            ui.add_space(4.0);
             let mut remove_at: Option<usize> = None;
             let mut toggle_at: Option<usize> = None;
             for (i, slot) in self.map_armies.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    let name = slot
-                        .path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("group");
-                    let side = if slot.eastern { "Eastern" } else { "NATO" };
-                    ui.label(format!("{side}  {name}  {}", army_mix_label(&slot.copies)));
+                let name = slot.path.file_stem().and_then(|s| s.to_str()).unwrap_or("group");
+                let side = shell::Side::from_eastern(slot.eastern);
+                shell::card(ui, false, |ui| {
+                    ui.horizontal(|ui| {
+                        shell::side_marker(ui, side, 12.0);
+                        ui.add(egui::Label::new(RichText::new(name).font(FontId::new(13.0, theme::bold_family()))).truncate());
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button("Remove").clicked() {
+                                remove_at = Some(i);
+                            }
+                        });
+                    });
+                    ui.label(RichText::new(army_mix_label(&slot.copies)).small().color(c::NEUTRAL_700));
                     let mut repo = slot.reposition;
-                    if ui.checkbox(&mut repo, "Reposition").on_hover_text("Park along the front using detected unit types. Off keeps the group's authored X/Z.").changed() {
+                    if ui
+                        .checkbox(&mut repo, "Reposition")
+                        .on_hover_text("Park along the front using detected unit types. Off keeps the group's authored X/Z.")
+                        .changed()
+                    {
                         toggle_at = Some(i);
                     }
-                    if ui.small_button("Remove").clicked() {
-                        remove_at = Some(i);
-                    }
                 });
+                ui.add_space(4.0);
             }
             if let Some(i) = toggle_at {
                 self.map_armies[i].reposition = !self.map_armies[i].reposition;
                 self.refresh_army_slot(i);
             }
             if let Some(i) = remove_at {
+                let name = self.map_armies[i].path.file_stem().and_then(|s| s.to_str()).unwrap_or("army").to_owned();
+                self.record_map_undo(format!("Removed {name}"));
                 self.map_armies.remove(i);
                 self.ship_drag = None;
                 self.ship_heading_drag = None;
@@ -5620,33 +7549,206 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             }
         }
     }
-	
+
+    fn map_references_tab(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        if ui.button("Add reference groups…").clicked() {
+            self.add_map_refs();
+        }
+        shell::hint(
+            ui,
+            "Airfields, blocks and entities are stamped at their saved spots, trimmed to the AO plus 10 km. Landscape MCU_Waypoint marks show as nested dots but are not exported.",
+            false,
+        );
+        ui.add_space(4.0);
+        let mut remove_at: Option<usize> = None;
+        for (i, g) in self.map_refs.iter().enumerate() {
+            let label = g.path.file_stem().and_then(|s| s.to_str()).unwrap_or("group");
+            let xz = g
+                .entity
+                .first_xz()
+                .map(|(x, z)| format!("X {x:.0}  Z {z:.0}"))
+                .unwrap_or_default();
+            shell::card(ui, false, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Label::new(RichText::new(label).font(FontId::new(13.0, theme::bold_family()))).truncate());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("Remove").clicked() {
+                            remove_at = Some(i);
+                        }
+                    });
+                });
+                if !xz.is_empty() {
+                    ui.label(RichText::new(xz).monospace().color(c::NEUTRAL_700));
+                }
+            });
+            ui.add_space(4.0);
+        }
+        if let Some(i) = remove_at {
+            let name = self.map_refs[i].path.file_stem().and_then(|s| s.to_str()).unwrap_or("group").to_owned();
+            self.record_map_undo(format!("Removed {name}"));
+            self.map_refs.remove(i);
+        }
+        if self.map_refs.is_empty() {
+            ui.label(RichText::new("No reference groups loaded.").color(c::NEUTRAL_700));
+        }
+    }
+
+    /// 64 px strip under the map: the front-date slider with year ticks.
+    fn map_date_strip(&mut self, ui: &mut egui::Ui) {
+        let n_slots = TIMELINE.len().max(1);
+        ui.add_space(6.0);
+        let mut rail = Rect::NOTHING;
+        ui.horizontal(|ui| {
+            ui.add_sized([86.0, 20.0], egui::Label::new(section_heading("Front date")));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.label(RichText::new("step").small().color(c::NEUTRAL_700));
+                shell::kbd(ui, "→");
+                shell::kbd(ui, "←");
+                ui.add_space(8.0);
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.spacing_mut().slider_width = ui.available_width();
+                    let slider = egui::Slider::new(&mut self.front_t, 0.0..=(n_slots - 1) as f32)
+                        .show_value(false);
+                    let resp = ui.add(slider).on_hover_text("Front date. ← → step one mark; Home / End jump to the ends.");
+                    rail = resp.rect;
+                    if resp.changed() {
+                        self.custom_front_xz.clear();
+                        self.forget_front_marks();
+                        let i = self.front_t.round().clamp(0.0, (n_slots - 1) as f32) as usize;
+                        self.apply_timeline_mark(i, true);
+                    }
+                });
+            });
+        });
+        // Year ticks under the rail; egui insets the rail by the handle radius.
+        let inset = rail.height() / 2.5;
+        let (x0, x1) = (rail.left() + inset, rail.right() - inset);
+        let painter = ui.painter();
+        for year in YEARS {
+            let Some(i) = TIMELINE.iter().position(|m| m.year == year) else {
+                continue;
+            };
+            let x = x0 + (x1 - x0) * i as f32 / (n_slots - 1).max(1) as f32;
+            painter.line_segment(
+                [Pos2::new(x, rail.bottom()), Pos2::new(x, rail.bottom() + 4.0)],
+                Stroke::new(1.0_f32, c::NEUTRAL_500),
+            );
+            painter.text(
+                Pos2::new(x, rail.bottom() + 5.0),
+                Align2::CENTER_TOP,
+                year.to_string(),
+                FontId::monospace(12.0),
+                c::NEUTRAL_700,
+            );
+        }
+    }
+
+    /// Overlays on the map: AO readout, legend chip, zoom group (README §5.6).
+    fn map_overlays(&mut self, ui: &mut egui::Ui, area: Rect) {
+        let ao = format!(
+            "AO  X {:.0}–{:.0}  Z {:.0}–{:.0}",
+            self.front_aabb.x_min, self.front_aabb.x_max, self.front_aabb.z_min, self.front_aabb.z_max
+        );
+        let painter = ui.painter_at(area);
+        let g = painter.layout_no_wrap(ao, FontId::monospace(12.0), c::TEXT);
+        // 52 px down so it clears the tool banner.
+        let ao_rect = Rect::from_min_size(area.min + Vec2::new(12.0, 52.0), g.size() + Vec2::new(16.0, 10.0));
+        painter.rect_filled(ao_rect, 0.0, c::BG);
+        painter.rect_stroke(ao_rect, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
+        painter.galley(ao_rect.min + Vec2::new(8.0, 5.0), g, c::TEXT);
+        if let Some(text) = self.terrain_readout() {
+            {
+                let g = painter.layout_no_wrap(text, FontId::monospace(12.0), c::TEXT);
+                let r = Rect::from_min_size(ao_rect.left_bottom() + Vec2::new(0.0, 4.0), g.size() + Vec2::new(16.0, 10.0));
+                painter.rect_filled(r, 0.0, c::BG);
+                painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
+                painter.galley(r.min + Vec2::new(8.0, 5.0), g, c::TEXT);
+            }
+        }
+
+        let chip = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
+            egui::Frame::new()
+                .fill(c::BG)
+                .stroke(Stroke::new(1.0_f32, c::DIVIDER))
+                .inner_margin(egui::Margin::symmetric(8, 2))
+                .show(ui, |ui| ui.horizontal(|ui| add(ui)));
+        };
+        let legend_rect = Rect::from_min_max(
+            area.left_bottom() + Vec2::new(12.0, -46.0),
+            area.left_bottom() + Vec2::new(area.width() * 0.6, -10.0),
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(legend_rect).layout(Layout::left_to_right(Align::Max)),
+            |ui| {
+                chip(ui, &mut |ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+                    legend_line(ui, c::FRONT, false, "Front");
+                    legend_side(ui, shell::Side::Dprk, "DPRK");
+                    legend_side(ui, shell::Side::Nato, "NATO");
+                    legend_line(ui, c::ACCENT_800, true, "AO");
+                    ui.menu_button("All layers ▾", |ui| self.draw_map_legend(ui))
+                        .response
+                        .on_hover_text("Every map layer and its color");
+                });
+            },
+        );
+        let zoom_rect = Rect::from_min_max(
+            area.right_bottom() - Vec2::new(380.0, 46.0),
+            area.right_bottom() - Vec2::new(12.0, 10.0),
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new().max_rect(zoom_rect).layout(Layout::right_to_left(Align::Max)),
+            |ui| {
+                // Right-to-left: added in reverse so it reads − % + Reset view Reset AO.
+                chip(ui, &mut |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if ui.button("Reset AO").on_hover_text("Reset the AO box to the full map").clicked() {
+                        self.front_aabb = WorldAabb::full_map();
+                        self.map_drag_uv = None;
+                    }
+                    if ui.button("Reset view").on_hover_text("Reset map zoom and pan").clicked() {
+                        self.map_zoom = 1.0;
+                        self.map_pan = Pos2::new(0.5, 0.5);
+                    }
+                    if ui.button("+").on_hover_text("Zoom in").clicked() {
+                        self.bump_map_zoom(1.25, None);
+                    }
+                    ui.label(RichText::new(format!("{:.0}%", self.map_zoom * 100.0)).monospace());
+                    if ui.button("−").on_hover_text("Zoom out").clicked() {
+                        self.bump_map_zoom(1.0 / 1.25, None);
+                    }
+                });
+            },
+        );
+    }
+
     fn ensure_map_assets(&mut self, ctx: &egui::Context) {
         if self.fighter_tex_east.is_none() {
             self.fighter_tex_east = Some(ctx.load_texture(
                 "eastern_fighter",
-                load_fighter_svg(include_bytes!("../assets/EasternFighter.svg")),
+                recolor_to_side(fighter_svg_north(true, 128), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.fighter_tex_nato.is_none() {
             self.fighter_tex_nato = Some(ctx.load_texture(
                 "nato_fighter",
-                load_fighter_svg(include_bytes!("../assets/NatoFighter.svg")),
+                recolor_to_side(fighter_svg_north(false, 128), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.ship_tex_east.is_none() {
             self.ship_tex_east = Some(ctx.load_texture(
                 "eastern_shipping",
-                load_fighter_svg(include_bytes!("../assets/EasternShipping.svg")),
+                load_side_svg(include_bytes!("../assets/EasternShipping.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.ship_tex_nato.is_none() {
             self.ship_tex_nato = Some(ctx.load_texture(
                 "nato_shipping",
-                load_fighter_svg(include_bytes!("../assets/NatoShiping.svg")),
+                load_side_svg(include_bytes!("../assets/NatoShiping.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
@@ -5660,84 +7762,84 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         if self.obj_tex_east.is_none() {
             self.obj_tex_east = Some(ctx.load_texture(
                 "eastern_objective",
-                load_fighter_svg(include_bytes!("../assets/EasternObjective.svg")),
+                load_side_svg(include_bytes!("../assets/EasternObjective.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.obj_tex_nato.is_none() {
             self.obj_tex_nato = Some(ctx.load_texture(
                 "nato_objective",
-                load_fighter_svg(include_bytes!("../assets/NatoObjective.svg")),
+                load_side_svg(include_bytes!("../assets/NatoObjective.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.armor_tex_east.is_none() {
             self.armor_tex_east = Some(ctx.load_texture(
                 "eastern_armor",
-                load_fighter_svg(include_bytes!("../assets/EasternArmor.svg")),
+                load_side_svg(include_bytes!("../assets/EasternArmor.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.armor_tex_nato.is_none() {
             self.armor_tex_nato = Some(ctx.load_texture(
                 "nato_armor",
-                load_fighter_svg(include_bytes!("../assets/NatoArmor.svg")),
+                load_side_svg(include_bytes!("../assets/NatoArmor.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.supply_tex_east.is_none() {
             self.supply_tex_east = Some(ctx.load_texture(
                 "eastern_supply",
-                load_fighter_svg(include_bytes!("../assets/EasternSupply.svg")),
+                load_side_svg(include_bytes!("../assets/EasternSupply.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.supply_tex_nato.is_none() {
             self.supply_tex_nato = Some(ctx.load_texture(
                 "nato_supply",
-                load_fighter_svg(include_bytes!("../assets/NatoSupply.svg")),
+                load_side_svg(include_bytes!("../assets/NatoSupply.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.arty_tex_east.is_none() {
             self.arty_tex_east = Some(ctx.load_texture(
                 "eastern_arty",
-                load_fighter_svg(include_bytes!("../assets/EasternArty.svg")),
+                load_side_svg(include_bytes!("../assets/EasternArty.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.arty_tex_nato.is_none() {
             self.arty_tex_nato = Some(ctx.load_texture(
                 "nato_arty",
-                load_fighter_svg(include_bytes!("../assets/NatoArty.svg")),
+                load_side_svg(include_bytes!("../assets/NatoArty.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.train_tex_east.is_none() {
             self.train_tex_east = Some(ctx.load_texture(
                 "eastern_train",
-                load_fighter_svg(include_bytes!("../assets/EasternTrain.svg")),
+                load_side_svg(include_bytes!("../assets/EasternTrain.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.train_tex_nato.is_none() {
             self.train_tex_nato = Some(ctx.load_texture(
                 "nato_train",
-                load_fighter_svg(include_bytes!("../assets/NatoTrain.svg")),
+                load_side_svg(include_bytes!("../assets/NatoTrain.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.infantry_tex_east.is_none() {
             self.infantry_tex_east = Some(ctx.load_texture(
                 "eastern_infantry",
-                load_fighter_svg(include_bytes!("../assets/EasternInfantry.svg")),
+                load_side_svg(include_bytes!("../assets/EasternInfantry.svg"), true),
                 egui::TextureOptions::LINEAR,
             ));
         }
         if self.infantry_tex_nato.is_none() {
             self.infantry_tex_nato = Some(ctx.load_texture(
                 "nato_infantry",
-                load_fighter_svg(include_bytes!("../assets/NatoInfantry.svg")),
+                load_side_svg(include_bytes!("../assets/NatoInfantry.svg"), false),
                 egui::TextureOptions::LINEAR,
             ));
         }
@@ -5824,11 +7926,17 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             });
             return;
         };
-        let avail = ui.available_width().min(960.0);
+        // The map fills the center, letterboxed on NEUTRAL_200.
+        let area = ui.available_rect_before_wrap();
+        ui.painter().rect_filled(area, 0.0, c::NEUTRAL_200);
         let size = lo.size_vec2();
-        let scale = (avail / size.x).min(840.0 / size.y);
+        let scale = ((area.width() - 16.0) / size.x)
+            .min((area.height() - 16.0) / size.y)
+            .max(0.01);
         let img_size = Vec2::new(size.x * scale, size.y * scale);
-        let (rect, response) = ui.allocate_exact_size(img_size, Sense::click_and_drag());
+        let rect = Rect::from_center_size(area.center(), img_size);
+        let response = ui.allocate_rect(rect, Sense::click_and_drag());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Korea map"));
         let view = self.map_view_uv();
         let tex = if self.map_zoom > 1.0 {
             self.map_hi_tex.clone().unwrap_or(lo)
@@ -5953,6 +8061,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
 
         let hover_pos = response.hover_pos().or(response.interact_pointer_pos());
         let hover_xz = hover_pos.map(|p| uv_to_world(pos_to_uv(map_rect, p)));
+        self.map_hover_xz = response.hover_pos().map(|p| uv_to_world(pos_to_uv(map_rect, p)));
         let end_snap = if self.current_salient.is_empty() {
             None
         } else {
@@ -5961,17 +8070,31 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                 .and_then(|p| snap_to_front(&snap_line, p))
         };
 
-        if let Some(pos) = response.interact_pointer_pos() {
+        // After Esc or a tool switch, the drag that was under way ends unused.
+        if self.map_void_drag && !ui.input(|i| i.pointer.primary_down()) {
+            self.map_void_drag = false;
+        }
+        if self.map_void_drag {
+            // Swallow the rest of the cancelled drag.
+        } else if let Some(pos) = response.interact_pointer_pos() {
             let uv = pos_to_uv(map_rect, pos);
             let (x, z) = uv_to_world(uv);
 
             match self.map_drawing_mode {
                 MapDrawingMode::BaseFront => {
-                    if response.dragged_by(egui::PointerButton::Primary)
-                        || response.clicked_by(egui::PointerButton::Primary)
-                    {
+                    // Each click, or each whole drag, is one undoable front stroke.
+                    let dragging = response.dragged_by(egui::PointerButton::Primary);
+                    if dragging || response.clicked_by(egui::PointerButton::Primary) {
+                        let before = self.custom_front_xz.len();
+                        if dragging && self.front_stroke.is_none() {
+                            self.front_stroke = Some(before);
+                        }
                         if can_extend_west_east(&self.custom_front_xz, (x, z), 2500.0) {
                             self.custom_front_xz.push((x, z));
+                            self.map_undo.rebase();
+                            if !dragging {
+                                self.note_map_drawing(DrawnMark::Front { prev_len: before });
+                            }
                         }
                     }
                 }
@@ -6015,8 +8138,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                             let dz = tip.1 - tail.1;
                             if (dx * dx + dz * dz).sqrt() >= 2_500.0 {
                                 self.attack_arrows.push((tail, tip));
-                                self.drawn_marks.push(DrawnMark::AttackArrow);
-								self.clear_redo_stack();
+                                self.note_map_drawing(DrawnMark::AttackArrow);
                             }
                         }
                     }
@@ -6032,6 +8154,9 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                             self.nato_objectives.push((x, z));
                         }
                         self.reaim_map_ground();
+                        if !ui.input(|i| i.modifiers.shift) {
+                            self.map_drawing_mode = MapDrawingMode::None;
+                        }
                     }
                     if response.clicked_by(egui::PointerButton::Secondary) {
                         if self.remove_nearest_objective(eastern, map_rect, pos) {
@@ -6190,44 +8315,23 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         {
             self.commit_current_salient(&snap_line);
         }
+        // A Draw-front drag ends: its points become one mark.
+        if let Some(prev_len) = self.front_stroke {
+            if !response.dragged_by(egui::PointerButton::Primary) {
+                self.front_stroke = None;
+                if self.custom_front_xz.len() > prev_len {
+                    self.note_map_drawing(DrawnMark::Front { prev_len });
+                }
+            }
+        }
 
         let (composite_front, patches) = apply_salients(full_dense.clone(), &self.salients);
         let painter = ui.painter_at(rect);
 
-        if self.map_drawing_mode != MapDrawingMode::None {
-            let text = match self.map_drawing_mode {
-                MapDrawingMode::BaseFront => "DRAWING BASE FRONT\nWest to east only. Timeline slider clears it.",
-                MapDrawingMode::Salient => "DRAWING SALIENT\nClick or drag to draw. Light dot = start, dark dot = return.\nClick the dark dot or right-click to finish.",
-                MapDrawingMode::AttackArrow => "DRAWING ATTACK ARROW\nDrag from tail to tip. Colour follows the tail's side of the front.",
-                MapDrawingMode::PlaceEastObjective => "EASTERN OBJECTIVE\nClick to drop a preview marker. Right-click to remove. Not exported.",
-                MapDrawingMode::PlaceNatoObjective => "NATO OBJECTIVE\nClick to drop a preview marker. Right-click to remove. Not exported.",
-                MapDrawingMode::None => "",
-            };
-            painter.text(rect.min + Vec2::new(11.0, 11.0), Align2::LEFT_TOP, text, FontId::proportional(16.0), Color32::from_rgb(20, 20, 24));
-            painter.text(rect.min + Vec2::new(10.0, 10.0), Align2::LEFT_TOP, text, FontId::proportional(16.0), Color32::from_rgb(255, 255, 100));
-        } else if let Some((hit, wi)) = self.wp_selected {
-            let n = hit.spot_i() + 1;
-            let text = if self
-                .ground_spot_mut(hit)
-                .is_some_and(|s| s.network.is_some())
-            {
-                format!(
-                    "PLACE UNIT {n} WP{}\nClick a road or railroad — any branch, including behind the column.\nRight-click to cancel.",
-                    wi + 1
-                )
-            } else {
-                format!(
-                    "PLACE UNIT {n} WP{}\nClick dry land toward the objective (or the front).\nRight-click to cancel.",
-                    wi + 1
-                )
-            };
-            painter.text(rect.min + Vec2::new(11.0, 11.0), Align2::LEFT_TOP, &text, FontId::proportional(16.0), Color32::from_rgb(20, 20, 24));
-            painter.text(rect.min + Vec2::new(10.0, 10.0), Align2::LEFT_TOP, &text, FontId::proportional(16.0), Color32::from_rgb(255, 255, 100));
-        }
-
         let overlay = timeline_preview(self.front_t);
 
         draw_reference_overlays(&painter, map_rect);
+        self.draw_terrain_layers(ui.ctx(), &painter, map_rect);
 
         for battle in &overlay.battles {
             let pos = world_to_pos(map_rect, battle.x, battle.z);
@@ -6244,7 +8348,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
 
         if composite_front.len() >= 2 {
             draw_front_inside_outside(&painter, map_rect, &composite_front, self.front_aabb);
-            let salient_stroke = Stroke::new(1.5_f32, Color32::from_rgb(180, 180, 80));
+            let salient_stroke = Stroke::new(1.5_f32, SALIENT_OUTLINE);
             for patch in &patches {
                 for ring in clip_ring_to_aabb(&patch.ring, self.front_aabb) {
                     draw_dashed_world_line(&painter, map_rect, &ring, salient_stroke);
@@ -6342,14 +8446,42 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         self.draw_map_objectives(&painter, map_rect);
 
         // 8. Draw AABB Box
+        // AO: dashed ACCENT_800 outline over a ~7 % accent wash (mockup 2f).
         let box_rect = aabb_to_screen(map_rect, self.front_aabb);
-        painter.rect_stroke(
-            box_rect,
-            0.0,
-            Stroke::new(2.0_f32, Color32::from_rgb(255, 210, 70)),
-            egui::StrokeKind::Outside,
-        );
-        painter.rect_filled(box_rect, 0.0, Color32::from_rgba_unmultiplied(255, 210, 70, 25));
+        painter.rect_filled(box_rect, 0.0, AO_FILL);
+        let corners = [
+            box_rect.left_top(),
+            box_rect.right_top(),
+            box_rect.right_bottom(),
+            box_rect.left_bottom(),
+            box_rect.left_top(),
+        ];
+        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(1.5_f32, c::ACCENT_800), 6.0, 4.0));
+
+        // Tool banner at the top-center (only while a tool or a WP pick is active).
+        let banner = if let Some(t) = MAP_TOOLS
+            .iter()
+            .find(|t| t.0 == self.map_drawing_mode && t.0 != MapDrawingMode::None)
+        {
+            Some((t.2.to_string(), t.3.to_string()))
+        } else if let Some((hit, wi)) = self.wp_selected {
+            let on_network = self.ground_spot_mut(hit).is_some_and(|s| s.network.is_some());
+            let hint = if on_network {
+                "Click a road or railroad, any branch · right-click to cancel"
+            } else {
+                "Click dry land toward the objective · right-click to cancel"
+            };
+            Some((format!("Place unit {} WP{}", hit.spot_i() + 1, wi + 1), hint.to_string()))
+        } else {
+            None
+        };
+        if let Some((name, hint)) = banner {
+            shell::map_tool_banner(&ui.painter_at(area), area, &name, &hint);
+        }
+        if self.map_drawing_mode != MapDrawingMode::None && response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        self.map_overlays(ui, area);
     }
 
     fn hit_fighter_spot(&self, map_rect: Rect, pointer: Pos2) -> Option<usize> {
@@ -6443,16 +8575,13 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             self.fighter_tex_nato.as_ref()
         };
         let size = Vec2::splat(26.0);
-        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+        // Fighters face their side's way (README §8): DPRK south, NATO north.
+        // Fighter spots carry no heading of their own, so nothing overrides it.
+        let facing = shell::Side::from_eastern(layout.eastern).facing_rad();
         for spot in &layout.spots {
             let pos = world_to_pos(map_rect, spot.x, spot.z);
             if let Some(tex) = tex {
-                painter.image(
-                    tex.id(),
-                    Rect::from_center_size(pos, size),
-                    uv,
-                    Color32::WHITE,
-                );
+                paint_rotated_image(painter, tex, pos, size, facing, Color32::WHITE);
             } else {
                 painter.circle_filled(pos, 8.0, faction_map_color(layout.eastern));
             }
@@ -6710,23 +8839,23 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         }
     }
 
+    /// "Import new templates as": one row of six 36 × 28 type buttons.
     fn unit_kind_picker(&mut self, ui: &mut egui::Ui) {
         let icons = self.type_icons(self.recon_eastern);
-        for kind in UnitKind::ALL {
-            ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for kind in UnitKind::ALL {
                 if unit_kind_icon_button(
                     ui,
                     icons[kind.index()].as_ref(),
                     kind.label(),
                     &kind.hover(),
                     self.recon_import_kind == kind,
-                    28.0,
                 ) {
                     self.recon_import_kind = kind;
                 }
-                ui.label(kind.label());
-            });
-        }
+            }
+        });
     }
 
     fn units_locked(&self) -> bool {
@@ -7029,13 +9158,13 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             painter,
             map_rect,
             mapnet::roads(),
-            Stroke::new(1.15_f32, Color32::from_rgba_unmultiplied(110, 18, 18, 128)),
+            Stroke::new(1.15_f32, ROAD_LINE),
         );
         draw_network_lines(
             painter,
             map_rect,
             mapnet::railroads(),
-            Stroke::new(1.35_f32, Color32::from_rgba_unmultiplied(16, 16, 18, 128)),
+            Stroke::new(1.35_f32, RAIL_LINE),
         );
     }
 
@@ -7066,7 +9195,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         } else {
             self.nato_objectives.as_slice()
         };
-        let side = if eastern { "Eastern" } else { "NATO" };
+        let side = if eastern { "DPRK" } else { "NATO" };
         let mut warnings = Vec::new();
         let terrain = match crate::watermap::WaterMap::builtin() {
             Ok(w) => w,
@@ -7270,7 +9399,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
     }
 
     fn load_map_armies(&mut self, eastern: bool) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -7391,7 +9520,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                 }
             }
         }
-        let side = if eastern { "Eastern" } else { "NATO" };
+        let side = if eastern { "DPRK" } else { "NATO" };
         let n = slot.copies.len();
         if let Some(slot) = self.map_armies.get_mut(idx) {
             slot.ships = if ship_spots.is_empty() {
@@ -7423,7 +9552,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         };
         let eastern = slot.eastern;
         let copies = slot.copies.clone();
-        let side = if eastern { "Eastern" } else { "NATO" };
+        let side = if eastern { "DPRK" } else { "NATO" };
         let objectives = if eastern {
             self.east_objectives.clone()
         } else {
@@ -7620,6 +9749,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             }
             let country = country_for_coalition(slot.eastern, self.country);
             apply_overrides(&mut root, "", country);
+            // Written into the generated .Group as a group name: keep "Eastern".
             let side = if slot.eastern { "Eastern" } else { "NATO" };
             let name = slot
                 .path
@@ -7659,7 +9789,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                 continue;
             }
             if slot.selected_triggers.is_empty() {
-                return Err(format!("Select a Zone IN for {}.", slot.info.name));
+                return Err(format!("Select a Zone In for {}.", slot.info.name));
             }
             let text = std::fs::read_to_string(&slot.path)
                 .map_err(|err| format!("Could not read template: {err}"))?;
@@ -7689,6 +9819,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         park_recon_copies_headed(&mut root, &spots, &headings);
         let country = country_for_coalition(layout.eastern, self.country);
         apply_overrides(&mut root, "", country);
+        // Written into the generated .Group as a group name: keep "Eastern".
         let side = if layout.eastern { "Eastern" } else { "NATO" };
         root.set_name(&format!("{side} Shipping"));
         Ok(vec![MapShipPack { root }])
@@ -7739,7 +9870,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                     continue;
                 }
                 if slot.selected_triggers.is_empty() {
-                    return Err(format!("Select a Zone IN for {}.", slot.info.name));
+                    return Err(format!("Select a Zone In for {}.", slot.info.name));
                 }
                 let text = std::fs::read_to_string(&slot.path)
                     .map_err(|err| format!("Could not read template: {err}"))?;
@@ -7774,6 +9905,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         );
         let country = country_for_coalition(layout.eastern, self.country);
         apply_overrides(&mut root, "", country);
+        // Written into the generated .Group as a group name: keep "Eastern".
         let side = if layout.eastern { "Eastern" } else { "NATO" };
         root.set_name(&format!("{side} Ground"));
         Ok(MapGroundPack { root })
@@ -7818,9 +9950,13 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                     .map(|s| s.pack)
                     .collect::<std::collections::BTreeSet<_>>()
                     .len();
-                let side = if eastern { "Eastern" } else { "NATO" };
+                let side = if eastern { "DPRK" } else { "NATO" };
+                // One fighter layout at a time: placing again replaces it, undoably.
+                if self.map_fighters.is_some() || !self.map_imported_fighters.is_empty() {
+                    self.record_map_undo("Replaced the placed fighters".into());
+                }
                 self.status = Status::Info(format!(
-                    "{side}: {n} groups in {packs} pack(s). Drag icons in Pan / Select AO to fine-tune."
+                    "{side}: {n} groups in {packs} packs. Drag icons with Select AO / move units (1) to fine-tune."
                 ));
                 self.map_fighters = Some(layout);
                 self.map_imported_fighters.clear();
@@ -7882,6 +10018,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         for s in &layout.spots {
             by_pack.entry(s.pack).or_default().push(s);
         }
+        // Written into the generated .Group as a group name: keep "Eastern".
         let side = if layout.eastern { "Eastern" } else { "NATO" };
         let mut out = Vec::new();
         for (pack_id, mut members) in by_pack {
@@ -7912,6 +10049,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         self.salients.clear();
         self.current_salient.clear();
         self.drawn_marks.retain(|m| *m != DrawnMark::Salient);
+        self.forget_front_marks();
         self.apply_timeline_mark(idx, true);
         self.front_t = idx.min(TIMELINE.len().saturating_sub(1)) as f32;
     }
@@ -7940,16 +10078,13 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
             return;
         }
         self.salients.push(std::mem::take(&mut self.current_salient));
-        self.drawn_marks.push(DrawnMark::Salient);
-		self.clear_redo_stack();
+        self.note_map_drawing(DrawnMark::Salient);
     }
 
-	fn remove_last_mark(&mut self) {
-        if self.attack_drag.take().is_some() {
-            return;
-        }
-        if !self.current_salient.is_empty() {
-            self.current_salient.clear();
+    /// Undo the last drawing: first a stroke still in progress, then the
+    /// newest finished mark (front stroke, salient or arrow).
+    fn remove_last_mark(&mut self) {
+        if self.cancel_map_stroke() {
             return;
         }
         if let Some(mark) = self.drawn_marks.pop() {
@@ -7966,7 +10101,17 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                         self.redo_marks.push(mark);
                     }
                 }
+                DrawnMark::Front { prev_len } => {
+                    let cut = prev_len.min(self.custom_front_xz.len());
+                    self.redo_fronts.push(self.custom_front_xz.split_off(cut));
+                    self.redo_marks.push(mark);
+                }
             }
+            self.map_undo.rebase();
+        }
+        // Back below the marks drawn after the last Clear: that Clear is next.
+        if self.map_undo.label().is_some() && self.drawn_marks.len() <= self.map_undo_marks {
+            self.map_last = MapAction::Clear;
         }
     }
 
@@ -7985,7 +10130,15 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
                         self.drawn_marks.push(mark);
                     }
                 }
+                DrawnMark::Front { .. } => {
+                    if let Some(points) = self.redo_fronts.pop() {
+                        self.custom_front_xz.extend(points);
+                        self.drawn_marks.push(mark);
+                    }
+                }
             }
+            self.map_last = MapAction::Drawing;
+            self.map_undo.rebase();
         }
     }
 
@@ -7993,6 +10146,7 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         self.redo_marks.clear();
         self.redo_salients.clear();
         self.redo_attack_arrows.clear();
+        self.redo_fronts.clear();
     }
 
     fn apply_timeline_mark(&mut self, idx: usize, clear_focus: bool) {
@@ -8029,21 +10183,26 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         }
     }
 
-	fn draw_map_legend(&self, ui: &mut egui::Ui) {
-		ui.add_space(4.0);
-		ui.label(RichText::new("Legend").strong());
-		ui.horizontal_wrapped(|ui| {
-			legend_swatch(ui, Color32::from_rgba_unmultiplied(110, 18, 18, 128), "Road");
-			legend_swatch(ui, Color32::from_rgba_unmultiplied(16, 16, 18, 128), "Railroad");
-			legend_swatch(ui, Color32::from_rgb(220, 30, 30), "Front Line");
-			legend_swatch(ui, Color32::from_rgb(240, 220, 80), "Major Battle");
-			legend_swatch(ui, Color32::from_rgb(155, 0, 0), "DPRK");
-			legend_swatch(ui, Color32::from_rgb(0, 120, 150), "NATO");
-			legend_swatch(ui, Color32::from_rgb(30, 90, 220), "Airfield");
-			legend_swatch(ui, Color32::from_rgb(255, 140, 40), "Linked entity");
-			legend_swatch(ui, Color32::from_rgb(255, 210, 70), "Block");
-		});
-	}
+    /// "All layers ▾": every map layer, drawn the way the map draws it.
+    fn draw_map_legend(&self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        ui.label(RichText::new("Legend").strong());
+        ui.set_min_width(220.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(320.0);
+            legend_line(ui, c::FRONT, false, "Front line");
+            legend_line(ui, SALIENT_OUTLINE, true, "Salient");
+            legend_line(ui, c::ACCENT_800, true, "AO box");
+            legend_side(ui, shell::Side::Dprk, "DPRK");
+            legend_side(ui, shell::Side::Nato, "NATO");
+            legend_line(ui, ROAD_LINE, false, "Road");
+            legend_line(ui, RAIL_LINE, false, "Railroad");
+            legend_swatch(ui, Color32::from_rgb(240, 220, 80), "Major battle");
+            legend_swatch(ui, Color32::from_rgb(30, 90, 220), "Airfield");
+            legend_swatch(ui, Color32::from_rgb(255, 140, 40), "Linked entity");
+            legend_swatch(ui, BLOCK_DOT, "Block");
+        });
+    }
 
     fn focus_battle(&mut self, battle: &Battle) {
         self.front_focus = Some(battle.id);
@@ -8056,495 +10215,19 @@ fn map_view_toolbar(&mut self, ui: &mut egui::Ui) {
         self.front_focus = Some(battle.id);
     }
 
-    fn recon_new_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-				"Each template parks in its own square 10 km grid from 40000, 40000 (2×2 for 4 copies of that type, 3×3 for 9) so you can sort by hand if desired. 
-A random logic may be used so that each mission spawns placed units at random.
-If used mission begin is unlinked in each loaded group.
-Influence is set to control how many copies of that type are created (from the share of Templates to create). 
-Activate ratio then runs a waterfall inside each type: the last timer is 100%, and a win closes the remaining Outs so two cannot fire.
-Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated).",
-            )
-        );
-        ui.label(
-            RichText::new(
-                "Icon and subtitle text stay as LC indexes in the group. If .eng (or other language) files sit next to a template they are copied beside the output; re-export from the editor if they are missing.",
-            )
-        );
-        ui.label(
-            RichText::new(format!(
-                "Select the {SUGGESTED_ZONE_NAMES} checkzones that belong to each template so we know the group is valid."
-            ))
-        );
-        ui.add_space(8.0);
-
-        self.ensure_map_assets(ui.ctx());
-        ui.label(RichText::new("Army").strong());
-        ui.label(
-            RichText::new(
-                "Eastern or NATO artwork for the type icons on this page. Map Place Eastern / Place NATO still picks the coalition that parks along the front.",
-            )
-        );
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.recon_eastern, true, "Eastern");
-            ui.selectable_value(&mut self.recon_eastern, false, "NATO");
-        });
-        ui.add_space(6.0);
-        ui.label(RichText::new("Import as").strong());
-        ui.label(
-            RichText::new(
-                "Default type for newly added templates. Each template keeps its own icon — click the icons on a template to change it. Map draws that same type: Ship on water, Train on railroad, Armor / Supply / Artillery on open ground, Infantry on dry land (not water)."
-            )
-        );
-        ui.horizontal(|ui| {
-            self.unit_kind_picker(ui);
-        });
-        ui.add_space(8.0);
-
-        labeled_slider(ui, "Templates to create", &mut self.recon_total, 1..=64);
-        ui.checkbox(
-            &mut self.recon_strip_randomizer,
-            "Spawn all copies (omit randomizer)",
-        );
-        if self.recon_strip_randomizer {
-            ui.label(
-                RichText::new(
-                    "Every copy keeps its Mission Begin chain and starts. No waterfall, no deletions.",
-                )
-            );
-        } else {
-            labeled_slider(ui, "Activate ratio (%)", &mut self.recon_percent, 1..=100);
-        }
-        recon_dserver_note(ui);
-        if !self.recon_strip_randomizer {
-            self.recon_timing_sliders(ui);
-        }
-        ui.checkbox(
-            &mut self.recon_keep_positions,
-            "Keep loaded positions (do not park on the grid)",
-        );
-        ui.add_space(8.0);
-
-        if self.recon_slots.is_empty() {
-            ui.label(
-                RichText::new("Add one or more .Group files, or a folder of them, then set influence.")
-                    .italics()
-            );
-        }
-
-        let kind_icons = self.type_icons(self.recon_eastern);
-        recon_slot_list(
-            ui,
-            &mut self.recon_slots,
-            Some("Influence (share of copies created)"),
-            Some(kind_icons),
-        );
-
-        if !self.recon_slots.is_empty() {
-            let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
-            let mix = allocate_mix(&weights, self.recon_total as usize, self.recon_percent);
-            let placed: usize = mix.iter().map(|m| m.copies).sum();
-            let live: usize = mix.iter().map(|m| m.activate).sum();
-            ui.add_space(4.0);
-			ui.label(RichText::new("Copy mix").strong());
-            ui.label(
-                RichText::new(
-                    if self.recon_strip_randomizer {
-                        "Influence splits how many copies of each type are placed. Spawn-all keeps every copy; no activate waterfall."
-                    } else {
-                        "Influence splits how many copies of each type are placed. Activate % is per type, not on the pack total, so two types at 50% of 10 copies is 5 placed / 3 live each (6 live), not 5 live overall."
-                    },
-                )
-            );
-            for (slot, m) in self.recon_slots.iter().zip(mix.iter()) {
-                let live_n = if self.recon_strip_randomizer {
-                    m.copies
-                } else {
-                    m.activate
-                };
-                ui.label(
-                    RichText::new(format!(
-                        "  {} placed, {} {}  ×  {} ({})",
-                        m.copies,
-                        live_n,
-                        if self.recon_strip_randomizer {
-                            "spawn"
-                        } else {
-                            "activate"
-                        },
-                        slot.info.name,
-                        slot.kind.label()
-                    ))
-                );
-            }
-            let shown_live = if self.recon_strip_randomizer {
-                placed
-            } else {
-                live
-            };
-            ui.label(
-                RichText::new(format!(
-                    "{shown_live} of {placed} copies will {}.",
-                    if self.recon_strip_randomizer {
-                        "spawn"
-                    } else {
-                        "activate"
-                    }
-                ))
-                    .color(Color32::from_rgb(110, 150, 110)),
-            );
-        }
-
-    }
-
-    fn recon_rework_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new(
-                "Add Ground Units packs that need to be modified once exported from this utility. 
-	In this mode copies stay where you have placed them. 
-	This may be used to add another unit pack in later, or to combine several packs into one group file.",
-            )
-        );
-        ui.label(
-            RichText::new(format!(
-                "Select the {SUGGESTED_ZONE_NAMES} checkzones so we know each type is valid. Influence is the activate ratio for that type: how many of the copies already on the map will win that type's waterfall."
-            ))
-        );
-        ui.add_space(8.0);
-
-        ui.checkbox(
-            &mut self.recon_strip_randomizer,
-            "Remove random logic (keep every copy, no waterfall)",
-        );
-        if self.recon_strip_randomizer {
-            ui.label(
-                RichText::new(
-                    "Strips Recon Randomizer and reconnects each copy's Mission Begin so every group starts. Pick the MCU Mission Begin should fire: a timer, or a checkzone. Recommended: a timer that targets a Closer checkzone (Zone IN). ENABLE / PULSE IN is usually that timer. Pick the checkzone itself only if you want Mission Begin to pulse that zone directly.",
-                )
-            );
-        }
-        recon_dserver_note(ui);
-        ui.add_space(8.0);
-
-        let detected_total: usize = self.recon_rework.iter().filter_map(|s| s.detected).sum();
-        ui.label(
-            RichText::new(format!("{detected_total} groups detected on the map")).strong(),
-        );
-        if !self.recon_strip_randomizer {
-            ui.label("Activate ratio (%)");
-            ui.horizontal(|ui| {
-                let changed = ui
-                    .add(
-                        egui::Slider::new(&mut self.recon_percent, 1..=100)
-                            .show_value(false)
-                            .trailing_fill(true),
-                    )
-                    .changed();
-                let typed = ui
-                    .add(egui::DragValue::new(&mut self.recon_percent).range(1..=100).speed(0.2))
-                    .changed();
-                if changed || typed {
-                    for slot in &mut self.recon_rework {
-                        slot.influence = self.recon_percent;
-                    }
-                }
-            });
-            self.recon_timing_sliders(ui);
-        }
-        ui.add_space(8.0);
-
-        if self.recon_rework.is_empty() {
-            ui.label(
-                RichText::new("Add one or more Random Ground Units .Group files exported from the editor.")
-                    .italics()
-            );
-        }
-
-        recon_slot_list(
-            ui,
-            &mut self.recon_rework,
-            if self.recon_strip_randomizer {
-                None
-            } else {
-                Some("Influence (activate %)")
-            },
-            None,
-        );
-
-        if self.recon_strip_randomizer && !self.recon_rework.is_empty() {
-            ui.add_space(6.0);
-            ui.label(RichText::new("Reconnect Mission Begin").strong());
-            for (i, slot) in self.recon_rework.iter_mut().enumerate() {
-                if slot.restore_start.is_empty() {
-                    if let Some(c) = slot.info.suggested_restore() {
-                        slot.restore_start = c.name.clone();
-                    }
-                }
-                let selected = slot.restore_start.clone();
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&slot.info.name).strong());
-                    egui::ComboBox::from_id_salt(format!("restore_start_{i}"))
-                        .selected_text(if selected.is_empty() {
-                            "Select a timer or checkzone".to_string()
-                        } else {
-                            selected.clone()
-                        })
-                        .width(360.0)
-                        .show_ui(ui, |ui| {
-                            for choice in &slot.info.restore_starts {
-                                let kind = match choice.kind {
-                                    RestoreKind::Timer => "Timer",
-                                    RestoreKind::CheckZone => "CheckZone",
-                                };
-                                let rec = if choice.recommended { "  (recommended)" } else { "" };
-                                let label = format!("{}  [{kind}]{rec}", choice.name);
-                                if ui
-                                    .selectable_label(slot.restore_start == choice.name, label)
-                                    .clicked()
-                                {
-                                    slot.restore_start = choice.name.clone();
-                                }
-                            }
-                        });
-                });
-                if let Some(c) = slot
-                    .info
-                    .restore_starts
-                    .iter()
-                    .find(|c| c.name == slot.restore_start)
-                {
-                    ui.label(
-                        RichText::new(&c.hint).color(Color32::from_rgb(180, 150, 70)),
-                    );
-                }
-            }
-            ui.label(
-                RichText::new(format!(
-                    "All {detected_total} copies will start (no randomizer)."
-                ))
-                .color(Color32::from_rgb(110, 150, 110)),
-            );
-        } else if !self.recon_rework.is_empty() {
-            ui.add_space(4.0);
-			ui.label(RichText::new("Copy mix").strong());
-            ui.label(
-                RichText::new(
-                    "Copies stay where they are. Influence is that type's activate %. Each type has its own waterfall.",
-                )
-            );
-            let mut placed = 0usize;
-            let mut live = 0usize;
-            for slot in &self.recon_rework {
-                let n = slot.detected.unwrap_or(0);
-                let mix = TypeMix::from_copies(n, slot.influence.clamp(1, 100));
-                placed += mix.copies;
-                live += mix.activate;
-                ui.label(
-                    RichText::new(format!(
-                        "  {} on map, {} activate  ×  {}",
-                        mix.copies, mix.activate, slot.info.name
-                    ))
-                );
-            }
-            if placed > 0 {
-                ui.label(
-                    RichText::new(format!("{live} of {placed} copies will activate."))
-                        .color(Color32::from_rgb(110, 150, 110)),
-                );
+    /// Returns true when the status bar's Undo is clicked.
+    fn status_line(&self, ui: &mut egui::Ui) -> bool {
+        // An active map tool owns the status line until it is put down (README §6.2).
+        if self.mode == AppMode::Map {
+            if let Some(msg) = self.map_tool_status() {
+                return shell::status_bar(ui, Severity::Info, &msg, self.undo_label());
             }
         }
-
-    }
-
-    fn recon_timing_sliders(&mut self, ui: &mut egui::Ui) {
-        labeled_slider(ui, "Start delay (s)", &mut self.recon_start_delay_s, 0..=180);
-        ui.label(
-            RichText::new(
-                "Wait this long after Mission Begin before the first type starts. Use this when several Army Generator groups are in the same mission so they do not all fire at t=0.",
-            )
-        );
-        labeled_slider(
-            ui,
-            "Delay between groups (ms)",
-            &mut self.recon_group_delay_ms,
-            0..=5000,
-        );
-        ui.label(
-            RichText::new(
-                "After the start delay, each following type waits this long (default 500 ms) so MCU load does not spike.",
-            )
-        );
-    }
-
-    fn pack_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Linked groups").strong());
-        ui.label(
-            RichText::new("Copies of the configured group are chained through 'NodeGates' and are parked in a square 10 km grid from 40000, 40000.")
-        );
-        ui.add_space(4.0);
-        labeled_slider(ui, "Number of linked groups", &mut self.linked_groups, 1..=10);
-    }
-
-    fn flight_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Random aircraft flights").strong());
-        ui.label(
-            RichText::new(
-                "Each flight is one randomizer slot. Pairs: AttackArea + Cover. A leftover aircraft gets AttackArea only.",
-            )
-        );
-        ui.add_space(4.0);
-        labeled_slider(ui, "Number of flights", &mut self.flight_count, 1..=10);
-        labeled_slider(ui, "Max number in each flight", &mut self.max_in_flight, 1..=8);
-        let sizes = flight_sizes(self.flight_count as usize, self.max_in_flight as usize);
-        let total: usize = sizes.iter().sum();
-        let mix = sizes
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .join("/");
-        ui.label(
-            RichText::new(format!(
-                "{total} aircraft in Group 1  ·  flight sizes {mix}  ·  numbers {}–{}",
-                crate::aircraft::flight_number(0, 0),
-                crate::aircraft::flight_number(
-                    (self.flight_count as usize).saturating_sub(1),
-                    sizes.last().copied().unwrap_or(1).saturating_sub(1)
-                )
-            ))
-            .color(Color32::from_rgb(110, 150, 110)),
-        );
-    }
-
-    fn types_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Aircraft types").strong());
-        ui.label(
-            RichText::new("Flights cycle through the selected types. Skill is loosely applied; lead ≥ wingman.")
-        );
-        ui.add_space(4.0);
-        for (i, ac) in AIRCRAFT_TYPES.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.type_enabled[i], ac.label);
-                ui.add_enabled(
-                    self.type_enabled[i],
-                    egui::Slider::new(&mut self.type_skill[i], 0..=4)
-                        .integer()
-                        .text("skill")
-                        .trailing_fill(true),
-                );
-            });
-        }
-    }
-
-    fn country_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Country").strong());
-        ui.label(
-            RichText::new(
-                "500-series: Zone IN/OUT trigger on western coalitions [2].  600-series: trigger on [1].",
-            )
-        );
-        ui.add_space(4.0);
-        let selected = COUNTRIES
-            .iter()
-            .find(|(id, _)| *id == self.country)
-            .map(|(_, label)| *label)
-            .unwrap_or("501  USSR");
-        egui::ComboBox::from_id_salt("country")
-            .selected_text(selected)
-            .width(220.0)
-            .show_ui(ui, |ui| {
-                for (id, label) in COUNTRIES {
-                    ui.selectable_value(&mut self.country, *id, *label);
-                }
-            });
-    }
-
-    fn timers_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Timers (seconds)").strong());
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label("Cooldown");
-            ui.add(
-                egui::DragValue::new(&mut self.cooldown)
-                    .range(0.0..=1800.0)
-                    .speed(1.0)
-                    .suffix(" s"),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.label("Reinforcement");
-            ui.add(
-                egui::DragValue::new(&mut self.reinforcement)
-                    .range(0.0..=1800.0)
-                    .speed(1.0)
-                    .suffix(" s"),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.label("Delete orders");
-            ui.add(
-                egui::DragValue::new(&mut self.delete_orders)
-                    .range(0.0..=600.0)
-                    .speed(1.0)
-                    .suffix(" s"),
-            );
-        });
-    }
-
-    fn altitude_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Altitude range (m)").strong());
-        ui.label(
-            RichText::new("1- and 2-ships spread between min and max. Each complete 4-ship is 2 low / 2 high (~2000 m); leftover ships stay low. Low cover sits in a 500–1500 m band that rises with max. Wingmen stack 25–50 m on their lead.")
-        );
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label("Min");
-            ui.add(
-                egui::DragValue::new(&mut self.altitude_min)
-                    .range(100.0..=9000.0)
-                    .speed(25.0)
-                    .suffix(" m"),
-            );
-            ui.label("Max");
-            ui.add(
-                egui::DragValue::new(&mut self.altitude_max)
-                    .range(100.0..=9000.0)
-                    .speed(25.0)
-                    .suffix(" m"),
-            );
-        });
-        if self.altitude_min > self.altitude_max {
-            std::mem::swap(&mut self.altitude_min, &mut self.altitude_max);
-        }
-    }
-
-    fn optional_template_section(&mut self, ui: &mut egui::Ui) {
-        ui.collapsing("Custom pack template (experimental)", |ui| {
-            ui.label(
-                RichText::new("Leave unloaded to use the built-in logic.")
-            );
-            ui.horizontal(|ui| {
-                if ui.button("Load…").clicked() {
-                    self.pick_template();
-                }
-                if self.custom_path.is_some() && ui.button("Use built-in").clicked() {
-                    self.custom_path = None;
-                    self.status = Status::Info("Using built-in logic.".into());
-                }
-                let label = self
-                    .custom_path
-                    .as_ref()
-                    .and_then(|p| p.file_name())
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("Built-in");
-                ui.label(RichText::new(label).italics());
-            });
-        });
-    }
-
-    fn status_line(&self, ui: &mut egui::Ui) {
         let (severity, msg) = match &self.status {
-            Status::Idle => (Severity::Info, self.idle_hint().to_owned()),
+            Status::Idle => match self.idle_problem() {
+                Some(problem) => (Severity::Warn, problem),
+                None => (Severity::Info, self.idle_hint().to_owned()),
+            },
             Status::Info(msg) => (Severity::Info, msg.clone()),
             Status::Warn { lead, items } => {
                 let msg = if lead.is_empty() {
@@ -8556,7 +10239,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             }
             Status::Error(msg) => (Severity::Error, msg.clone()),
         };
-        shell::status_bar(ui, severity, &msg, None);
+        shell::status_bar(ui, severity, &msg, self.undo_label())
     }
 
     /// What the one-line status bar cannot hold: warning bullets and the rest
@@ -8608,11 +10291,20 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
                 }
             },
             AppMode::Airfield => {
-                "Load a Freeflight airfield from _gen.mission, then export the cleaned group."
+                "Load a Freeflight airfield from _gen.mission, then generate the cleaned group."
             }
             AppMode::Map => {
                 "Draw a box on the Korea map, then generate icons for that area."
             },
+        }
+    }
+
+    /// With nothing else to report, the idle status names the first thing
+    /// that blocks Generate on this tab (Exclusive Activation plans).
+    fn idle_problem(&self) -> Option<String> {
+        match self.mode {
+            AppMode::Exclusive => exclusive_first_problem(&self.bomber_slots),
+            _ => None,
         }
     }
 
@@ -8626,7 +10318,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn pick_template(&mut self) {
-        let picked = rfd::FileDialog::new()
+        let picked = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_file();
         let Some(path) = picked else {
@@ -8664,7 +10356,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn add_bomber_template(&mut self) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -8674,10 +10366,11 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
         let mut last_err = None;
         let mut loaded_pack = false;
         for path in paths {
-            match self.add_bomber_from_path(path) {
+            match self.add_bomber_from_path(path.clone()) {
                 Ok(from_pack) => {
                     if from_pack {
                         loaded_pack = true;
+                        self.bomber_loaded_path = Some(path);
                     }
                 }
                 Err(err) => last_err = Some(err),
@@ -8782,7 +10475,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             "Exclusive_Activation_{}plan.Group",
             self.bomber_slots.len()
         );
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -8801,6 +10494,9 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             if n == 1 { "" } else { "s" }
         );
         self.status = save_with_sidecars(&save_path, &text, &locale_paths, &summary);
+        if !matches!(self.status, Status::Error(_)) {
+            self.bomber_loaded_path = None;
+        }
     }
 
     fn add_recon_from_path(&mut self, path: PathBuf) -> Result<(), String> {
@@ -8864,7 +10560,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn add_recon_template(&mut self) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -8874,7 +10570,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn add_recon_folder(&mut self) {
-        let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+        let Some(dir) = dialog::FileDialog::new().pick_folder() else {
             return;
         };
         let paths = group_files_in_dir(&dir);
@@ -8910,7 +10606,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             }
             if slot.selected_triggers.is_empty() {
                 self.status = Status::Error(format!(
-                    "Select a Zone IN for {}.",
+                    "Select a Zone In for {}.",
                     slot.info.name
                 ));
                 return;
@@ -8965,7 +10661,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
                 live, self.recon_total
             )
         };
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -9018,7 +10714,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn add_placed_packs(&mut self) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -9074,7 +10770,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
                     return;
                 }
             } else if slot.selected_triggers.is_empty() {
-                self.status = Status::Error(format!("Select a Zone IN for {}.", slot.info.name));
+                self.status = Status::Error(format!("Select a Zone In for {}.", slot.info.name));
                 return;
             }
         }
@@ -9126,7 +10822,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             };
             let text = serialize_group(&combined);
             let suggested = format!("Ground_Units_{n}_always_on.Group");
-            let Some(save_path) = rfd::FileDialog::new()
+            let Some(save_path) = dialog::FileDialog::new()
                 .add_filter("IL-2 Group", &["Group"])
                 .set_file_name(&suggested)
                 .save_file()
@@ -9164,7 +10860,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             .sum();
         let text = serialize_group(&combined);
         let suggested = format!("Random_Ground_Units_{live}of{n}.Group");
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -9181,7 +10877,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn load_airfield(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group / mission", &["Group", "group", "Mission", "mission"])
             .pick_file()
         else {
@@ -9220,54 +10916,37 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
         }
     }
 
+    /// Airfield tab, left panel: the automatic database harvest (watch the
+    /// game's _gen.mission and file every start airfield).
     fn harvest_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Airfield database (automatic)").strong());
-        ui.label(
-            "Turn on Watch, then in game start a Freeflight from each airfield in turn. Each time the game rewrites _gen.mission, the start airfield is cut out, cleaned for multiplayer, and saved to the database folder with a catalog.Group entry. The raw mission is archived under raw/.",
+        shell::section_title(ui, "Harvest automatically", Some("many airfields"));
+        shell::hint(
+            ui,
+            "Instead of the steps above: watch, then start a Freeflight from each airfield in turn. Each new _gen.mission is cut, cleaned for multiplayer and filed in the database.",
+            false,
         );
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label("Game Missions folder");
-            ui.add(egui::TextEdit::singleline(&mut self.harvest_missions_dir).desired_width(420.0));
-            if ui.button("Browse…").clicked() {
-                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                    self.harvest_missions_dir = dir.display().to_string();
-                }
+        let mut watching = self.harvest_watcher.is_some();
+        if ui
+            .checkbox(&mut watching, "Watch for new airfields")
+            .on_hover_text("Polls the Missions folder for a rewritten _gen.mission, on any tab.")
+            .changed()
+        {
+            if watching {
+                self.start_harvest_watch();
+            } else {
+                self.harvest_watcher = None;
             }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Database folder");
-            ui.add(egui::TextEdit::singleline(&mut self.harvest_db_dir).desired_width(420.0));
-            if ui.button("Browse…").clicked() {
-                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                    self.harvest_db_dir = dir.display().to_string();
-                }
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Radius");
-            ui.add(
-                egui::DragValue::new(&mut self.harvest_cfg.radius_m)
-                    .range(1000.0..=10000.0)
-                    .speed(50.0)
-                    .suffix(" m"),
-            );
-            ui.checkbox(&mut self.harvest_cfg.keep_ai_planes, "Keep AI planes");
-        });
-        ui.horizontal(|ui| {
-            let mut watching = self.harvest_watcher.is_some();
-            if ui.checkbox(&mut watching, "Watch for new airfields").changed() {
-                if watching {
-                    self.start_harvest_watch();
-                } else {
-                    self.harvest_watcher = None;
-                }
-            }
-            if ui.button("Harvest current _gen.mission").clicked() {
+        }
+        if let Some(w) = &self.harvest_watcher {
+            ui.label(RichText::new(format!("Watching {}", w.dir().display())).small().color(c::ACCENT_700));
+        }
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Harvest current").on_hover_text("Harvest the _gen.mission in the Missions folder now").clicked() {
                 self.harvest_current_gen();
             }
-            if ui.button("Harvest a mission file…").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
+            if ui.button("Harvest a file…").on_hover_text("Harvest any .Mission file").clicked() {
+                if let Some(path) = dialog::FileDialog::new()
                     .add_filter("IL-2 mission", &["Mission", "mission"])
                     .pick_file()
                 {
@@ -9275,12 +10954,51 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
                 }
             }
         });
-        if let Some(w) = &self.harvest_watcher {
-            ui.label(RichText::new(format!("Watching {}", w.dir().display())).italics());
+        ui.add_space(4.0);
+        let folder_row = |ui: &mut egui::Ui, label: &str, value: &mut String| {
+            ui.label(RichText::new(label).small().color(c::NEUTRAL_700));
+            // Right to left: the button takes its real width, the path the rest,
+            // so the row never overflows the 290 px panel.
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 28.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    if ui.button("Browse…").clicked() {
+                        if let Some(dir) = dialog::FileDialog::new().pick_folder() {
+                            *value = dir.display().to_string();
+                        }
+                    }
+                    ui.add(egui::TextEdit::singleline(value).desired_width(ui.available_width()));
+                },
+            );
+        };
+        folder_row(ui, "Game Missions folder", &mut self.harvest_missions_dir);
+        folder_row(ui, "Database folder", &mut self.harvest_db_dir);
+        ui.horizontal(|ui| {
+            ui.label("Radius");
+            ui.add(
+                egui::DragValue::new(&mut self.harvest_cfg.radius_m)
+                    .range(1000.0..=10000.0)
+                    .speed(50.0)
+                    .suffix(" m"),
+            )
+            .on_hover_text("Objects this close to the field are cut out with it; logic further out is kept through links.");
+            ui.checkbox(&mut self.harvest_cfg.keep_ai_planes, "Keep AI planes");
+        });
+    }
+
+    /// Airfield tab, center: what the last harvests did (newest first).
+    fn harvest_log_panel(&mut self, ui: &mut egui::Ui) {
+        if self.harvest_log.is_empty() {
+            return;
         }
-        for line in self.harvest_log.iter().take(12) {
-            ui.label(RichText::new(line).monospace());
-        }
+        ui.add_space(12.0);
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            shell::section_title(ui, "Database harvest", Some("newest first"));
+            for line in self.harvest_log.iter().take(12) {
+                ui.add(egui::Label::new(RichText::new(line).monospace()).wrap());
+            }
+        });
     }
 
     fn harvest_dir(&self) -> PathBuf {
@@ -9321,9 +11039,23 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             *w = GenWatcher::new(dir);
         }
         if let Some(path) = w.poll(std::time::Instant::now()) {
-            self.run_harvest(&path);
+            // The watcher runs on every tab; it reports on the Airfield tab's status.
+            self.with_tab_status(AppMode::Airfield, |s| s.run_harvest(&path));
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+
+    /// Runs `f` with `mode`'s status as `self.status`, so what it reports
+    /// lands on that tab even when another tab is shown.
+    fn with_tab_status(&mut self, mode: AppMode, f: impl FnOnce(&mut Self)) {
+        if mode == self.mode {
+            f(self);
+            return;
+        }
+        let slot = mode_slot(mode);
+        let shown = std::mem::replace(&mut self.status, std::mem::take(&mut self.tab_status[slot]));
+        f(self);
+        self.tab_status[slot] = std::mem::replace(&mut self.status, shown);
     }
 
     fn run_harvest(&mut self, source: &Path) {
@@ -9389,7 +11121,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
             .and_then(|s| s.to_str())
             .map(|stem| format!("{stem}_mp.Group"))
             .unwrap_or_else(|| "Airfield_mp.Group".into());
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -9474,7 +11206,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
         };
         let text = serialize_group(&pack.root);
         let suggested = format!("Korea_BaseMap_{}.Group", self.current_mark().date_label());
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -9559,7 +11291,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn load_base_map(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_file()
         else {
@@ -9594,6 +11326,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
         self.current_salient.clear();
         self.attack_arrows = imported.attack_arrows;
         self.attack_drag = None;
+        self.front_stroke = None;
         self.drawn_marks.clear();
         self.clear_redo_stack();
         for _ in &self.salients {
@@ -9718,7 +11451,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
     }
 
     fn add_map_refs(&mut self) {
-        let Some(paths) = rfd::FileDialog::new()
+        let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
             .pick_files()
         else {
@@ -9779,7 +11512,7 @@ Winners run ENABLE / PULSE IN → Zone IN; losers are not spawned (or activated)
         let text = serialize_group(&generated);
 
         let suggested = fighter_pack_filename(self.country, self.linked_groups as usize);
-        let Some(save_path) = rfd::FileDialog::new()
+        let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
             .save_file()
@@ -9832,9 +11565,9 @@ fn preview_dot_style(kind: PreviewKind, in_box: bool) -> (Color32, f32) {
         }
         PreviewKind::Block => {
             let color = if in_box {
-                Color32::from_rgb(255, 210, 70) // Remains Yellow/Gold
+                BLOCK_DOT
             } else {
-                Color32::from_rgba_unmultiplied(255, 210, 70, 90)
+                BLOCK_DOT.gamma_multiply(0.35)
             };
             (color, if in_box { 2.4 } else { 1.7 })
         }
@@ -9842,8 +11575,9 @@ fn preview_dot_style(kind: PreviewKind, in_box: bool) -> (Color32, f32) {
 }
 
 fn move_row_button(ui: &mut egui::Ui, up: bool) -> egui::Response {
-    let size = Vec2::splat(18.0);
+    let size = Vec2::splat(28.0); // minimum target (README §6.6)
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), if up { "Move up" } else { "Move down" }));
     let visuals = ui.style().interact(&response);
     ui.painter().rect(
         rect.shrink(0.5),
@@ -9874,8 +11608,9 @@ fn move_row_button(ui: &mut egui::Ui, up: bool) -> egui::Response {
 }
 
 fn move_col_button(ui: &mut egui::Ui, left: bool) -> egui::Response {
-    let size = Vec2::splat(18.0);
+    let size = Vec2::splat(28.0); // minimum target (README §6.6)
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), if left { "Move left" } else { "Move right" }));
     let visuals = ui.style().interact(&response);
     ui.painter().rect(
         rect.shrink(0.5),
@@ -9913,11 +11648,43 @@ fn skip_only_warnings(warnings: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// "1 salient" / "3 salients".
+fn count_noun(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// Legend entry for a dot layer: a small filled square.
 fn legend_swatch(ui: &mut egui::Ui, color: Color32, label: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());
-    ui.painter().rect_filled(rect, 1.0, color);
-	ui.label(RichText::new(label));
-    ui.add_space(8.0);
+    legend_entry(ui, label, |p, r| {
+        p.rect_filled(r.shrink(2.0), 1.0, color);
+    });
+}
+
+/// Legend entry for a line layer: a 14 px line, solid or dashed.
+fn legend_line(ui: &mut egui::Ui, color: Color32, dashed: bool, label: &str) {
+    legend_entry(ui, label, |p, r| {
+        let (a, b) = (r.left_center(), r.right_center());
+        let stroke = Stroke::new(2.0_f32, color);
+        if dashed {
+            p.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.5_f32, color), 4.0, 3.0));
+        } else {
+            p.line_segment([a, b], stroke);
+        }
+    });
+}
+
+/// Legend entry for a side: its marker, turned the side's way.
+fn legend_side(ui: &mut egui::Ui, side: shell::Side, label: &str) {
+    legend_entry(ui, label, |p, r| shell::paint_side_marker(p, r.center(), 12.0, side));
+}
+
+fn legend_entry(ui: &mut egui::Ui, label: &str, paint: impl FnOnce(&egui::Painter, Rect)) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 5.0;
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 14.0), Sense::hover());
+        paint(ui.painter(), rect);
+        ui.label(RichText::new(label).small().color(c::TEXT));
+    });
 }
 
 fn fighter_icon_button(ui: &mut egui::Ui, tex: Option<&TextureHandle>, fallback: &str) -> bool {
@@ -9931,23 +11698,38 @@ fn fighter_icon_button(ui: &mut egui::Ui, tex: Option<&TextureHandle>, fallback:
     }
 }
 
+/// Army Generator type button (README §5.2): 36 × 28, the type texture in
+/// the middle, the type name on hover and in the accessibility label.
 fn unit_kind_icon_button(
     ui: &mut egui::Ui,
     tex: Option<&TextureHandle>,
     fallback: &str,
     hover: &str,
     selected: bool,
-    size: f32,
 ) -> bool {
-    if let Some(tex) = tex {
-        ui.add(egui::ImageButton::new((tex.id(), Vec2::splat(size))).selected(selected))
+    const SIZE: Vec2 = Vec2::new(36.0, 28.0);
+    let Some(tex) = tex else {
+        return ui
+            .add(egui::Button::selectable(selected, fallback).min_size(SIZE))
             .on_hover_text(hover)
-            .clicked()
-    } else {
-        ui.selectable_label(selected, fallback)
-            .on_hover_text(hover)
-            .clicked()
+            .clicked();
+    };
+    let (rect, resp) = ui.allocate_exact_size(SIZE, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, fallback));
+    if ui.is_rect_visible(rect) {
+        let (fill, border) = if selected {
+            (c::ACCENT_200, c::ACCENT)
+        } else if resp.hovered() {
+            (c::ACCENT_100, c::ACCENT)
+        } else {
+            (Color32::TRANSPARENT, c::DIVIDER)
+        };
+        let p = ui.painter();
+        p.rect_filled(rect, 2.0, fill);
+        p.rect_stroke(rect, 2.0, Stroke::new(1.0_f32, border), egui::StrokeKind::Inside);
+        egui::Image::new((tex.id(), Vec2::splat(20.0))).paint_at(ui, Rect::from_center_size(rect.center(), Vec2::splat(20.0)));
     }
+    resp.on_hover_text(hover).clicked()
 }
 
 fn map_icon_button(
@@ -9997,10 +11779,111 @@ fn paint_rotated_image(
 }
 
 fn load_fighter_svg(bytes: &[u8]) -> ColorImage {
+    rasterize_svg(bytes, 128)
+}
+
+/// A one-colour side icon (`assets/Eastern*.svg` / `Nato*.svg`) recoloured
+/// on screen to its side token (README §8). The SVG colours themselves, and
+/// every colour written into generated files, stay as they are.
+fn load_side_svg(bytes: &[u8], eastern: bool) -> ColorImage {
+    recolor_to_side(rasterize_svg(bytes, 128), eastern)
+}
+
+fn recolor_to_side(mut img: ColorImage, eastern: bool) -> ColorImage {
+    let color = shell::Side::from_eastern(eastern).color();
+    for p in &mut img.pixels {
+        let a = p.a() as f32 / 255.0;
+        let ch = |v: u8| (v as f32 * a).round() as u8;
+        *p = Color32::from_rgba_premultiplied(ch(color.r()), ch(color.g()), ch(color.b()), p.a());
+    }
+    img
+}
+
+/// The fighter SVGs are drawn diagonally: `EasternFighter.svg` points
+/// north-west and `NatoFighter.svg` north-east. Turning them by these angles
+/// (degrees, clockwise) when rasterizing makes both textures point north, the
+/// orientation `shell::Side::facing_rad` assumes.
+const FIGHTER_SVG_TO_NORTH_DEG: [f32; 2] = [45.0, -45.0];
+
+/// A fighter icon rasterized pointing north, in its authored colour.
+fn fighter_svg_north(eastern: bool, target: u32) -> ColorImage {
+    if eastern {
+        rasterize_svg_turned(include_bytes!("../assets/EasternFighter.svg"), target, FIGHTER_SVG_TO_NORTH_DEG[0])
+    } else {
+        rasterize_svg_turned(include_bytes!("../assets/NatoFighter.svg"), target, FIGHTER_SVG_TO_NORTH_DEG[1])
+    }
+}
+
+/// Registers the side-marker silhouettes once (`shell::paint_side_marker`).
+/// 64 px with mipmaps stays crisp from 10 to 18 px, also on HiDPI screens.
+fn ensure_side_textures(ctx: &egui::Context) {
+    if shell::side_textures(ctx).is_none() {
+        shell::register_side_textures(ctx, side_marker_image(true), side_marker_image(false));
+    }
+}
+
+/// The list-size side marker: the fighter without its ring, cropped to the
+/// plane, so the silhouette and its facing still read at 12–18 px.
+fn side_marker_image(eastern: bool) -> ColorImage {
+    let svg: &[u8] = if eastern {
+        include_bytes!("../assets/EasternFighter.svg")
+    } else {
+        include_bytes!("../assets/NatoFighter.svg")
+    };
+    let text = String::from_utf8_lossy(svg);
+    let no_ring = match text.find("<circle") {
+        Some(start) => match text[start..].find("/>") {
+            Some(end) => format!("{}{}", &text[..start], &text[start + end + 2..]),
+            None => text.into_owned(),
+        },
+        None => text.into_owned(),
+    };
+    let deg = FIGHTER_SVG_TO_NORTH_DEG[if eastern { 0 } else { 1 }];
+    crop_to_content(rasterize_svg_turned(no_ring.as_bytes(), 96, deg))
+}
+
+/// Crops an image to its opaque pixels, centred in a square with a 1 px margin.
+fn crop_to_content(img: ColorImage) -> ColorImage {
+    let [w, h] = img.size;
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if img.pixels[y * w + x].a() > 8 {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    if x1 < x0 || y1 < y0 {
+        return img;
+    }
+    let side = (x1 - x0).max(y1 - y0) + 3;
+    let (ox, oy) = ((x0 + x1) / 2, (y0 + y1) / 2);
+    let mut out = ColorImage::new([side, side], vec![Color32::TRANSPARENT; side * side]);
+    for y in 0..side {
+        for x in 0..side {
+            let sx = ox as isize + x as isize - side as isize / 2;
+            let sy = oy as isize + y as isize - side as isize / 2;
+            if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h {
+                out.pixels[y * side + x] = img.pixels[sy as usize * w + sx as usize];
+            }
+        }
+    }
+    out
+}
+
+fn rasterize_svg(bytes: &[u8], target: u32) -> ColorImage {
+    rasterize_svg_turned(bytes, target, 0.0)
+}
+
+/// Rasterizes an SVG to `target` px on its longer side, turned `deg`
+/// degrees clockwise about its centre (the icons are round, so nothing clips).
+fn rasterize_svg_turned(bytes: &[u8], target: u32, deg: f32) -> ColorImage {
     let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default())
         .expect("fighter SVG in assets/ is not valid");
     let size = tree.size().to_int_size();
-    let target = 128u32;
     let src_w = size.width().max(1);
     let src_h = size.height().max(1);
     let scale = target as f32 / src_w.max(src_h) as f32;
@@ -10010,7 +11893,8 @@ fn load_fighter_svg(bytes: &[u8]) -> ColorImage {
     let transform = resvg::tiny_skia::Transform::from_scale(
         w as f32 / tree.size().width(),
         h as f32 / tree.size().height(),
-    );
+    )
+    .post_rotate_at(deg, w as f32 / 2.0, h as f32 / 2.0);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     ColorImage::from_rgba_premultiplied([w as usize, h as usize], pixmap.data())
 }
@@ -10041,6 +11925,33 @@ fn decode_png(bytes: &[u8]) -> Option<ColorImage> {
         [w as usize, h as usize],
         img.as_raw(),
     ))
+}
+
+/// Hypsometric ramp for the relief layer (metres → color).
+fn relief_color(y: f32) -> Color32 {
+    const STOPS: [(f32, [f32; 3]); 7] = [
+        (0.5, [120.0, 160.0, 200.0]),
+        (1.0, [92.0, 140.0, 90.0]),
+        (150.0, [140.0, 170.0, 100.0]),
+        (400.0, [205.0, 190.0, 130.0]),
+        (800.0, [170.0, 120.0, 80.0]),
+        (1200.0, [140.0, 110.0, 100.0]),
+        (1800.0, [235.0, 235.0, 235.0]),
+    ];
+    if y < STOPS[0].0 {
+        let [r, g, b] = STOPS[0].1;
+        return Color32::from_rgb(r as u8, g as u8, b as u8);
+    }
+    for w in STOPS.windows(2) {
+        let ((y0, a), (y1, b)) = (w[0], w[1]);
+        if y <= y1 {
+            let t = ((y - y0) / (y1 - y0)).clamp(0.0, 1.0);
+            let m = |i: usize| (a[i] + (b[i] - a[i]) * t) as u8;
+            return Color32::from_rgb(m(0), m(1), m(2));
+        }
+    }
+    let [r, g, b] = STOPS[STOPS.len() - 1].1;
+    Color32::from_rgb(r as u8, g as u8, b as u8)
 }
 
 fn map_screen_rect(widget: Rect, view: Rect) -> Rect {
@@ -10109,8 +12020,8 @@ fn draw_front_inside_outside(
     pts: &[(f64, f64)],
     aabb: WorldAabb,
 ) {
-    let outside = Stroke::new(1.15_f32, Color32::from_rgb(220, 30, 30));
-    let inside = Stroke::new(2.5_f32, Color32::from_rgb(220, 30, 30));
+    let outside = Stroke::new(1.15_f32, c::FRONT);
+    let inside = Stroke::new(2.5_f32, c::FRONT);
     draw_world_line(painter, rect, pts, outside);
     let clipped = clip_linestring_to_rect(&points_to_linestring(pts), &aabb.as_rect());
     for run in &clipped {
@@ -10211,11 +12122,26 @@ fn draw_reference_overlays(painter: &egui::Painter, rect: Rect) {
 
 const STATUS_WARN: Color32 = Color32::from_rgb(220, 140, 40);
 
+/// Map line colours shared by the map and its legend (on screen only).
+const SALIENT_OUTLINE: Color32 = Color32::from_rgb(180, 180, 80);
+/// 50 % dark red / near-black, premultiplied (roads.svg / railroads.svg overlays).
+const ROAD_LINE: Color32 = Color32::from_rgba_premultiplied(55, 9, 9, 128);
+const RAIL_LINE: Color32 = Color32::from_rgba_premultiplied(8, 8, 9, 128);
+
+/// AO box wash: ACCENT (#5980a6) at ~7 %, premultiplied.
+const AO_FILL: Color32 = Color32::from_rgba_premultiplied(6, 9, 12, 18);
+
+/// Reference-group blocks on the map and in the legend: a neutral token, so
+/// they no longer share the old AO yellow.
+const BLOCK_DOT: Color32 = c::NEUTRAL_800;
+
+/// On-screen side colour (tokens). The colours written into the base map
+/// (`RColor` / `GColor` / `BColor` in frontlines.rs) are separate and unchanged.
 fn faction_map_color(eastern: bool) -> Color32 {
     if eastern {
-        Color32::from_rgb(155, 0, 0)
+        c::DPRK
     } else {
-        Color32::from_rgb(0, 120, 150)
+        c::NATO
     }
 }
 
@@ -10306,7 +12232,7 @@ fn draw_dashed_world_line(painter: &egui::Painter, rect: Rect, pts: &[(f64, f64)
 }
 
 fn draw_map_label(painter: &egui::Painter, pos: Pos2, text: &str, color: Color32, align: Align2) {
-    let font = FontId::new(10.0, FontFamily::Proportional);
+    let font = FontId::new(12.0, FontFamily::Proportional); // 12 px minimum (README §6.6)
     painter.text(
         pos + Vec2::new(0.6, 0.6),
         align,
@@ -10372,7 +12298,17 @@ fn army_mix_label(copies: &[ArmyCopyInfo]) -> String {
 fn load_group(path: &Path) -> Result<crate::ast::Il2Entity, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|err| format!("Could not read file: {err}"))?;
-    parse_group_file(&text).map_err(|err| format!("Parse failed: {err}"))
+    parse_group_file(&text).map_err(|err| {
+        // A flat "Save Selection to File" export has many root blocks and no Group.
+        match parse_il2_document(&text) {
+            Ok(root) if root.children.len() > 1 && root.name() == Some("Airfield") => format!(
+                "{} holds {} separate blocks, not one Group. Group them in the mission editor, then save the group and add that file.",
+                path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+                root.children.len()
+            ),
+            _ => format!("Parse failed: {err}"),
+        }
+    })
 }
 
 fn drop_rework_path(slots: &mut Vec<ReconSlot>, path: &Path) {
@@ -10386,125 +12322,309 @@ fn drop_rework_path(slots: &mut Vec<ReconSlot>, path: &Path) {
     slots.retain(|s| !s.sources.is_empty());
 }
 
+/// A fixed-width side panel whose contents scroll on their own (README §6.1).
+/// Fighter Pack preview: group card and NodeGate link sizes.
+const PACK_CARD_W: f32 = 120.0;
+const PACK_CARD_H: f32 = 52.0;
+const PACK_LINK_W: f32 = 70.0;
+
+/// Whole numbers with a space every three digits: 227880 → "227 880".
+fn group_digits(value: f64) -> String {
+    let n = value.round() as i64;
+    let digits = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(ch);
+    }
+    if n < 0 {
+        out.insert(0, '-');
+    }
+    out
+}
+
+/// Which labels to draw along a strip: taken left to right, a label is
+/// skipped when it would come within `gap` of the last drawn one.
+fn strip_labels_shown(lefts: &[f32], widths: &[f32], gap: f32) -> Vec<bool> {
+    let mut order: Vec<usize> = (0..lefts.len()).collect();
+    order.sort_by(|a, b| lefts[*a].total_cmp(&lefts[*b]));
+    let mut shown = vec![false; lefts.len()];
+    let mut last_right = f32::NEG_INFINITY;
+    for i in order {
+        if lefts[i] >= last_right + gap {
+            shown[i] = true;
+            last_right = lefts[i] + widths[i];
+        }
+    }
+    shown
+}
+
+/// Exclusive Activation card tags: what a plan lacks, else "⚠ Check" when a
+/// selected zone or the end timer has a wiring warning, else "Ready".
+fn plan_tags(slot: &BomberSlot) -> Vec<(&'static str, bool)> {
+    let mut tags = Vec::new();
+    if slot.selected_triggers.is_empty() {
+        tags.push(("⚠ Checkzone", false));
+    }
+    if slot.selected_completion.is_none() {
+        tags.push(("⚠ End timer", false));
+    }
+    if tags.is_empty() {
+        let warned = slot.selected_triggers.iter().any(|id| slot.info.trigger_warnings.contains_key(id))
+            || slot
+                .selected_completion
+                .is_some_and(|id| slot.info.cleanup_warnings.contains_key(&id));
+        tags.push(if warned { ("⚠ Check", false) } else { ("Ready", true) });
+    }
+    tags
+}
+
+/// The first plan that cannot generate, as the idle status names it.
+fn exclusive_first_problem(slots: &[BomberSlot]) -> Option<String> {
+    slots.iter().enumerate().find_map(|(n, slot)| {
+        if slot.selected_triggers.is_empty() {
+            Some(format!("Plan {} has no start checkzone", n + 1))
+        } else if slot.selected_completion.is_none() {
+            Some(format!("Plan {} has no end timer", n + 1))
+        } else {
+            None
+        }
+    })
+}
+
+/// A plan card: `shell::card` plus the hover state (ACCENT_100 fill, ACCENT border).
+fn plan_card<R>(ui: &mut egui::Ui, selected: bool, hovered: bool, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let (stroke, fill) = if selected || hovered {
+        (Stroke::new(1.0_f32, c::ACCENT), c::ACCENT_100)
+    } else {
+        (Stroke::new(1.0_f32, c::DIVIDER), Color32::TRANSPARENT)
+    };
+    let inner = egui::Frame::new()
+        .stroke(stroke)
+        .fill(fill)
+        .inner_margin(egui::Margin::symmetric(11, 9))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        });
+    if selected {
+        shell::corner_marks(ui.painter(), inner.response.rect, c::MARK);
+    }
+    inner.inner
+}
+
+/// Country name without its code: 601 → "USA".
+fn country_name(country: i32) -> String {
+    COUNTRIES
+        .iter()
+        .find(|(id, _)| *id == country)
+        .and_then(|(_, label)| label.split_whitespace().last())
+        .map_or_else(|| format!("country {country}"), str::to_owned)
+}
+
+/// A label on the left, a monospace value on the right, a hairline below.
+fn fact_row(ui: &mut egui::Ui, label: &str, value: &str) {
+    let resp = ui.horizontal(|ui| {
+        ui.set_min_height(26.0);
+        ui.label(label);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(RichText::new(value).monospace().color(c::NEUTRAL_800));
+        });
+    });
+    let r = resp.response.rect;
+    ui.painter().hline(r.x_range(), r.bottom() + 1.0, Stroke::new(1.0_f32, c::DIVIDER));
+}
+
+fn side_panel(ctx: &egui::Context, id: &str, left: bool, width: f32, add: impl FnOnce(&mut egui::Ui)) {
+    let panel = if left {
+        egui::SidePanel::left(id.to_owned())
+    } else {
+        egui::SidePanel::right(id.to_owned())
+    };
+    panel.exact_width(width).resizable(false).show(ctx, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt(id)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add_space(6.0);
+                add(ui);
+            });
+    });
+}
+
+/// The center panel of a tab, scrolling on its own.
+fn center_panel(ctx: &egui::Context, id: &str, add: impl FnOnce(&mut egui::Ui)) {
+    egui::CentralPanel::default().show(ctx, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt(id)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add_space(6.0);
+                add(ui);
+            });
+    });
+}
+
+/// Empty center: names the first step and offers its button (README §4).
+/// Returns true when the button is clicked.
+fn empty_state(ui: &mut egui::Ui, text: &str, button: &str) -> bool {
+    let mut clicked = false;
+    ui.add_space(40.0);
+    ui.vertical_centered(|ui| {
+        ui.label(RichText::new(text).color(c::NEUTRAL_800));
+        ui.add_space(8.0);
+        clicked = ui.button(button).on_hover_text("Ctrl O").clicked();
+    });
+    clicked
+}
+
+/// "1  In game, …" with a 22 px boxed number.
+fn numbered_step(ui: &mut egui::Ui, n: u32, text: &str) {
+    ui.horizontal_top(|ui| {
+        let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+        ui.painter().rect_stroke(r, 0.0, Stroke::new(1.0_f32, c::NEUTRAL_500), egui::StrokeKind::Inside);
+        ui.painter().text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            n.to_string(),
+            FontId::monospace(12.0),
+            c::TEXT,
+        );
+        ui.add(egui::Label::new(text).wrap());
+    });
+    ui.add_space(4.0);
+}
+
+/// 32 px blueprint grid behind a canvas-like center.
+fn paint_blueprint_grid(painter: &egui::Painter, rect: Rect) {
+    let grid = Stroke::new(1.0_f32, c::NEUTRAL_200);
+    let mut x = rect.left() + 32.0;
+    while x < rect.right() {
+        painter.line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], grid);
+        x += 32.0;
+    }
+    let mut y = rect.top() + 32.0;
+    while y < rect.bottom() {
+        painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], grid);
+        y += 32.0;
+    }
+}
+
+/// One card per Army Generator template (README §5.2). Returns the index
+/// whose Remove was clicked; the caller records undo and removes it.
 fn recon_slot_list(
     ui: &mut egui::Ui,
-    slots: &mut Vec<ReconSlot>,
+    slots: &mut [ReconSlot],
     influence_label: Option<&str>,
     kind_icons: Option<[Option<TextureHandle>; 6]>,
-) {
+    side: shell::Side,
+) -> Option<usize> {
     let mut remove = None;
     for i in 0..slots.len() {
-        ui.group(|ui| {
+        shell::card(ui, false, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{}.", i + 1)).strong());
-                ui.vertical(|ui| {
-                    ui.label(RichText::new(&slots[i].info.name).strong());
-                    if let Some(icons) = &kind_icons {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            for k in UnitKind::ALL {
-                                if unit_kind_icon_button(
-                                    ui,
-                                    icons[k.index()].as_ref(),
-                                    k.label(),
-                                    &k.hover(),
-                                    slots[i].kind == k,
-                                    22.0,
-                                ) {
-                                    slots[i].kind = k;
-                                }
-                            }
-                        });
-                    }
-                    let file = slots[i]
-                        .path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("file")
-                        .to_string();
-                    let file = if slots[i].sources.len() > 1 {
-                        format!("{} + {} more", file, slots[i].sources.len() - 1)
-                    } else {
-                        file
-                    };
-					ui.label(RichText::new(file));
-                    ui.label(
-                        RichText::new(format!(
-                            "{} vehicles/ships/trains, {} blocks",
-                            slots[i].info.vehicle_count, slots[i].info.block_count
-                        ))
-                    );
-                    if let Some(n) = slots[i].detected {
-                        ui.label(
-                            RichText::new(format!("{n} detected on the map"))
-                                .color(Color32::from_rgb(70, 140, 200)),
-                        );
-                    }
-                });
+                shell::side_marker(ui, side, 12.0);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("{} · {}", i + 1, slots[i].info.name))
+                            .font(FontId::new(13.0, theme::bold_family())),
+                    )
+                    .truncate(),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button("Remove").clicked() {
+                    if shell::link(ui, "Remove").clicked() {
                         remove = Some(i);
                     }
                 });
             });
-
-            show_missing_locale_hint(ui, &slots[i].path);
-
-            if let Some(label) = influence_label {
-                ui.add_space(4.0);
-                ui.label(label);
-                ui.add(egui::Slider::new(&mut slots[i].influence, 0..=100).trailing_fill(true));
+            let file = slots[i].path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+            let file = if slots[i].sources.len() > 1 {
+                format!("{} + {} more", file, slots[i].sources.len() - 1)
+            } else {
+                file
+            };
+            let mut meta = format!("{file} · {}", recon_counts_line(&slots[i].info));
+            if let Some(n) = slots[i].detected {
+                meta.push_str(&format!(" · {n} on the map"));
             }
-
+            ui.label(RichText::new(meta).small().color(c::NEUTRAL_700));
+            if let Some(icons) = &kind_icons {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for k in UnitKind::ALL {
+                        if unit_kind_icon_button(
+                            ui,
+                            icons[k.index()].as_ref(),
+                            k.label(),
+                            &k.hover(),
+                            slots[i].kind == k,
+                        ) {
+                            slots[i].kind = k;
+                        }
+                    }
+                });
+            }
+            show_missing_locale_hint(ui, &slots[i].path);
+            if let Some(label) = influence_label {
+                ui.horizontal(|ui| {
+                    ui.label(label);
+                    ui.add(egui::Slider::new(&mut slots[i].influence, 0..=100).trailing_fill(true));
+                });
+            }
             let zones = slots[i].info.checkzones.clone();
             let suggested = slots[i].info.suggested_triggers.clone();
             if !zones.is_empty() {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(
-                        "Zone IN checkzones on this group (used to confirm the group is valid).",
-                    )
-                    .color(Color32::from_rgb(180, 150, 70)),
-                );
+                // The checkzone *name* the scan matches is literal; Help lists it.
+                ui.label(RichText::new("Zone In checkzones").small().color(c::NEUTRAL_700)).on_hover_text(format!(
+                    "Checkzones named {SUGGESTED_ZONE_NAMES} are marked (suggested). Help › Army Generator lists the MCUs a template needs."
+                ));
             }
             for zone in &zones {
                 let mut on = slots[i].selected_triggers.contains(&zone.index);
-                let label = if suggested.contains(&zone.index) {
-                    format!("{}  (suggested)", zone.name)
-                } else {
-                    zone.name.clone()
-                };
-                if ui.checkbox(&mut on, label).changed() {
-                    if on {
-                        if !slots[i].selected_triggers.contains(&zone.index) {
-                            slots[i].selected_triggers.push(zone.index);
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut on, &zone.name).changed() {
+                        if on {
+                            if !slots[i].selected_triggers.contains(&zone.index) {
+                                slots[i].selected_triggers.push(zone.index);
+                            }
+                        } else {
+                            slots[i].selected_triggers.retain(|id| *id != zone.index);
                         }
-                    } else {
-                        slots[i].selected_triggers.retain(|id| *id != zone.index);
                     }
-                }
+                    if suggested.contains(&zone.index) {
+                        ui.label(RichText::new("(suggested)").small().color(c::NEUTRAL_700));
+                    }
+                });
             }
             if slots[i].selected_triggers.is_empty() {
-                ui.label(
-                    RichText::new("Select at least one Zone IN.")
-                        .color(Color32::from_rgb(200, 90, 90)),
-                );
+                shell::warning(ui, "Select at least one Zone In.");
             }
         });
         ui.add_space(4.0);
     }
-    if let Some(i) = remove {
-        slots.remove(i);
-    }
+    remove
+}
+
+/// "6 vehicles", "1 train, 2 blocks": what a template holds, zero counts left out.
+fn recon_counts_line(info: &UnitPlanInfo) -> String {
+    let vehicles = info.vehicle_count.saturating_sub(info.ship_count + info.train_count);
+    let parts: Vec<String> = [
+        (vehicles, "vehicle", "vehicles"),
+        (info.ship_count, "ship", "ships"),
+        (info.train_count, "train", "trains"),
+        (info.block_count, "block", "blocks"),
+    ]
+    .into_iter()
+    .filter(|(n, _, _)| *n > 0)
+    .map(|(n, one, many)| format!("{n} {}", if n == 1 { one } else { many }))
+    .collect();
+    if parts.is_empty() { "no units".to_string() } else { parts.join(", ") }
 }
 
 fn recon_dserver_note(ui: &mut egui::Ui) {
-    ui.label(
-        RichText::new(
-            "DServer struggles when too many random units fire at once. This pack is capped at 64 copies. Stay under 30 random units in the whole mission (this pack plus any others) unless you use Spawn all / omit randomizer.",
-        )
-        .color(Color32::from_rgb(180, 150, 70)),
-    );
+    shell::warning(ui, "DServer: keep under 30 random units per mission. Packs cap at 64 copies.");
 }
 
 fn recon_delay_note(start_s: u32, group_ms: u32) -> String {
@@ -10523,6 +12643,17 @@ fn recon_delay_note(start_s: u32, group_ms: u32) -> String {
 }
 
 fn labeled_slider(ui: &mut egui::Ui, label: &str, value: &mut u32, range: std::ops::RangeInclusive<u32>) {
+    labeled_slider_suffix(ui, label, value, range, "");
+}
+
+/// `labeled_slider` whose value box carries a unit, e.g. "60%".
+fn labeled_slider_suffix(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut u32,
+    range: std::ops::RangeInclusive<u32>,
+    suffix: &str,
+) {
     ui.label(label);
     ui.horizontal(|ui| {
         ui.add(
@@ -10530,7 +12661,7 @@ fn labeled_slider(ui: &mut egui::Ui, label: &str, value: &mut u32, range: std::o
                 .show_value(false)
                 .trailing_fill(true),
         );
-        ui.add(egui::DragValue::new(value).range(range).speed(0.2));
+        ui.add(egui::DragValue::new(value).range(range).speed(0.2).suffix(suffix));
     });
 }
 
@@ -10543,7 +12674,7 @@ fn show_missing_locale_hint(ui: &mut egui::Ui, group_path: &Path) {
         RichText::new(
             "No translation files (.eng, …) next to this group. Re-export from the editor to create them.",
         )
-        .color(Color32::from_rgb(180, 150, 70)),
+        .color(c::WARN_TEXT),
     );
 }
 

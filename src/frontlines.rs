@@ -1583,7 +1583,7 @@ pub fn inspect_base_map(root: &Il2Entity) -> Result<ImportedBaseMap, String> {
         if looks_like_fighter_pack(child) {
             let spots = fighter_group_spots(child);
             if spots.is_empty() {
-                notes.push(format!("Fighter pack \"{name}\" has no Group N Zone IN."));
+                notes.push(format!("Fighter pack \"{name}\" has no \"Group N\" group with a checkzone named \"Zone IN\"."));
                 continue;
             }
             let (eastern, wave) = parse_fighter_label(name, child);

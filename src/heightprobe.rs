@@ -21,7 +21,7 @@
 //! * `run_cli` — `--probe-*` command-line mode (see `CLI_HELP`)
 //!
 //! ## Used by
-//! * tests only for now (the Map-tab Terrain panel wires it in later)
+//! * ui.rs — Map › Terrain: export survey / AO tiles, import snapped files
 
 #![allow(dead_code)]
 

@@ -119,7 +119,11 @@ pub struct McuChoice {
 #[derive(Debug, Clone)]
 pub struct UnitPlanInfo {
     pub name: String,
+    /// Vehicles, ships and trains together.
     pub vehicle_count: usize,
+    /// The ships and trains in `vehicle_count` (for the UI's card line).
+    pub ship_count: usize,
+    pub train_count: usize,
     pub block_count: usize,
     pub checkzones: Vec<McuChoice>,
     pub suggested_triggers: Vec<i32>,
@@ -476,7 +480,7 @@ fn partition_sizes(n: usize, k: usize) -> Vec<usize> {
 pub fn inspect_unit(root: &Il2Entity) -> Result<UnitPlanInfo, String> {
     let checkzones = collect_checkzones(root);
     if checkzones.is_empty() {
-        return Err("template has no MCU_CheckZone (need Zone IN)".into());
+        return Err("template has no MCU_CheckZone (needs a Zone In)".into());
     }
     let route = mapnet::inspect_route(root);
     let wp_ahead = if route.is_some() {
@@ -489,6 +493,8 @@ pub fn inspect_unit(root: &Il2Entity) -> Result<UnitPlanInfo, String> {
         vehicle_count: root.count_block_type("Vehicle")
             + root.count_block_type("Ship")
             + root.count_block_type("Train"),
+        ship_count: root.count_block_type("Ship"),
+        train_count: root.count_block_type("Train"),
         block_count: root.count_block_type("Block") + root.count_block_type("Ground"),
         suggested_triggers: checkzones
             .iter()
@@ -516,6 +522,8 @@ fn fallback_unit_info(root: &Il2Entity, name: &str) -> UnitPlanInfo {
         vehicle_count: root.count_block_type("Vehicle")
             + root.count_block_type("Ship")
             + root.count_block_type("Train"),
+        ship_count: root.count_block_type("Ship"),
+        train_count: root.count_block_type("Train"),
         block_count: root.count_block_type("Block") + root.count_block_type("Ground"),
         suggested_triggers: checkzones
             .iter()
@@ -556,7 +564,7 @@ pub fn generate_recon_ex(plans: &[ReconInput], build: ReconBuild) -> Result<Il2E
             continue;
         }
         if plan.trigger_zone_ids.is_empty() {
-            return Err(format!("plan {} needs a Zone IN selected", i + 1));
+            return Err(format!("plan {} needs a Zone In selected", i + 1));
         }
         for id in &plan.trigger_zone_ids {
             if find_index(&plan.root, *id).is_none() {
@@ -605,7 +613,7 @@ pub fn generate_recon_ex(plans: &[ReconInput], build: ReconBuild) -> Result<Il2E
             }
             if start.is_empty() {
                 return Err(format!(
-                    "{} has no Mission Begin targets or ENABLE / PULSE IN to fire on a win",
+                    "{} has no Mission Begin targets or MCU named \"ENABLE / PULSE IN\" to fire on a win",
                     plan.label
                 ));
             }
@@ -1593,7 +1601,7 @@ fn apply_randomizer_inner(
     let win_targets: Vec<Vec<i32>> = owned.iter().map(win_targets_for_copy).collect();
     if let Some(i) = win_targets.iter().position(|t| t.is_empty()) {
         return Err(format!(
-            "{} has no ENABLE / PULSE IN or Zone IN to fire on a win",
+            "{} has no MCU named \"ENABLE / PULSE IN\" or checkzone named \"Zone IN\" to fire on a win",
             owned[i].name().unwrap_or("copy")
         ));
     }
