@@ -14,9 +14,12 @@
 //! * `struct AirfieldInfo` / `fn inspect_airfield` — preview before export
 //! * `struct PlayerPlaneInfo` — name + country of each player plane
 //! * `struct CleanReport` / `fn clean_airfield` — mutate in place
+//! * `fn strip_ai_planes` — drop remaining AI `Plane`s and their private logic
+//! * `pub(crate) node_link_ids` / `scrub_deleted` — link helpers shared with harvest.rs
 //!
 //! ## Used by
 //! * ui.rs (Airfield) — inspect on load, clean + serialize on Export File
+//! * harvest.rs — cleans each airfield cut out of `_gen.mission`
 
 use std::collections::{HashMap, HashSet};
 
@@ -104,13 +107,27 @@ pub fn clean_airfield(
     plane_coalitions: &str,
 ) -> Result<CleanReport, String> {
     let plan = plan_clean(root);
-    if plan.strip.is_empty() && plan.unlink.is_empty() {
-        return Ok(CleanReport {
-            stripped: 0,
-            unlinked_checkzones: 0,
-            plane_coalitions: plane_coalitions.to_string(),
-        });
-    }
+    apply_plan(root, plan, plane_coalitions)
+}
+
+/// Remove every remaining `Plane` (AI flights) and the logic that only
+/// served them. Checkzones object-linked to them switch to
+/// `plane_coalitions`, as in [`clean_airfield`]. Icons and subtitles near
+/// the planes are kept: AI parks on the field, so proximity means nothing.
+pub fn strip_ai_planes(
+    root: &mut Il2Entity,
+    plane_coalitions: &str,
+) -> Result<CleanReport, String> {
+    let seeds = plane_object_ids(root, &|e| e.block_type == "Plane");
+    let plan = plan_strip(root, seeds, false);
+    apply_plan(root, plan, plane_coalitions)
+}
+
+fn apply_plan(
+    root: &mut Il2Entity,
+    plan: Plan,
+    plane_coalitions: &str,
+) -> Result<CleanReport, String> {
     let unlink_n = plan.unlink.len();
     for id in &plan.unlink {
         if let Some(zone) = find_index_mut(root, *id) {
@@ -135,16 +152,24 @@ pub fn clean_airfield(
 }
 
 fn plan_clean(root: &Il2Entity) -> Plan {
+    plan_strip(root, player_object_ids(root), true)
+}
+
+/// Strip plan seeded by `player_ids` (plane indexes plus their entities).
+/// `player_extras` also drops the AutoRemove helper and objectives, icons
+/// and subtitles near a player plane — Freeflight SP clutter.
+fn plan_strip(root: &Il2Entity, player_ids: HashSet<i32>, player_extras: bool) -> Plan {
     let by_index = index_map(root);
-    let player_ids = player_object_ids(root);
     let mut strip = player_ids.clone();
 
-    if let Some(auto) = root.find_by_name(AUTO_REMOVE) {
-        auto.for_each(&mut |e| {
-            if let Some(id) = e.index {
-                strip.insert(id);
-            }
-        });
+    if player_extras {
+        if let Some(auto) = root.find_by_name(AUTO_REMOVE) {
+            auto.for_each(&mut |e| {
+                if let Some(id) = e.index {
+                    strip.insert(id);
+                }
+            });
+        }
     }
 
     for e in by_index.values() {
@@ -158,6 +183,9 @@ fn plan_clean(root: &Il2Entity) -> Plan {
             } else if let Some(id) = e.index {
                 strip.insert(id);
             }
+        }
+        if !player_extras {
+            continue;
         }
         if e.block_type == "MCU_TR_MissionObjective" {
             if let Some(id) = e.index {
@@ -249,9 +277,14 @@ fn plan_clean(root: &Il2Entity) -> Plan {
 }
 
 fn player_object_ids(root: &Il2Entity) -> HashSet<i32> {
+    plane_object_ids(root, &is_player_plane)
+}
+
+/// Indexes of planes matching `pick`, plus their linked entities.
+fn plane_object_ids(root: &Il2Entity, pick: &dyn Fn(&Il2Entity) -> bool) -> HashSet<i32> {
     let mut ids = HashSet::new();
     root.for_each(&mut |e| {
-        if !is_player_plane(e) {
+        if !pick(e) {
             return;
         }
         if let Some(id) = e.index {
@@ -349,7 +382,9 @@ fn near_any_player(root: &Il2Entity, e: &Il2Entity) -> bool {
     near
 }
 
-fn node_link_ids(e: &Il2Entity) -> Vec<i32> {
+/// Every index `e` points at: `Targets`, `Objects`, entity/objective links
+/// and `OnEvents`/`OnReports` rows.
+pub(crate) fn node_link_ids(e: &Il2Entity) -> Vec<i32> {
     let mut ids = Vec::new();
     ids.extend_from_slice(&e.targets);
     ids.extend_from_slice(&e.objects);
@@ -416,7 +451,7 @@ fn remove_stripped(root: &mut Il2Entity, strip: &HashSet<i32>) {
     }
 }
 
-fn scrub_deleted(root: &mut Il2Entity, deleted: &HashSet<i32>) {
+pub(crate) fn scrub_deleted(root: &mut Il2Entity, deleted: &HashSet<i32>) {
     root.for_each_mut(&mut |e| {
         let targets: Vec<i32> = e
             .targets

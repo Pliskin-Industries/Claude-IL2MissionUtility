@@ -69,6 +69,10 @@ use crate::frontlines::{
     PLACE_MARGIN, TIMELINE, YEARS,
 };
 use crate::geo::{self, MAP_MAX, MAP_MIN};
+use crate::harvest::{
+    default_missions_dir, find_gen_file, harvest_file, GenWatcher, HarvestConfig,
+    HarvestOutcome, DEFAULT_DB_DIR,
+};
 use crate::help::{self, HelpTopic};
 use crate::shell::{self, Severity};
 use crate::theme::{self, c};
@@ -424,6 +428,13 @@ struct GroupGeneratorApp {
     airfield_root: Option<crate::ast::Il2Entity>,
     airfield_info: Option<AirfieldInfo>,
     airfield_western: bool,
+    harvest_missions_dir: String,
+    harvest_db_dir: String,
+    harvest_cfg: HarvestConfig,
+    /// `Some` while "Watch for new airfields" is on.
+    harvest_watcher: Option<GenWatcher>,
+    /// Newest first.
+    harvest_log: Vec<String>,
     front_year: u16,
     front_season: Season,
     front_t: f32,
@@ -1531,6 +1542,13 @@ impl Default for GroupGeneratorApp {
             airfield_root: None,
             airfield_info: None,
             airfield_western: true,
+            harvest_missions_dir: default_missions_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            harvest_db_dir: DEFAULT_DB_DIR.to_string(),
+            harvest_cfg: HarvestConfig::default(),
+            harvest_watcher: None,
+            harvest_log: Vec::new(),
             front_year: 1951,
             front_season: Season::LateSpring,
             front_t: timeline_index(1951, Season::LateSpring) as f32,
@@ -1635,6 +1653,7 @@ impl Default for GroupGeneratorApp {
 
 impl eframe::App for GroupGeneratorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_harvest(ctx);
         let keys = shell::read_shortcuts(ctx, self.mode == AppMode::Map);
         self.handle_shortcuts(&keys);
 
@@ -6125,7 +6144,10 @@ impl GroupGeneratorApp {
     }
 
     fn airfield_left_panel(&mut self, ui: &mut egui::Ui) {
-        shell::section_title(ui, "Get the file", None);
+        self.harvest_section(ui);
+        ui.add_space(6.0);
+        ui.separator();
+        shell::section_title(ui, "Get the file", Some("one airfield"));
         numbered_step(ui, 1, "In game, open a Freeflight mission and take off from the airfield.");
         numbered_step(
             ui,
@@ -6151,6 +6173,7 @@ impl GroupGeneratorApp {
             if empty_state(ui, "Load an airfield group exported from _gen.mission.", "Load airfield…") {
                 self.load_airfield();
             }
+            self.harvest_log_panel(ui);
             return;
         };
         let side = if self.airfield_western { "NATO [2]" } else { "DPRK [1]" };
@@ -6205,6 +6228,7 @@ impl GroupGeneratorApp {
         });
         ui.add_space(10.0);
         shell::warning(ui, "Still required after export: add planes to fly and set the starting location.");
+        self.harvest_log_panel(ui);
     }
 
     fn airfield_right_panel(&mut self, ui: &mut egui::Ui) {
@@ -9997,6 +10021,154 @@ impl GroupGeneratorApp {
         }
     }
 
+    /// Airfield tab, left panel: the automatic database harvest (watch the
+    /// game's _gen.mission and file every start airfield).
+    fn harvest_section(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Airfield database", Some("automatic"));
+        shell::hint(
+            ui,
+            "Watch, then start a Freeflight from each airfield in turn. Each new _gen.mission is cut, cleaned for multiplayer and filed.",
+            false,
+        );
+        ui.add_space(4.0);
+        let mut watching = self.harvest_watcher.is_some();
+        if ui
+            .checkbox(&mut watching, "Watch for new airfields")
+            .on_hover_text("Polls the Missions folder for a rewritten _gen.mission, on any tab.")
+            .changed()
+        {
+            if watching {
+                self.start_harvest_watch();
+            } else {
+                self.harvest_watcher = None;
+            }
+        }
+        if let Some(w) = &self.harvest_watcher {
+            ui.label(RichText::new(format!("Watching {}", w.dir().display())).small().color(c::ACCENT_700));
+        }
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Harvest current").on_hover_text("Harvest the _gen.mission in the Missions folder now").clicked() {
+                self.harvest_current_gen();
+            }
+            if ui.button("Harvest a file…").on_hover_text("Harvest any .Mission file").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("IL-2 mission", &["Mission", "mission"])
+                    .pick_file()
+                {
+                    self.run_harvest(&path);
+                }
+            }
+        });
+        ui.add_space(4.0);
+        let folder_row = |ui: &mut egui::Ui, label: &str, value: &mut String| {
+            ui.label(RichText::new(label).small().color(c::NEUTRAL_700));
+            ui.horizontal(|ui| {
+                let browse_w = 72.0;
+                ui.add(egui::TextEdit::singleline(value).desired_width(ui.available_width() - browse_w));
+                if ui.button("Browse…").clicked() {
+                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                        *value = dir.display().to_string();
+                    }
+                }
+            });
+        };
+        folder_row(ui, "Game Missions folder", &mut self.harvest_missions_dir);
+        folder_row(ui, "Database folder", &mut self.harvest_db_dir);
+        ui.horizontal(|ui| {
+            ui.label("Radius");
+            ui.add(
+                egui::DragValue::new(&mut self.harvest_cfg.radius_m)
+                    .range(1000.0..=10000.0)
+                    .speed(50.0)
+                    .suffix(" m"),
+            )
+            .on_hover_text("Objects this close to the field are cut out with it; logic further out is kept through links.");
+            ui.checkbox(&mut self.harvest_cfg.keep_ai_planes, "Keep AI planes");
+        });
+    }
+
+    /// Airfield tab, center: what the last harvests did (newest first).
+    fn harvest_log_panel(&mut self, ui: &mut egui::Ui) {
+        if self.harvest_log.is_empty() {
+            return;
+        }
+        ui.add_space(12.0);
+        shell::blueprint(ui, c::DIVIDER, |ui| {
+            shell::section_title(ui, "Database harvest", Some("newest first"));
+            for line in self.harvest_log.iter().take(12) {
+                ui.add(egui::Label::new(RichText::new(line).monospace()).wrap());
+            }
+        });
+    }
+
+    fn harvest_dir(&self) -> PathBuf {
+        PathBuf::from(self.harvest_missions_dir.trim())
+    }
+
+    fn start_harvest_watch(&mut self) {
+        let dir = self.harvest_dir();
+        if !dir.is_dir() {
+            self.status = Status::Error(format!("Missions folder not found: {}", dir.display()));
+            return;
+        }
+        self.harvest_watcher = Some(GenWatcher::new(dir));
+        self.status = Status::Info(
+            "Watching for _gen.mission. Start a Freeflight from the next airfield.".into(),
+        );
+    }
+
+    fn harvest_current_gen(&mut self) {
+        let dir = self.harvest_dir();
+        let Some(path) = find_gen_file(&dir) else {
+            self.status = Status::Error(format!("No _gen.mission in {}", dir.display()));
+            return;
+        };
+        self.run_harvest(&path);
+        if let Some(w) = &mut self.harvest_watcher {
+            w.acknowledge_current();
+        }
+    }
+
+    /// Poll the watcher each frame; restart it if the folder field changed.
+    fn poll_harvest(&mut self, ctx: &egui::Context) {
+        let dir = self.harvest_dir();
+        let Some(w) = &mut self.harvest_watcher else {
+            return;
+        };
+        if w.dir() != dir.as_path() {
+            *w = GenWatcher::new(dir);
+        }
+        if let Some(path) = w.poll(std::time::Instant::now()) {
+            self.run_harvest(&path);
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+
+    fn run_harvest(&mut self, source: &Path) {
+        let db = PathBuf::from(self.harvest_db_dir.trim());
+        if let Err(err) = std::fs::create_dir_all(&db) {
+            self.status = Status::Error(format!("Could not create {}: {err}", db.display()));
+            return;
+        }
+        match harvest_file(source, &db, &self.harvest_cfg) {
+            Ok(out) => {
+                self.status = Status::Info(format!(
+                    "Harvested {} airfield(s) into {}.",
+                    out.airfields.len(),
+                    db.display()
+                ));
+                for line in harvest_log_lines(&out).into_iter().rev() {
+                    self.harvest_log.insert(0, line);
+                }
+            }
+            Err(err) => {
+                self.harvest_log.insert(0, format!("FAILED: {err}"));
+                self.status = Status::Error(format!("Harvest failed: {err}"));
+            }
+        }
+        self.harvest_log.truncate(50);
+    }
+
     fn export_airfield(&mut self) {
         let Some(root) = self.airfield_root.clone() else {
             self.status = Status::Error("Load an airfield first.".into());
@@ -11253,6 +11425,42 @@ fn show_missing_locale_hint(ui: &mut egui::Ui, group_path: &Path) {
         )
         .color(c::WARN_TEXT),
     );
+}
+
+fn harvest_log_lines(out: &HarvestOutcome) -> Vec<String> {
+    let mut lines: Vec<String> = out
+        .airfields
+        .iter()
+        .map(|af| {
+            let r = &af.record;
+            let mut line = format!(
+                "{} ({}) -> {}: {} vehicles, {} blocks, {} logic, {} taxi nodes",
+                r.name,
+                country_short(r.country),
+                r.file,
+                r.vehicles,
+                r.blocks,
+                r.logic,
+                r.taxi_nodes
+            );
+            if af.cleaned.stripped > 0 {
+                line.push_str(&format!("; stripped {} player/SP objects", af.cleaned.stripped));
+            }
+            if af.ai_planes_removed > 0 {
+                line.push_str(&format!("; removed {} AI planes", af.ai_planes_removed));
+            }
+            if af.via_links > 0 {
+                line.push_str(&format!("; {} logic nodes beyond the radius kept via links", af.via_links));
+            }
+            line
+        })
+        .collect();
+    if out.models_added > 0 {
+        lines.push(format!("  {} new model(s) added to models.tsv", out.models_added));
+    }
+    let raw = out.archived.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    lines.push(format!("  raw mission archived as raw/{raw}"));
+    lines
 }
 
 fn save_with_sidecars(

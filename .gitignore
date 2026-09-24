@@ -1,3 +1,7 @@
 /target
 *.xcf
 .aider*
+
+# Terrain height probes and editor exports (tens of GB)
+/References/HeightGrid/
+/References/Korea Map Aux/

@@ -99,7 +99,20 @@ unlink, strip count, vehicles/AI planes/blocks) and `clean_airfield`
 takeoff, music, objectives, tiny `CZ_PLAYER_OUT` bubbles; retarget
 object-linked checkzones and set `PlaneCoalitions`).
 `EASTERN_PLANE_COALITIONS` = `[1]`, `WESTERN_PLANE_COALITIONS` = `[2]`.
-`CleanReport` is the export summary. **Airfield mode.**
+`CleanReport` is the export summary. `strip_ai_planes` drops the
+remaining AI `Plane`s the same way (no proximity rules). **Airfield mode,
+harvest.rs.**
+
+### `harvest.rs` — `_gen.mission` → airfield database
+Cuts the start airfield out of a Task Editor `_gen.mission` (radius around
+the `Airfield` block, nearest-field split, link closure for logic up to
+20 km out), cleans it with `airfield.rs`, and files it into a database
+folder: `raw/` archive, `<name>_<country>.Group` + sidecars, `catalog.Group`
+(`AirfieldRecord` rows, upserted), `models.tsv`. `harvest_root` is pure;
+`harvest_file` does the I/O. `GenWatcher` polls the Missions folder and
+reports a rewrite once it has been stable for 1.5 s. Drops `#` comments and
+the `Options` header before parsing (`WindLayers` rows are not `.Group`
+syntax). **Airfield mode.**
 
 ### `bombers.rs` — Exclusive Activation
 Detects plans in template groups (`inspect_plan`, `BomberPlanInfo`:

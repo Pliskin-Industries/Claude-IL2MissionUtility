@@ -325,7 +325,30 @@ Import, then **move copies off the parking grid** onto the map. Keep each copy�
 
 Freeflight missions from the Task Editor include a **player aircraft** and single-player graph (takeoff helpers, music, objectives, tiny player-out bubbles). Multiplayer does not use that. This mode strips the player and retargets proximity checkzones that were object-linked to the player, so the field can sit in an MP mission as AI + blocks + friendly-plane zones.
 
-### Source file (required)
+### Airfield database (automatic harvest)
+
+Use this to collect many airfields without the mission editor. It sits at the top of the Airfield tab's left panel; the log appears in the center. Every time you start a Freeflight, the game rewrites `data\Missions\_gen.mission` with the whole generated mission. The harvester reads that file directly.
+
+1. Check **Game Missions folder**. It is filled in when the Steam or standalone install is in its default place; otherwise **Browse…** to `…\data\Missions`.
+2. Pick a **Database folder** (default `References\Airfields`).
+3. Tick **Watch for new airfields**.
+4. In game, start a Freeflight from an airfield, then quit back to the menu. Pick the next airfield and repeat. Each flight adds a line to the log.
+
+For each flight the harvester:
+
+- copies the untouched mission (and its language files) to `raw\` with a UTC time stamp, before anything else;
+- finds the airfield nearest the player plane and keeps everything within **Radius** (default 4000 m) that is not closer to another airfield, plus logic linked from it up to 20 km away (approach icons);
+- removes the player and single-player logic (as below) and any AI planes (tick **Keep AI planes** to keep them);
+- saves `<Airfield name>_<country>.Group` with its language files, ready for **Map → Add reference groups…**;
+- updates `catalog.Group`, one `AirfieldRecord` per airfield and country: position, footprint, taxi-graph node count, approximate runway axis (heading from grid north and length, from the taxi graph), vehicle/block/logic counts, map, date, and which raw file it came from;
+- adds any new aircraft, vehicle or object type to `models.tsv`.
+
+Harvesting the same airfield and country again replaces its group and catalog entry. Capture a field once per side if it is dressed differently for each.
+
+- **Harvest current** reads the file that is there now (the watcher ignores a file that existed before it was switched on).
+- **Harvest a file…** reads any `.Mission`. With no player plane in it, every airfield in the file is harvested.
+
+### Source file (manual, one airfield)
 
 In the IL-2 map / mission editor:
 
@@ -485,6 +508,8 @@ Fighter Pack and Exclusive Activation already contain NodeGates. Army Generator 
 **Icons have no text** — missing `.eng` (etc.). Re-export the template or keep Map sidecars next to the group.
 
 **Two plans fire at once** — Exclusive: the start zone was not selected, or the end timer never fires so you may have other issues, or zones were not Closer / not actually targeting OUT DISABLE after a hand edit. Regenerate rather than patching NodeGates.
+
+**Harvest log stays empty** — check that **Game Missions folder** is the `data\Missions` folder of the install you play, and that `_gen.mission` there changes when you start a Freeflight. The watcher ignores a file that was already there when it was switched on; use **Harvest current** for that one. A harvest that fails still leaves the raw copy in `raw\`.
 
 **Airfield still has a player** — load from `_gen.mission` Freeflight, not a hand-built group that never marked a player plane.
 
