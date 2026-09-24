@@ -125,6 +125,7 @@ writes the UTF-16 translation sidecars (`.eng`, `.rus`, …).
 | P5 | **UI localization:** string table plus a language picker | Author todo. Easier after P4. | L |
 | P6 | **Manual rewrite** (author todo) | Should follow the feature changes so it does not go stale twice. | M |
 | P7 | **Template altitude follow-ups** (see §5) | All done or closed (2026-09-23). | S |
+| P8 | **Features the historical templates need.** Details and acceptance criteria are in `handoff/R3-template-feature-gaps.md`. F1: respawn linked flights on a cooldown. F2: loader round-trip for every spawn layout. F3: break off after N losses. F4: cross-template trigger hooks. F5: date-aware aircraft warning (La-11 in 1950). F6: headless generation via lib/CLI. F7: waypoint speed without the UI. F8: searchlight defended-area preset. F9: per-element altitude step. | Found while building `TemplateExamples/Historical1950/` (2026-09-24). Each one forced a workaround or left out sourced behaviour. **Not scheduled; not in a 0.6 release.** | S–M each |
 
 ## 5. Feature log
 
