@@ -483,9 +483,21 @@ Fallbacks: `UNKNOWN_ARTILLERY_M` = 15 km, `UNKNOWN_ARMOR_M` = 2 km,
 Sparse store of ground heights on a 100 m lattice (224 × 224-node tiles,
 HGT1 file under `%APPDATA%\IL2MissionUtility\terrain`). `lookup` falls back
 from 100 m to 200 / 400 / 800 m cells and reports the spacing that
-answered; `ground_margin_m` gives the lift for that spacing. Stores and
-answers only: no parsing, no placement. **Map mode (Terrain tab); export
-use comes later.**
+answered; `ground_margin_m` / `parked_plane_margin_m` give the lift for
+that spacing. Stores and answers only: no parsing, no placement.
+**Map mode (Terrain tab), terrain_apply.rs.**
+
+### `terrain_apply.rs` — units onto the measured ground at export
+`apply_terrain_heights` runs on a finished tree just before it is written:
+Vehicle / Train and their ground waypoints get terrain + margin, planes with
+`StartType` 1–3 get terrain + a small lift, ships go to 0, entities keep
+their offset. Units already within 5 m of the ground keep their Y;
+unmeasured spots (or survey-only 800 m data) keep the old Y and are listed
+in `ApplyReport`. Airborne planes, MCUs and static objects are never
+touched; X/Z never change; applying twice is a no-op. ui.rs calls it for
+Template, Exclusive, Army (generate + rework), Map and Fighter Pack exports
+when *Apply terrain heights on export* is on (off by default) — not for Airfield.
+**All generate paths except Airfield.**
 
 ### `heightprobe.rs` — terrain probe files
 Builds T-34 probe groups (one per 100 m land node, one file per tile; the

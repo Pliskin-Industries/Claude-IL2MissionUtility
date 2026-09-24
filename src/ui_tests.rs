@@ -1759,3 +1759,16 @@ impl Harness {
         }
     }
 }
+
+/// Terrain heights are opt-in: exports are unchanged until the Map ›
+/// Terrain switch is turned on (user decision, 2026-09-24).
+#[test]
+fn terrain_heights_on_export_start_off() {
+    let mut h = Harness::new("terrainoff");
+    assert!(!h.app.terrain_apply, "Apply terrain heights starts off");
+    h.tab("Map");
+    h.wait_for_map();
+    h.click_prefix_if_present("Terrain");
+    let n = h.find("Apply terrain heights on export");
+    assert_eq!(n.toggled, Some(false));
+}

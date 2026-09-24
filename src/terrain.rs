@@ -15,7 +15,8 @@
 //!
 //! ## Public API
 //! * `STEP_M`, `LATTICE_N`, `TILE`, `TILES_PER_SIDE`, `KOREA_MAP_ID`
-//! * `DEFAULT_GROUND_MARGIN_M`, `DEFAULT_PARKED_PLANE_MARGIN_M`, `ground_margin_m`
+//! * `DEFAULT_GROUND_MARGIN_M`, `DEFAULT_PARKED_PLANE_MARGIN_M`, `ground_margin_m`,
+//!   `parked_plane_margin_m`
 //! * `struct HeightStore` — `new`, `node` / `set_node`, `add_point`,
 //!   `height_at`, `lookup` (→ `TerrainHeight`), `measured_nodes`, `tile_measured`, `to_bytes` /
 //!   `from_bytes`, `load` / `save`
@@ -71,6 +72,21 @@ pub fn ground_margin_m(spacing_m: f64) -> Option<f64> {
         Some(DEFAULT_GROUND_MARGIN_M)
     } else if spacing_m <= 2.0 * STEP_M {
         Some(30.0)
+    } else {
+        None
+    }
+}
+
+/// Lift for a plane starting on the ground (runway / parking). Airfields are
+/// flat, and a plane dropped from height can break, so the lift stays small
+/// and coarse spacings are refused.
+pub fn parked_plane_margin_m(spacing_m: f64) -> Option<f64> {
+    if spacing_m <= 0.0 {
+        Some(0.5)
+    } else if spacing_m <= STEP_M {
+        Some(DEFAULT_PARKED_PLANE_MARGIN_M)
+    } else if spacing_m <= 2.0 * STEP_M {
+        Some(3.0)
     } else {
         None
     }

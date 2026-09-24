@@ -533,6 +533,9 @@ struct GroupGeneratorApp {
     terrain_log: Vec<String>,
     terrain_show_coverage: bool,
     terrain_show_relief: bool,
+    /// Put generated units on the measured terrain when exporting. Off by
+    /// default (user decision, 2026-09-24): exports are unchanged until it is on.
+    terrain_apply: bool,
     terrain_relief: Option<TextureHandle>,
     current_salient: Vec<(f64, f64)>,
     salients: Vec<Vec<(f64, f64)>>,
@@ -1775,6 +1778,7 @@ impl Default for GroupGeneratorApp {
             terrain_log: Vec::new(),
             terrain_show_coverage: false,
             terrain_show_relief: false,
+            terrain_apply: false,
             terrain_relief: None,
             current_salient: Vec::new(),
             salients: Vec::new(),
@@ -4447,13 +4451,14 @@ impl GroupGeneratorApp {
             waypoint_priority: self.tpl_wp_priority,
             zone_coalition: self.tpl_zone_coalition,
         };
-        let pack = match generate_template(&opts) {
+        let mut pack = match generate_template(&opts) {
             Ok(p) => p,
             Err(err) => {
                 self.status = Status::Error(err);
                 return;
             }
         };
+        let terrain_note = self.apply_terrain(&mut pack);
         let text = serialize_group(&pack);
         let default_name = self
             .tpl_loaded_path
@@ -4484,6 +4489,7 @@ impl GroupGeneratorApp {
                 opts.bring_up.label()
             ),
         );
+        self.add_terrain_note(terrain_note);
     }
 
     fn reset_template_builder(&mut self) {
@@ -5713,7 +5719,14 @@ impl GroupGeneratorApp {
             self.terrain_error = None;
             self.terrain_relief = None;
         }
-        shell::hint(ui, "Exports keep their own heights for now.", false);
+        ui.checkbox(&mut self.terrain_apply, "Apply terrain heights on export").on_hover_text(
+            "Ground units and their waypoints go to the measured ground + margin, parked planes just above it, ships to sea level. Units already on the ground keep their height.",
+        );
+        shell::hint(
+            ui,
+            "Used by Template, Exclusive, Army, Map and Fighter Pack exports (not Airfield). Where the terrain is not measured, units keep their height and the export lists them.",
+            false,
+        );
         ui.add_space(6.0);
         ui.separator();
 
@@ -5787,6 +5800,33 @@ impl GroupGeneratorApp {
         if shell::hint(ui, "How to measure heights, step by step.", true) {
             self.open_help(HelpTopic::Front);
         }
+    }
+
+    /// Put an export's units on the measured terrain (terrain_apply.rs).
+    /// Returns the status note, or `None` when switched off or nothing applied.
+    fn apply_terrain(&mut self, root: &mut crate::ast::Il2Entity) -> Option<(String, bool)> {
+        if !self.terrain_apply {
+            return None;
+        }
+        let store = self.terrain_store()?;
+        let rep = crate::terrain_apply::apply_terrain_heights(root, store);
+        let note = rep.summary();
+        (!note.is_empty()).then_some((note, !rep.unmeasured.is_empty()))
+    }
+
+    /// Add the terrain note to the export's status; units left unmeasured
+    /// turn it into a warning.
+    fn add_terrain_note(&mut self, note: Option<(String, bool)>) {
+        let Some((note, warn)) = note else { return };
+        self.status = match std::mem::replace(&mut self.status, Status::Idle) {
+            Status::Info(msg) if warn => Status::Warn { lead: msg, items: vec![note] },
+            Status::Info(msg) => Status::Info(format!("{msg} {note}")),
+            Status::Warn { lead, mut items } => {
+                items.push(note);
+                Status::Warn { lead, items }
+            }
+            other => other,
+        };
     }
 
     fn terrain_export_survey(&mut self) {
@@ -10577,13 +10617,14 @@ impl GroupGeneratorApp {
             });
         }
 
-        let generated = match link_bomber_plans_with(&inputs, self.bomber_keep_positions) {
+        let mut generated = match link_bomber_plans_with(&inputs, self.bomber_keep_positions) {
             Ok(g) => g,
             Err(err) => {
                 self.status = Status::Error(err);
                 return;
             }
         };
+        let terrain_note = self.apply_terrain(&mut generated);
         let text = serialize_group(&generated);
         let suggested = format!(
             "Exclusive_Activation_{}plan.Group",
@@ -10611,6 +10652,7 @@ impl GroupGeneratorApp {
         if !matches!(self.status, Status::Error(_)) {
             self.bomber_loaded_path = None;
         }
+        self.add_terrain_note(terrain_note);
     }
 
     fn add_recon_from_path(&mut self, path: PathBuf) -> Result<(), String> {
@@ -10748,7 +10790,7 @@ impl GroupGeneratorApp {
             }
         }
 
-        let generated = match generate_recon_ex(
+        let mut generated = match generate_recon_ex(
             &inputs,
             ReconBuild {
                 activate_percent: self.recon_percent,
@@ -10764,6 +10806,7 @@ impl GroupGeneratorApp {
                 return;
             }
         };
+        let terrain_note = self.apply_terrain(&mut generated);
         let text = serialize_group(&generated);
         let mix = allocate_mix(&weights, self.recon_total as usize, self.recon_percent);
         let live: usize = mix.iter().map(|m| m.activate).sum();
@@ -10792,6 +10835,7 @@ impl GroupGeneratorApp {
             )
         };
         self.status = save_with_sidecars(&save_path, &text, &locale_paths, &summary);
+        self.add_terrain_note(terrain_note);
     }
 
     fn add_placed_from_path(&mut self, path: PathBuf) -> Result<(), String> {
@@ -10934,6 +10978,7 @@ impl GroupGeneratorApp {
                     return;
                 }
             };
+            let terrain_note = self.apply_terrain(&mut combined);
             let text = serialize_group(&combined);
             let suggested = format!("Ground_Units_{n}_always_on.Group");
             let Some(save_path) = dialog::FileDialog::new()
@@ -10951,6 +10996,7 @@ impl GroupGeneratorApp {
                     "Removed randomizer from {n} groups. Mission Begin fires the selected start MCU on each copy."
                 ),
             );
+            self.add_terrain_note(terrain_note);
             return;
         }
         let type_percents: Vec<(String, u32)> = self
@@ -10972,6 +11018,7 @@ impl GroupGeneratorApp {
             .iter()
             .map(|s| wanted_winners(s.detected.unwrap_or(0), s.influence.clamp(1, 100)))
             .sum();
+        let terrain_note = self.apply_terrain(&mut combined);
         let text = serialize_group(&combined);
         let suggested = format!("Random_Ground_Units_{live}of{n}.Group");
         let Some(save_path) = dialog::FileDialog::new()
@@ -10988,6 +11035,7 @@ impl GroupGeneratorApp {
             &paths,
             &format!("Reworked {n} groups (exactly {live} live{delay_note})"),
         );
+        self.add_terrain_note(terrain_note);
     }
 
     fn load_airfield(&mut self) {
@@ -11311,13 +11359,14 @@ impl GroupGeneratorApp {
             ship_packs,
             ground_packs,
         };
-        let pack = match generate_front(&opts) {
+        let mut pack = match generate_front(&opts) {
             Ok(p) => p,
             Err(err) => {
                 self.status = Status::Error(err);
                 return;
             }
         };
+        let terrain_note = self.apply_terrain(&mut pack.root);
         let text = serialize_group(&pack.root);
         let suggested = format!("Korea_BaseMap_{}.Group", self.current_mark().date_label());
         let Some(save_path) = dialog::FileDialog::new()
@@ -11370,6 +11419,7 @@ impl GroupGeneratorApp {
                 self.status = Status::Error(format!("Wrote the group, but language files failed: {err}"));
             }
         }
+        self.add_terrain_note(terrain_note);
     }
 
     fn stamp_imported_fighters(&self) -> Result<Vec<MapFighterPack>, String> {
@@ -11623,6 +11673,7 @@ impl GroupGeneratorApp {
             self.country,
             self.linked_groups as usize,
         ));
+        let terrain_note = self.apply_terrain(&mut generated);
         let text = serialize_group(&generated);
 
         let suggested = fighter_pack_filename(self.country, self.linked_groups as usize);
@@ -11656,6 +11707,7 @@ impl GroupGeneratorApp {
                 self.status = Status::Error(format!("Could not write file: {err}"));
             }
         }
+        self.add_terrain_note(terrain_note);
     }
 }
 
