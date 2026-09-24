@@ -124,7 +124,7 @@ writes the UTF-16 translation sidecars (`.eng`, `.rus`, …).
 | P4 | **Split `ui.rs`** (10k lines) into per-mode panel modules, with no behavior change | Prerequisite for localization. Lowers merge risk for every UI task. | M–L |
 | P5 | **UI localization:** string table plus a language picker | Author todo. Easier after P4. | L |
 | P6 | **Manual rewrite** (author todo) | Should follow the feature changes so it does not go stale twice. | M |
-| P7 | **Template altitude follow-ups** (see §5) | Wingmen match lead: DONE. Copy-attributes ceiling clamp: awaiting user. Persistence: closed. | S |
+| P7 | **Template altitude follow-ups** (see §5) | All done or closed (2026-09-23). | S |
 
 ## 5. Feature log
 
@@ -159,14 +159,16 @@ altitude to automatically be set at 50% of operating ceiling."
   switching a seat to Follows adopts the lead's height. The per-seat button
   reads **Match lead** on a wingman. 381 tests pass. Smoke-tested: MiG
   lead at 7500 m brings its La-11 wingman to 7500 m (not 5075 m); dragging
-  the lead to 1500 m moves the wingman to 1500 m. Not synced: a ground-start
-  lead's Engine (Running/Warm/Cold) choice made afterwards.
-- **Ceiling clamp on copy. OPEN, pending the user.** This is a pre-existing
-  bug, not a design question. "Copy attributes to all" copies the selected
+  the lead to 1500 m moves the wingman to 1500 m. The ground-start Engine
+  choice (Running/Warm/Cold) on a lead now syncs to its wingmen too. It was
+  missed at first; fixed in the next merge below.
+- **Ceiling clamp on copy. DONE** (user said yes, 2026-09-23). This was a
+  pre-existing bug, not a design question. "Copy attributes to all" copies the selected
   plane's altitude onto every other plane without capping it at that
   plane's own ceiling. For example, an F-86 at 12,000 m copied onto an
   IL-10 (6,950 m ceiling) gives 12,000 m. The proposed fix is a one-line
-  clamp in `copy_seat_attributes`. Awaiting the user's go-ahead.
+  clamp in `copy_seat_attributes`. Fixed, with 383 tests passing. Merged
+  together with the engine sync.
 - **Persistence. RULED: default on is correct.** Resetting to on at each
   app start is the intended behavior. No persistence is needed. Closed.
 
@@ -195,3 +197,4 @@ continue at delegation-loop step 3 (§2).
 | 2026-09-23 | Claude (Fable role) | Created working copy and git baseline (`.gitattributes * -text`). Verified 371 tests pass. Wrote this handoff. Designed P1 and delegated it to Astra (job `20260924024246-e38e95ca`, branch `codex/auto-altitude`). The job failed because the Codex CLI is not installed. The user will install Codex; the prompt is saved in `handoff/`. |
 | 2026-09-23 | Claude (Fable role) | Codex was installed, but the broker kept ENOENT because Claude never fully quit (the lookup is cached). Ran the CLI directly and found the default model is **gpt-6-luna**. Astra is not on the account, so I stopped the run before it made any edits. The user chose Claude to implement P1. Built on `claude/auto-altitude`, 376 tests pass, smoke-tested in the app, merged to `main`. An untracked `handoff/R1-historical-reference-codex-prompt.md` (a Korea 1950–53 unit-reference task, not written by Claude) was left untouched and was not run; it waits for the user. |
 | 2026-09-23 | Claude (Fable role) | User rulings on P7: wingmen match their lead (built on `claude/auto-altitude-follow-lead`, 381 tests, smoke-tested, merged `72106da`), and auto altitude default on is correct (closed). Explained that the copy-attributes clamp is a bug, not a question; awaiting the go-ahead. |
+| 2026-09-23 | Claude (Fable role) | The user asked why the engine choice did not sync: it was an oversight, since only the slider and button were hooked up. Fixed so the Engine choice on a lead syncs to its wingmen, and added the copy-attributes ceiling clamp (user said yes). 383 tests pass, and there are still 70 warnings. Both merged to `main`. |
