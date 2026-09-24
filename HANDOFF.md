@@ -21,7 +21,7 @@ fixtures are line-ending sensitive. Do not remove it.
 **Build and test.**
 
 ```bash
-cargo test --offline     # baseline: 371 passed, ~45 s cold build
+cargo test --offline     # 376 passed after P1 (371 at baseline); ~45 s cold build
 cargo build --release    # ships target/release/il2_mission_utility.exe
 ```
 
@@ -32,7 +32,7 @@ cargo build --release    # ships target/release/il2_mission_utility.exe
 | Role | Who | Notes |
 |---|---|---|
 | Overlord / reviewer | **Claude Opus acting as Fable** (Fable quota exhausted, per user 2026-09-23) | Plans, scopes, reviews every diff, merges, owns accountability. |
-| Executor | **GPT-6 Astra via Codex broker** | All coding work. `max` effort for implementation, `ultra` for reviews. |
+| Executor | **GPT-6 Astra via Codex broker**, if the account gets access | All coding work. `max` effort for implementation, `ultra` for reviews. **Not available as of 2026-09-23** (see below). |
 
 **Delegation loop in use.** There is no remote, but Claude and Codex share
 this machine's disk. So the loop is:
@@ -47,7 +47,17 @@ this machine's disk. So the loop is:
 
 Once a GitHub remote exists, switch to the skill's standard `git_push`/`git_pull` flow.
 
-**Codex prerequisite (not yet met on 2026-09-23).** The user installs the CLI:
+**Astra is not on this OpenAI account (verified 2026-09-23).**
+`~/.codex/models_cache.json` lists only `gpt-6-luna` (the CLI default when no
+model is set), `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-reserve` and
+`codex-auto-review`. There is no Astra and no Sol. `config.toml` sets no
+`model`, so a delegation that does not pass `model` silently runs **Luna**.
+Always pass `model` explicitly, and confirm the model in
+`~/.codex/sessions/.../rollout-*.jsonl` (`"model":`). For P1 the user chose
+Claude to implement (one-task waiver). Ask again for each new task: Astra
+after a plan upgrade, `gpt-5.6-terra`, or Claude.
+
+**Codex install (done 2026-09-23).** The user installs the CLI:
 `npm.cmd i -g @openai/codex`, then `codex.cmd login`. Use the `.cmd` forms
 because the PowerShell execution policy blocks `npm.ps1`. Then **fully quit
 Claude from the system tray** and reopen it. Closing the window is not
@@ -151,7 +161,16 @@ altitude to automatically be set at 50% of operating ceiling."
 - **Persistence.** The checkbox resets to on at every app start. The app has
   no settings persistence.
 
-**Status: BLOCKED. Codex CLI is not installed**, so the design is ready
+**Status: DONE, merged to `main` 2026-09-23** (`aab880c`, merge `9389c6a`).
+Claude implemented it (user waiver: Astra is unavailable on the account).
+The tests went from 371 to 376, and the build still has the same 70
+warnings, so none are new. It was smoke-tested in the running app: adding
+a B-29 gives 5334 m airstart; dragging to 0 m gives a ground start
+(Running); the **50% ceiling** button restores 5334 m.
+
+The notes below record the earlier blocker.
+
+~~BLOCKED: Codex CLI is not installed~~, so the design was ready
 but not implemented. The broker extension exists (`~/.codex-broker/`), but
 there is no `codex.exe` and no `~/.codex/config.toml`. Job
 `20260924024246-e38e95ca` failed at spawn with `ENOENT` and changed nothing.
@@ -165,3 +184,4 @@ continue at delegation-loop step 3 (§2).
 | Date | Who | What |
 |---|---|---|
 | 2026-09-23 | Claude (Fable role) | Created working copy and git baseline (`.gitattributes * -text`). Verified 371 tests pass. Wrote this handoff. Designed P1 and delegated it to Astra (job `20260924024246-e38e95ca`, branch `codex/auto-altitude`). The job failed because the Codex CLI is not installed. The user will install Codex; the prompt is saved in `handoff/`. |
+| 2026-09-23 | Claude (Fable role) | Codex was installed, but the broker kept ENOENT because Claude never fully quit (the lookup is cached). Ran the CLI directly and found the default model is **gpt-6-luna**. Astra is not on the account, so I stopped the run before it made any edits. The user chose Claude to implement P1. Built on `claude/auto-altitude`, 376 tests pass, smoke-tested in the app, merged to `main`. An untracked `handoff/R1-historical-reference-codex-prompt.md` (a Korea 1950–53 unit-reference task, not written by Claude) was left untouched and was not run; it waits for the user. |
