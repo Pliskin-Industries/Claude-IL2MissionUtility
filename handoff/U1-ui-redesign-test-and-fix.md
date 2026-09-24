@@ -1,6 +1,10 @@
 # U1 — UI redesign: live test, fix, merge, push
 
-Status (2026-09-24): **built and unit/UI-tested on branch `claude/ui-final`,
+Status (2026-09-24, later): **DONE except merge/push.** Every gap from a spec audit was
+fixed and the live click-through below was completed (see HANDOFF §6, last row).
+The user wants to check the app before `claude/ui-final` is merged and pushed.
+
+Earlier status: **built and unit/UI-tested on branch `claude/ui-final`,
 not merged.** The live click-through in the real window was started and
 stopped early. The user wants this session to test the running app, fix what
 it finds, then **merge `claude/ui-final` into `main` and push once the live
