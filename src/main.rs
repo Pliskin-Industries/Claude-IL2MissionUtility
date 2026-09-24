@@ -34,6 +34,7 @@ mod serialize;
 mod shell;
 mod template;
 mod terrain;
+mod terrain_apply;
 mod theme;
 mod ui;
 mod watermap;
