@@ -119,7 +119,11 @@ pub struct McuChoice {
 #[derive(Debug, Clone)]
 pub struct UnitPlanInfo {
     pub name: String,
+    /// Vehicles, ships and trains together.
     pub vehicle_count: usize,
+    /// The ships and trains in `vehicle_count` (for the UI's card line).
+    pub ship_count: usize,
+    pub train_count: usize,
     pub block_count: usize,
     pub checkzones: Vec<McuChoice>,
     pub suggested_triggers: Vec<i32>,
@@ -489,6 +493,8 @@ pub fn inspect_unit(root: &Il2Entity) -> Result<UnitPlanInfo, String> {
         vehicle_count: root.count_block_type("Vehicle")
             + root.count_block_type("Ship")
             + root.count_block_type("Train"),
+        ship_count: root.count_block_type("Ship"),
+        train_count: root.count_block_type("Train"),
         block_count: root.count_block_type("Block") + root.count_block_type("Ground"),
         suggested_triggers: checkzones
             .iter()
@@ -516,6 +522,8 @@ fn fallback_unit_info(root: &Il2Entity, name: &str) -> UnitPlanInfo {
         vehicle_count: root.count_block_type("Vehicle")
             + root.count_block_type("Ship")
             + root.count_block_type("Train"),
+        ship_count: root.count_block_type("Ship"),
+        train_count: root.count_block_type("Train"),
         block_count: root.count_block_type("Block") + root.count_block_type("Ground"),
         suggested_triggers: checkzones
             .iter()
