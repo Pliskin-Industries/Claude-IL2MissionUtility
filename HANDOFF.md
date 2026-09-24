@@ -47,6 +47,12 @@ this machine's disk. So the loop is:
 
 Once a GitHub remote exists, switch to the skill's standard `git_push`/`git_pull` flow.
 
+**Codex prerequisite (not yet met on 2026-09-23).** The user installs the CLI:
+`npm i -g @openai/codex`, then `codex login`, then restarts Claude. If the
+broker still reports `ENOENT`, set `CODEX_BIN` to the absolute path of the
+real `codex.exe`, not the `codex.cmd` shim. Saved delegation prompts live
+in `handoff/`.
+
 ## 3. What the application is
 
 A native Windows desktop tool (Rust 2024, `eframe`/`egui` 0.32, `nom`
@@ -140,10 +146,17 @@ altitude to automatically be set at 50% of operating ceiling."
 - **Persistence.** The checkbox resets to on at every app start. The app has
   no settings persistence.
 
-**Status:** see Session log.
+**Status: BLOCKED. Codex CLI is not installed**, so the design is ready
+but not implemented. The broker extension exists (`~/.codex-broker/`), but
+there is no `codex.exe` and no `~/.codex/config.toml`. Job
+`20260924024246-e38e95ca` failed at spawn with `ENOENT` and changed nothing.
+The user chose to install Codex rather than have Claude implement it.
+**To resume:** once `codex.exe` resolves, re-send
+`handoff/P1-auto-altitude-codex-prompt.md` verbatim with `codex_start`, then
+continue at delegation-loop step 3 (§2).
 
 ## 6. Session log
 
 | Date | Who | What |
 |---|---|---|
-| 2026-09-23 | Claude (Fable role) | Created working copy and git baseline (`.gitattributes * -text`). Verified 371 tests pass. Wrote this handoff. Designed P1 and delegated it to Astra (job `20260924024246-e38e95ca`, branch `codex/auto-altitude`). |
+| 2026-09-23 | Claude (Fable role) | Created working copy and git baseline (`.gitattributes * -text`). Verified 371 tests pass. Wrote this handoff. Designed P1 and delegated it to Astra (job `20260924024246-e38e95ca`, branch `codex/auto-altitude`). The job failed because the Codex CLI is not installed. The user will install Codex; the prompt is saved in `handoff/`. |
