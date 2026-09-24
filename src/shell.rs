@@ -468,7 +468,9 @@ pub fn confirm_dialog(ctx: &egui::Context, open: &mut bool, title: &str, body: &
             ui.set_max_width(380.0);
             ui.label(body);
             ui.add_space(10.0);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // A fixed-height row: a bare with_layout would take the window's full height.
+            let row = Vec2::new(ui.available_width(), 32.0);
+            ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
                 if primary_button(ui, confirm, "Enter", true).clicked()
                     || ui.input(|i| i.key_pressed(egui::Key::Enter))
                 {

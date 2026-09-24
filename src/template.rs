@@ -827,8 +827,8 @@ impl ZoneCoalition {
 
     pub fn label(self) -> &'static str {
         match self {
-            ZoneCoalition::Eastern => "Eastern [1]",
-            ZoneCoalition::Western => "Western [2]",
+            ZoneCoalition::Eastern => "DPRK [1]",
+            ZoneCoalition::Western => "NATO [2]",
             ZoneCoalition::Both => "Both [1, 2]",
         }
     }
@@ -4342,7 +4342,7 @@ fn read_zones(
         opts.zone_coalition = parse_zone_coalition(z.property("PlaneCoalitions").unwrap_or(""));
         if !native && z.name() != Some("Zone IN") {
             warnings.push(format!(
-                "Checkzone \"{}\" was mapped to Zone IN ({:.0} m).",
+                "Checkzone \"{}\" was mapped to Zone In ({:.0} m).",
                 z.name().unwrap_or("Zone In"),
                 opts.zone_in
             ));
@@ -4352,7 +4352,7 @@ fn read_zones(
         opts.zone_in = inn;
         opts.zone_out = out;
         warnings.push(format!(
-            "No Zone IN found — using {} defaults ({:.0} / {:.0} m).",
+            "No Zone In found — using {} defaults ({:.0} / {:.0} m).",
             match mix {
                 ZoneMix::Air => "aircraft",
                 ZoneMix::Ground => "ground",
@@ -4380,7 +4380,7 @@ fn read_zones(
         opts.zone_out = opts.zone_in + 200.0;
         if old > 0.0 {
             warnings.push(format!(
-                "Zone Out ({old:.0} m) was raised to {:.0} m so it stays larger than Zone IN.",
+                "Zone Out ({old:.0} m) was raised to {:.0} m so it stays larger than Zone In.",
                 opts.zone_out
             ));
         }

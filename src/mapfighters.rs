@@ -118,7 +118,7 @@ pub fn place_in_coalition(
     let spots = checkerboard_spots(&mp, min_spacing, waves, groups_per_wave, fill);
     if spots.is_empty() {
         return Err(
-            "coalition area is too small for Zone IN spacing. Enlarge the AO or lower linked groups."
+            "coalition area is too small for Zone In spacing. Enlarge the AO or lower linked groups."
                 .into(),
         );
     }

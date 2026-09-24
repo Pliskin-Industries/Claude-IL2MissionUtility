@@ -476,7 +476,7 @@ fn partition_sizes(n: usize, k: usize) -> Vec<usize> {
 pub fn inspect_unit(root: &Il2Entity) -> Result<UnitPlanInfo, String> {
     let checkzones = collect_checkzones(root);
     if checkzones.is_empty() {
-        return Err("template has no MCU_CheckZone (need Zone IN)".into());
+        return Err("template has no MCU_CheckZone (needs a Zone In)".into());
     }
     let route = mapnet::inspect_route(root);
     let wp_ahead = if route.is_some() {
@@ -556,7 +556,7 @@ pub fn generate_recon_ex(plans: &[ReconInput], build: ReconBuild) -> Result<Il2E
             continue;
         }
         if plan.trigger_zone_ids.is_empty() {
-            return Err(format!("plan {} needs a Zone IN selected", i + 1));
+            return Err(format!("plan {} needs a Zone In selected", i + 1));
         }
         for id in &plan.trigger_zone_ids {
             if find_index(&plan.root, *id).is_none() {

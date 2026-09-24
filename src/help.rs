@@ -382,7 +382,7 @@ mod tests {
     fn map_section_describes_base_map_export() {
         let s = section_for(HelpTopic::Front);
         assert!(s.contains("Generate Base Map"));
-        assert!(s.contains("Load Base Map"));
+        assert!(s.contains("Load base map"));
         assert!(s.contains("Reference groups"));
         assert!(s.contains("10 km"));
         assert!(s.contains("5 km"));

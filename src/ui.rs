@@ -136,7 +136,10 @@ pub fn run() -> eframe::Result {
         options,
         Box::new(|cc| {
             theme::apply(&cc.egui_ctx);
-            Ok(Box::new(GroupGeneratorApp::default()))
+            let mut app = GroupGeneratorApp::default();
+            app.mark_saved(AppMode::Template);
+            app.mark_saved(AppMode::Map);
+            Ok(Box::new(app))
         }),
     )
 }
@@ -188,6 +191,48 @@ const MAP_TOOLS: [(MapDrawingMode, &str, &str, &str); 6] = [
     (MapDrawingMode::PlaceNatoObjective, "◆", "NATO objective", "Click to place · Shift for more · right-click removes"),
 ];
 
+/// What Template Reset / Remove / Load can take away; restored by Ctrl Z.
+struct TemplateSnapshot {
+    seats: Vec<TemplateSeat>,
+    select: Option<TplSelect>,
+    bring_up: BringUp,
+    spawn_reset: bool,
+    spawn_cooldown_min: f32,
+    place_layout: PlaceLayout,
+    per_group: u32,
+    zone_in: f32,
+    zone_out: f32,
+    zone_mix: Option<ZoneMix>,
+    wp_spacing: f32,
+    wp_speed: f32,
+    wp_altitude: f32,
+    wp_priority: i32,
+    zone_coalition: ZoneCoalition,
+    loaded_path: Option<PathBuf>,
+}
+
+/// What a Map Clear or Remove can take away (README §6.3).
+struct MapForces {
+    ships: Option<MapShipLayout>,
+    ground_east: Option<MapGroundLayout>,
+    ground_nato: Option<MapGroundLayout>,
+    armies: Vec<MapArmySlot>,
+    fighters: Option<MapFighterLayout>,
+    imported_fighters: Vec<ImportedFighterPack>,
+    east_objectives: Vec<(f64, f64)>,
+    nato_objectives: Vec<(f64, f64)>,
+    refs: Vec<MapRefGroup>,
+}
+
+/// A destructive action waiting for its confirmation dialog.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Confirm {
+    ResetTemplate,
+    ResetFighter,
+    LoadTemplate,
+    LoadBaseMap,
+}
+
 /// Tabs of the Map tab's right dock.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MapDock {
@@ -202,6 +247,7 @@ enum DrawnMark {
     AttackArrow,
 }
 
+#[derive(Clone)]
 struct BomberSlot {
     path: PathBuf,
     root: crate::ast::Il2Entity,
@@ -288,6 +334,7 @@ impl UnitKind {
     }
 }
 
+#[derive(Clone)]
 struct ReconSlot {
     path: PathBuf,
     info: UnitPlanInfo,
@@ -302,6 +349,7 @@ struct ReconSlot {
 }
 
 /// A .Group loaded in Map mode as an army (not a reference stamp).
+#[derive(Clone)]
 struct MapArmySlot {
     path: PathBuf,
     entity: crate::ast::Il2Entity,
@@ -453,6 +501,16 @@ struct GroupGeneratorApp {
     tpl_model_tex: HashMap<String, TextureHandle>,
     tpl_seats: Vec<TemplateSeat>,
     tpl_select: Option<TplSelect>,
+    tpl_undo: shell::Undo<TemplateSnapshot>,
+    /// `tpl_fingerprint` at the last Load / Generate / Reset.
+    tpl_saved: String,
+    recon_undo: shell::Undo<(ReconSubmode, Vec<ReconSlot>)>,
+    bomber_undo: shell::Undo<Vec<BomberSlot>>,
+    map_undo: shell::Undo<MapForces>,
+    /// `drawn_marks.len()` when `map_undo` was recorded: later marks undo first.
+    map_undo_marks: usize,
+    map_saved: String,
+    confirm: Option<Confirm>,
     /// Unit card being dragged in the Units list (index at drag start).
     tpl_card_drag: Option<usize>,
     tpl_bring_up: BringUp,
@@ -1546,6 +1604,14 @@ impl Default for GroupGeneratorApp {
             tpl_model_tex: HashMap::new(),
             tpl_seats: default_template_seats(),
             tpl_select: None,
+            tpl_undo: shell::Undo::default(),
+            tpl_saved: String::new(),
+            recon_undo: shell::Undo::default(),
+            bomber_undo: shell::Undo::default(),
+            map_undo: shell::Undo::default(),
+            map_undo_marks: 0,
+            map_saved: String::new(),
+            confirm: None,
             tpl_card_drag: None,
             tpl_bring_up: BringUp::Activate,
             tpl_spawn_reset: false,
@@ -1584,9 +1650,13 @@ impl eframe::App for GroupGeneratorApp {
                 }
                 self.set_mode(MODES[idx].0);
             });
+        let mut undo = false;
         egui::TopBottomPanel::bottom("status")
             .exact_height(shell::STATUS_H)
-            .show(ctx, |ui| self.status_line(ui));
+            .show(ctx, |ui| undo = self.status_line(ui));
+        if undo {
+            self.undo_current_tab();
+        }
         self.status_details(ctx);
         egui::TopBottomPanel::top("page_header")
             .exact_height(shell::HEADER_H)
@@ -1601,6 +1671,7 @@ impl eframe::App for GroupGeneratorApp {
             AppMode::Airfield => self.airfield_page(ctx),
             AppMode::Map => self.map_page(ctx),
         }
+        self.confirm_dialogs(ctx);
         help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
     }
 }
@@ -1634,6 +1705,16 @@ impl GroupGeneratorApp {
     }
 
     fn handle_shortcuts(&mut self, keys: &shell::Shortcuts) {
+        // An open confirmation takes the keyboard: Esc cancels it (Enter is in the dialog).
+        if self.confirm.is_some() {
+            if keys.escape {
+                self.confirm = None;
+            }
+            return;
+        }
+        if keys.undo {
+            self.undo_current_tab();
+        }
         if let Some((mode, _)) = keys.tab.and_then(|i| MODES.get(i)) {
             self.set_mode(*mode);
         }
@@ -1646,11 +1727,8 @@ impl GroupGeneratorApp {
         if keys.load {
             self.load_action();
         }
-        // Undo / redo only exist for Map drawings so far.
+        // Redo exists for Map drawings only.
         if self.mode == AppMode::Map {
-            if keys.undo {
-                self.remove_last_mark();
-            }
             if keys.redo {
                 self.redo_last_mark();
             }
@@ -1672,6 +1750,11 @@ impl GroupGeneratorApp {
 
     /// The header's primary button and Ctrl G.
     fn primary_action(&mut self) {
+        let mode = self.mode;
+        self.run_io(mode, |s| s.primary_action_inner());
+    }
+
+    fn primary_action_inner(&mut self) {
         match self.mode {
             AppMode::Template => self.generate_unit_template(),
             AppMode::Recon => match self.recon_submode {
@@ -1688,7 +1771,10 @@ impl GroupGeneratorApp {
     /// The header's first secondary button and Ctrl O. Fighter Pack has none.
     fn load_action(&mut self) {
         match self.mode {
-            AppMode::Template => self.load_template_group(),
+            AppMode::Template if self.is_dirty(AppMode::Template) => self.confirm = Some(Confirm::LoadTemplate),
+            AppMode::Template => self.load_template_now(),
+            AppMode::Map if self.is_dirty(AppMode::Map) => self.confirm = Some(Confirm::LoadBaseMap),
+            AppMode::Map => self.run_io(AppMode::Map, |s| s.load_base_map()),
             AppMode::Recon => match self.recon_submode {
                 ReconSubmode::New => self.add_recon_template(),
                 ReconSubmode::Rework => self.add_placed_packs(),
@@ -1696,7 +1782,6 @@ impl GroupGeneratorApp {
             AppMode::Fighter => {}
             AppMode::Exclusive => self.add_bomber_template(),
             AppMode::Airfield => self.load_airfield(),
-            AppMode::Map => self.load_base_map(),
         }
     }
 
@@ -1801,10 +1886,14 @@ impl GroupGeneratorApp {
         );
         self.recon_submode = new_submode;
         if reset {
-            match mode {
-                AppMode::Fighter => self.reset_fighter_pack(),
-                _ => self.reset_template_builder(),
-            }
+            self.confirm = match mode {
+                AppMode::Fighter => Some(Confirm::ResetFighter),
+                _ if self.tpl_seats.is_empty() => {
+                    self.reset_template_confirmed();
+                    None
+                }
+                _ => Some(Confirm::ResetTemplate),
+            };
         }
         if add_folder {
             self.add_recon_folder();
@@ -2092,6 +2181,7 @@ impl GroupGeneratorApp {
             self.tpl_preview_from_catalog = false;
         }
         if let Some(si) = remove {
+            self.record_tpl_undo(format!("Removed {}", self.tpl_seats[si].unit.label()));
             self.remove_tpl_seat(si);
         }
     }
@@ -2301,7 +2391,7 @@ impl GroupGeneratorApp {
                 ui.horizontal_wrapped(|ui| {
                     ui.checkbox(&mut self.tpl_spawn_reset, "Allow multiple spawns")
                         .on_hover_text(
-                            "One-shot: leave unchecked. Repeat spawn: Zone Out always cleans up and zeros DeathCount. If every unit is destroyed (OnPlaneDestroyed / OnKilled), cooldown pulses the spawner even while the player stays. A hiding unit is cleaned up when the player leaves, not mid-fight.",
+                            "Respawns after the cooldown once every unit is destroyed. Zone Out cleanup details are in Help › Template.",
                         );
                     if self.tpl_spawn_reset {
                         ui.label("Cooldown");
@@ -2616,6 +2706,7 @@ impl GroupGeneratorApp {
         }
         if let Some((si, oi)) = remove_order {
             if si < self.tpl_seats.len() && oi < self.tpl_seats[si].orders.len() {
+                self.record_tpl_undo(format!("Removed {}", self.tpl_seats[si].orders[oi].kind.label()));
                 self.tpl_seats[si].orders.remove(oi);
                 for hook in &mut self.tpl_seats[si].events {
                     remap_event_then(&mut hook.then, oi);
@@ -2625,6 +2716,7 @@ impl GroupGeneratorApp {
         }
         if let Some((si, ei)) = remove_event {
             if si < self.tpl_seats.len() && ei < self.tpl_seats[si].events.len() {
+                self.record_tpl_undo(format!("Removed {}", self.tpl_seats[si].events[ei].kind.label()));
                 self.tpl_seats[si].events.remove(ei);
                 self.tpl_select = Some(TplSelect::Seat(si));
             }
@@ -3051,6 +3143,7 @@ impl GroupGeneratorApp {
                             }
                         });
                     if ui.small_button("Remove order").clicked() {
+                        self.record_tpl_undo(format!("Removed {}", self.tpl_seats[seat].orders[order].kind.label()));
                         self.tpl_seats[seat].orders.remove(order);
                         for hook in &mut self.tpl_seats[seat].events {
                             remap_event_then(&mut hook.then, order);
@@ -3637,6 +3730,7 @@ impl GroupGeneratorApp {
                             }
                         });
                     if ui.small_button("Remove event").clicked() {
+                        self.record_tpl_undo(format!("Removed {}", self.tpl_seats[seat].events[event].kind.label()));
                         self.tpl_seats[seat].events.remove(event);
                         self.tpl_select = Some(TplSelect::Seat(seat));
                         return;
@@ -4222,7 +4316,7 @@ impl GroupGeneratorApp {
             &text,
             &locale,
             &format!(
-                "Wrote {} units ({}) with Zone IN/Out and MISSION END cleanup",
+                "Wrote {} units ({}) with Zone In / Zone Out and MISSION END cleanup",
                 opts.seats.len(),
                 opts.bring_up.label()
             ),
@@ -4864,6 +4958,277 @@ impl GroupGeneratorApp {
         }
     }
 
+    // ── Undo, confirmations, unsaved edits (README §6.3) ──────────────────
+
+    fn tpl_snapshot(&self) -> TemplateSnapshot {
+        TemplateSnapshot {
+            seats: self.tpl_seats.clone(),
+            select: self.tpl_select,
+            bring_up: self.tpl_bring_up,
+            spawn_reset: self.tpl_spawn_reset,
+            spawn_cooldown_min: self.tpl_spawn_cooldown_min,
+            place_layout: self.tpl_place_layout,
+            per_group: self.tpl_per_group,
+            zone_in: self.tpl_zone_in,
+            zone_out: self.tpl_zone_out,
+            zone_mix: self.tpl_zone_mix,
+            wp_spacing: self.tpl_wp_spacing,
+            wp_speed: self.tpl_wp_speed,
+            wp_altitude: self.tpl_wp_altitude,
+            wp_priority: self.tpl_wp_priority,
+            zone_coalition: self.tpl_zone_coalition,
+            loaded_path: self.tpl_loaded_path.clone(),
+        }
+    }
+
+    fn tpl_restore(&mut self, s: TemplateSnapshot) {
+        self.tpl_seats = s.seats;
+        self.tpl_select = s.select;
+        self.tpl_bring_up = s.bring_up;
+        self.tpl_spawn_reset = s.spawn_reset;
+        self.tpl_spawn_cooldown_min = s.spawn_cooldown_min;
+        self.tpl_place_layout = s.place_layout;
+        self.tpl_per_group = s.per_group;
+        self.tpl_zone_in = s.zone_in;
+        self.tpl_zone_out = s.zone_out;
+        self.tpl_zone_mix = s.zone_mix;
+        self.tpl_wp_spacing = s.wp_spacing;
+        self.tpl_wp_speed = s.wp_speed;
+        self.tpl_wp_altitude = s.wp_altitude;
+        self.tpl_wp_priority = s.wp_priority;
+        self.tpl_zone_coalition = s.zone_coalition;
+        self.tpl_loaded_path = s.loaded_path;
+        clamp_tpl_select(&mut self.tpl_select, &self.tpl_seats);
+    }
+
+    fn map_forces(&self) -> MapForces {
+        MapForces {
+            ships: self.map_ships.clone(),
+            ground_east: self.map_ground_east.clone(),
+            ground_nato: self.map_ground_nato.clone(),
+            armies: self.map_armies.clone(),
+            fighters: self.map_fighters.clone(),
+            imported_fighters: self.map_imported_fighters.clone(),
+            east_objectives: self.east_objectives.clone(),
+            nato_objectives: self.nato_objectives.clone(),
+            refs: self.map_refs.clone(),
+        }
+    }
+
+    fn restore_map_forces(&mut self, f: MapForces) {
+        self.map_ships = f.ships;
+        self.map_ground_east = f.ground_east;
+        self.map_ground_nato = f.ground_nato;
+        self.map_armies = f.armies;
+        self.map_fighters = f.fighters;
+        self.map_imported_fighters = f.imported_fighters;
+        self.east_objectives = f.east_objectives;
+        self.nato_objectives = f.nato_objectives;
+        self.map_refs = f.refs;
+        self.ship_drag = None;
+        self.ship_heading_drag = None;
+        self.ground_drag = None;
+        self.ground_heading_drag = None;
+        self.wp_drag = None;
+        self.wp_selected = None;
+        self.fighter_drag = None;
+        self.objective_drag = None;
+        self.reaim_map_ground();
+    }
+
+    /// Call before a Map Clear / Remove so Ctrl Z can bring the forces back.
+    fn record_map_undo(&mut self, label: String) {
+        self.map_undo.record(label, self.map_forces());
+        self.map_undo_marks = self.drawn_marks.len();
+    }
+
+    fn record_tpl_undo(&mut self, label: String) {
+        self.tpl_undo.record(label, self.tpl_snapshot());
+    }
+
+    /// The undo label shown in the status bar for the current tab.
+    fn undo_label(&self) -> Option<&str> {
+        match self.mode {
+            AppMode::Template => self.tpl_undo.label(),
+            AppMode::Recon => self.recon_undo.label(),
+            AppMode::Exclusive => self.bomber_undo.label(),
+            AppMode::Map => self.map_undo.label(),
+            AppMode::Fighter | AppMode::Airfield => None,
+        }
+    }
+
+    /// Ctrl Z and the status bar's Undo. On Map a drawing made after the
+    /// last Clear is undone first (the existing mark undo).
+    fn undo_current_tab(&mut self) {
+        let label = self.undo_label().map(str::to_owned);
+        match self.mode {
+            AppMode::Template => {
+                if let Some(s) = self.tpl_undo.take() {
+                    self.tpl_restore(s);
+                    self.sync_template_waypoint_speed();
+                }
+            }
+            AppMode::Recon => {
+                if let Some((sub, slots)) = self.recon_undo.take() {
+                    match sub {
+                        ReconSubmode::New => self.recon_slots = slots,
+                        ReconSubmode::Rework => self.recon_rework = slots,
+                    }
+                }
+            }
+            AppMode::Exclusive => {
+                if let Some(slots) = self.bomber_undo.take() {
+                    self.bomber_slots = slots;
+                }
+            }
+            AppMode::Map => {
+                if self.map_undo.label().is_some() && self.drawn_marks.len() <= self.map_undo_marks {
+                    if let Some(f) = self.map_undo.take() {
+                        self.restore_map_forces(f);
+                    }
+                } else {
+                    self.remove_last_mark();
+                    return;
+                }
+            }
+            AppMode::Fighter | AppMode::Airfield => return,
+        }
+        if let Some(label) = label {
+            self.status = Status::Info(format!("Undone: {label}."));
+        }
+    }
+
+    /// Everything the Template's Generate reads, as text. Equal text means no edits.
+    fn tpl_fingerprint(&self) -> String {
+        format!(
+            "{:?}",
+            (
+                &self.tpl_seats,
+                self.tpl_bring_up,
+                self.tpl_spawn_reset,
+                self.tpl_spawn_cooldown_min,
+                self.tpl_place_layout,
+                self.tpl_per_group,
+                self.tpl_zone_in,
+                self.tpl_zone_out,
+                self.tpl_wp_speed,
+                self.tpl_wp_altitude,
+                self.tpl_wp_priority,
+                self.tpl_zone_coalition,
+            )
+        )
+    }
+
+    fn map_fingerprint(&self) -> String {
+        let a = self.front_aabb;
+        format!(
+            "{:?}",
+            (
+                (&self.map_ships, &self.map_ground_east, &self.map_ground_nato, &self.map_fighters),
+                (&self.east_objectives, &self.nato_objectives, self.map_armies.len(), self.map_refs.len()),
+                (&self.custom_front_xz, &self.salients, &self.attack_arrows),
+                (a.x_min, a.x_max, a.z_min, a.z_max, self.front_t),
+            )
+        )
+    }
+
+    /// The current state counts as saved (startup, Load, Generate, Reset).
+    fn mark_saved(&mut self, mode: AppMode) {
+        match mode {
+            AppMode::Template => self.tpl_saved = self.tpl_fingerprint(),
+            AppMode::Map => self.map_saved = self.map_fingerprint(),
+            _ => {}
+        }
+    }
+
+    fn is_dirty(&self, mode: AppMode) -> bool {
+        match mode {
+            AppMode::Template => !self.tpl_seats.is_empty() && self.tpl_fingerprint() != self.tpl_saved,
+            AppMode::Map => self.map_fingerprint() != self.map_saved,
+            _ => false,
+        }
+    }
+
+    fn status_text(&self) -> String {
+        match &self.status {
+            Status::Idle => String::new(),
+            Status::Info(m) | Status::Error(m) => m.clone(),
+            Status::Warn { lead, items } => format!("{lead}{}", items.join("|")),
+        }
+    }
+
+    /// Runs a Load / Generate and marks the tab saved if it reported success.
+    fn run_io(&mut self, mode: AppMode, f: impl FnOnce(&mut Self)) {
+        let before = self.status_text();
+        f(self);
+        let ok = !matches!(self.status, Status::Error(_)) && self.status_text() != before;
+        if ok {
+            self.mark_saved(mode);
+        }
+    }
+
+    fn confirm_dialogs(&mut self, ctx: &egui::Context) {
+        let Some(kind) = self.confirm else {
+            return;
+        };
+        let (title, body, button) = match kind {
+            Confirm::ResetTemplate => {
+                let orders: usize = self.tpl_seats.iter().map(|s| s.orders.len()).sum();
+                (
+                    "Reset the template?",
+                    format!(
+                        "This clears {} units, {orders} orders and the placement settings. The catalog stays. You can undo with Ctrl Z.",
+                        self.tpl_seats.len()
+                    ),
+                    "Reset",
+                )
+            }
+            Confirm::ResetFighter => (
+                "Reset Fighter Pack?",
+                "This sets linked groups, flights, aircraft types and skills, country, altitudes and timers back to their defaults.".to_string(),
+                "Reset",
+            ),
+            Confirm::LoadTemplate => (
+                "Replace the template?",
+                "The template has edits that are not in a generated file. Loading replaces them. You can undo with Ctrl Z.".to_string(),
+                "Load…",
+            ),
+            Confirm::LoadBaseMap => (
+                "Replace the map?",
+                "The map has changes that are not in a generated base map. Loading replaces the AO, front, arrows and placed forces.".to_string(),
+                "Load…",
+            ),
+        };
+        let mut open = true;
+        if shell::confirm_dialog(ctx, &mut open, title, &body, button) {
+            match kind {
+                Confirm::ResetTemplate => self.reset_template_confirmed(),
+                Confirm::ResetFighter => self.reset_fighter_pack(),
+                Confirm::LoadTemplate => self.load_template_now(),
+                Confirm::LoadBaseMap => self.run_io(AppMode::Map, |s| s.load_base_map()),
+            }
+        }
+        if !open {
+            self.confirm = None;
+        }
+    }
+
+    fn reset_template_confirmed(&mut self) {
+        self.record_tpl_undo("Reset the template".into());
+        self.reset_template_builder();
+        self.mark_saved(AppMode::Template);
+    }
+
+    /// Load… on Template. Recorded for undo only when something was loaded.
+    fn load_template_now(&mut self) {
+        let before = self.tpl_snapshot();
+        let fp = self.tpl_fingerprint();
+        self.run_io(AppMode::Template, |s| s.load_template_group());
+        if self.tpl_fingerprint() != fp {
+            self.tpl_undo.record("Replaced by Load", before);
+        }
+    }
+
     // ── Army Generator (README §5.2) ───────────────────────────────────────
 
     fn recon_page(&mut self, ctx: &egui::Context) {
@@ -4894,12 +5259,21 @@ impl GroupGeneratorApp {
             return;
         }
         let side = shell::Side::from_eastern(self.recon_eastern);
-        if rework {
+        let removed = if rework {
             let label = (!self.recon_strip_randomizer).then_some("Activate %");
-            recon_slot_list(ui, &mut self.recon_rework, label, None, side);
+            recon_slot_list(ui, &mut self.recon_rework, label, None, side)
         } else {
             let icons = self.type_icons(self.recon_eastern);
-            recon_slot_list(ui, &mut self.recon_slots, Some("Influence"), Some(icons), side);
+            recon_slot_list(ui, &mut self.recon_slots, Some("Influence"), Some(icons), side)
+        };
+        if let Some(i) = removed {
+            let (sub, slots) = if rework {
+                (ReconSubmode::Rework, &mut self.recon_rework)
+            } else {
+                (ReconSubmode::New, &mut self.recon_slots)
+            };
+            self.recon_undo.record(format!("Removed {}", slots[i].info.name), (sub, slots.clone()));
+            slots.remove(i);
         }
     }
 
@@ -5692,6 +6066,8 @@ impl GroupGeneratorApp {
             self.bomber_selected = Some(j);
         }
         if remove {
+            self.bomber_undo
+                .record(format!("Removed plan {}", self.bomber_slots[i].info.name), self.bomber_slots.clone());
             self.bomber_slots.remove(i);
             self.bomber_selected = if self.bomber_slots.is_empty() { None } else { Some(i.min(self.bomber_slots.len() - 1)) };
         } else if duplicate {
@@ -6141,6 +6517,8 @@ impl GroupGeneratorApp {
                 let has_fighters = self.map_fighters.as_ref().is_some_and(|l| !l.spots.is_empty());
                 ui.add_enabled_ui(has_fighters, |ui| {
                     if ui.button("Clear").on_hover_text("Clear placed fighters").clicked() {
+                        let n = self.map_fighters.as_ref().map_or(0, |l| l.spots.len());
+                        self.record_map_undo(format!("Cleared {n} fighter groups"));
                         self.map_fighters = None;
                         self.map_imported_fighters.clear();
                         self.fighter_drag = None;
@@ -6173,6 +6551,8 @@ impl GroupGeneratorApp {
                 let has_objs = !self.east_objectives.is_empty() || !self.nato_objectives.is_empty();
                 ui.add_enabled_ui(has_objs, |ui| {
                     if ui.button("Clear").on_hover_text("Clear all objectives").clicked() {
+                        let n = self.east_objectives.len() + self.nato_objectives.len();
+                        self.record_map_undo(format!("Cleared {n} objectives"));
                         self.east_objectives.clear();
                         self.nato_objectives.clear();
                         self.objective_drag = None;
@@ -6206,6 +6586,9 @@ impl GroupGeneratorApp {
                 }
             });
         });
+        if self.recon_keep_positions {
+            shell::hint(ui, "Place is off: Keep loaded positions is on in Army Generator.", false);
+        }
         ui.horizontal(|ui| {
             if ui
                 .button("Load DPRK…")
@@ -6257,6 +6640,7 @@ impl GroupGeneratorApp {
                     || !self.map_armies.is_empty();
                 ui.add_enabled_ui(has_units, |ui| {
                     if ui.button("Clear").on_hover_text("Clear placed and loaded units").clicked() {
+                        self.record_map_undo(format!("Cleared {} units", e_n + n_n + ships));
                         self.map_ships = None;
                         self.map_ground_east = None;
                         self.map_ground_nato = None;
@@ -6305,6 +6689,8 @@ impl GroupGeneratorApp {
                 self.refresh_army_slot(i);
             }
             if let Some(i) = remove_at {
+                let name = self.map_armies[i].path.file_stem().and_then(|s| s.to_str()).unwrap_or("army").to_owned();
+                self.record_map_undo(format!("Removed {name}"));
                 self.map_armies.remove(i);
                 self.ship_drag = None;
                 self.ship_heading_drag = None;
@@ -6351,6 +6737,8 @@ impl GroupGeneratorApp {
             ui.add_space(4.0);
         }
         if let Some(i) = remove_at {
+            let name = self.map_refs[i].path.file_stem().and_then(|s| s.to_str()).unwrap_or("group").to_owned();
+            self.record_map_undo(format!("Removed {name}"));
             self.map_refs.remove(i);
         }
         if self.map_refs.is_empty() {
@@ -7930,7 +8318,7 @@ impl GroupGeneratorApp {
         } else {
             self.nato_objectives.as_slice()
         };
-        let side = if eastern { "Eastern" } else { "NATO" };
+        let side = if eastern { "DPRK" } else { "NATO" };
         let mut warnings = Vec::new();
         let terrain = match crate::watermap::WaterMap::builtin() {
             Ok(w) => w,
@@ -8255,7 +8643,7 @@ impl GroupGeneratorApp {
                 }
             }
         }
-        let side = if eastern { "Eastern" } else { "NATO" };
+        let side = if eastern { "DPRK" } else { "NATO" };
         let n = slot.copies.len();
         if let Some(slot) = self.map_armies.get_mut(idx) {
             slot.ships = if ship_spots.is_empty() {
@@ -8287,7 +8675,7 @@ impl GroupGeneratorApp {
         };
         let eastern = slot.eastern;
         let copies = slot.copies.clone();
-        let side = if eastern { "Eastern" } else { "NATO" };
+        let side = if eastern { "DPRK" } else { "NATO" };
         let objectives = if eastern {
             self.east_objectives.clone()
         } else {
@@ -8484,6 +8872,7 @@ impl GroupGeneratorApp {
             }
             let country = country_for_coalition(slot.eastern, self.country);
             apply_overrides(&mut root, "", country);
+            // Written into the generated .Group as a group name: keep "Eastern".
             let side = if slot.eastern { "Eastern" } else { "NATO" };
             let name = slot
                 .path
@@ -8523,7 +8912,7 @@ impl GroupGeneratorApp {
                 continue;
             }
             if slot.selected_triggers.is_empty() {
-                return Err(format!("Select a Zone IN for {}.", slot.info.name));
+                return Err(format!("Select a Zone In for {}.", slot.info.name));
             }
             let text = std::fs::read_to_string(&slot.path)
                 .map_err(|err| format!("Could not read template: {err}"))?;
@@ -8553,6 +8942,7 @@ impl GroupGeneratorApp {
         park_recon_copies_headed(&mut root, &spots, &headings);
         let country = country_for_coalition(layout.eastern, self.country);
         apply_overrides(&mut root, "", country);
+        // Written into the generated .Group as a group name: keep "Eastern".
         let side = if layout.eastern { "Eastern" } else { "NATO" };
         root.set_name(&format!("{side} Shipping"));
         Ok(vec![MapShipPack { root }])
@@ -8603,7 +8993,7 @@ impl GroupGeneratorApp {
                     continue;
                 }
                 if slot.selected_triggers.is_empty() {
-                    return Err(format!("Select a Zone IN for {}.", slot.info.name));
+                    return Err(format!("Select a Zone In for {}.", slot.info.name));
                 }
                 let text = std::fs::read_to_string(&slot.path)
                     .map_err(|err| format!("Could not read template: {err}"))?;
@@ -8638,6 +9028,7 @@ impl GroupGeneratorApp {
         );
         let country = country_for_coalition(layout.eastern, self.country);
         apply_overrides(&mut root, "", country);
+        // Written into the generated .Group as a group name: keep "Eastern".
         let side = if layout.eastern { "Eastern" } else { "NATO" };
         root.set_name(&format!("{side} Ground"));
         Ok(MapGroundPack { root })
@@ -8682,7 +9073,7 @@ impl GroupGeneratorApp {
                     .map(|s| s.pack)
                     .collect::<std::collections::BTreeSet<_>>()
                     .len();
-                let side = if eastern { "Eastern" } else { "NATO" };
+                let side = if eastern { "DPRK" } else { "NATO" };
                 self.status = Status::Info(format!(
                     "{side}: {n} groups in {packs} pack(s). Drag icons in Pan / Select AO to fine-tune."
                 ));
@@ -8746,6 +9137,7 @@ impl GroupGeneratorApp {
         for s in &layout.spots {
             by_pack.entry(s.pack).or_default().push(s);
         }
+        // Written into the generated .Group as a group name: keep "Eastern".
         let side = if layout.eastern { "Eastern" } else { "NATO" };
         let mut out = Vec::new();
         for (pack_id, mut members) in by_pack {
@@ -8920,12 +9312,12 @@ impl GroupGeneratorApp {
         self.front_focus = Some(battle.id);
     }
 
-    fn status_line(&self, ui: &mut egui::Ui) {
+    /// Returns true when the status bar's Undo is clicked.
+    fn status_line(&self, ui: &mut egui::Ui) -> bool {
         // An active map tool owns the status line until it is put down (README §6.2).
         if self.mode == AppMode::Map {
             if let Some(msg) = self.map_tool_status() {
-                shell::status_bar(ui, Severity::Info, &msg, None);
-                return;
+                return shell::status_bar(ui, Severity::Info, &msg, self.undo_label());
             }
         }
         let (severity, msg) = match &self.status {
@@ -8941,7 +9333,7 @@ impl GroupGeneratorApp {
             }
             Status::Error(msg) => (Severity::Error, msg.clone()),
         };
-        shell::status_bar(ui, severity, &msg, None);
+        shell::status_bar(ui, severity, &msg, self.undo_label())
     }
 
     /// What the one-line status bar cannot hold: warning bullets and the rest
@@ -9295,7 +9687,7 @@ impl GroupGeneratorApp {
             }
             if slot.selected_triggers.is_empty() {
                 self.status = Status::Error(format!(
-                    "Select a Zone IN for {}.",
+                    "Select a Zone In for {}.",
                     slot.info.name
                 ));
                 return;
@@ -9459,7 +9851,7 @@ impl GroupGeneratorApp {
                     return;
                 }
             } else if slot.selected_triggers.is_empty() {
-                self.status = Status::Error(format!("Select a Zone IN for {}.", slot.info.name));
+                self.status = Status::Error(format!("Select a Zone In for {}.", slot.info.name));
                 return;
             }
         }
@@ -10716,14 +11108,15 @@ fn paint_blueprint_grid(painter: &egui::Painter, rect: Rect) {
     }
 }
 
-/// One card per Army Generator template (README §5.2).
+/// One card per Army Generator template (README §5.2). Returns the index
+/// whose Remove was clicked; the caller records undo and removes it.
 fn recon_slot_list(
     ui: &mut egui::Ui,
-    slots: &mut Vec<ReconSlot>,
+    slots: &mut [ReconSlot],
     influence_label: Option<&str>,
     kind_icons: Option<[Option<TextureHandle>; 6]>,
     side: shell::Side,
-) {
+) -> Option<usize> {
     let mut remove = None;
     for i in 0..slots.len() {
         shell::card(ui, false, |ui| {
@@ -10815,9 +11208,7 @@ fn recon_slot_list(
         });
         ui.add_space(4.0);
     }
-    if let Some(i) = remove {
-        slots.remove(i);
-    }
+    remove
 }
 
 fn recon_dserver_note(ui: &mut egui::Ui) {
