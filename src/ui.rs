@@ -590,6 +590,9 @@ struct GroupGeneratorApp {
     status: Status,
     /// Each tab's status while another tab is shown, in `MODES` order (`set_mode` swaps).
     tab_status: [Status; 6],
+    /// Status text last seen, and the tab's edit fingerprint when it appeared (`age_status`).
+    status_seen: String,
+    status_fp: u64,
     tpl_path: Option<PathBuf>,
     /// Group currently being edited (Load group…), not the catalog path.
     tpl_loaded_path: Option<PathBuf>,
@@ -611,7 +614,8 @@ struct GroupGeneratorApp {
     /// `tpl_fingerprint` at the last Load / Generate / Reset.
     tpl_saved: String,
     recon_undo: shell::Undo<(ReconSubmode, Vec<ReconSlot>)>,
-    bomber_undo: shell::Undo<Vec<BomberSlot>>,
+    /// The plans before a Remove, and which plan was selected.
+    bomber_undo: shell::Undo<(Vec<BomberSlot>, Option<usize>)>,
     map_undo: shell::Undo<MapForces>,
     /// `drawn_marks.len()` right after the recorded Clear: marks above it were
     /// drawn later and undo first; once they are gone the Clear is next.
@@ -1823,6 +1827,8 @@ impl Default for GroupGeneratorApp {
             help_topic: HelpTopic::Overview,
             status: Status::Idle,
             tab_status: Default::default(),
+            status_seen: String::new(),
+            status_fp: 0,
             tpl_path: None,
             tpl_loaded_path: None,
             tpl_catalog: bundled_catalog(),
@@ -1916,6 +1922,7 @@ impl GroupGeneratorApp {
         self.confirm_dialogs(ctx);
         help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
         self.settle_undo();
+        self.age_status();
     }
 }
 
@@ -2570,11 +2577,23 @@ impl GroupGeneratorApp {
             });
         });
         let hint_h = 24.0;
-        egui::ScrollArea::both()
-            .id_salt("tpl_tree_scroll")
-            .auto_shrink([false, false])
-            .max_height((ui.available_height() - hint_h).max(40.0))
-            .show(ui, |ui| self.draw_template_seat_list(ui));
+        let max_h = (ui.available_height() - hint_h).max(40.0);
+        ui.scope(|ui| {
+            // A solid bar (not egui's hover-only floating one) shows that a
+            // long chain continues past the right edge.
+            ui.spacing_mut().scroll = egui::style::ScrollStyle {
+                foreground_color: true,
+                dormant_handle_opacity: 0.35,
+                dormant_background_opacity: 0.3,
+                ..egui::style::ScrollStyle::solid()
+            };
+            egui::ScrollArea::both()
+                .id_salt("tpl_tree_scroll")
+                .auto_shrink([false, false])
+                .max_height(max_h)
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                .show(ui, |ui| self.draw_template_seat_list(ui));
+        });
         if shell::hint(
             ui,
             "UNIT → OnSpawned → orders. ‹ › move the selected chip.",
@@ -5302,6 +5321,74 @@ impl GroupGeneratorApp {
         }
     }
 
+    /// Info and error messages describe the last action. Once the tab is
+    /// edited after one appeared, it gives way to the tab's idle hint, so the
+    /// status bar never reports something stale. Warnings stay until replaced.
+    fn age_status(&mut self) {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (self.mode as u8, self.tab_edit_text()).hash(&mut h);
+        let fp = h.finish();
+        let text = self.status_text();
+        if text != self.status_seen {
+            self.status_seen = text;
+            self.status_fp = fp;
+        } else if fp != self.status_fp && matches!(self.status, Status::Info(_) | Status::Error(_)) {
+            self.status = Status::Idle;
+            self.status_seen = self.status_text();
+            self.status_fp = fp;
+        }
+    }
+
+    /// The status as one string (`age_status` and tests read it).
+    fn status_text(&self) -> String {
+        match &self.status {
+            Status::Idle => String::new(),
+            Status::Info(m) | Status::Error(m) => m.clone(),
+            Status::Warn { lead, items } => format!("{lead}{}", items.join("|")),
+        }
+    }
+
+    /// Everything a user can edit on the current tab, as text (selection excluded).
+    fn tab_edit_text(&self) -> String {
+        match self.mode {
+            AppMode::Template => self.tpl_fingerprint(),
+            AppMode::Map => self.map_fingerprint(),
+            AppMode::Recon => {
+                let slots = match self.recon_submode {
+                    ReconSubmode::New => &self.recon_slots,
+                    ReconSubmode::Rework => &self.recon_rework,
+                };
+                format!(
+                    "{}{:?}{:?}",
+                    self.recon_submode == ReconSubmode::New,
+                    slots
+                        .iter()
+                        .map(|s| (&s.path, s.kind, &s.selected_triggers, s.influence, &s.restore_start))
+                        .collect::<Vec<_>>(),
+                    (self.recon_total, self.recon_percent, self.recon_strip_randomizer, self.recon_keep_positions, self.recon_eastern)
+                )
+            }
+            AppMode::Exclusive => format!(
+                "{:?}{}",
+                self.bomber_slots
+                    .iter()
+                    .map(|s| (&s.path, &s.selected_triggers, s.selected_completion))
+                    .collect::<Vec<_>>(),
+                self.bomber_keep_positions
+            ),
+            AppMode::Fighter => format!(
+                "{:?}",
+                (
+                    (self.linked_groups, self.flight_count, self.max_in_flight, self.country),
+                    (&self.type_enabled, &self.type_skill, &self.custom_path),
+                    (self.cooldown, self.reinforcement, self.delete_orders, self.altitude_min, self.altitude_max),
+                )
+            ),
+            AppMode::Airfield => format!("{:?}{}", self.airfield_path, self.airfield_western),
+        }
+    }
+
     /// Drop the current tab's undo snapshot once the tab is edited after it
     /// (shell::Undo::settle). Only cheap fields go into the fingerprint.
     fn settle_undo(&mut self) {
@@ -5395,8 +5482,10 @@ impl GroupGeneratorApp {
                 }
             }
             AppMode::Exclusive => {
-                if let Some(slots) = self.bomber_undo.take() {
+                if let Some((slots, selected)) = self.bomber_undo.take() {
                     self.bomber_slots = slots;
+                    // Undo selects the plan that came back, not its neighbour.
+                    self.bomber_selected = selected;
                 }
             }
             AppMode::Map => match self.map_undo_kind() {
@@ -5464,16 +5553,6 @@ impl GroupGeneratorApp {
             AppMode::Template => !self.tpl_seats.is_empty() && self.tpl_fingerprint() != self.tpl_saved,
             AppMode::Map => self.map_fingerprint() != self.map_saved,
             _ => false,
-        }
-    }
-
-    /// The status as one string (tests read it).
-    #[cfg(test)]
-    fn status_text(&self) -> String {
-        match &self.status {
-            Status::Idle => String::new(),
-            Status::Info(m) | Status::Error(m) => m.clone(),
-            Status::Warn { lead, items } => format!("{lead}{}", items.join("|")),
         }
     }
 
@@ -5614,9 +5693,17 @@ impl GroupGeneratorApp {
             let tiles_done = tiles.iter().filter(|&&(ti, tj, _)| store.tile_measured(ti, tj) > 0).count();
             let points = store.points().len();
             let pct = if total_probes > 0 { measured as f64 * 100.0 / total_probes as f64 } else { 0.0 };
-            ui.label(format!("{measured} of {total_probes} land nodes measured ({pct:.1}%)"));
+            ui.label(format!(
+                "{} of {} land nodes measured ({pct:.1}%)",
+                group_digits(measured as f64),
+                group_digits(total_probes as f64)
+            ));
             ui.label(
-                RichText::new(format!("{tiles_done} of {} tiles started · {points} extra points", tiles.len()))
+                RichText::new(format!(
+                    "{tiles_done} of {} tiles started · {} extra points",
+                    tiles.len(),
+                    group_digits(points as f64)
+                ))
                     .small()
                     .color(c::NEUTRAL_700),
             );
@@ -5633,7 +5720,7 @@ impl GroupGeneratorApp {
         shell::section_title(ui, "Measure", Some("export probes"));
         if ui
             .button("Export survey pass…")
-            .on_hover_text("390,625 probe points, 800 m apart over the whole map (sea and frame included)")
+            .on_hover_text("390 625 probe points, 800 m apart over the whole map (sea and frame included)")
             .clicked()
         {
             self.terrain_export_survey();
@@ -5652,8 +5739,9 @@ impl GroupGeneratorApp {
         shell::hint(
             ui,
             &format!(
-                "The AO touches {} tiles, {ao_probes} probes. Import a file in the editor, select all, set to ground, save, then Import snapped.",
-                ao_tiles.len()
+                "The AO touches {} tiles, {} probes. Import a file in the editor, select all, set to ground, save, then Import snapped.",
+                ao_tiles.len(),
+                group_digits(ao_probes as f64)
             ),
             false,
         );
@@ -6330,28 +6418,48 @@ impl GroupGeneratorApp {
                 "Group 1 · flights",
                 Some(&format!("{total} aircraft · sizes {}", sizes.join("/"))),
             );
+            // Stripes are painted by hand across the full table width; the
+            // grid's own stripes stop at its last column.
+            let table_w = ui.available_width();
+            let row_gap = 6.0;
             egui::Grid::new("fighter_flights")
                 .num_columns(5)
-                .striped(true)
-                .spacing([22.0, 6.0])
+                .spacing([22.0, row_gap])
                 .show(ui, |ui| {
                     for h in ["Flight", "Type", "Aircraft", "Role", "Altitude"] {
                         ui.label(RichText::new(h).font(FontId::new(12.0, theme::bold_family())));
                     }
                     ui.end_row();
+                    let left = ui.max_rect().left();
+                    let stripe = ui.visuals().faint_bg_color;
                     for (f, fl) in flights.iter().enumerate() {
                         let (low, high) = Self::flight_element_altitudes(&fl.seats);
-                        ui.label(crate::aircraft::plane_display_name(f, 0));
-                        ui.label(fl.type_label);
-                        ui.label(fl.seats.len().to_string());
-                        ui.label(Self::flight_role_text(&fl.seats));
-                        ui.label(RichText::new(Self::altitude_text(low, high)).monospace());
-                        ui.end_row();
+                        let slot = (f % 2 == 0).then(|| ui.painter().add(egui::Shape::Noop));
+                        let top = ui.cursor().top();
+                        Self::fighter_flight_row(ui, f, fl, low, high);
+                        if let Some(slot) = slot {
+                            let bottom = ui.cursor().top() - row_gap;
+                            let rect = egui::Rect::from_min_max(
+                                Pos2::new(left - 2.0, top - row_gap / 2.0),
+                                Pos2::new(left + table_w, bottom + row_gap / 2.0),
+                            );
+                            ui.painter().set(slot, egui::Shape::rect_filled(rect, 0.0, stripe));
+                        }
                     }
                 });
             ui.add_space(10.0);
             Self::fighter_altitude_strip(ui, &flights, self.altitude_min, self.altitude_max);
         });
+    }
+
+    /// One row of the Group 1 flights table (ends the grid row).
+    fn fighter_flight_row(ui: &mut egui::Ui, f: usize, fl: &crate::flights::FlightPreview, low: f64, high: Option<f64>) {
+        ui.label(crate::aircraft::plane_display_name(f, 0));
+        ui.label(fl.type_label);
+        ui.label(fl.seats.len().to_string());
+        ui.label(Self::flight_role_text(&fl.seats));
+        ui.label(RichText::new(Self::altitude_text(low, high)).monospace());
+        ui.end_row();
     }
 
     /// "Group logic is built in. 3 linked groups, chained through NodeGates,
@@ -6871,7 +6979,10 @@ impl GroupGeneratorApp {
         }
         if remove {
             self.bomber_undo
-                .record(format!("Removed plan {}", self.bomber_slots[i].info.name), self.bomber_slots.clone());
+                .record(
+                    format!("Removed plan {}", self.bomber_slots[i].info.name),
+                    (self.bomber_slots.clone(), self.bomber_selected),
+                );
             self.bomber_slots.remove(i);
             self.bomber_selected = if self.bomber_slots.is_empty() { None } else { Some(i.min(self.bomber_slots.len() - 1)) };
         } else if duplicate {
@@ -7651,20 +7762,23 @@ impl GroupGeneratorApp {
             self.front_aabb.x_min, self.front_aabb.x_max, self.front_aabb.z_min, self.front_aabb.z_max
         );
         let painter = ui.painter_at(area);
-        let g = painter.layout_no_wrap(ao, FontId::monospace(12.0), c::TEXT);
+        let hover = ui.input(|i| i.pointer.hover_pos());
+        // The readouts sit over the map; with the pointer on one they fade to
+        // 25 % so the map under them stays visible (and clickable: they are
+        // painted, not widgets).
+        let readout = |text: String, min: Pos2| -> Rect {
+            let g = painter.layout_no_wrap(text, FontId::monospace(12.0), c::TEXT);
+            let r = Rect::from_min_size(min, g.size() + Vec2::new(16.0, 10.0));
+            let a = if hover.is_some_and(|p| r.contains(p)) { 0.25 } else { 1.0 };
+            painter.rect_filled(r, 0.0, c::BG.gamma_multiply(a));
+            painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, c::DIVIDER.gamma_multiply(a)), egui::StrokeKind::Inside);
+            painter.galley_with_override_text_color(r.min + Vec2::new(8.0, 5.0), g, c::TEXT.gamma_multiply(a));
+            r
+        };
         // 52 px down so it clears the tool banner.
-        let ao_rect = Rect::from_min_size(area.min + Vec2::new(12.0, 52.0), g.size() + Vec2::new(16.0, 10.0));
-        painter.rect_filled(ao_rect, 0.0, c::BG);
-        painter.rect_stroke(ao_rect, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
-        painter.galley(ao_rect.min + Vec2::new(8.0, 5.0), g, c::TEXT);
+        let ao_rect = readout(ao, area.min + Vec2::new(12.0, 52.0));
         if let Some(text) = self.terrain_readout() {
-            {
-                let g = painter.layout_no_wrap(text, FontId::monospace(12.0), c::TEXT);
-                let r = Rect::from_min_size(ao_rect.left_bottom() + Vec2::new(0.0, 4.0), g.size() + Vec2::new(16.0, 10.0));
-                painter.rect_filled(r, 0.0, c::BG);
-                painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
-                painter.galley(r.min + Vec2::new(8.0, 5.0), g, c::TEXT);
-            }
+            readout(text, ao_rect.left_bottom() + Vec2::new(0.0, 4.0));
         }
 
         let chip = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {

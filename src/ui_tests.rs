@@ -1036,12 +1036,52 @@ fn a_second_identical_generate_marks_the_tab_saved() {
     assert_eq!(h.status(), first, "same message as the first Generate");
     assert!(!h.app.is_dirty(AppMode::Template), "the second Generate counts as saved");
 
-    // A cancelled dialog reports nothing: the status stays and the edits stay unsaved.
+    // An edit retires the "Wrote …" message (age_status); a cancelled dialog
+    // then reports nothing: the status stays and the edits stay unsaved.
     h.app.tpl_zone_in += 500.0;
+    h.settle();
+    assert_eq!(h.status(), "", "the Generate message is gone after an edit");
     dialog::answer(Vec::new());
     h.click("Generate File");
-    assert_eq!(h.status(), first);
+    assert_eq!(h.status(), "");
     assert!(h.app.is_dirty(AppMode::Template));
+}
+
+/// Info messages give way to the idle hint once the tab is edited; warnings stay.
+#[test]
+fn status_messages_retire_after_the_next_edit() {
+    let mut h = Harness::new("agestatus");
+    h.tab("Fighter Pack");
+    h.app.status = Status::Info("Fighter Pack reset to the default settings.".into());
+    h.settle();
+    assert!(!h.status().is_empty(), "a fresh message stays while nothing changes");
+    h.app.flight_count += 1;
+    h.settle();
+    assert_eq!(h.status(), "", "an edit retires it");
+    h.app.status = Status::Warn { lead: "Placed with notes: ".into(), items: vec!["one".into()] };
+    h.settle();
+    h.app.flight_count -= 1;
+    h.settle();
+    assert!(h.status().starts_with("Placed with notes"), "warnings stay until replaced");
+}
+
+/// Undoing a Remove on Exclusive Activation selects the plan that came back.
+#[test]
+fn exclusive_undo_reselects_the_removed_plan() {
+    let mut h = Harness::new("exundo");
+    h.tab("Exclusive Activation");
+    dialog::answer(vec![repo("TemplateExamples/Exclusive_Activation_6plan.Group")]);
+    h.key_with(Key::O, CTRL);
+    h.settle();
+    assert_eq!(h.app.bomber_slots.len(), 6);
+    h.app.bomber_selected = Some(5);
+    h.settle();
+    h.click("Remove");
+    assert_eq!(h.app.bomber_slots.len(), 5);
+    assert_eq!(h.app.bomber_selected, Some(4), "the neighbour is selected after Remove");
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.bomber_slots.len(), 6);
+    assert_eq!(h.app.bomber_selected, Some(5), "Undo selects the restored plan");
 }
 
 // ── Map ───────────────────────────────────────────────────────────────────
