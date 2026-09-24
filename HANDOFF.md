@@ -124,7 +124,7 @@ writes the UTF-16 translation sidecars (`.eng`, `.rus`, …).
 | P4 | **Split `ui.rs`** (10k lines) into per-mode panel modules, with no behavior change | Prerequisite for localization. Lowers merge risk for every UI task. | M–L |
 | P5 | **UI localization:** string table plus a language picker | Author todo. Easier after P4. | L |
 | P6 | **Manual rewrite** (author todo) | Should follow the feature changes so it does not go stale twice. | M |
-| P7 | **Template altitude follow-ups** (see §5 open questions) | Smaller correctness items. | S |
+| P7 | **Template altitude follow-ups** (see §5) | Wingmen match lead: DONE. Copy-attributes ceiling clamp: awaiting user. Persistence: closed. | S |
 
 ## 5. Feature log
 
@@ -151,15 +151,24 @@ altitude to automatically be set at 50% of operating ceiling."
   they now airstart at half their ceiling. To build a runway or parked
   flight, turn auto off.
 
-**Open questions / follow-ups (P7):**
-- **Mixed-model formations.** Each seat uses its own model's ceiling, so a
-  MiG lead and an La-11 wingman spawn at different heights. Should followers
-  match their lead?
-- **Ceiling clamp on copy.** "Copy attributes to all" copies altitude
-  without clamping to the target aircraft's ceiling. This is pre-existing
-  behavior.
-- **Persistence.** The checkbox resets to on at every app start. The app has
-  no settings persistence.
+**Follow-ups (P7). User rulings 2026-09-23:**
+- **Mixed-model formations. RULED: wingmen match their lead.** DONE, merge
+  `72106da`. With auto on, a wingman takes its lead's altitude, capped at
+  its own ceiling. A ground-start lead keeps its wingmen on the ground with
+  the same engine state. Moving the lead's slider moves its wingmen, and
+  switching a seat to Follows adopts the lead's height. The per-seat button
+  reads **Match lead** on a wingman. 381 tests pass. Smoke-tested: MiG
+  lead at 7500 m brings its La-11 wingman to 7500 m (not 5075 m); dragging
+  the lead to 1500 m moves the wingman to 1500 m. Not synced: a ground-start
+  lead's Engine (Running/Warm/Cold) choice made afterwards.
+- **Ceiling clamp on copy. OPEN, pending the user.** This is a pre-existing
+  bug, not a design question. "Copy attributes to all" copies the selected
+  plane's altitude onto every other plane without capping it at that
+  plane's own ceiling. For example, an F-86 at 12,000 m copied onto an
+  IL-10 (6,950 m ceiling) gives 12,000 m. The proposed fix is a one-line
+  clamp in `copy_seat_attributes`. Awaiting the user's go-ahead.
+- **Persistence. RULED: default on is correct.** Resetting to on at each
+  app start is the intended behavior. No persistence is needed. Closed.
 
 **Status: DONE, merged to `main` 2026-09-23** (`aab880c`, merge `9389c6a`).
 Claude implemented it (user waiver: Astra is unavailable on the account).
@@ -185,3 +194,4 @@ continue at delegation-loop step 3 (§2).
 |---|---|---|
 | 2026-09-23 | Claude (Fable role) | Created working copy and git baseline (`.gitattributes * -text`). Verified 371 tests pass. Wrote this handoff. Designed P1 and delegated it to Astra (job `20260924024246-e38e95ca`, branch `codex/auto-altitude`). The job failed because the Codex CLI is not installed. The user will install Codex; the prompt is saved in `handoff/`. |
 | 2026-09-23 | Claude (Fable role) | Codex was installed, but the broker kept ENOENT because Claude never fully quit (the lookup is cached). Ran the CLI directly and found the default model is **gpt-6-luna**. Astra is not on the account, so I stopped the run before it made any edits. The user chose Claude to implement P1. Built on `claude/auto-altitude`, 376 tests pass, smoke-tested in the app, merged to `main`. An untracked `handoff/R1-historical-reference-codex-prompt.md` (a Korea 1950–53 unit-reference task, not written by Claude) was left untouched and was not run; it waits for the user. |
+| 2026-09-23 | Claude (Fable role) | User rulings on P7: wingmen match their lead (built on `claude/auto-altitude-follow-lead`, 381 tests, smoke-tested, merged `72106da`), and auto altitude default on is correct (closed). Explained that the copy-attributes clamp is a bug, not a question; awaiting the go-ahead. |
