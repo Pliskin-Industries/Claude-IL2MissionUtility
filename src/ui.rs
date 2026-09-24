@@ -431,6 +431,8 @@ struct GroupGeneratorApp {
     tpl_model_tex: HashMap<String, TextureHandle>,
     tpl_seats: Vec<TemplateSeat>,
     tpl_select: Option<TplSelect>,
+    /// Unit card being dragged in the Units list (index at drag start).
+    tpl_card_drag: Option<usize>,
     tpl_bring_up: BringUp,
     tpl_spawn_reset: bool,
     tpl_spawn_cooldown_min: f32,
@@ -527,78 +529,72 @@ fn kinds_in_same_group(kind: OrderKind, unit_kind: CatalogKind) -> Vec<OrderKind
     }
 }
 
-fn draw_tree_add_buttons(
-    ui: &mut egui::Ui,
-    si: usize,
-    unit_kind: CatalogKind,
-    can_orders: bool,
-    add: &mut Option<AddTreeItem>,
-) {
-    if can_orders {
-        egui::Grid::new(format!("tree_add_{si}"))
-            .num_columns(2)
-            .spacing([2.0, 2.0])
-            .show(ui, |ui| {
-                ui.menu_button("+ Command", |ui| {
-                    for k in OrderKind::commands(unit_kind) {
-                        if ui.button(k.label()).clicked() {
-                            *add = Some(AddTreeItem::Order { seat: si, kind: k });
-                            ui.close();
-                        }
-                    }
-                })
-                .response
-                .on_hover_text("Add a command to the order tree");
-                ui.menu_button("+ Event", |ui| {
-                    ui.set_max_height(280.0);
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for k in EntityEvent::available(unit_kind) {
-                            if ui.button(k.label()).clicked() {
-                                *add = Some(AddTreeItem::Event { seat: si, kind: *k });
-                                ui.close();
-                            }
-                        }
-                    });
-                })
-                .response
-                .on_hover_text("Add an OnEvent");
-                ui.end_row();
-                ui.menu_button("+ Special", |ui| {
-                    for k in OrderKind::specials(unit_kind) {
-                        if ui.button(k.label()).clicked() {
-                            *add = Some(AddTreeItem::Order { seat: si, kind: k });
-                            ui.close();
-                        }
-                    }
-                })
-                .response
-                .on_hover_text("Add Time on Target, Timer, or Mission Complete");
-                ui.menu_button("+ Report", |ui| {
-                    for k in OrderKind::reports(unit_kind) {
-                        if ui.button(k.label()).clicked() {
-                            *add = Some(AddTreeItem::Order { seat: si, kind: k });
-                            ui.close();
-                        }
-                    }
-                })
-                .response
-                .on_hover_text("Add an OnReport on the matching command");
-            });
-    } else {
-        ui.menu_button("+ Event", |ui| {
-            ui.set_max_height(280.0);
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for k in EntityEvent::available(unit_kind) {
-                    if ui.button(k.label()).clicked() {
-                        *add = Some(AddTreeItem::Event { seat: si, kind: *k });
-                        ui.close();
-                    }
+/// "+ Order ▾" in the order tree header: commands, specials and reports for
+/// the selected unit.
+fn tree_order_menu(ui: &mut egui::Ui, si: usize, unit_kind: CatalogKind, add: &mut Option<AddTreeItem>) {
+    ui.menu_button("+ Order ▾", |ui| {
+        let groups: [(&str, Vec<OrderKind>); 3] = [
+            ("Command", OrderKind::commands(unit_kind).collect()),
+            ("Special", OrderKind::specials(unit_kind).collect()),
+            ("Report", OrderKind::reports(unit_kind).collect()),
+        ];
+        for (heading, kinds) in groups {
+            if kinds.is_empty() {
+                continue;
+            }
+            ui.label(RichText::new(heading).small().color(c::NEUTRAL_700));
+            for k in kinds {
+                if ui.button(k.label()).clicked() {
+                    *add = Some(AddTreeItem::Order { seat: si, kind: k });
+                    ui.close();
                 }
-            });
-        })
-        .response
-        .on_hover_text("Add an OnEvent");
+            }
+        }
+    })
+    .response
+    .on_hover_text("Add a command, Time on Target / Timer / Mission Complete, or an OnReport to the selected unit")
+    .on_disabled_hover_text("Select a lead or independent unit. Wingmen take no orders.");
+}
+
+/// "+ Event ▾" in the order tree header: OnEvents for the selected unit.
+fn tree_event_menu(ui: &mut egui::Ui, si: usize, unit_kind: CatalogKind, add: &mut Option<AddTreeItem>) {
+    ui.menu_button("+ Event ▾", |ui| {
+        ui.set_max_height(280.0);
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for k in EntityEvent::available(unit_kind) {
+                if ui.button(k.label()).clicked() {
+                    *add = Some(AddTreeItem::Event { seat: si, kind: *k });
+                    ui.close();
+                }
+            }
+        });
+    })
+    .response
+    .on_hover_text("Add an OnEvent to the selected unit")
+    .on_disabled_hover_text("Select a unit first.");
+}
+
+/// DPRK for the 500-series countries, NATO for the 600-series, none otherwise.
+fn seat_side(country: i32) -> Option<shell::Side> {
+    match country / 100 {
+        5 => Some(shell::Side::Dprk),
+        6 => Some(shell::Side::Nato),
+        _ => None,
     }
+}
+
+fn paint_seat_marker(painter: &egui::Painter, center: Pos2, size: f32, country: i32) {
+    match seat_side(country) {
+        Some(side) => shell::paint_side_marker(painter, center, size, side),
+        None => {
+            painter.rect_filled(Rect::from_center_size(center, Vec2::splat(size * 0.7)), 1.0, c::NEUTRAL_500);
+        }
+    }
+}
+
+/// Condensed uppercase section heading (README §8 type scale).
+fn section_heading(text: &str) -> RichText {
+    RichText::new(text.to_uppercase()).text_style(TextStyle::Name("section".into()))
 }
 
 fn default_template_seats() -> Vec<TemplateSeat> {
@@ -613,20 +609,9 @@ fn country_short(country: i32) -> String {
         .unwrap_or_else(|| country.to_string())
 }
 
-/// Preview color for a country's side: NATO (teal), Eastern (red), neutral (grey).
+/// Formation-view color for a country's side: DPRK, NATO, or neutral grey.
 fn side_color(country: i32) -> Color32 {
-    if country / 100 == 6 {
-        Color32::from_rgb(0, 120, 150)   // NATO
-    } else if country / 100 == 5 {
-        Color32::from_rgb(155, 0, 0)      // Eastern
-    } else {
-        Color32::from_rgb(140, 140, 140)  // neutral / unassigned
-    }
-}
-
-fn section_title(ui: &mut egui::Ui, title: &str) {
-    ui.label(RichText::new(title).strong().size(15.0));
-    ui.add_space(4.0);
+    seat_side(country).map_or(c::NEUTRAL_600, shell::Side::color)
 }
 
 fn clamp_tpl_select(select: &mut Option<TplSelect>, seats: &[TemplateSeat]) {
@@ -697,58 +682,77 @@ fn order_chip_label(oi: usize, kind: OrderKind, extra: usize) -> String {
     }
 }
 
-fn draw_two_line_chip(
+/// Order-tree chip: hairline border, accent border + fill when selected,
+/// dashed border for events.
+fn draw_tree_chip(
     ui: &mut egui::Ui,
     title: &str,
     detail: &str,
     fill: Color32,
-    min_size: Vec2,
+    selected: bool,
+    dashed: bool,
+    size: Vec2,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(min_size, Sense::click());
-    let visuals = ui.style().interact(&response);
-    ui.painter().rect(
-        rect,
-        visuals.corner_radius,
-        fill,
-        visuals.bg_stroke,
-        egui::StrokeKind::Inside,
-    );
-    let title_font = ui
-        .style()
-        .text_styles
-        .get(&TextStyle::Button)
-        .cloned()
-        .unwrap_or_else(|| FontId::proportional(12.0));
-    let detail_font = FontId::proportional(10.0);
-    let color = visuals.text_color();
-    let c = rect.center();
-    if detail.is_empty() {
-        ui.painter()
-            .text(c, Align2::CENTER_CENTER, title, title_font, color);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let p = ui.painter();
+    let (fill, stroke) = if selected {
+        (c::ACCENT_200, Stroke::new(1.5_f32, c::ACCENT))
+    } else if response.hovered() {
+        (c::ACCENT_100, Stroke::new(1.0_f32, c::ACCENT))
     } else {
-        ui.painter().text(
-            Pos2::new(c.x, c.y - 7.0),
-            Align2::CENTER_CENTER,
-            title,
-            title_font,
-            color,
-        );
-        ui.painter().text(
-            Pos2::new(c.x, c.y + 8.0),
-            Align2::CENTER_CENTER,
-            detail,
-            detail_font,
-            color,
-        );
+        (fill, Stroke::new(1.0_f32, c::NEUTRAL_500))
+    };
+    p.rect_filled(rect, 2.0, fill);
+    if dashed && !selected {
+        let r = rect.shrink(0.5);
+        let pts = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+        p.extend(egui::Shape::dashed_line(&pts, stroke, 4.0, 3.0));
+    } else {
+        p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+    }
+    let title_font = FontId::new(13.0, if selected { theme::bold_family() } else { FontFamily::Proportional });
+    let c0 = rect.center();
+    let clip = p.with_clip_rect(rect.shrink(3.0));
+    if detail.is_empty() {
+        clip.text(c0, Align2::CENTER_CENTER, title, title_font, c::TEXT);
+    } else {
+        clip.text(Pos2::new(c0.x, c0.y - 7.0), Align2::CENTER_CENTER, title, title_font, c::TEXT);
+        clip.text(Pos2::new(c0.x, c0.y + 8.0), Align2::CENTER_CENTER, detail, FontId::proportional(12.0), c::NEUTRAL_700);
     }
     response
 }
 
+/// The unit chip that starts each order-tree row: side marker, "{n} · {model}".
+fn draw_tree_unit_chip(ui: &mut egui::Ui, n: usize, label: &str, country: i32, selected: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(TREE_UNIT_W, TREE_CHIP_H), Sense::click());
+    let p = ui.painter();
+    let (fill, stroke) = if selected {
+        (c::ACCENT_200, Stroke::new(1.5_f32, c::ACCENT))
+    } else if response.hovered() {
+        (c::ACCENT_100, Stroke::new(1.0_f32, c::ACCENT))
+    } else {
+        (c::NEUTRAL_100, Stroke::new(1.0_f32, c::NEUTRAL_500))
+    };
+    p.rect_filled(rect, 2.0, fill);
+    p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+    paint_seat_marker(p, Pos2::new(rect.left() + 12.0, rect.center().y), 11.0, country);
+    p.with_clip_rect(rect.shrink(3.0)).text(
+        Pos2::new(rect.left() + 22.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        format!("{n} · {label}"),
+        FontId::new(13.0, theme::bold_family()),
+        c::TEXT,
+    );
+    response
+}
+
 const TREE_ARROW_SLOT: f32 = 18.0;
-const TREE_CHIP_H: f32 = 40.0;
-const TREE_CHIP_W: f32 = 148.0;
-const TREE_ROW_GAP: f32 = 8.0;
-const TREE_UNIT_GAP: f32 = 20.0;
+/// Two text lines at 13 + 12 px; README §6.6 asks for at least 28.
+const TREE_CHIP_H: f32 = 36.0;
+const TREE_CHIP_W: f32 = 140.0;
+const TREE_UNIT_W: f32 = 98.0;
+const TREE_ROW_GAP: f32 = 6.0;
+const TREE_UNIT_GAP: f32 = 10.0;
 
 fn order_chip_size(_kind: OrderKind) -> Vec2 {
     Vec2::new(TREE_CHIP_W, TREE_CHIP_H)
@@ -845,32 +849,6 @@ fn sync_train_mask_to_carriages(seat: &mut TemplateSeat) {
     seat.mod_mask = payloads::encode_mod_mask(mask);
 }
 
-fn centered_fill_button(ui: &mut egui::Ui, label: &str, fill: Color32, min_size: Vec2) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(min_size, Sense::click());
-    let visuals = ui.style().interact(&response);
-    ui.painter().rect(
-        rect,
-        visuals.corner_radius,
-        fill,
-        visuals.bg_stroke,
-        egui::StrokeKind::Inside,
-    );
-    let font = ui
-        .style()
-        .text_styles
-        .get(&TextStyle::Button)
-        .cloned()
-        .unwrap_or_else(|| FontId::proportional(13.0));
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        label,
-        font,
-        visuals.text_color(),
-    );
-    response
-}
-
 fn tree_arrow_slot(ui: &mut egui::Ui, show: bool, left: bool, enabled: bool) -> bool {
     if show {
         let mut clicked = false;
@@ -927,7 +905,7 @@ fn draw_template_order_chip(
         } else {
             ""
         };
-        let resp = draw_two_line_chip(ui, &text, detail, fill, order_chip_size(kind));
+        let resp = draw_tree_chip(ui, &text, detail, fill, selected, false, order_chip_size(kind));
         if !hover.is_empty() {
             resp.clone().on_hover_text(hover);
         }
@@ -951,7 +929,8 @@ fn draw_template_event_chip(
     ei: usize,
     kind: EntityEvent,
     selected: bool,
-    selected_fill: Color32,
+    // Selection is drawn by draw_tree_chip; kept for the shared call shape.
+    _selected_fill: Color32,
     event_fill: Color32,
     clicked: &mut Option<TplSelect>,
     remove_event: &mut Option<(usize, usize)>,
@@ -960,10 +939,13 @@ fn draw_template_event_chip(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.add_space(TREE_ARROW_SLOT);
-        let resp = centered_fill_button(
+        let resp = draw_tree_chip(
             ui,
             kind.label(),
-            if selected { selected_fill } else { event_fill },
+            "",
+            event_fill,
+            selected,
+            true,
             Vec2::new(TREE_CHIP_W, TREE_CHIP_H),
         );
         if resp.clicked() {
@@ -990,10 +972,7 @@ fn split_trailing_events(mut laid: Vec<Vec<OrderTreeNode>>) -> (Vec<Vec<OrderTre
 }
 
 fn tree_line_stroke() -> Stroke {
-    Stroke::new(
-        1.8_f32,
-        Color32::from_rgba_unmultiplied(90, 130, 145, 200),
-    )
+    Stroke::new(1.0_f32, c::NEUTRAL_500)
 }
 
 fn push_polyline(shapes: &mut Vec<egui::Shape>, pts: Vec<Pos2>, stroke: Stroke) {
@@ -1543,6 +1522,7 @@ impl Default for GroupGeneratorApp {
             tpl_model_tex: HashMap::new(),
             tpl_seats: default_template_seats(),
             tpl_select: None,
+            tpl_card_drag: None,
             tpl_bring_up: BringUp::Activate,
             tpl_spawn_reset: false,
             tpl_spawn_cooldown_min: 5.0,
@@ -1588,19 +1568,23 @@ impl eframe::App for GroupGeneratorApp {
             .exact_height(shell::HEADER_H)
             .frame(egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin::symmetric(18, 0)))
             .show(ctx, |ui| self.page_header_bar(ui));
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // One scroll position per tab; the window itself never scrolls.
-            egui::ScrollArea::vertical()
-                .id_salt(("page", self.mode as u8))
-                .show(ui, |ui| match self.mode {
-                    AppMode::Template => self.template_panel(ui),
-                    AppMode::Fighter => self.fighter_panel(ui),
-                    AppMode::Exclusive => self.bomber_panel(ui),
-                    AppMode::Recon => self.recon_panel(ui),
-                    AppMode::Airfield => self.airfield_panel(ui),
-                    AppMode::Map => self.map_panel(ui),
-                });
-        });
+        if self.mode == AppMode::Template {
+            self.template_page(ctx);
+        } else {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // One scroll position per tab; the window itself never scrolls.
+                egui::ScrollArea::vertical()
+                    .id_salt(("page", self.mode as u8))
+                    .show(ui, |ui| match self.mode {
+                        AppMode::Template => {}
+                        AppMode::Fighter => self.fighter_panel(ui),
+                        AppMode::Exclusive => self.bomber_panel(ui),
+                        AppMode::Recon => self.recon_panel(ui),
+                        AppMode::Airfield => self.airfield_panel(ui),
+                        AppMode::Map => self.map_panel(ui),
+                    });
+            });
+        }
         help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
     }
 }
@@ -1805,158 +1789,488 @@ impl GroupGeneratorApp {
         }
     }
 
-    fn template_panel(&mut self, ui: &mut egui::Ui) {
+    /// Template tab (README §5.1): add units and the unit list on the left, the
+    /// formation view over the order tree in the center, the selection and
+    /// settings on the right. Each panel scrolls on its own.
+    fn template_page(&mut self, ctx: &egui::Context) {
         self.sync_template_zone_defaults();
-        ui.label(
-            RichText::new(
-                "Build a proximity-triggered unit group. This mode does not write NodeGates, but is intended to be used with the Army Generator mode.",
-            )
-            .small(),
-        );
-        ui.add_space(8.0);
+        egui::SidePanel::left("tpl_left")
+            .exact_width(270.0)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("tpl_left_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add_space(6.0);
+                        self.template_add_units_section(ui);
+                        ui.add_space(6.0);
+                        ui.separator();
+                        self.template_units_section(ui);
+                    });
+            });
+        egui::SidePanel::right("tpl_right")
+            .exact_width(304.0)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("tpl_right_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        // Composite widgets (slider + value) do not wrap, so keep them narrow.
+                        ui.spacing_mut().slider_width = 96.0;
+                        ui.add_space(6.0);
+                        self.template_selection_block(ui);
+                        ui.add_space(6.0);
+                        ui.separator();
+                        self.template_bring_up_section(ui);
+                        self.template_placement_section(ui);
+                        self.template_waypoints_section(ui);
+                        self.template_catalog_section(ui);
+                    });
+            });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0))
+            .show(ctx, |ui| {
+                egui::TopBottomPanel::bottom("tpl_tree")
+                    .exact_height(236.0)
+                    .show_inside(ui, |ui| self.template_order_tree(ui));
+                self.draw_template_schematic(ui);
+            });
+    }
 
-        ui.columns(2, |cols| {
-            self.template_bring_up_section(&mut cols[0]);
-            self.template_placement_section(&mut cols[1]);
-        });
-        ui.add_space(10.0);
-        self.template_formation_view_section(ui);
-        ui.add_space(10.0);
-        self.template_add_units_section(ui);
-        ui.add_space(10.0);
-        self.template_unit_list_section(ui);
-        ui.add_space(10.0);
-        self.template_waypoints_section(ui);
-        ui.add_space(10.0);
-        self.template_catalog_section(ui);
-        ui.add_space(12.0);
+    /// The seat the current selection belongs to (unit, order or event).
+    fn selected_tpl_seat(&self) -> Option<usize> {
+        match self.tpl_select {
+            Some(
+                TplSelect::Seat(s) | TplSelect::Order { seat: s, .. } | TplSelect::Event { seat: s, .. },
+            ) if s < self.tpl_seats.len() => Some(s),
+            _ => None,
+        }
+    }
+
+    fn template_catalog_label(&self) -> String {
+        self.tpl_path
+            .as_ref()
+            .and_then(|p| p.file_stem())
+            .and_then(|s| s.to_str())
+            .map_or_else(|| "Built-in catalog".to_string(), str::to_owned)
+    }
+
+    fn use_builtin_catalog(&mut self) {
+        self.tpl_path = None;
+        self.tpl_catalog = bundled_catalog();
+        self.tpl_class = None;
+        self.tpl_country = None;
+        self.tpl_add_pick = 0;
+        self.tpl_preview_from_catalog = false;
     }
 
     fn template_catalog_section(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            section_title(ui, "Catalog");
-            ui.horizontal(|ui| {
+        let summary = if self.tpl_path.is_some() {
+            self.template_catalog_label()
+        } else {
+            "Built-in".to_string()
+        };
+        shell::settings_section(ui, "tpl_catalog", "Catalog", &summary, false, |ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("Load catalog…").clicked() {
                     self.load_unit_catalog();
                 }
                 if ui.button("Add group…").clicked() {
                     self.add_user_catalog_group();
                 }
-                if ui.small_button("Use built-in catalog").clicked() {
-                    self.tpl_path = None;
-                    self.tpl_catalog = bundled_catalog();
-                    self.tpl_class = None;
-                    self.tpl_country = None;
-                    self.tpl_add_pick = 0;
-                    self.tpl_preview_from_catalog = false;
+                if ui.button("Use built-in catalog").clicked() {
+                    self.use_builtin_catalog();
                 }
-                let label = self
-                    .tpl_path
-                    .as_ref()
-                    .and_then(|p| p.file_stem())
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("Built-in ModelTypes + Fixed Objects");
-                ui.label(RichText::new(label).italics());
             });
+            let label = self
+                .tpl_path
+                .as_ref()
+                .and_then(|p| p.file_stem())
+                .and_then(|s| s.to_str())
+                .unwrap_or("Built-in ModelTypes + Fixed Objects");
+            ui.label(RichText::new(label).italics().color(c::NEUTRAL_700));
         });
     }
 
     fn template_add_units_section(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            section_title(ui, "Add Units");
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Kind").strong());
-                for kind in CatalogKind::ALL {
-                    if ui
-                        .selectable_label(self.tpl_kind == kind, kind.label())
-                        .clicked()
-                    {
-                        self.tpl_kind = kind;
-                        self.tpl_class = None;
-                        self.tpl_country = None;
-                        self.tpl_add_pick = 0;
-                        self.tpl_preview_from_catalog = true;
+        let catalog = self.template_catalog_label();
+        ui.horizontal(|ui| {
+            ui.label(section_heading("Add units"));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.menu_button(RichText::new(format!("{catalog} ▾")).small().color(c::NEUTRAL_700), |ui| {
+                    if ui.button("Load catalog…").clicked() {
+                        self.load_unit_catalog();
+                        ui.close();
+                    }
+                    if ui.button("Add group…").clicked() {
+                        self.add_user_catalog_group();
+                        ui.close();
+                    }
+                    if ui.button("Use built-in catalog").clicked() {
+                        self.use_builtin_catalog();
+                        ui.close();
+                    }
+                })
+                .response
+                .on_hover_text("Unit catalog: load one, add a group to it, or go back to the built-in list.");
+            });
+        });
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(2.0, 2.0);
+            for kind in CatalogKind::ALL {
+                if ui.selectable_label(self.tpl_kind == kind, kind.label()).clicked() {
+                    self.tpl_kind = kind;
+                    self.tpl_class = None;
+                    self.tpl_country = None;
+                    self.tpl_add_pick = 0;
+                    self.tpl_preview_from_catalog = true;
+                }
+            }
+        });
+        ui.add_space(4.0);
+        self.draw_template_model_browser(ui);
+    }
+
+    /// Adds one seat of `unit` and selects it, as "Add unit" always has.
+    fn template_add_model(&mut self, unit: CatalogUnit) {
+        append_seat(&mut self.tpl_seats, unit, self.tpl_per_group);
+        if self.tpl_auto_altitude {
+            let last = self.tpl_seats.len() - 1;
+            apply_auto_altitude(&mut self.tpl_seats, last);
+        }
+        self.tpl_select = Some(TplSelect::Seat(self.tpl_seats.len() - 1));
+        self.tpl_preview_from_catalog = false;
+        self.sync_template_waypoint_speed();
+    }
+
+    fn template_units_section(&mut self, ui: &mut egui::Ui) {
+        let n = self.tpl_seats.len();
+        shell::section_title(ui, &format!("Units · {n}"), (n > 1).then_some("drag to reorder"));
+        if n == 0 {
+            ui.label(
+                RichText::new("No units yet. Pick a model above and click + Add.")
+                    .small()
+                    .color(c::NEUTRAL_700),
+            );
+            return;
+        }
+        if self.tpl_card_drag.is_some_and(|d| d >= n) {
+            self.tpl_card_drag = None;
+        }
+        let selected = self.selected_tpl_seat();
+        let mut rects = Vec::with_capacity(n);
+        let mut clicked = None;
+        let mut remove = None;
+        for si in 0..n {
+            let seat = &self.tpl_seats[si];
+            let (tag, accent) = match seat.role {
+                FlightRole::Lead => {
+                    let size = 1 + (0..n).filter(|&j| self.tpl_seats[j].role == FlightRole::Follows(si)).count();
+                    (format!("Lead ×{size}"), true)
+                }
+                FlightRole::Follows(lead) if is_follower(&self.tpl_seats, si) => {
+                    (format!("Follows {}", lead + 1), false)
+                }
+                _ => (String::new(), false),
+            };
+            let tail = if receives_orders(&self.tpl_seats, si) {
+                match seat.orders.len() {
+                    1 => "1 order".to_string(),
+                    k => format!("{k} orders"),
+                }
+            } else {
+                "follows lead".to_string()
+            };
+            let country_name = country_short(seat.country);
+            // "601 USA" → "USA": the code is in the Country field when it matters.
+            let country_name = country_name.split_once(' ').map_or(country_name.as_str(), |(_, n)| n.trim());
+            let meta = format!("{country_name} · Skill {} · {tail}", seat.skill);
+            let title = format!("{} · {}", si + 1, seat.unit.label());
+            let country = seat.country;
+            let resp = ui
+                .scope_builder(
+                    egui::UiBuilder::new()
+                        .id_salt(("tpl_card", si))
+                        .sense(Sense::click_and_drag()),
+                    |ui| {
+                        shell::card(ui, selected == Some(si), |ui| {
+                            ui.horizontal(|ui| {
+                                let (r, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+                                paint_seat_marker(ui.painter(), r.center(), 12.0, country);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(title).font(FontId::new(13.0, theme::bold_family())),
+                                    )
+                                    .truncate(),
+                                );
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    if ui.small_button("×").on_hover_text("Remove unit").clicked() {
+                                        remove = Some(si);
+                                    }
+                                    if !tag.is_empty() {
+                                        shell::tag(ui, &tag, accent);
+                                    }
+                                });
+                            });
+                            ui.label(RichText::new(meta).small().color(c::NEUTRAL_700));
+                        });
+                    },
+                )
+                .response;
+            if resp.clicked() {
+                clicked = Some(si);
+            }
+            if resp.drag_started() {
+                self.tpl_card_drag = Some(si);
+            }
+            if resp.hovered() && self.tpl_card_drag.is_none() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+            rects.push(resp.rect);
+            ui.add_space(4.0);
+        }
+        if ui.button("Copy attributes to all").on_hover_text(
+            "Copy the selected unit's country, skill, fuel, and flags to every unit, and its altitude to every plane (capped at each plane's ceiling). Payload and modifications copy only to the same aircraft type.",
+        ).clicked() {
+            copy_seat_attributes(&mut self.tpl_seats, selected.unwrap_or(0));
+        }
+
+        // Drag to reorder: an accent line marks where the card will land.
+        if let Some(src) = self.tpl_card_drag {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            let insert = ui.ctx().pointer_interact_pos().map(|p| {
+                rects.iter().position(|r| p.y < r.center().y).unwrap_or(n)
+            });
+            if let Some(ins) = insert {
+                let y = if ins < n { rects[ins].top() - 2.0 } else { rects[n - 1].bottom() + 2.0 };
+                ui.painter().line_segment(
+                    [Pos2::new(rects[0].left(), y), Pos2::new(rects[0].right(), y)],
+                    Stroke::new(2.0_f32, c::ACCENT),
+                );
+            }
+            if !ui.input(|i| i.pointer.primary_down()) {
+                self.tpl_card_drag = None;
+                if let Some(ins) = insert {
+                    let dest = if ins > src { ins - 1 } else { ins };
+                    self.move_tpl_seat_to(src, dest);
+                }
+            }
+        }
+        if let Some(si) = clicked {
+            self.tpl_select = Some(TplSelect::Seat(si));
+            self.tpl_preview_from_catalog = false;
+        }
+        if let Some(si) = remove {
+            self.remove_tpl_seat(si);
+        }
+    }
+
+    /// Moves a seat one step at a time so `move_seat` keeps roles and
+    /// order targets consistent.
+    fn move_tpl_seat_to(&mut self, mut from: usize, to: usize) {
+        while from != to {
+            let dir = if to > from { 1 } else { -1 };
+            match move_seat(&mut self.tpl_seats, from, dir) {
+                Some(dest) => {
+                    swap_tpl_select(&mut self.tpl_select, from, dest);
+                    from = dest;
+                }
+                None => break,
+            }
+        }
+    }
+
+    fn remove_tpl_seat(&mut self, si: usize) {
+        if si >= self.tpl_seats.len() {
+            return;
+        }
+        self.tpl_seats.remove(si);
+        for seat in &mut self.tpl_seats {
+            seat.role = match seat.role {
+                FlightRole::Follows(t) if t == si => FlightRole::Independent,
+                FlightRole::Follows(t) if t > si => FlightRole::Follows(t - 1),
+                other => other,
+            };
+            for order in &mut seat.orders {
+                remap_seat_index(&mut order.cover_lead, si);
+                remap_seat_index(&mut order.attack_seat, si);
+                remap_index_vec(&mut order.shared_with, si);
+            }
+        }
+        clamp_tpl_select(&mut self.tpl_select, &self.tpl_seats);
+        self.sync_template_waypoint_speed();
+    }
+
+    fn template_order_tree(&mut self, ui: &mut egui::Ui) {
+        let seat = self.selected_tpl_seat();
+        let unit_kind = seat.map_or(CatalogKind::Plane, |s| self.tpl_seats[s].unit.kind);
+        let can_orders = seat.is_some_and(|s| receives_orders(&self.tpl_seats, s));
+        let mut add = None;
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(section_heading("Order tree"));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_enabled_ui(seat.is_some(), |ui| {
+                    tree_event_menu(ui, seat.unwrap_or(0), unit_kind, &mut add);
+                });
+                ui.add_enabled_ui(can_orders, |ui| {
+                    tree_order_menu(ui, seat.unwrap_or(0), unit_kind, &mut add);
+                });
+            });
+        });
+        let hint_h = 24.0;
+        egui::ScrollArea::both()
+            .id_salt("tpl_tree_scroll")
+            .auto_shrink([false, false])
+            .max_height((ui.available_height() - hint_h).max(40.0))
+            .show(ui, |ui| self.draw_template_seat_list(ui));
+        if shell::hint(
+            ui,
+            "UNIT → OnSpawned → orders. Select a unit, then + Order or + Event. ‹ › move the selected chip.",
+            true,
+        ) {
+            self.open_help(HelpTopic::Template);
+        }
+        if let Some(item) = add {
+            self.apply_tree_add(item);
+        }
+    }
+
+    fn apply_tree_add(&mut self, item: AddTreeItem) {
+        match item {
+            AddTreeItem::Order { seat: si, kind } => {
+                let unit = self.tpl_seats[si].unit.clone();
+                let next_wp = next_waypoint_number(&self.tpl_seats);
+                self.tpl_seats[si]
+                    .orders
+                    .push(order_spec_for_added_kind(&unit, kind, next_wp));
+                if kind == OrderKind::GotoWaypoint {
+                    if let Some(spec) = self.tpl_seats[si].orders.last_mut() {
+                        spec.priority = self.tpl_wp_priority;
                     }
                 }
-            });
-            self.draw_template_model_browser(ui);
-        });
-    }
-
-    fn template_unit_list_section(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            section_title(ui, "Unit List");
-            ui.label(
-                RichText::new(
-                    "UNIT → OnSpawned → orders (Goto WP, Attack, Time on Target, Mission Complete). An event that Then's an order is the only line into that chip.",
-                )
-                .italics()
-                .small(),
-            );
-            self.draw_template_seat_list(ui);
-            self.draw_template_details(ui);
-        });
-    }
-
-    fn template_formation_view_section(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            section_title(ui, "Formation View");
-            ui.horizontal(|ui| {
-                ui.label("Zoom");
-                ui.add(
-                    egui::Slider::new(&mut self.tpl_view_zoom, 0.04..=12.0).show_value(false),
-                );
-                ui.label(RichText::new(format!("{:.0}%", self.tpl_view_zoom * 100.0)));
-                if ui
-                    .button("Reset View")
-                    .on_hover_text("Fit the formation. Scroll to zoom, right-drag to pan.")
-                    .clicked()
-                {
-                    self.tpl_view_zoom = 1.0;
-                    self.tpl_view_pan = Vec2::ZERO;
+                let oi = self.tpl_seats[si].orders.len() - 1;
+                if kind == OrderKind::AttackArea {
+                    apply_suggested_attack_area(&mut self.tpl_seats, si, oi);
                 }
-            });
-            self.draw_template_schematic(ui);
-        });
+                let oi = {
+                    let seat = &mut self.tpl_seats[si];
+                    normalize_order_chain(&mut seat.orders, &mut seat.events, oi)
+                };
+                self.tpl_select = Some(TplSelect::Order { seat: si, order: oi });
+            }
+            AddTreeItem::Event { seat: si, kind } => {
+                let mut hook = EventHook::default_for(self.tpl_seats[si].unit.kind);
+                hook.kind = kind;
+                self.tpl_seats[si].events.push(hook);
+                let ei = self.tpl_seats[si].events.len() - 1;
+                self.tpl_select = Some(TplSelect::Event { seat: si, event: ei });
+            }
+        }
+        self.tpl_preview_from_catalog = false;
+    }
+
+    /// Right panel, top: what is selected, in large type, then its fields.
+    /// With nothing selected (or a catalog model picked) it previews that model.
+    fn template_selection_block(&mut self, ui: &mut egui::Ui) {
+        let kicker = |ui: &mut egui::Ui, text: &str| {
+            ui.label(RichText::new(text.to_uppercase()).small().color(c::NEUTRAL_700));
+        };
+        let title = |ui: &mut egui::Ui, text: &str| {
+            ui.label(RichText::new(text).font(FontId::new(22.0, theme::heading_family())));
+        };
+        let seat = self.selected_tpl_seat();
+        let Some(si) = seat.filter(|_| !self.tpl_preview_from_catalog) else {
+            let unit = self.displayed_catalog().get(self.tpl_add_pick).cloned();
+            kicker(ui, "Catalog");
+            title(ui, unit.as_ref().map_or("No model", |u| u.label()));
+            self.draw_model_preview(ui, unit.as_ref(), None, None, None);
+            if self.tpl_seats.is_empty() {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "Build a proximity-triggered unit group. This mode does not write NodeGates; use it with the Army Generator.",
+                    )
+                    .small()
+                    .color(c::NEUTRAL_700),
+                );
+            }
+            return;
+        };
+        match self.tpl_select {
+            Some(TplSelect::Order { order, .. }) if order < self.tpl_seats[si].orders.len() => {
+                kicker(ui, &format!("Selected · Unit {} · Order {}", si + 1, order + 1));
+                title(ui, self.tpl_seats[si].orders[order].kind.label());
+            }
+            Some(TplSelect::Event { event, .. }) if event < self.tpl_seats[si].events.len() => {
+                kicker(ui, &format!("Selected · Unit {} · Event {}", si + 1, event + 1));
+                title(ui, self.tpl_seats[si].events[event].kind.label());
+            }
+            _ => {
+                let unit = self.tpl_seats[si].unit.clone();
+                kicker(ui, &format!("Selected · Unit {}", si + 1));
+                title(ui, unit.label());
+                let payload = payloads::payload_preview(&unit.script, self.tpl_seats[si].payload_id);
+                let mods = payloads::mods_preview(&unit.script, &self.tpl_seats[si].mod_mask);
+                let status = unit.is_air().then(|| {
+                    PlaneStart::from_i32(self.tpl_seats[si].start_type)
+                        .preview_status(self.tpl_seats[si].altitude)
+                });
+                self.draw_model_preview(ui, Some(&unit), Some(&payload), Some(&mods), status.as_deref());
+                ui.add_space(6.0);
+            }
+        }
+        self.draw_template_details(ui);
     }
 
     fn template_bring_up_section(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            section_title(ui, "Activate or Spawn");
-            let flights_need_activate = has_linked_wingmen(&self.tpl_seats);
-            if flights_need_activate && self.tpl_bring_up == BringUp::Spawn {
-                self.tpl_bring_up = BringUp::Activate;
+        let flights_need_activate = has_linked_wingmen(&self.tpl_seats);
+        if flights_need_activate && self.tpl_bring_up == BringUp::Spawn {
+            self.tpl_bring_up = BringUp::Activate;
+        }
+        let summary = match self.tpl_bring_up {
+            BringUp::Activate if flights_need_activate => "Activate · required by wingmen".to_string(),
+            BringUp::Activate => "Activate".to_string(),
+            BringUp::Spawn if self.tpl_spawn_reset => {
+                format!("Spawn · repeat {:.0} min", self.tpl_spawn_cooldown_min)
             }
-            for mode in [BringUp::Activate, BringUp::Spawn] {
-                let spawn_locked = mode == BringUp::Spawn && flights_need_activate;
-                ui.add_enabled_ui(!spawn_locked, |ui| {
-                    if ui
-                        .selectable_label(self.tpl_bring_up == mode, mode.label())
-                        .on_hover_text(match mode {
-                            BringUp::Activate => {
-                                "Enable parked units. Required for flights with wingmen (Exclusive Activation)."
-                            }
-                            BringUp::Spawn => {
-                                "Spawn through a counter. Object-links the spawner to each unit entity. Best for many independent units, or the same units more than once."
-                            }
-                        })
-                        .clicked()
-                    {
-                        self.tpl_bring_up = mode;
-                    }
-                });
-            }
+            BringUp::Spawn => "Spawn · once".to_string(),
+        };
+        shell::settings_section(ui, "tpl_bring_up", "Activate or Spawn", &summary, false, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                for mode in [BringUp::Activate, BringUp::Spawn] {
+                    let spawn_locked = mode == BringUp::Spawn && flights_need_activate;
+                    ui.add_enabled_ui(!spawn_locked, |ui| {
+                        if ui
+                            .selectable_label(self.tpl_bring_up == mode, mode.label())
+                            .on_hover_text(match mode {
+                                BringUp::Activate => {
+                                    "Enable parked units. Required for flights with wingmen (Exclusive Activation)."
+                                }
+                                BringUp::Spawn => {
+                                    "Spawn through a counter. Object-links the spawner to each unit entity. Best for many independent units, or the same units more than once."
+                                }
+                            })
+                            .clicked()
+                        {
+                            self.tpl_bring_up = mode;
+                        }
+                    });
+                }
+            });
             if flights_need_activate {
-                ui.label(
-                    RichText::new(
-                        "A flight lead has followers (target-linked wingmen). That flight must be activated, not spawned. Independent units in the same file are activated with them.",
-                    )
-                    .italics()
-                    .small(),
+                // The lock reason is shown, not only on hover (README §6.5).
+                shell::warning(
+                    ui,
+                    "Spawn is off: a lead has wingmen, and a flight must be activated. Independent units in the file activate with it.",
                 );
             }
             if self.tpl_bring_up == BringUp::Spawn {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.checkbox(&mut self.tpl_spawn_reset, "Allow multiple spawns")
                         .on_hover_text(
                             "One-shot: leave unchecked. Repeat spawn: Zone Out always cleans up and zeros DeathCount. If every unit is destroyed (OnPlaneDestroyed / OnKilled), cooldown pulses the spawner even while the player stays. A hiding unit is cleaned up when the player leaves, not mid-fight.",
@@ -1975,152 +2289,157 @@ impl GroupGeneratorApp {
     }
 
     fn template_placement_section(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            section_title(ui, "Placement & Checkzones");
-            ui.horizontal(|ui| {
-                ui.label("Layout");
-                let prev_layout = self.tpl_place_layout;
-                egui::ComboBox::from_id_salt("tpl_place_layout")
-                    .selected_text(self.tpl_place_layout.label())
-                    .width(200.0)
-                    .show_ui(ui, |ui| {
-                        for layout in PlaceLayout::ALL {
-                            ui.selectable_value(
-                                &mut self.tpl_place_layout,
-                                layout,
-                                layout.label(),
-                            );
-                        }
-                    });
-                if self.tpl_place_layout != prev_layout {
-                    self.tpl_per_group = self.tpl_place_layout.default_per_group();
-                }
-                ui.label("Per group");
-                ui.add(egui::DragValue::new(&mut self.tpl_per_group).range(1..=8));
-            });
-            ui.label(
-                RichText::new(
-                    "Spacing is 150 m. Inverted Vee is finger-four (4). Combat Box is two 3-ship vees (6). Ground and ships usually use Column.",
-                )
-                .italics()
-                .small(),
-            );
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label("Trigger coalition");
-                egui::ComboBox::from_id_salt("tpl_zone_coalition")
-                    .selected_text(self.tpl_zone_coalition.label())
-                    .width(140.0)
-                    .show_ui(ui, |ui| {
-                        for c in ZoneCoalition::ALL {
-                            ui.selectable_value(&mut self.tpl_zone_coalition, c, c.label());
-                        }
-                    });
-            });
+        let summary = format!(
+            "{} · In {:.1} km",
+            self.tpl_place_layout.label(),
+            self.tpl_zone_in / 1000.0
+        );
+        let mut help = false;
+        shell::settings_section(ui, "tpl_placement", "Placement & Checkzones", &summary, true, |ui| {
+            ui.spacing_mut().slider_width = 64.0;
             let visual = visual_range_m(self.template_zone_mix());
-            ui.horizontal(|ui| {
-                ui.label("Zone IN");
-                ui.add(
-                    egui::Slider::new(&mut self.tpl_zone_in, 500.0..=40_000.0)
-                        .suffix(" m")
-                        .logarithmic(true),
-                );
-                if near_visual_range(self.tpl_zone_in, visual) {
-                    ui.label(
-                        RichText::new("visual range")
-                            .small()
-                            .color(Color32::from_rgb(210, 180, 70)),
+            let zone_label = |ui: &mut egui::Ui, text: &str, near: bool| {
+                ui.vertical(|ui| {
+                    ui.label(text);
+                    if near {
+                        ui.label(RichText::new("visual range").small().color(c::WARN_TEXT));
+                    }
+                });
+            };
+            egui::Grid::new("tpl_place_grid")
+                .num_columns(2)
+                .min_col_width(84.0)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Layout");
+                    let prev_layout = self.tpl_place_layout;
+                    egui::ComboBox::from_id_salt("tpl_place_layout")
+                        .selected_text(self.tpl_place_layout.label())
+                        .width(128.0)
+                        .truncate()
+                        .show_ui(ui, |ui| {
+                            for layout in PlaceLayout::ALL {
+                                ui.selectable_value(&mut self.tpl_place_layout, layout, layout.label());
+                            }
+                        });
+                    if self.tpl_place_layout != prev_layout {
+                        self.tpl_per_group = self.tpl_place_layout.default_per_group();
+                    }
+                    ui.end_row();
+
+                    ui.label("Per group");
+                    ui.add(egui::DragValue::new(&mut self.tpl_per_group).range(1..=8));
+                    ui.end_row();
+
+                    ui.label("Trigger coalition");
+                    egui::ComboBox::from_id_salt("tpl_zone_coalition")
+                        .selected_text(self.tpl_zone_coalition.label())
+                        .width(128.0)
+                        .show_ui(ui, |ui| {
+                            for co in ZoneCoalition::ALL {
+                                ui.selectable_value(&mut self.tpl_zone_coalition, co, co.label());
+                            }
+                        });
+                    ui.end_row();
+
+                    zone_label(ui, "Zone In", near_visual_range(self.tpl_zone_in, visual));
+                    ui.add(
+                        egui::Slider::new(&mut self.tpl_zone_in, 500.0..=40_000.0)
+                            .suffix(" m")
+                            .logarithmic(true),
                     );
-                }
-            });
-            if self.tpl_zone_out < self.tpl_zone_in + 200.0 {
-                self.tpl_zone_out = self.tpl_zone_in + 200.0;
-            }
-            ui.horizontal(|ui| {
-                ui.label("Zone Out");
-                ui.add(
-                    egui::Slider::new(&mut self.tpl_zone_out, 700.0..=50_000.0)
-                        .suffix(" m")
-                        .logarithmic(true),
-                );
-                if near_visual_range(self.tpl_zone_out, visual) {
-                    ui.label(
-                        RichText::new("visual range")
-                            .small()
-                            .color(Color32::from_rgb(210, 180, 70)),
+                    ui.end_row();
+
+                    if self.tpl_zone_out < self.tpl_zone_in + 200.0 {
+                        self.tpl_zone_out = self.tpl_zone_in + 200.0;
+                    }
+                    zone_label(ui, "Zone Out", near_visual_range(self.tpl_zone_out, visual));
+                    ui.add(
+                        egui::Slider::new(&mut self.tpl_zone_out, 700.0..=50_000.0)
+                            .suffix(" m")
+                            .logarithmic(true),
                     );
-                }
-            });
+                    ui.end_row();
+                });
+            help = shell::hint(
+                ui,
+                "Spacing is 150 m. Inverted Vee is finger-four (4). Combat Box is two 3-ship vees (6). Ground and ships usually use Column.",
+                true,
+            );
         });
+        if help {
+            self.open_help(HelpTopic::Template);
+        }
     }
 
     fn template_waypoints_section(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            section_title(ui, "Waypoints");
-            ui.horizontal(|ui| {
-                let n = used_waypoint_count(&self.tpl_seats);
-                ui.label(if n == 0 {
-                    "None (add a Goto WP order)".to_string()
-                } else {
-                    format!("{n} from Goto WP orders")
-                });
-                ui.label("Speed");
-                ui.add(egui::DragValue::new(&mut self.tpl_wp_speed).suffix(" km/h"))
-                    .on_hover_text(
-                        "MCU Speed in km/h. No editor limit. Defaults to 90% of the slowest unit’s cruise, rounded to 10 km/h.",
-                    );
-                ui.label("Altitude");
-                let max_alt = self
-                    .tpl_seats
-                    .iter()
-                    .filter(|s| s.unit.is_air())
-                    .map(|s| model_spec::ceiling_m(&s.unit.script))
-                    .fold(0.0_f32, f32::max);
-                let mut shown_alt =
-                    path_waypoint_display_m(&self.tpl_seats, self.tpl_wp_altitude);
-                let alt_range = if max_alt > 0.0 {
-                    0.0..=max_alt
-                } else {
-                    0.0..=f32::MAX
-                };
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut shown_alt)
-                            .range(alt_range)
-                            .suffix(" m"),
-                    )
-                    .on_hover_text(
-                        "0 m for ground units. Aircraft follow spawn height until you enter a value.",
-                    )
-                    .changed()
-                {
-                    self.tpl_wp_altitude = shown_alt;
-                }
-                let mut pri = self.tpl_wp_priority;
-                draw_priority_combo(ui, "tpl_wp_pri".into(), &mut pri);
-                if pri != self.tpl_wp_priority {
-                    self.tpl_wp_priority = pri;
-                    for seat in &mut self.tpl_seats {
-                        for order in &mut seat.orders {
-                            if order.kind == OrderKind::GotoWaypoint {
-                                order.priority = pri;
+        let n = used_waypoint_count(&self.tpl_seats);
+        let shown_alt = path_waypoint_display_m(&self.tpl_seats, self.tpl_wp_altitude);
+        let summary = format!("{n} · {:.0} km/h · {shown_alt:.0} m", self.tpl_wp_speed);
+        shell::settings_section(ui, "tpl_waypoints", "Waypoints", &summary, false, |ui| {
+            egui::Grid::new("tpl_wp_grid")
+                .num_columns(2)
+                .min_col_width(84.0)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Waypoints");
+                    ui.label(if n == 0 {
+                        "None (add a Goto WP order)".to_string()
+                    } else {
+                        format!("{n} from Goto WP orders")
+                    });
+                    ui.end_row();
+
+                    ui.label("Speed");
+                    ui.add(egui::DragValue::new(&mut self.tpl_wp_speed).suffix(" km/h"))
+                        .on_hover_text(
+                            "MCU Speed in km/h. No editor limit. Defaults to 90% of the slowest unit’s cruise, rounded to 10 km/h.",
+                        );
+                    ui.end_row();
+
+                    ui.label("Altitude");
+                    let max_alt = self
+                        .tpl_seats
+                        .iter()
+                        .filter(|s| s.unit.is_air())
+                        .map(|s| model_spec::ceiling_m(&s.unit.script))
+                        .fold(0.0_f32, f32::max);
+                    let mut shown_alt = shown_alt;
+                    let alt_range = if max_alt > 0.0 { 0.0..=max_alt } else { 0.0..=f32::MAX };
+                    if ui
+                        .add(egui::DragValue::new(&mut shown_alt).range(alt_range).suffix(" m"))
+                        .on_hover_text("0 m for ground units. Aircraft follow spawn height until you enter a value.")
+                        .changed()
+                    {
+                        self.tpl_wp_altitude = shown_alt;
+                    }
+                    ui.end_row();
+
+                    let mut pri = self.tpl_wp_priority;
+                    draw_priority_combo(ui, "tpl_wp_pri".into(), &mut pri);
+                    ui.end_row();
+                    if pri != self.tpl_wp_priority {
+                        self.tpl_wp_priority = pri;
+                        for seat in &mut self.tpl_seats {
+                            for order in &mut seat.orders {
+                                if order.kind == OrderKind::GotoWaypoint {
+                                    order.priority = pri;
+                                }
                             }
                         }
                     }
-                }
-            });
+                });
         });
     }
 
+    /// Order tree rows: one per unit, unit chip → OnSpawned → orders.
     fn draw_template_seat_list(&mut self, ui: &mut egui::Ui) {
-        let selected_fill = Color32::from_rgb(252, 186, 3);
-        let unit_fill = Color32::from_rgb(196, 196, 196);
-        let order_fill = Color32::from_rgb(94, 167, 181);
-        let report_fill = Color32::from_rgb(94, 181, 133);
-        let chain_fill = Color32::from_rgb(181, 148, 94);
-        let event_fill = Color32::from_rgb(175, 94, 181);
-        let mut add_item = None;
-        let mut remove_seat = None;
+        // Fills tell commands, specials and reports apart; selection is accent.
+        let selected_fill = c::ACCENT_200;
+        let order_fill = c::NEUTRAL_100;
+        let report_fill = c::NEUTRAL_300;
+        let chain_fill = c::NEUTRAL_200;
+        let event_fill = c::BG;
         let mut remove_order = None;
         let mut remove_event = None;
         let mut move_order: Option<(usize, usize, i32)> = None;
@@ -2130,9 +2449,9 @@ impl GroupGeneratorApp {
 
         if self.tpl_seats.is_empty() {
             ui.label(
-                RichText::new("No units yet — pick a model above and Add unit.")
-                    .italics()
-                    .small(),
+                RichText::new("No units yet. Pick a model on the left and click + Add.")
+                    .small()
+                    .color(c::NEUTRAL_700),
             );
         }
 
@@ -2142,16 +2461,7 @@ impl GroupGeneratorApp {
             }
             ui.horizontal_top(|ui| {
                 let unit_sel = matches!(self.tpl_select, Some(TplSelect::Seat(s)) if s == si);
-                let role = match self.tpl_seats[si].role {
-                    FlightRole::Lead => "Lead",
-                    FlightRole::Follows(_) if is_follower(&self.tpl_seats, si) => "Wing",
-                    _ => "",
-                };
-                let label = if role.is_empty() {
-                    self.tpl_seats[si].unit.label().to_string()
-                } else {
-                    format!("{} ({role})", self.tpl_seats[si].unit.label())
-                };
+                let label = self.tpl_seats[si].unit.label().to_string();
                 let current_script = self.tpl_seats[si].unit.script.clone();
                 let kind = self.tpl_seats[si].unit.kind;
                 let mut models: Vec<CatalogUnit> = self
@@ -2161,13 +2471,9 @@ impl GroupGeneratorApp {
                     .cloned()
                     .collect();
                 models.sort_by(|a, b| a.label().cmp(b.label()));
-                let response = centered_fill_button(
-                    ui,
-                    &label,
-                    if unit_sel { selected_fill } else { unit_fill },
-                    Vec2::new(140.0, 24.0),
-                )
-                .on_hover_text("Click to change model (same kind)");
+                let response =
+                    draw_tree_unit_chip(ui, si + 1, &label, self.tpl_seats[si].country, unit_sel)
+                        .on_hover_text(format!("{label}. Click to change model (same kind)."));
                 if response.clicked() {
                     clicked = Some(TplSelect::Seat(si));
                 }
@@ -2247,19 +2553,8 @@ impl GroupGeneratorApp {
                             }
                         });
                     }
-                    draw_tree_add_buttons(
-                        ui,
-                        si,
-                        self.tpl_seats[si].unit.kind,
-                        true,
-                        &mut add_item,
-                    );
                 } else {
-                    ui.label(
-                        RichText::new("follows lead")
-                            .italics()
-                            .small(),
-                    );
+                    ui.label(RichText::new("follows lead").small().color(c::NEUTRAL_700));
                     if !self.tpl_seats[si].events.is_empty() {
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 8.0;
@@ -2284,56 +2579,12 @@ impl GroupGeneratorApp {
                         });
                     }
                 }
-                if !receives_orders(&self.tpl_seats, si) {
-                    draw_tree_add_buttons(
-                        ui,
-                        si,
-                        self.tpl_seats[si].unit.kind,
-                        false,
-                        &mut add_item,
-                    );
-                }
-                if ui.small_button("×").on_hover_text("Remove unit").clicked() {
-                    remove_seat = Some(si);
-                }
             });
         }
 
         if let Some(sel) = clicked {
             self.tpl_select = Some(sel);
             self.tpl_preview_from_catalog = false;
-        }
-        if let Some(item) = add_item {
-            match item {
-                AddTreeItem::Order { seat: si, kind } => {
-                    let unit = self.tpl_seats[si].unit.clone();
-                    let next_wp = next_waypoint_number(&self.tpl_seats);
-                    self.tpl_seats[si]
-                        .orders
-                        .push(order_spec_for_added_kind(&unit, kind, next_wp));
-                    if kind == OrderKind::GotoWaypoint {
-                        if let Some(spec) = self.tpl_seats[si].orders.last_mut() {
-                            spec.priority = self.tpl_wp_priority;
-                        }
-                    }
-                    let oi = self.tpl_seats[si].orders.len() - 1;
-                    if kind == OrderKind::AttackArea {
-                        apply_suggested_attack_area(&mut self.tpl_seats, si, oi);
-                    }
-                    let oi = {
-                        let seat = &mut self.tpl_seats[si];
-                        normalize_order_chain(&mut seat.orders, &mut seat.events, oi)
-                    };
-                    self.tpl_select = Some(TplSelect::Order { seat: si, order: oi });
-                }
-                AddTreeItem::Event { seat: si, kind } => {
-                    let mut hook = EventHook::default_for(self.tpl_seats[si].unit.kind);
-                    hook.kind = kind;
-                    self.tpl_seats[si].events.push(hook);
-                    let ei = self.tpl_seats[si].events.len() - 1;
-                    self.tpl_select = Some(TplSelect::Event { seat: si, event: ei });
-                }
-            }
         }
         if let Some((si, oi)) = remove_order {
             if si < self.tpl_seats.len() && oi < self.tpl_seats[si].orders.len() {
@@ -2385,23 +2636,6 @@ impl GroupGeneratorApp {
                 self.tpl_preview_from_catalog = false;
             }
         }
-        if let Some(si) = remove_seat {
-            self.tpl_seats.remove(si);
-            for seat in &mut self.tpl_seats {
-                seat.role = match seat.role {
-                    FlightRole::Follows(t) if t == si => FlightRole::Independent,
-                    FlightRole::Follows(t) if t > si => FlightRole::Follows(t - 1),
-                    other => other,
-                };
-                for order in &mut seat.orders {
-                    remap_seat_index(&mut order.cover_lead, si);
-                    remap_seat_index(&mut order.attack_seat, si);
-                    remap_index_vec(&mut order.shared_with, si);
-                }
-            }
-            clamp_tpl_select(&mut self.tpl_select, &self.tpl_seats);
-            self.sync_template_waypoint_speed();
-        }
     }
 
     fn draw_train_carriages(&mut self, ui: &mut egui::Ui, si: usize) {
@@ -2425,7 +2659,7 @@ impl GroupGeneratorApp {
             );
         }
         for ci in 0..n {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(format!("{}.", ci + 1));
                 ui.label(carriage_label(&self.tpl_seats[si].carriages[ci]));
                 let train_script = self.tpl_seats[si].unit.script.clone();
@@ -2471,7 +2705,7 @@ impl GroupGeneratorApp {
             }
         }
         if !choices.is_empty() {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Add");
                 egui::ComboBox::from_id_salt(format!("tpl_add_car_{si}"))
                     .selected_text("carriage…")
@@ -2499,14 +2733,12 @@ impl GroupGeneratorApp {
         ui.add_space(8.0);
         match self.tpl_select {
             Some(TplSelect::Seat(si)) if si < self.tpl_seats.len() => {
-                ui.label(RichText::new("Unit details").strong());
                 let mut moved = false;
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(format!(
-                        "Seat {} · {} · {}",
-                        si + 1,
+                        "{} · position {}",
                         self.tpl_seats[si].unit.kind.label(),
-                        self.tpl_seats[si].unit.label()
+                        si + 1
                     ));
                     ui.add_enabled_ui(si > 0, |ui| {
                         if move_row_button(ui, true).on_hover_text("Move unit up").clicked() {
@@ -2528,7 +2760,7 @@ impl GroupGeneratorApp {
                 if moved {
                     return;
                 }
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Role");
                     let follow_choices: Vec<(usize, String)> = lead_indexes(&self.tpl_seats)
                         .into_iter()
@@ -2614,7 +2846,7 @@ impl GroupGeneratorApp {
                         });
                 });
                 if self.tpl_seats[si].role == FlightRole::Lead {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label("In formation");
                         let mut count = if self.tpl_seats[si].formation_count == 0 {
                             self.tpl_per_group
@@ -2630,7 +2862,7 @@ impl GroupGeneratorApp {
                         }
                     });
                 }
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Country");
                     egui::ComboBox::from_id_salt(format!("tpl_seat_country_{si}"))
                         .selected_text(
@@ -2650,11 +2882,12 @@ impl GroupGeneratorApp {
                                 );
                             }
                         });
+                    ui.end_row();
                     ui.label("Skill");
                     ui.add(egui::Slider::new(&mut self.tpl_seats[si].skill, 0..=4));
                 });
                 if self.tpl_seats[si].unit.is_air() {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label("Altitude");
                         let ceiling = model_spec::ceiling_m(&self.tpl_seats[si].unit.script);
                         let slid = ui
@@ -2695,7 +2928,7 @@ impl GroupGeneratorApp {
                         }
                     });
                     if self.tpl_seats[si].altitude <= 0.0 {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Engine");
                             let current = PlaneStart::from_i32(self.tpl_seats[si].start_type);
                             for start in PlaneStart::GROUND {
@@ -2724,7 +2957,7 @@ impl GroupGeneratorApp {
                         });
                     }
                 }
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Number in formation");
                     ui.add(
                         egui::DragValue::new(&mut self.tpl_seats[si].number_in_formation)
@@ -2738,7 +2971,7 @@ impl GroupGeneratorApp {
                     );
                 });
                 self.draw_seat_payload_mods(ui, si);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.checkbox(&mut self.tpl_seats[si].vulnerable, "Vulnerable");
                     ui.checkbox(&mut self.tpl_seats[si].engageable, "Engageable");
                     ui.checkbox(&mut self.tpl_seats[si].limit_ammo, "Limit ammo");
@@ -2765,9 +2998,8 @@ impl GroupGeneratorApp {
             Some(TplSelect::Order { seat, order })
                 if seat < self.tpl_seats.len() && order < self.tpl_seats[seat].orders.len() =>
             {
-                ui.label(RichText::new("Order details").strong());
-                ui.horizontal(|ui| {
-                    ui.label(format!("Seat {} · Order {}", seat + 1, order + 1));
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Kind");
                     let kind = self.tpl_seats[seat].orders[order].kind;
                     let unit_kind = if self.tpl_seats[seat].unit.is_air() {
                         CatalogKind::Plane
@@ -2819,7 +3051,7 @@ impl GroupGeneratorApp {
                         if others.is_empty() {
                             ui.label(RichText::new("Add another unit to attack.").italics());
                         } else {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label("Target");
                                 let current = self.tpl_seats[seat].orders[order]
                                     .attack_seat
@@ -2848,7 +3080,7 @@ impl GroupGeneratorApp {
                                     });
                             });
                         }
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.checkbox(
                                 &mut self.tpl_seats[seat].orders[order].attack_group,
                                 "Attack group",
@@ -2871,7 +3103,7 @@ impl GroupGeneratorApp {
                             .italics()
                             .small(),
                         );
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Waypoint");
                             let max_wp = used_waypoint_count(&self.tpl_seats).max(1);
                             let wp = self.tpl_seats[seat].orders[order]
@@ -2903,7 +3135,7 @@ impl GroupGeneratorApp {
                                 self.tpl_select = Some(TplSelect::Order { seat, order: idx });
                             }
                         });
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             draw_priority_combo(
                                 ui,
                                 format!("tpl_goto_pri_{seat}_{order}"),
@@ -2911,7 +3143,7 @@ impl GroupGeneratorApp {
                             );
                         });
                         if self.tpl_seats[seat].unit.is_air() {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label("Altitude");
                                 let hop_ceiling =
                                     model_spec::ceiling_m(&self.tpl_seats[seat].unit.script);
@@ -2955,7 +3187,7 @@ impl GroupGeneratorApp {
                         ui.label(
                             "Timer pulsed from the waypoint before Attack / AttackArea (not the previous delay). When it expires, the next order in the chain fires. Use this so the flight is updated after hanging on the target.",
                         );
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Time on target");
                             ui.add(
                                 egui::DragValue::new(
@@ -2975,7 +3207,7 @@ impl GroupGeneratorApp {
                         ui.label(
                             "MCU_Timer pause in the order chain. The previous order pulses this timer; when it expires the next order runs.",
                         );
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Pause");
                             ui.add(
                                 egui::DragValue::new(
@@ -2990,7 +3222,7 @@ impl GroupGeneratorApp {
                         ui.label(
                             "MCU_CMD_ForceComplete on this unit (or shared Objects). Mission Complete pulses the shared MISSION END hub instead.",
                         );
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             draw_priority_combo(
                                 ui,
                                 format!("tpl_fc_pri_{seat}_{order}"),
@@ -3006,7 +3238,7 @@ impl GroupGeneratorApp {
                     OrderKind::AttackArea => {
                         let ground = self.tpl_seats[seat].orders[order].attack_ground
                             || self.tpl_seats[seat].orders[order].attack_g_targets;
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Attack");
                             let current = self.tpl_seats[seat].orders[order].attack_area_target();
                             egui::ComboBox::from_id_salt(format!("tpl_aa_tgt_{seat}_{order}"))
@@ -3029,7 +3261,7 @@ impl GroupGeneratorApp {
                                 &mut self.tpl_seats[seat].orders[order].priority,
                             );
                         });
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Area");
                             ui.add(
                                 egui::DragValue::new(
@@ -3097,7 +3329,7 @@ impl GroupGeneratorApp {
                         );
                     }
                     OrderKind::Formation => {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Formation");
                             let current = formation_label(
                                 self.tpl_seats[seat].orders[order].formation_type,
@@ -3127,7 +3359,7 @@ impl GroupGeneratorApp {
                         });
                     }
                     OrderKind::Behaviour => {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Filter");
                             ui.add(
                                 egui::DragValue::new(
@@ -3138,7 +3370,7 @@ impl GroupGeneratorApp {
                         });
                     }
                     OrderKind::Flare => {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Color");
                             ui.add(
                                 egui::DragValue::new(
@@ -3167,7 +3399,7 @@ impl GroupGeneratorApp {
                                 RichText::new("Add another unit to cover.")
                                     .italics(),
                             );
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 draw_priority_combo(
                                     ui,
                                     format!("tpl_cover_pri_{seat}_{order}"),
@@ -3175,7 +3407,7 @@ impl GroupGeneratorApp {
                                 );
                             });
                         } else {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label("Cover");
                                 let current = self.tpl_seats[seat].orders[order]
                                     .cover_lead
@@ -3211,7 +3443,7 @@ impl GroupGeneratorApp {
                         }
                     }
                     OrderKind::Land => {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             draw_priority_combo(
                                 ui,
                                 format!("tpl_land_pri_{seat}_{order}"),
@@ -3259,7 +3491,7 @@ impl GroupGeneratorApp {
                                 .small(),
                             );
                         }
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Timer");
                             ui.add(
                                 egui::DragValue::new(
@@ -3281,7 +3513,7 @@ impl GroupGeneratorApp {
                             .filter(|o| !o.kind.is_report())
                             .map(|o| o.kind.label())
                             .unwrap_or("Choose next order…");
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("Then");
                             egui::ComboBox::from_id_salt(format!("tpl_rep_then_{seat}_{order}"))
                                 .selected_text(then_label)
@@ -3352,7 +3584,6 @@ impl GroupGeneratorApp {
             Some(TplSelect::Event { seat, event })
                 if seat < self.tpl_seats.len() && event < self.tpl_seats[seat].events.len() =>
             {
-                ui.label(RichText::new("Event details").strong());
                 ui.label(
                     "OnEvent (TarId only). Links this unit to Force Complete or an order timer.",
                 );
@@ -3362,8 +3593,8 @@ impl GroupGeneratorApp {
                 } else {
                     flight_lead_of(&self.tpl_seats, seat)
                 };
-                ui.horizontal(|ui| {
-                    ui.label(format!("Seat {} · Event {}", seat + 1, event + 1));
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Event");
                     let kind = self.tpl_seats[seat].events[event].kind;
                     egui::ComboBox::from_id_salt(format!("tpl_evt_kind_{seat}_{event}"))
                         .selected_text(kind.label())
@@ -3390,7 +3621,7 @@ impl GroupGeneratorApp {
                 let current = self.tpl_seats[seat].events[event]
                     .then
                     .label(&then_orders);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Then");
                     egui::ComboBox::from_id_salt(format!("tpl_evt_then_{seat}_{event}"))
                         .selected_text(current)
@@ -3412,42 +3643,45 @@ impl GroupGeneratorApp {
                 });
             }
             _ => {
-                ui.label(RichText::new("Select a unit or order in the list, or a dot on the diagram.").italics());
+                ui.label(
+                    RichText::new("Select a unit card, an order chip, or a unit in the formation view.")
+                        .color(c::NEUTRAL_700),
+                );
             }
         }
     }
 
+    /// Filter combo, then one 28 px row per model: click a row to preview it,
+    /// click its "+ Add" (or double-click the row) to add a unit.
     fn draw_template_model_browser(&mut self, ui: &mut egui::Ui) {
+        let full_w = ui.available_width();
         if self.tpl_kind == CatalogKind::Infantry {
             let countries = self.countries_for_infantry();
             if self.tpl_country.is_some_and(|c| !countries.contains(&c)) {
                 self.tpl_country = None;
             }
             if !countries.is_empty() {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("Country").strong());
-                    if ui
-                        .selectable_label(self.tpl_country.is_none(), "All")
-                        .clicked()
-                    {
-                        self.tpl_country = None;
-                        self.tpl_add_pick = 0;
-                        self.tpl_preview_from_catalog = true;
-                    }
-                    for country in countries {
-                        if ui
-                            .selectable_label(
-                                self.tpl_country == Some(country),
-                                country_short(country),
-                            )
-                            .clicked()
-                        {
-                            self.tpl_country = Some(country);
+                let current = self.tpl_country.map_or_else(|| "All countries".to_string(), country_short);
+                egui::ComboBox::from_id_salt("tpl_country_filter")
+                    .selected_text(current)
+                    .width(full_w - 8.0)
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(self.tpl_country.is_none(), "All countries").clicked() {
+                            self.tpl_country = None;
                             self.tpl_add_pick = 0;
                             self.tpl_preview_from_catalog = true;
                         }
-                    }
-                });
+                        for country in countries {
+                            if ui
+                                .selectable_label(self.tpl_country == Some(country), country_short(country))
+                                .clicked()
+                            {
+                                self.tpl_country = Some(country);
+                                self.tpl_add_pick = 0;
+                                self.tpl_preview_from_catalog = true;
+                            }
+                        }
+                    });
             }
         } else {
             let classes = self.classes_for_kind(self.tpl_kind);
@@ -3455,93 +3689,101 @@ impl GroupGeneratorApp {
                 self.tpl_class = None;
             }
             if !classes.is_empty() {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("Type").strong());
-                    if ui
-                        .selectable_label(self.tpl_class.is_none(), "All")
-                        .clicked()
-                    {
-                        self.tpl_class = None;
-                        self.tpl_add_pick = 0;
-                        self.tpl_preview_from_catalog = true;
-                    }
-                    for class in classes {
-                        if ui
-                            .selectable_label(self.tpl_class == Some(class), class.label())
-                            .clicked()
-                        {
-                            self.tpl_class = Some(class);
+                let current = self.tpl_class.map_or("All types", |c| c.label());
+                egui::ComboBox::from_id_salt("tpl_class_filter")
+                    .selected_text(current)
+                    .width(full_w - 8.0)
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(self.tpl_class.is_none(), "All types").clicked() {
+                            self.tpl_class = None;
                             self.tpl_add_pick = 0;
                             self.tpl_preview_from_catalog = true;
                         }
-                    }
-                });
+                        for class in classes {
+                            if ui.selectable_label(self.tpl_class == Some(class), class.label()).clicked() {
+                                self.tpl_class = Some(class);
+                                self.tpl_add_pick = 0;
+                                self.tpl_preview_from_catalog = true;
+                            }
+                        }
+                    });
             }
         }
 
         let models = self.displayed_catalog();
         if models.is_empty() {
-            ui.label(
-                RichText::new("No models of this kind in the catalog yet.").italics(),
-            );
+            ui.label(RichText::new("No models of this kind in the catalog yet.").color(c::NEUTRAL_700));
             return;
         }
         if self.tpl_add_pick >= models.len() {
             self.tpl_add_pick = 0;
         }
-        let selected_script = models
-            .get(self.tpl_add_pick)
-            .map(|u| u.script.clone())
-            .unwrap_or_default();
 
         ui.add_space(4.0);
-        if let Some(unit) = self.draw_model_button_grid(ui, &models, Some(&selected_script)) {
-            if let Some(i) = models.iter().position(|u| u.script == unit.script) {
-                self.tpl_add_pick = i;
-            }
+        let mut pick = None;
+        let mut add = None;
+        egui::ScrollArea::vertical()
+            .id_salt("tpl_model_list")
+            .max_height(260.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let w = ui.available_width();
+                for (i, unit) in models.iter().enumerate() {
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 28.0), Sense::click());
+                    let sel = i == self.tpl_add_pick;
+                    let add_rect = Rect::from_min_max(Pos2::new(rect.right() - 58.0, rect.top()), rect.max);
+                    let over_add = resp.hover_pos().is_some_and(|p| add_rect.contains(p));
+                    let p = ui.painter();
+                    if sel {
+                        p.rect_filled(rect, 0.0, c::ACCENT_100);
+                    } else if resp.hovered() {
+                        p.rect_filled(rect, 0.0, c::NEUTRAL_100);
+                    }
+                    p.with_clip_rect(rect.shrink2(Vec2::new(0.0, 1.0)).with_max_x(add_rect.left())).text(
+                        rect.left_center() + Vec2::new(8.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        unit.label(),
+                        FontId::proportional(13.0),
+                        c::TEXT,
+                    );
+                    let (add_font, add_color) = if sel || over_add {
+                        (FontId::new(13.0, theme::bold_family()), c::ACCENT_700)
+                    } else {
+                        (FontId::proportional(13.0), c::NEUTRAL_600)
+                    };
+                    p.text(rect.right_center() - Vec2::new(8.0, 0.0), Align2::RIGHT_CENTER, "+ Add", add_font, add_color);
+                    if over_add {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    let resp = resp.on_hover_text(format!("{}. Double-click or + Add to add a unit.", unit.label()));
+                    if resp.double_clicked() || (resp.clicked() && over_add) {
+                        add = Some(i);
+                    } else if resp.clicked() {
+                        pick = Some(i);
+                    }
+                }
+            });
+        if let Some(i) = pick {
+            self.tpl_add_pick = i;
             self.tpl_preview_from_catalog = true;
         }
+        if let Some(i) = add {
+            self.tpl_add_pick = i;
+            self.template_add_model(models[i].clone());
+        }
 
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            if ui.button("Add unit").clicked() {
-                if let Some(unit) = models.get(self.tpl_add_pick).cloned() {
-                    append_seat(&mut self.tpl_seats, unit, self.tpl_per_group);
-                    if self.tpl_auto_altitude {
-                        let last = self.tpl_seats.len() - 1;
-                        apply_auto_altitude(&mut self.tpl_seats, last);
-                    }
-                    self.tpl_select = Some(TplSelect::Seat(self.tpl_seats.len() - 1));
-                    self.tpl_preview_from_catalog = false;
-                    self.sync_template_waypoint_speed();
-                }
-            }
-            if !self.tpl_seats.is_empty()
-                && ui
-                    .button("Copy attributes to all")
-                    .on_hover_text(
-                        "Copy country, skill, fuel, and flags to every unit, and altitude to every plane (capped at each plane’s ceiling). Payload and modifications copy only to the same aircraft type.",
-                    )
-                    .clicked()
-            {
-                let from = match self.tpl_select {
-                    Some(TplSelect::Seat(si)) => si,
-                    Some(TplSelect::Order { seat, .. } | TplSelect::Event { seat, .. }) => seat,
-                    None => 0,
-                };
-                copy_seat_attributes(&mut self.tpl_seats, from);
-            }
-            if ui
-                .checkbox(&mut self.tpl_auto_altitude, "Auto altitude (50% ceiling)")
-                .on_hover_text(
-                    "New planes and model swaps start in the air at half the aircraft’s service ceiling; wingmen match their flight lead and follow it when the lead’s altitude changes. Turning this on re-heights every plane. Turn it off to add ground-start (runway or parked) planes.",
-                )
-                .changed()
-                && self.tpl_auto_altitude
-            {
-                apply_auto_altitude_all(&mut self.tpl_seats);
-            }
-        });
+        ui.add_space(6.0);
+        if ui
+            .checkbox(&mut self.tpl_auto_altitude, "Auto altitude (50% ceiling)")
+            .on_hover_text(
+                "New planes and model swaps start in the air at half the aircraft’s service ceiling; wingmen match their flight lead and follow it when the lead’s altitude changes. Turning this on re-heights every plane. Turn it off to add ground-start (runway or parked) planes.",
+            )
+            .changed()
+            && self.tpl_auto_altitude
+        {
+            apply_auto_altitude_all(&mut self.tpl_seats);
+        }
     }
 
     fn draw_seat_payload_mods(&mut self, ui: &mut egui::Ui, si: usize) {
@@ -3551,13 +3793,13 @@ impl GroupGeneratorApp {
         let has_mods = loadout.is_some_and(|a| a.has_mods());
 
         if has_payloads {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Payload");
                 let current = self.tpl_seats[si].payload_id;
                 let selected_text = payloads::payload_preview(&script, current);
                 egui::ComboBox::from_id_salt(format!("tpl_payload_{si}"))
                     .selected_text(selected_text)
-                    .width(280.0)
+                    .width(196.0)
                     .show_ui(ui, |ui| {
                         let ac = payloads::catalog().for_script(&script).unwrap();
                         for p in &ac.payloads {
@@ -3586,7 +3828,7 @@ impl GroupGeneratorApp {
                 }
             }
         } else if self.tpl_seats[si].unit.is_air() && !has_mods {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Payload");
                 ui.add(egui::DragValue::new(&mut self.tpl_seats[si].payload_id).range(0..=99));
             });
@@ -3594,7 +3836,7 @@ impl GroupGeneratorApp {
 
         if has_mods {
             let is_train = self.tpl_seats[si].unit.is_train();
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Modifications");
                 let preview = payloads::mods_preview(&script, &self.tpl_seats[si].mod_mask);
                 let label = if preview == "—" {
@@ -3671,47 +3913,19 @@ impl GroupGeneratorApp {
         }
     }
 
-    fn draw_model_button_grid(
-        &self,
-        ui: &mut egui::Ui,
-        models: &[CatalogUnit],
-        selected_script: Option<&str>,
-    ) -> Option<CatalogUnit> {
-        let mut picked = None;
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
-            for unit in models {
-                let selected = selected_script.is_some_and(|s| s.eq_ignore_ascii_case(&unit.script));
-                let btn = egui::Button::new(RichText::new(unit.label()).small())
-                    .min_size(Vec2::new(124.0, 30.0))
-                    .selected(selected);
-                if ui.add(btn).clicked() {
-                    picked = Some(unit.clone());
-                }
-            }
-        });
-        picked
-    }
-
+    /// Model picture and specs. The caller draws the name (selection title).
     fn draw_model_preview(
         &mut self,
         ui: &mut egui::Ui,
         unit: Option<&CatalogUnit>,
-        caption: &str,
         payload_line: Option<&str>,
         mods_line: Option<&str>,
         status_line: Option<&str>,
     ) {
-        ui.label(
-            RichText::new(caption)
-                .small()
-                .color(Color32::from_rgb(150, 150, 160)),
-        );
         let Some(unit) = unit else {
-            ui.label(RichText::new("Select a model.").italics());
+            ui.label(RichText::new("Select a model.").color(c::NEUTRAL_700));
             return;
         };
-        ui.label(RichText::new(unit.label()).strong());
         let ctx = ui.ctx().clone();
         let tex = self.model_texture(&ctx, &unit.script);
         let size = tex.size_vec2();
@@ -3740,7 +3954,7 @@ impl GroupGeneratorApp {
                 );
             }
             if !spec.notes.is_empty() {
-                ui.add(egui::Label::new(RichText::new(spec.notes).small().weak()).wrap());
+                ui.add(egui::Label::new(RichText::new(spec.notes).small().color(c::NEUTRAL_700)).wrap());
             }
         }
         ui.add_space(4.0);
@@ -3753,39 +3967,6 @@ impl GroupGeneratorApp {
         ui.add(
             egui::Label::new(RichText::new(format!("Modifications: {mods}")).small()).wrap(),
         );
-    }
-
-    fn schematic_preview_unit(&self) -> Option<(CatalogUnit, String, Option<(i32, String)>)> {
-        if self.tpl_preview_from_catalog {
-            let models = self.displayed_catalog();
-            return models
-                .get(self.tpl_add_pick)
-                .cloned()
-                .map(|u| (u, "Catalog".into(), None));
-        }
-        let seat = match self.tpl_select {
-            Some(
-                TplSelect::Seat(s)
-                | TplSelect::Order { seat: s, .. }
-                | TplSelect::Event { seat: s, .. },
-            ) => Some(s),
-            None => None,
-        };
-        if let Some(s) = seat {
-            if s < self.tpl_seats.len() {
-                let seat = &self.tpl_seats[s];
-                return Some((
-                    seat.unit.clone(),
-                    format!("Seat {}", s + 1),
-                    Some((seat.payload_id, seat.mod_mask.clone())),
-                ));
-            }
-        }
-        let models = self.displayed_catalog();
-        models
-            .get(self.tpl_add_pick)
-            .cloned()
-            .map(|u| (u, "Catalog".into(), None))
     }
 
     fn model_texture(&mut self, ctx: &egui::Context, script: &str) -> TextureHandle {
@@ -4123,85 +4304,23 @@ impl GroupGeneratorApp {
         }
     }
 
+    /// Formation view: fills the center above the order tree (README §5.1).
     fn draw_template_schematic(&mut self, ui: &mut egui::Ui) {
-        let preview_w = 252.0;
-        let height = 380.0;
-        ui.horizontal(|ui| {
-        let preview = self.schematic_preview_unit();
-        let caption = preview
-            .as_ref()
-            .map(|(_, c, _)| c.clone())
-            .unwrap_or_else(|| "Catalog".into());
-        let payload_line = preview.as_ref().and_then(|(u, _, load)| {
-            load.as_ref()
-                .map(|(id, _)| payloads::payload_preview(&u.script, *id))
-        });
-        let mods_line = preview.as_ref().and_then(|(u, _, load)| {
-            load.as_ref()
-                .map(|(_, mask)| payloads::mods_preview(&u.script, mask))
-        });
-        let status_line = if self.tpl_preview_from_catalog {
-            None
-        } else {
-            match self.tpl_select {
-                Some(
-                    TplSelect::Seat(s)
-                    | TplSelect::Order { seat: s, .. }
-                    | TplSelect::Event { seat: s, .. },
-                ) if s < self.tpl_seats.len() && self.tpl_seats[s].unit.is_air() => Some(
-                    PlaneStart::from_i32(self.tpl_seats[s].start_type)
-                        .preview_status(self.tpl_seats[s].altitude),
-                ),
-                _ => None,
-            }
-        };
-        let unit = preview.map(|(u, _, _)| u);
-        let (pr, _) = ui.allocate_exact_size(Vec2::new(preview_w, height), Sense::hover());
-        let panel_fill = ui.visuals().panel_fill;
-        ui.painter().rect_filled(pr, 4.0, panel_fill);
-        ui.painter().rect_stroke(
-            pr,
-            4.0,
-            Stroke::new(
-                1.0_f32,
-                Color32::from_rgb(
-                    panel_fill.r().saturating_add(18),
-                    panel_fill.g().saturating_add(18),
-                    panel_fill.b().saturating_add(18),
-                ),
-            ),
-            egui::StrokeKind::Inside,
-        );
-        ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(pr.shrink2(Vec2::new(8.0, 8.0)))
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            |ui| {
-                ui.set_clip_rect(pr);
-                ui.vertical(|ui| {
-                    ui.set_max_width(preview_w - 16.0);
-                    self.draw_model_preview(
-                        ui,
-                        unit.as_ref(),
-                        &caption,
-                        payload_line.as_deref(),
-                        mods_line.as_deref(),
-                        status_line.as_deref(),
-                    );
-                });
-            },
-        );
-        let map_w = (ui.available_width() - preview_w - ui.spacing().item_spacing.x).max(180.0);
-        let size = Vec2::new(map_w, height);
-        let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+        let rect = ui.available_rect_before_wrap();
+        let response = ui.allocate_rect(rect, Sense::click_and_drag());
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 4.0, Color32::from_rgb(28, 30, 34));
-        painter.rect_stroke(
-            rect,
-            4.0,
-            Stroke::new(1.0_f32, Color32::from_rgb(48, 52, 58)),
-            egui::StrokeKind::Inside,
-        );
+        painter.rect_filled(rect, 0.0, c::BG);
+        let grid = Stroke::new(1.0_f32, c::NEUTRAL_200);
+        let mut gx = rect.left() + 32.0;
+        while gx < rect.right() {
+            painter.line_segment([Pos2::new(gx, rect.top()), Pos2::new(gx, rect.bottom())], grid);
+            gx += 32.0;
+        }
+        let mut gy = rect.top() + 32.0;
+        while gy < rect.bottom() {
+            painter.line_segment([Pos2::new(rect.left(), gy), Pos2::new(rect.right(), gy)], grid);
+            gy += 32.0;
+        }
 
         let per = self.tpl_per_group.max(1) as usize;
         let spacing = PLACEMENT_SPACING as f64;
@@ -4315,49 +4434,59 @@ impl GroupGeneratorApp {
         let visual = visual_range_m(self.template_zone_mix());
         let vis_on_in = (self.tpl_zone_in - visual).abs() < 50.0;
         let vis_on_out = (self.tpl_zone_out - visual).abs() < 50.0;
+        // Zone In solid ACCENT_700, Zone Out dashed ACCENT, labels above each circle.
         painter.circle_stroke(
             origin,
             (self.tpl_zone_in * scale).max(2.0),
-            Stroke::new(1.5_f32, Color32::from_rgb(70, 150, 110)),
+            Stroke::new(1.5_f32, c::ACCENT_700),
         );
-        painter.circle_stroke(
+        shell::dashed_circle(
+            &painter,
             origin,
             (self.tpl_zone_out * scale).max(2.0),
-            Stroke::new(1.5_f32, Color32::from_rgb(170, 90, 80)),
+            Stroke::new(1.5_f32, c::ACCENT),
         );
         if !vis_on_in && !vis_on_out {
             painter.circle_stroke(
                 origin,
                 (visual * scale).max(2.0),
-                Stroke::new(1.2_f32, Color32::from_rgb(210, 180, 70)),
+                Stroke::new(1.0_f32, c::WARN),
             );
             painter.text(
                 to_screen(0.0, visual as f64),
                 Align2::LEFT_CENTER,
-                "visual",
-                FontId::proportional(11.0),
-                Color32::from_rgb(210, 180, 70),
+                " visual",
+                FontId::proportional(12.0),
+                c::WARN_TEXT,
             );
         }
         painter.text(
-            to_screen(0.0, self.tpl_zone_in as f64),
-            Align2::LEFT_CENTER,
-            if vis_on_in { "IN · visual" } else { "IN" },
-            FontId::proportional(11.0),
-            Color32::from_rgb(110, 190, 140),
+            to_screen(self.tpl_zone_in as f64, 0.0) - Vec2::new(0.0, 4.0),
+            Align2::CENTER_BOTTOM,
+            format!(
+                "Zone In {:.1} km{}",
+                self.tpl_zone_in / 1000.0,
+                if vis_on_in { " · visual" } else { "" }
+            ),
+            FontId::proportional(12.0),
+            c::ACCENT_700,
         );
         painter.text(
-            to_screen(0.0, self.tpl_zone_out as f64),
-            Align2::LEFT_CENTER,
-            if vis_on_out { "OUT · visual" } else { "OUT" },
-            FontId::proportional(11.0),
-            Color32::from_rgb(200, 130, 120),
+            to_screen(self.tpl_zone_out as f64, 0.0) - Vec2::new(0.0, 4.0),
+            Align2::CENTER_BOTTOM,
+            format!(
+                "Zone Out {:.1} km{}",
+                self.tpl_zone_out / 1000.0,
+                if vis_on_out { " · visual" } else { "" }
+            ),
+            FontId::proportional(12.0),
+            c::ACCENT_700,
         );
         if let Some(area) = selected_area {
             painter.circle_stroke(
                 origin,
                 (area * scale).max(2.0),
-                Stroke::new(1.4_f32, Color32::from_rgb(210, 160, 70)),
+                Stroke::new(1.4_f32, c::WARN),
             );
         }
 
@@ -4374,17 +4503,13 @@ impl GroupGeneratorApp {
             for pair in path.windows(2) {
                 painter.line_segment(
                     [pair[0], pair[1]],
-                    Stroke::new(1.4_f32, Color32::from_rgb(80, 140, 160)),
+                    Stroke::new(1.4_f32, c::ACCENT_500),
                 );
             }
             for &(num, p) in &wp_pts {
                 let sel = selected_wp == Some(num);
                 let r = if sel { 8.0 } else { 6.5 };
-                let color = if sel {
-                    Color32::from_rgb(255, 170, 60)
-                } else {
-                    Color32::from_rgb(120, 190, 210)
-                };
+                let color = if sel { c::ACCENT_800 } else { c::ACCENT_500 };
                 let dia = vec![
                     Pos2::new(p.x, p.y - r),
                     Pos2::new(p.x + r, p.y),
@@ -4396,8 +4521,8 @@ impl GroupGeneratorApp {
                     p + Vec2::new(10.0, 0.0),
                     Align2::LEFT_CENTER,
                     format!("WP {num}"),
-                    FontId::proportional(11.0),
-                    Color32::from_rgb(170, 210, 220),
+                    FontId::proportional(12.0),
+                    c::NEUTRAL_800,
                 );
             }
         }
@@ -4422,7 +4547,7 @@ impl GroupGeneratorApp {
             painter.rect_stroke(
                 box_rect,
                 6.0,
-                Stroke::new(1.0_f32, Color32::from_rgb(58, 64, 74)),
+                Stroke::new(1.0_f32, c::NEUTRAL_300),
                 egui::StrokeKind::Outside,
             );
         }
@@ -4435,7 +4560,7 @@ impl GroupGeneratorApp {
                             to_screen(world[lead].0, world[lead].1),
                             to_screen(world[i].0, world[i].1),
                         ],
-                        Stroke::new(1.6_f32, Color32::from_rgb(90, 110, 140)),
+                        Stroke::new(1.2_f32, c::NEUTRAL_500),
                     );
                 }
             }
@@ -4476,7 +4601,7 @@ impl GroupGeneratorApp {
             let lead_here = self.tpl_seats[i].role == FlightRole::Lead;
             let base = side_color(self.tpl_seats[i].country);
             let color = if selected {
-                Color32::from_rgb(255, 170, 60)
+                c::ACCENT
             } else if hovered {
                 Color32::from_rgb(
                     base.r().saturating_add(70),
@@ -4542,7 +4667,7 @@ impl GroupGeneratorApp {
                 }
             }
             if selected {
-                painter.circle_stroke(*p, r + 5.0, Stroke::new(1.6_f32, Color32::from_rgb(255, 210, 70)));
+                painter.circle_stroke(*p, r + 5.0, Stroke::new(1.5_f32, c::ACCENT));
             }
             let role = match self.tpl_seats[i].role {
                 FlightRole::Lead => "Lead",
@@ -4554,8 +4679,8 @@ impl GroupGeneratorApp {
                 *p + Vec2::new(0.0, r + 4.0),
                 Align2::CENTER_TOP,
                 label,
-                FontId::proportional(11.0),
-                Color32::from_rgb(210, 210, 220),
+                FontId::proportional(12.0),
+                c::NEUTRAL_800,
             );
         }
 
@@ -4577,16 +4702,10 @@ impl GroupGeneratorApp {
                 alt,
                 seat.number_in_formation
             );
-            painter.text(
-                rect.min + Vec2::new(10.0, 28.0),
-                Align2::LEFT_TOP,
-                text,
-                FontId::proportional(13.0),
-                Color32::from_rgb(255, 230, 160),
-            );
+            painter.text(rect.min + Vec2::new(14.0, 54.0), Align2::LEFT_TOP, text, FontId::proportional(13.0), c::TEXT);
         } else if let Some(num) = hover_wp {
             painter.text(
-                rect.min + Vec2::new(10.0, 28.0),
+                rect.min + Vec2::new(14.0, 54.0),
                 Align2::LEFT_TOP,
                 format!(
                     "WP {num} · {:.0} m north of origin · {:.0} m alt · {} · Area {} m",
@@ -4600,15 +4719,22 @@ impl GroupGeneratorApp {
                     waypoint_area_m(&self.tpl_seats)
                 ),
                 FontId::proportional(13.0),
-                Color32::from_rgb(180, 230, 240),
+                c::TEXT,
             );
         }
 
         painter.text(
-            rect.min + Vec2::new(10.0, 8.0),
+            rect.min + Vec2::new(14.0, 12.0),
+            Align2::LEFT_TOP,
+            "FORMATION VIEW",
+            FontId::new(14.0, theme::heading_family()),
+            c::TEXT,
+        );
+        painter.text(
+            rect.min + Vec2::new(14.0, 32.0),
             Align2::LEFT_TOP,
             format!(
-                "{} · {} / group · 150 m   Zone IN {:.1} km{} · Out {:.1} km{}   N up · scroll zoom · right-drag pan",
+                "{} · {} / group · 150 m   Zone In {:.1} km{} · Out {:.1} km{}",
                 self.tpl_place_layout.label(),
                 self.tpl_per_group,
                 self.tpl_zone_in / 1000.0,
@@ -4624,15 +4750,54 @@ impl GroupGeneratorApp {
                     ""
                 },
             ),
-            FontId::proportional(11.0),
-            Color32::from_rgb(170, 170, 180),
+            FontId::proportional(12.0),
+            c::NEUTRAL_700,
         );
         painter.text(
-            Pos2::new(rect.center().x, rect.min.y + 10.0),
+            Pos2::new(rect.center().x, rect.min.y + 12.0),
             Align2::CENTER_TOP,
             "N",
+            FontId::new(13.0, theme::bold_family()),
+            c::NEUTRAL_700,
+        );
+        if n == 0 {
+            let msg = "Pick a model on the left, then click + Add to begin.";
+            let g = painter.layout_no_wrap(msg.into(), FontId::proportional(13.0), c::NEUTRAL_800);
+            let box_rect = Rect::from_center_size(rect.center() + Vec2::new(0.0, 60.0), g.size() + Vec2::new(24.0, 14.0));
+            painter.rect_filled(box_rect, 2.0, c::BG);
+            painter.rect_stroke(box_rect, 2.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
+            painter.galley(box_rect.min + Vec2::new(12.0, 7.0), g, c::NEUTRAL_800);
+        }
+        painter.text(
+            rect.left_bottom() + Vec2::new(14.0, -14.0),
+            Align2::LEFT_BOTTOM,
+            "Scroll to zoom · right-drag to pan",
             FontId::proportional(12.0),
-            Color32::from_rgb(140, 160, 180),
+            c::NEUTRAL_700,
+        );
+        // Zoom group, bottom-right. Added after the canvas so it sits on top.
+        let zoom_rect = Rect::from_min_max(
+            rect.right_bottom() - Vec2::new(230.0, 44.0),
+            rect.right_bottom() - Vec2::new(12.0, 10.0),
+        );
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(zoom_rect)
+                .layout(Layout::right_to_left(Align::Center)),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if ui.button("Fit").on_hover_text("Fit the formation and reset the pan").clicked() {
+                    self.tpl_view_zoom = 1.0;
+                    self.tpl_view_pan = Vec2::ZERO;
+                }
+                if ui.button("+").on_hover_text("Zoom in").clicked() {
+                    self.tpl_view_zoom = (self.tpl_view_zoom * 1.25).min(12.0);
+                }
+                ui.label(RichText::new(format!("{:.0}%", self.tpl_view_zoom * 100.0)).monospace());
+                if ui.button("−").on_hover_text("Zoom out").clicked() {
+                    self.tpl_view_zoom = (self.tpl_view_zoom / 1.25).max(0.04);
+                }
+            },
         );
 
         if response.clicked() {
@@ -4669,8 +4834,6 @@ impl GroupGeneratorApp {
                 }
             }
         }
-
-        });
     }
 
     fn fighter_panel(&mut self, ui: &mut egui::Ui) {
