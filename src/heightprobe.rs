@@ -6,17 +6,19 @@
 //! named `H<iiii>_<jjjj>` after their lattice node, so a snapped file needs
 //! nothing else. The land test matches `tools/heightgrid/gen_land_grid.py`:
 //! dry cells of `combined_terrain.bin` inside the map frame, grown 2 cells
-//! into the sea. Sea is never probed; it snaps to exactly 0 m.
+//! into the sea. Sea snaps to exactly 0 m; only the 800 m survey pass
+//! (`survey_group`) probes it on purpose, to learn where the game's water is.
 //!
 //! A land probe still at Y = 0 was not snapped: it is reported and ignored,
-//! never stored as sea level.
+//! never stored as sea level. A file with no probe above 0 m is not merged.
 //!
 //! ## Public API
 //! * `CONTENT_X` / `CONTENT_Z` — map area inside the image frame
 //! * `tile_probe_nodes`, `tile_probe_count`, `probe_tiles`
 //! * `tile_name`, `probe_name`, `parse_probe_name`
-//! * `probe_group`, `tile_probe_group` — build probe `.Group` trees
+//! * `probe_group`, `tile_probe_group`, `survey_nodes`, `survey_group`
 //! * `ingest` / `IngestReport` — merge a snapped tree into a store
+//! * `run_cli` — `--probe-*` command-line mode (see `CLI_HELP`)
 //!
 //! ## Used by
 //! * tests only for now (the Map-tab Terrain panel wires it in later)
@@ -198,6 +200,28 @@ pub fn tile_probe_group(ti: usize, tj: usize) -> Result<Option<Il2Entity>, Strin
     probe_group(&tile_name(ti, tj), &nodes).map(Some)
 }
 
+/// Survey pass: every `SURVEY_STRIDE`-th lattice node (800 m), whole square.
+pub const SURVEY_STRIDE: usize = 8;
+pub const SURVEY_NAME: &str = "HG_PASS1_SURVEY_800m";
+
+/// Survey nodes over the full map square — sea and frame included, so the
+/// snapped file shows where the game has water (exactly 0 m) and terrain.
+pub fn survey_nodes() -> Vec<(usize, usize)> {
+    (0..LATTICE_N)
+        .rev()
+        .step_by(SURVEY_STRIDE)
+        .flat_map(|i| (0..LATTICE_N).step_by(SURVEY_STRIDE).map(move |j| (i, j)))
+        .collect()
+}
+
+fn is_survey_node(i: usize, j: usize) -> bool {
+    i.is_multiple_of(SURVEY_STRIDE) && j.is_multiple_of(SURVEY_STRIDE)
+}
+
+pub fn survey_group() -> Result<Il2Entity, String> {
+    probe_group(SURVEY_NAME, &survey_nodes())
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IngestReport {
     /// Probe heights written to lattice nodes.
@@ -206,19 +230,24 @@ pub struct IngestReport {
     pub probe_points: usize,
     /// Snapped mission objects kept as measured points (`learn`).
     pub learned: usize,
-    /// Probes at exactly 0 m over sea (kept: sea level).
-    pub sea: usize,
+    /// Probes at exactly 0 m over water (kept: water level).
+    pub water: usize,
     /// Probes at exactly 0 m on land: not snapped, ignored.
     pub unsnapped: usize,
+    /// Probes with a non-zero height.
+    pub above_zero: usize,
     /// Tiles that received lattice heights.
     pub tiles: BTreeSet<(usize, usize)>,
+    /// False when the file looked unsnapped and nothing was merged.
+    pub merged: bool,
 }
 
 impl IngestReport {
-    /// More than half the probes still at 0 m on land: the file was saved
-    /// without running set to ground.
+    /// Every probe still at 0 m, or most land probes at 0 m: the file was
+    /// saved without running set to ground.
     pub fn looks_unsnapped(&self) -> bool {
-        self.unsnapped > 0 && self.unsnapped * 2 > self.lattice + self.probe_points + self.unsnapped
+        let probes = self.lattice + self.probe_points + self.unsnapped;
+        (probes > 0 && self.above_zero == 0) || (self.unsnapped > 0 && self.unsnapped * 2 > probes)
     }
 }
 
@@ -226,46 +255,169 @@ fn num(e: &Il2Entity, key: &str) -> Option<f64> {
     e.property(key)?.trim().parse().ok()
 }
 
-/// Merge every probe in `root` into `store`. With `learn`, snapped ground
-/// objects (Vehicle / Train / Block / Ground with `PinToTerrain = 1` and a
-/// non-zero Y) are kept as measured points too — only use it on files the
-/// user has run set to ground on.
+enum Write {
+    Node(usize, usize, f64),
+    Point(f64, f64, f64),
+}
+
+/// Merge every probe in `root` into `store`; nothing is merged if the file
+/// looks unsnapped. A probe at exactly 0 m counts as water when it is a
+/// survey node (the survey covers sea on purpose) or the terrain mask says
+/// water; otherwise it was not snapped and is skipped. With `learn`, snapped
+/// ground objects (Vehicle / Train / Block / Ground with `PinToTerrain = 1`
+/// and a non-zero Y) are kept as measured points too — only use it on files
+/// the user has run set to ground on.
 pub fn ingest(root: &Il2Entity, store: &mut HeightStore, learn: bool) -> IngestReport {
-    let water = TerrainMap::builtin().ok();
+    let mask = TerrainMap::builtin().ok();
     let mut rep = IngestReport::default();
+    let mut writes = Vec::new();
     root.for_each(&mut |e| {
         let (Some(x), Some(y), Some(z)) = (num(e, "XPos"), num(e, "YPos"), num(e, "ZPos")) else { return };
         let name = e.name().unwrap_or("");
-        let lattice = parse_probe_name(name);
-        if lattice.is_none() && !is_legacy_probe(name) {
+        if parse_probe_name(name).is_none() && !is_legacy_probe(name) {
             let pinned = e.property("PinToTerrain").map(str::trim) == Some("1");
             if learn && pinned && y != 0.0 && LEARN_TYPES.contains(&e.block_type.as_str()) {
-                store.add_point(x, z, y);
+                writes.push(Write::Point(x, z, y));
                 rep.learned += 1;
             }
             return;
         }
+        let (fi, fj) = (x / STEP_M, z / STEP_M);
+        let node = ((fi - fi.round()).abs() < 0.005 && (fj - fj.round()).abs() < 0.005 && fi >= 0.0 && fj >= 0.0)
+            .then(|| (fi.round() as usize, fj.round() as usize))
+            .filter(|&(i, j)| i < LATTICE_N && j < LATTICE_N);
         if y == 0.0 {
-            if water.is_some_and(|w| w.is_water_xz(x, z)) {
-                rep.sea += 1;
+            let survey = node.is_some_and(|(i, j)| is_survey_node(i, j));
+            if survey || mask.is_some_and(|m| m.is_water_xz(x, z)) {
+                rep.water += 1;
             } else {
                 rep.unsnapped += 1;
                 return;
             }
-        }
-        let (fi, fj) = (x / STEP_M, z / STEP_M);
-        let on_node = (fi - fi.round()).abs() < 0.005 && (fj - fj.round()).abs() < 0.005;
-        if on_node && fi >= 0.0 && fj >= 0.0 && (fi.round() as usize) < LATTICE_N && (fj.round() as usize) < LATTICE_N {
-            let (i, j) = (fi.round() as usize, fj.round() as usize);
-            store.set_node(i, j, y);
-            rep.tiles.insert(tile_of_node(i, j));
-            rep.lattice += 1;
         } else {
-            store.add_point(x, z, y);
-            rep.probe_points += 1;
+            rep.above_zero += 1;
+        }
+        match node {
+            Some((i, j)) => {
+                writes.push(Write::Node(i, j, y));
+                rep.tiles.insert(tile_of_node(i, j));
+                rep.lattice += 1;
+            }
+            None => {
+                writes.push(Write::Point(x, z, y));
+                rep.probe_points += 1;
+            }
         }
     });
+    if rep.looks_unsnapped() {
+        return rep;
+    }
+    for w in writes {
+        match w {
+            Write::Node(i, j, y) => store.set_node(i, j, y),
+            Write::Point(x, z, y) => store.add_point(x, z, y),
+        }
+    }
+    rep.merged = true;
     rep
+}
+
+pub const CLI_HELP: &str = r"Terrain height probes (the window does not open):
+  --probe-survey <out.Group>              write the 800 m survey pass (whole map, one file)
+  --probe-ingest [--learn] <snapped>...   merge snapped .Group/.Mission files into the store
+  --probe-status                          show what the store holds
+  --store <path>                          use this store instead of the default
+Default store: %APPDATA%\IL2MissionUtility\terrain\korea_100m.hgt";
+
+/// `--probe-*` command-line mode. Returns the exit code, or `None` when the
+/// arguments are not a probe command (the GUI starts).
+pub fn run_cli(args: &[String]) -> Option<i32> {
+    let cmd = args.first()?.as_str();
+    if !cmd.starts_with("--probe-") {
+        return None;
+    }
+    let mut store_path = crate::terrain::default_store_path();
+    let mut learn = false;
+    let mut files = Vec::new();
+    let mut rest = args[1..].iter();
+    while let Some(a) = rest.next() {
+        match a.as_str() {
+            "--learn" => learn = true,
+            "--store" => match rest.next() {
+                Some(p) => store_path = p.into(),
+                None => return Some(fail("--store needs a path")),
+            },
+            _ => files.push(a.clone()),
+        }
+    }
+    let result = match cmd {
+        "--probe-survey" => cli_survey(&files),
+        "--probe-ingest" => cli_ingest(&files, &store_path, learn),
+        "--probe-status" => cli_status(&store_path),
+        _ => Err(CLI_HELP.to_string()),
+    };
+    Some(match result {
+        Ok(()) => 0,
+        Err(e) => fail(&e),
+    })
+}
+
+fn fail(msg: &str) -> i32 {
+    eprintln!("{msg}");
+    1
+}
+
+fn cli_survey(files: &[String]) -> Result<(), String> {
+    let [out] = files else { return Err(format!("--probe-survey needs one output path
+
+{CLI_HELP}")) };
+    let group = survey_group()?;
+    let n = group.children.len();
+    std::fs::write(out, crate::serialize::serialize_group(&group)).map_err(|e| format!("{out}: {e}"))?;
+    println!("{out}: {n} T-34 probes, 800 m apart over the whole map (sea and frame included)");
+    println!("Import it, select all, set to ground, save, then run --probe-ingest on the saved file.");
+    Ok(())
+}
+
+fn cli_ingest(files: &[String], store_path: &std::path::Path, learn: bool) -> Result<(), String> {
+    if files.is_empty() {
+        return Err(format!("--probe-ingest needs at least one snapped file
+
+{CLI_HELP}"));
+    }
+    let mut store = HeightStore::load(store_path, crate::terrain::KOREA_MAP_ID)?;
+    let mut refused = 0;
+    for path in files {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+        let root = parse_il2_document(&text).map_err(|e| format!("{path}: {e}"))?;
+        let rep = ingest(&root, &mut store, learn);
+        println!(
+            "{path}: {} heights, {} water, {} extra points, {} learned, {} unsnapped",
+            rep.lattice, rep.water, rep.probe_points, rep.learned, rep.unsnapped
+        );
+        if !rep.merged {
+            refused += 1;
+            println!("  NOT merged: it looks unsnapped (select all, set to ground, save, then retry)");
+        }
+    }
+    store.save(store_path)?;
+    cli_status(store_path)?;
+    if refused > 0 { Err(format!("{refused} file(s) not merged")) } else { Ok(()) }
+}
+
+fn cli_status(store_path: &std::path::Path) -> Result<(), String> {
+    let store = HeightStore::load(store_path, crate::terrain::KOREA_MAP_ID)?;
+    let tiles = (0..TILES_PER_SIDE)
+        .flat_map(|ti| (0..TILES_PER_SIDE).map(move |tj| (ti, tj)))
+        .filter(|&(ti, tj)| store.tile_measured(ti, tj) > 0)
+        .count();
+    println!(
+        "{}: {} measured nodes in {tiles} tiles, {} extra points",
+        store_path.display(),
+        store.measured_nodes(),
+        store.points().len()
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -365,9 +517,38 @@ mod tests {
     #[test]
     fn ingest_flags_a_file_saved_without_snapping() {
         let root = snapped(&[], "");
-        let rep = ingest(&root, &mut HeightStore::new(KOREA_MAP_ID), false);
+        let mut store = HeightStore::new(KOREA_MAP_ID);
+        let rep = ingest(&root, &mut store, false);
         assert_eq!(rep.unsnapped, 3);
         assert!(rep.looks_unsnapped());
+        assert!(!rep.merged);
+        assert_eq!(store.measured_nodes(), 0);
+    }
+
+    #[test]
+    fn survey_covers_the_whole_square_every_800_m() {
+        let nodes = survey_nodes();
+        assert_eq!(nodes.len(), 625 * 625);
+        assert_eq!(nodes[0], (4992, 0), "north-west corner first");
+        assert_eq!(*nodes.last().unwrap(), (0, 4992));
+        assert!(nodes.iter().all(|&(i, j)| is_survey_node(i, j)));
+    }
+
+    #[test]
+    fn survey_zeros_are_water_but_an_all_zero_survey_is_refused() {
+        // two survey nodes: one on land at 0 m (water per the survey), one snapped
+        let nodes = [(3904, 3624), (3904, 3632)];
+        let text = serialize_group(&probe_group(SURVEY_NAME, &nodes).unwrap());
+        let unsnapped = parse_group_file(&text).unwrap();
+        let mut store = HeightStore::new(KOREA_MAP_ID);
+        let rep = ingest(&unsnapped, &mut store, false);
+        assert!(rep.looks_unsnapped() && !rep.merged, "no probe above 0 m");
+        let snapped = parse_group_file(&text.replacen("YPos = 0.000", "YPos = 351.200", 1)).unwrap();
+        let rep = ingest(&snapped, &mut store, false);
+        assert!(rep.merged);
+        assert_eq!((rep.above_zero, rep.water, rep.unsnapped), (1, 1, 0));
+        assert_eq!(store.node(3904, 3624), Some(351.2));
+        assert_eq!(store.node(3904, 3632), Some(0.0));
     }
 
     #[test]
@@ -404,7 +585,7 @@ mod real_files {
             let rep = ingest(&root, &mut store, false);
             println!(
                 "{path}: lattice {} points {} sea {} unsnapped {} tiles {}",
-                rep.lattice, rep.probe_points, rep.sea, rep.unsnapped, rep.tiles.len()
+                rep.lattice, rep.probe_points, rep.water, rep.unsnapped, rep.tiles.len()
             );
         }
         println!("measured nodes {}, points {}", store.measured_nodes(), store.points().len());

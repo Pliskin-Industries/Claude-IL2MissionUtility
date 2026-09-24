@@ -15,9 +15,9 @@
 //!
 //! ## Public API
 //! * `STEP_M`, `LATTICE_N`, `TILE`, `TILES_PER_SIDE`, `KOREA_MAP_ID`
-//! * `DEFAULT_GROUND_MARGIN_M`, `DEFAULT_PARKED_PLANE_MARGIN_M`
+//! * `DEFAULT_GROUND_MARGIN_M`, `DEFAULT_PARKED_PLANE_MARGIN_M`, `ground_margin_m`
 //! * `struct HeightStore` — `new`, `node` / `set_node`, `add_point`,
-//!   `height_at`, `measured_nodes`, `tile_measured`, `to_bytes` /
+//!   `height_at`, `lookup` (→ `TerrainHeight`), `measured_nodes`, `tile_measured`, `to_bytes` /
 //!   `from_bytes`, `load` / `save`
 //! * `tile_of_node`, `node_of_tile`, `tile_node_range`, `default_store_path`
 //!
@@ -48,6 +48,32 @@ pub const DEFAULT_GROUND_MARGIN_M: f64 = 20.0;
 pub const DEFAULT_PARKED_PLANE_MARGIN_M: f64 = 1.0;
 /// A measured point this close to a query answers it directly.
 pub const POINT_RADIUS_M: f64 = 30.0;
+/// Lattice strides tried by `lookup`, finest first (100 / 200 / 400 / 800 m).
+const LOOKUP_STRIDES: [usize; 4] = [1, 2, 4, 8];
+
+/// A looked-up ground height. `spacing_m` is the lattice spacing that
+/// answered (0 = a measured point within `POINT_RADIUS_M`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TerrainHeight {
+    pub y: f64,
+    pub spacing_m: f64,
+}
+
+/// Lift to add to a ground unit so it never starts underground, from the
+/// measured interpolation error per spacing (roughest 3 × 3 km tested:
+/// 100 m + 20 m → 0.3% below, none > 8 m; 200 m + 30 m → 3% below). `None`
+/// above 200 m: that is an estimate only, not safe to place units on.
+pub fn ground_margin_m(spacing_m: f64) -> Option<f64> {
+    if spacing_m <= 0.0 {
+        Some(5.0)
+    } else if spacing_m <= STEP_M {
+        Some(DEFAULT_GROUND_MARGIN_M)
+    } else if spacing_m <= 2.0 * STEP_M {
+        Some(30.0)
+    } else {
+        None
+    }
+}
 
 const UNKNOWN: i16 = i16::MIN;
 const MAGIC: &[u8; 4] = b"HGT1";
@@ -137,42 +163,49 @@ impl HeightStore {
     }
 
     /// Ground height at world (x, z), or `None` where nothing is measured.
-    ///
-    /// A measured point within `POINT_RADIUS_M` answers directly (highest
-    /// if several). Otherwise the four surrounding lattice nodes are
-    /// interpolated bilinearly; with only some of them measured the highest
-    /// known one is used, since a unit placed high settles but one placed
-    /// low ends up underground.
     pub fn height_at(&self, x: f64, z: f64) -> Option<f64> {
+        self.lookup(x, z).map(|h| h.y)
+    }
+
+    /// Ground height plus how it was measured.
+    ///
+    /// A measured point within `POINT_RADIUS_M` answers directly (highest if
+    /// several). Otherwise the finest fully measured lattice cell around
+    /// (x, z) is interpolated bilinearly: 100 m, then the 200 / 400 / 800 m
+    /// cells the coarser probe passes fill. With no full cell, the highest
+    /// measured corner of the 100 m cell is used — a unit placed high
+    /// settles, one placed low ends up underground.
+    pub fn lookup(&self, x: f64, z: f64) -> Option<TerrainHeight> {
         let near = self
             .points
             .iter()
             .filter(|p| (p.x - x).hypot(p.z - z) <= POINT_RADIUS_M)
             .map(|p| p.y)
-            .fold(None, |m: Option<f64>, y| Some(m.map_or(y, |m| m.max(y))));
-        if near.is_some() {
-            return near;
+            .reduce(f64::max);
+        if let Some(y) = near {
+            return Some(TerrainHeight { y, spacing_m: 0.0 });
         }
         if !(0.0..=MAP_MAX).contains(&x) || !(0.0..=MAP_MAX).contains(&z) {
             return None;
         }
-        let fi = x / STEP_M;
-        let fj = z / STEP_M;
+        let (fi, fj) = (x / STEP_M, z / STEP_M);
+        for k in LOOKUP_STRIDES {
+            let i0 = ((fi / k as f64).floor() as usize * k).min(LATTICE_N - 1 - k);
+            let j0 = ((fj / k as f64).floor() as usize * k).min(LATTICE_N - 1 - k);
+            let q = [self.node(i0, j0), self.node(i0, j0 + k), self.node(i0 + k, j0), self.node(i0 + k, j0 + k)];
+            if let [Some(a), Some(b), Some(c), Some(d)] = q {
+                let (ti, tj) = ((fi - i0 as f64) / k as f64, (fj - j0 as f64) / k as f64);
+                let y = a * (1.0 - ti) * (1.0 - tj) + b * (1.0 - ti) * tj + c * ti * (1.0 - tj) + d * ti * tj;
+                return Some(TerrainHeight { y, spacing_m: k as f64 * STEP_M });
+            }
+        }
         let i0 = (fi.floor() as usize).min(LATTICE_N - 2);
         let j0 = (fj.floor() as usize).min(LATTICE_N - 2);
-        let (ti, tj) = (fi - i0 as f64, fj - j0 as f64);
-        let q = [
-            self.node(i0, j0),
-            self.node(i0, j0 + 1),
-            self.node(i0 + 1, j0),
-            self.node(i0 + 1, j0 + 1),
-        ];
-        match q {
-            [Some(a), Some(b), Some(c), Some(d)] => Some(
-                a * (1.0 - ti) * (1.0 - tj) + b * (1.0 - ti) * tj + c * ti * (1.0 - tj) + d * ti * tj,
-            ),
-            _ => q.into_iter().flatten().reduce(f64::max),
-        }
+        [self.node(i0, j0), self.node(i0, j0 + 1), self.node(i0 + 1, j0), self.node(i0 + 1, j0 + 1)]
+            .into_iter()
+            .flatten()
+            .reduce(f64::max)
+            .map(|y| TerrainHeight { y, spacing_m: STEP_M })
     }
 
     pub fn measured_nodes(&self) -> usize {
@@ -334,6 +367,27 @@ mod tests {
         assert_eq!(s.height_at(100_050.0, 200_050.0), Some(180.0));
         assert_eq!(s.height_at(300_050.0, 300_050.0), None);
         assert_eq!(s.height_at(-5.0, 100.0), None);
+    }
+
+    #[test]
+    fn lookup_falls_back_to_coarser_passes() {
+        let mut s = HeightStore::new(KOREA_MAP_ID);
+        // an 800 m survey cell (stride 8) around (100,000 / 200,000)
+        for (i, j, y) in [(1000, 2000, 100.0), (1000, 2008, 180.0), (1008, 2000, 260.0), (1008, 2008, 340.0)] {
+            s.set_node(i, j, y);
+        }
+        let h = s.lookup(100_400.0, 200_400.0).unwrap();
+        assert_eq!(h, TerrainHeight { y: 220.0, spacing_m: 800.0 });
+        assert_eq!(ground_margin_m(h.spacing_m), None, "800 m is an estimate only");
+        // a 200 m base cell inside it wins once measured
+        for (i, j) in [(1004, 2004), (1004, 2006), (1006, 2004), (1006, 2006)] {
+            s.set_node(i, j, 500.0);
+        }
+        let h = s.lookup(100_500.0, 200_500.0).unwrap();
+        assert_eq!(h, TerrainHeight { y: 500.0, spacing_m: 200.0 });
+        assert_eq!(ground_margin_m(h.spacing_m), Some(30.0));
+        assert_eq!(ground_margin_m(100.0), Some(DEFAULT_GROUND_MARGIN_M));
+        assert_eq!(ground_margin_m(0.0), Some(5.0));
     }
 
     #[test]
