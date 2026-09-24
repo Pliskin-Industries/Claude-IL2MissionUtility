@@ -48,7 +48,12 @@ this machine's disk. So the loop is:
 Once a GitHub remote exists, switch to the skill's standard `git_push`/`git_pull` flow.
 
 **Codex prerequisite (not yet met on 2026-09-23).** The user installs the CLI:
-`npm i -g @openai/codex`, then `codex login`, then restarts Claude. If the
+`npm.cmd i -g @openai/codex`, then `codex.cmd login`. Use the `.cmd` forms
+because the PowerShell execution policy blocks `npm.ps1`. Then **fully quit
+Claude from the system tray** and reopen it. Closing the window is not
+enough: the broker caches the binary lookup once per process. It
+auto-finds the vendored exe under `%APPDATA%\npm\node_modules\@openai\codex\...`,
+which is installed (codex-cli 0.156.1). If the
 broker still reports `ENOENT`, set `CODEX_BIN` to the absolute path of the
 real `codex.exe`, not the `codex.cmd` shim. Saved delegation prompts live
 in `handoff/`.
