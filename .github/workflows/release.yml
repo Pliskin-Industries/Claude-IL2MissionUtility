@@ -1,0 +1,95 @@
+# Release autobuild.
+#
+# Push a tag that starts with "v" (e.g. v0.6-Alpha) and this workflow tests,
+# builds the Windows release exe, and attaches it to the GitHub Release for
+# that tag as IL2MissionUtility-<tag>.exe (same naming as upstream), plus a
+# .sha256 checksum. If you already created the release by hand (with your own
+# notes), the files are added to it; otherwise a release is created with
+# auto-generated notes. Tags containing alpha/beta/rc or a hyphen are marked
+# pre-release.
+#
+# Run it by hand from the Actions tab (Run workflow) to do a build only: the
+# exe is uploaded as a workflow artifact and no release is touched.
+#
+# Every asset (maps, SVGs, Models.Group, Payloads.txt, terrain mask, manual)
+# is compiled into the exe, so the exe alone is the whole app.
+
+name: Release build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Install Rust (stable)
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build release exe
+        run: cargo build --release --locked
+
+      - name: Name the build
+        id: name
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            label="${GITHUB_REF_NAME}"
+          else
+            label="build-${GITHUB_SHA::7}"
+          fi
+          exe="IL2MissionUtility-${label}.exe"
+          mkdir -p dist
+          cp target/release/il2_mission_utility.exe "dist/${exe}"
+          (cd dist && sha256sum "${exe}" > "${exe}.sha256")
+          echo "exe=${exe}" >> "$GITHUB_OUTPUT"
+          ls -l dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.exe }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists; uploading files to it."
+            gh release upload "$TAG" dist/* --clobber
+          else
+            pre=""
+            if echo "$TAG" | grep -qiE 'alpha|beta|rc|-'; then pre="--prerelease"; fi
+            title="Version ${TAG#v}"
+            title="${title//-/ }"
+            echo "Creating release $TAG ($title) $pre"
+            gh release create "$TAG" dist/* --title "$title" --generate-notes $pre
+          fi

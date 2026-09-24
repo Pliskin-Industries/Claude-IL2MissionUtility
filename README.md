@@ -72,6 +72,8 @@ Todo:
 - Update the user manual to human readable text (not AI babble) to provide a clear understanding of how this utility is supposed to work.
 - Provide for localization
 
+Download: prebuilt Windows builds are attached to each [Release](../../releases). They are built automatically by GitHub Actions (`.github/workflows/release.yml`) whenever a version tag such as `v0.6-Alpha` is pushed.
+
 How to build:
 - Download & install [Rust](https://rust-lang.org/)
 - Click the green <>Code button and download the zip from this github page
