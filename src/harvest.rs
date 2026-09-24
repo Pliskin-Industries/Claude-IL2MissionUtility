@@ -9,7 +9,7 @@
 //! <db>/raw/<utc stamp>_gen.Mission   untouched copy + language files
 //! <db>/<Airfield>_<country>.Group     cleaned airfield + language files
 //! <db>/catalog.Group                  one AirfieldRecord per field/country
-//! <db>/models.tsv                     every Model/Script the game used
+//! <db>/models.tsv                     every Model/Script the game used (+ raw file)
 //! ```
 //!
 //! ## Cutting one airfield out of a mission
@@ -29,14 +29,15 @@
 //! ## Runway axis
 //! Taxi-graph nodes do not mark the runway (`Runway = 0` everywhere in the
 //! K13–K15 exports). `AxisHeading` / `AxisLength` are the principal axis of
-//! the taxi-graph nodes — an approximation of the main runway, grid north.
+//! the `MCU_TR_TaxiGraph` nodes — an approximation of the main runway, grid
+//! north. Older maps keep an `Airfield { Chart { Point } }` in airfield-local
+//! coordinates instead; those points are counted in `TaxiNodes` but give no axis.
 //!
 //! ## Public API
 //! * `GEN_FILE`, `DEFAULT_RADIUS_M`, `DEFAULT_LINK_REACH_M`, `DEFAULT_DB_DIR`
 //! * `struct HarvestConfig`, `struct AirfieldRecord`, `struct HarvestedAirfield`,
 //!   `struct HarvestOutcome`
 //! * `fn default_missions_dir` / `fn find_gen_file`
-//! * `fn parse_mission` — `.Mission` text → root (drops `#` comments and `Options`)
 //! * `fn harvest_root` — cut + clean airfields from a parsed mission (pure)
 //! * `fn harvest_file` — archive, harvest, write group/catalog/models (I/O)
 //! * `struct GenWatcher` — polls `_gen.mission` and reports stable rewrites
@@ -130,7 +131,6 @@ pub struct HarvestedAirfield {
 pub struct HarvestOutcome {
     pub archived: PathBuf,
     pub airfields: Vec<HarvestedAirfield>,
-    pub written: Vec<PathBuf>,
     pub models_added: usize,
 }
 
@@ -173,11 +173,7 @@ pub fn find_gen_file(dir: &Path) -> Option<PathBuf> {
 
 /// Parse `.Mission` text. `#` comment lines and the `Options` header are
 /// dropped: `WindLayers` rows (`0 : 143 : 1.5;`) are not `.Group` syntax.
-pub fn parse_mission(text: &str) -> Result<Il2Entity, String> {
-    let (root, _) = parse_mission_with_header(text)?;
-    Ok(root)
-}
-
+/// The header's `GuiMap` and `Date` are returned for the catalog.
 fn parse_mission_with_header(text: &str) -> Result<(Il2Entity, MissionHeader), String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let body: String = text
@@ -511,6 +507,7 @@ fn describe(group: &Il2Entity, site: &Site) -> AirfieldRecord {
     let mut footprint2: f64 = 0.0;
     let (mut vehicles, mut blocks, mut logic) = (0usize, 0usize, 0usize);
     let mut nodes: Vec<(f64, f64)> = Vec::new();
+    let mut chart_points = 0usize;
     group.for_each(&mut |e| {
         match e.block_type.as_str() {
             "Vehicle" | "Ship" => vehicles += 1,
@@ -526,6 +523,14 @@ fn describe(group: &Il2Entity, site: &Site) -> AirfieldRecord {
         if e.block_type == "MCU_TR_TaxiGraph" {
             collect_taxi_nodes(e, &mut nodes);
         }
+        if e.block_type == "Airfield" {
+            chart_points += e
+                .children
+                .iter()
+                .filter(|c| c.block_type == "Chart")
+                .map(|c| c.count_block_type("Point"))
+                .sum::<usize>();
+        }
     });
     let axis = principal_axis(&nodes);
     AirfieldRecord {
@@ -536,7 +541,7 @@ fn describe(group: &Il2Entity, site: &Site) -> AirfieldRecord {
         y: site.y,
         z: site.z,
         footprint_m: footprint2.sqrt(),
-        taxi_nodes: nodes.len(),
+        taxi_nodes: nodes.len() + chart_points,
         axis_heading_deg: axis.map(|a| a.0),
         axis_length_m: axis.map(|a| a.1),
         vehicles,
@@ -623,7 +628,6 @@ pub fn harvest_file(
         archived.file_name().and_then(|n| n.to_str()).unwrap_or("")
     );
     let tables = merge_template_sidecars(&[source.to_path_buf()]);
-    let mut written = Vec::new();
     for af in &mut airfields {
         af.record.map = header.map.clone();
         af.record.date = header.date.clone();
@@ -633,16 +637,14 @@ pub fn harvest_file(
         std::fs::write(&path, serialize_group(&af.group))
             .map_err(|err| format!("{}: {err}", path.display()))?;
         write_sidecars(&path, &used_tables(&af.group, &tables))?;
-        written.push(path);
     }
     let records: Vec<AirfieldRecord> = airfields.iter().map(|a| a.record.clone()).collect();
     upsert_catalog(&db.join(CATALOG_FILE), &records)?;
-    let first = records.first().map(|r| r.name.as_str()).unwrap_or("");
-    let models_added = append_models(&db.join(MODELS_FILE), &root, first)?;
+    let raw_name = archived.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let models_added = append_models(&db.join(MODELS_FILE), &root, raw_name)?;
     Ok(HarvestOutcome {
         archived,
         airfields,
-        written,
         models_added,
     })
 }
@@ -781,7 +783,7 @@ fn append_models(path: &Path, root: &Il2Entity, seen_at: &str) -> Result<usize, 
         })
         .collect();
     let mut out = if existing.is_empty() {
-        "Type\tScript\tModel\tFirstSeen\r\n".to_string()
+        "Type\tScript\tModel\tFirstSeenIn\r\n".to_string()
     } else {
         existing
     };
@@ -1024,7 +1026,7 @@ mod tests {
         let timer = block("MCU_Timer", 5, 100.0, 0.0, "  Targets = [4,6];\r\n  Objects = [];\r\n");
         let far_icon = block("MCU_Icon", 6, 14000.0, 0.0, "  Targets = [];\r\n  Objects = [];\r\n");
         let body = [a, b, near_a, near_b, timer, far_icon].join("\r\n");
-        let root = parse_mission(&mission_text(&body)).unwrap();
+        let root = parse_mission_with_header(&mission_text(&body)).map(|(r, _)| r).unwrap();
 
         let all = harvest_root(&root, &HarvestConfig::default());
         assert_eq!(all.len(), 2, "no player: every field");
@@ -1038,7 +1040,7 @@ mod tests {
 
         let player = block("Plane", 7, 2900.0, 0.0, "  AILevel = 0;\r\n  Country = 501;\r\n  Model = \"p.mgm\";\r\n  Script = \"p.txt\";\r\n");
         let body = format!("{body}\r\n{player}");
-        let root = parse_mission(&mission_text(&body)).unwrap();
+        let root = parse_mission_with_header(&mission_text(&body)).map(|(r, _)| r).unwrap();
         let start = harvest_root(&root, &HarvestConfig::default());
         assert_eq!(start.len(), 1);
         assert_eq!(start[0].record.country, 501);
@@ -1051,7 +1053,7 @@ mod tests {
         let ai = block("Plane", 2, 200.0, 0.0, "  AILevel = 2;\r\n  LinkTrId = 3;\r\n  Model = \"p.mgm\";\r\n  Script = \"p.txt\";\r\n");
         let ent = block("MCU_TR_Entity", 3, 200.0, 0.0, "  Targets = [];\r\n  Objects = [];\r\n  MisObjID = 2;\r\n");
         let body = [a, ai, ent].join("\r\n");
-        let root = parse_mission(&mission_text(&body)).unwrap();
+        let root = parse_mission_with_header(&mission_text(&body)).map(|(r, _)| r).unwrap();
         let stripped = harvest_root(&root, &HarvestConfig::default());
         assert_eq!(stripped[0].ai_planes_removed, 1);
         assert_eq!(stripped[0].group.count_block_type("Plane"), 0);
@@ -1135,7 +1137,8 @@ mod tests {
     fn real_mission_from_env() {
         let path = std::env::var("IL2_MISSION").expect("set IL2_MISSION");
         let bytes = std::fs::read(&path).unwrap();
-        let root = parse_mission(&String::from_utf8_lossy(&bytes)).expect("parse real mission");
+        let (root, _) =
+            parse_mission_with_header(&String::from_utf8_lossy(&bytes)).expect("parse real mission");
         let got = harvest_root(&root, &HarvestConfig::default());
         for af in &got {
             eprintln!(
