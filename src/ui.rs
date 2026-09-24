@@ -175,6 +175,11 @@ enum AppMode {
     Map,
 }
 
+/// Index of `mode` in `MODES` (the per-tab status slots follow it).
+fn mode_slot(mode: AppMode) -> usize {
+    MODES.iter().position(|(m, _)| *m == mode).unwrap_or(0)
+}
+
 /// Rail order (docs/ui-redesign/README.md §4). Ctrl 1–6 follow it.
 const MODES: [(AppMode, &str); 6] = [
     (AppMode::Template, "Template"),
@@ -430,6 +435,8 @@ struct GroupGeneratorApp {
     bomber_keep_positions: bool,
     /// Plan shown in the Exclusive Activation center.
     bomber_selected: Option<usize>,
+    /// The generated Exclusive Activation pack whose plans were added (header "Editing {stem}").
+    bomber_loaded_path: Option<PathBuf>,
     recon_submode: ReconSubmode,
     recon_slots: Vec<ReconSlot>,
     recon_rework: Vec<ReconSlot>,
@@ -526,6 +533,8 @@ struct GroupGeneratorApp {
     help_open: bool,
     help_topic: HelpTopic,
     status: Status,
+    /// Each tab's status while another tab is shown, in `MODES` order (`set_mode` swaps).
+    tab_status: [Status; 6],
     tpl_path: Option<PathBuf>,
     /// Group currently being edited (Load group…), not the catalog path.
     tpl_loaded_path: Option<PathBuf>,
@@ -1524,7 +1533,9 @@ fn draw_order_tree_columns(
     paint_order_tree_lines(ui, line_idx, &geom, orders, events);
 }
 
+#[derive(Default)]
 enum Status {
+    #[default]
     Idle,
     Info(String),
     /// Soft placement / reposition notes (orange bullets). Hard failures use [`Status::Error`].
@@ -1558,6 +1569,7 @@ impl Default for GroupGeneratorApp {
             bomber_slots: Vec::new(),
             bomber_keep_positions: false,
             bomber_selected: None,
+            bomber_loaded_path: None,
             recon_submode: ReconSubmode::New,
             recon_slots: Vec::new(),
             recon_rework: Vec::new(),
@@ -1651,6 +1663,7 @@ impl Default for GroupGeneratorApp {
             help_open: false,
             help_topic: HelpTopic::Overview,
             status: Status::Idle,
+            tab_status: Default::default(),
             tpl_path: None,
             tpl_loaded_path: None,
             tpl_catalog: bundled_catalog(),
@@ -1769,6 +1782,9 @@ impl GroupGeneratorApp {
         if self.mode == AppMode::Map {
             self.cancel_map_tool();
         }
+        // Each tab keeps its own status line: park the outgoing one, restore the incoming one.
+        let incoming = std::mem::take(&mut self.tab_status[mode_slot(mode)]);
+        self.tab_status[mode_slot(self.mode)] = std::mem::replace(&mut self.status, incoming);
         self.mode = mode;
     }
 
@@ -1934,7 +1950,17 @@ impl GroupGeneratorApp {
                 Some(file_label(&self.custom_path, false).unwrap_or_else(|| "Built-in logic".into())),
                 "Generate File",
             ),
-            AppMode::Exclusive => ("Exclusive Activation", None, "Generate File"),
+            AppMode::Exclusive => (
+                "Exclusive Activation",
+                // Only while plans from that generated pack are still listed.
+                self.bomber_loaded_path
+                    .as_ref()
+                    .filter(|p| self.bomber_slots.iter().any(|s| &s.path == *p))
+                    .and_then(|p| p.file_stem())
+                    .and_then(|n| n.to_str())
+                    .map(|n| format!("Editing {n}")),
+                "Generate File",
+            ),
             AppMode::Airfield => (
                 "Airfield to Multiplayer",
                 file_label(&self.airfield_path, false),
@@ -5339,6 +5365,8 @@ impl GroupGeneratorApp {
         }
     }
 
+    /// The status as one string (tests read it).
+    #[cfg(test)]
     fn status_text(&self) -> String {
         match &self.status {
             Status::Idle => String::new(),
@@ -5348,12 +5376,16 @@ impl GroupGeneratorApp {
     }
 
     /// Runs a Load / Generate and marks the tab saved if it reported success.
+    /// The status is cleared first, so the signal is "`f` reported a result
+    /// that is not an error" — a second identical Generate counts too. A
+    /// cancelled dialog reports nothing and keeps the previous status.
     fn run_io(&mut self, mode: AppMode, f: impl FnOnce(&mut Self)) {
-        let before = self.status_text();
+        let before = std::mem::take(&mut self.status);
         f(self);
-        let ok = !matches!(self.status, Status::Error(_)) && self.status_text() != before;
-        if ok {
-            self.mark_saved(mode);
+        match self.status {
+            Status::Idle => self.status = before,
+            Status::Error(_) => {}
+            Status::Info(_) | Status::Warn { .. } => self.mark_saved(mode),
         }
     }
 
@@ -6141,50 +6173,20 @@ impl GroupGeneratorApp {
     }
 
     fn fighter_preview(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(6.0);
+        shell::section_title(ui, "Pack preview", None);
+        // No types: generation would refuse, so do not preview the fallback type.
+        if self.selected_types().0.is_empty() {
+            ui.label("Select at least one aircraft type to preview the pack.");
+            return;
+        }
         let flights = crate::flights::preview_flights(&self.fighter_flight_config());
         let total: usize = flights.iter().map(|f| f.seats.len()).sum();
         let groups = self.linked_groups.max(1) as usize;
-        ui.add_space(6.0);
-        shell::section_title(ui, "Pack preview", None);
-        ui.label(if groups == 1 {
-            "One group of Group 1's flights.".to_string()
-        } else {
-            format!("{groups} copies of Group 1, chained through NodeGates so they take turns spawning.")
-        });
-        ui.add_space(8.0);
-
-        // Group cards joined by NodeGate links.
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 8.0);
-            for g in 0..groups {
-                if g > 0 {
-                    let (r, _) = ui.allocate_exact_size(Vec2::new(70.0, 48.0), Sense::hover());
-                    let y = r.center().y;
-                    ui.painter().line_segment(
-                        [Pos2::new(r.left(), y), Pos2::new(r.right(), y)],
-                        Stroke::new(1.0_f32, c::NEUTRAL_500),
-                    );
-                    ui.painter().text(
-                        Pos2::new(r.center().x, y - 3.0),
-                        Align2::CENTER_BOTTOM,
-                        "NodeGate",
-                        FontId::proportional(12.0),
-                        c::NEUTRAL_700,
-                    );
-                }
-                let border = if g == 0 { c::ACCENT } else { c::DIVIDER };
-                egui::Frame::new()
-                    .fill(c::BG)
-                    .stroke(Stroke::new(1.0_f32, border))
-                    .inner_margin(egui::Margin::symmetric(12, 6))
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(format!("Group {}", g + 1)).font(FontId::new(13.0, theme::bold_family())));
-                            ui.label(RichText::new(format!("{total} aircraft")).small().color(c::NEUTRAL_700));
-                        });
-                    });
-            }
-        });
+        let custom = self.custom_path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str());
+        ui.label(Self::fighter_pack_sentence(custom, groups));
+        ui.add_space(12.0);
+        Self::fighter_group_cards(ui, groups, total, self.country);
         ui.add_space(12.0);
 
         let sizes: Vec<String> = flights.iter().map(|f| f.seats.len().to_string()).collect();
@@ -6204,72 +6206,213 @@ impl GroupGeneratorApp {
                     }
                     ui.end_row();
                     for (f, fl) in flights.iter().enumerate() {
-                        let leads = fl.seats.iter().filter(|s| s.1).count();
-                        let covers = fl.seats.len() - leads;
-                        let lo = fl.seats.iter().map(|s| s.0).fold(f64::MAX, f64::min);
-                        let hi = fl.seats.iter().map(|s| s.0).fold(f64::MIN, f64::max);
-                        ui.label(RichText::new(crate::aircraft::flight_number(f, 0).to_string()).monospace());
+                        let (low, high) = Self::flight_element_altitudes(&fl.seats);
+                        ui.label(crate::aircraft::plane_display_name(f, 0));
                         ui.label(fl.type_label);
                         ui.label(fl.seats.len().to_string());
-                        ui.label(if covers == 0 {
-                            format!("{leads} attack")
-                        } else {
-                            format!("{leads} attack · {covers} cover")
-                        });
-                        ui.label(
-                            RichText::new(if (hi - lo).abs() < 1.0 {
-                                format!("{lo:.0} m")
-                            } else {
-                                format!("{lo:.0}–{hi:.0} m")
-                            })
-                            .monospace(),
-                        );
+                        ui.label(Self::flight_role_text(&fl.seats));
+                        ui.label(RichText::new(Self::altitude_text(low, high)).monospace());
                         ui.end_row();
                     }
                 });
+            ui.add_space(10.0);
+            Self::fighter_altitude_strip(ui, &flights, self.altitude_min, self.altitude_max);
         });
-        ui.add_space(12.0);
+    }
 
-        // Altitude strip: the min–max band, a tick per aircraft, flight numbers at the leads.
-        shell::blueprint(ui, c::DIVIDER, |ui| {
-            shell::section_title(
-                ui,
-                "Altitude",
-                Some(&format!("{:.0}–{:.0} m", self.altitude_min, self.altitude_max)),
-            );
-            let all: Vec<f64> = flights.iter().flat_map(|f| f.seats.iter().map(|s| s.0)).collect();
-            let lo = all.iter().copied().fold(self.altitude_min as f64, f64::min);
-            let hi = all.iter().copied().fold(self.altitude_max as f64, f64::max).max(lo + 1.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 46.0), Sense::hover());
-            let p = ui.painter();
-            let x_of = |alt: f64| rect.left() + ((alt - lo) / (hi - lo)) as f32 * rect.width();
-            let y = rect.top() + 14.0;
-            p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0_f32, c::NEUTRAL_400));
-            p.rect_filled(
-                Rect::from_min_max(
-                    Pos2::new(x_of(self.altitude_min as f64), y - 3.0),
-                    Pos2::new(x_of(self.altitude_max as f64), y + 3.0),
-                ),
-                0.0,
-                c::ACCENT_200,
-            );
-            for (f, fl) in flights.iter().enumerate() {
-                for (alt, lead) in &fl.seats {
-                    let x = x_of(*alt);
-                    let h = if *lead { 8.0 } else { 5.0 };
-                    p.line_segment([Pos2::new(x, y - h), Pos2::new(x, y + h)], Stroke::new(1.0_f32, c::ACCENT_700));
-                }
-                if let Some((alt, _)) = fl.seats.first() {
+    /// "Group logic is built in. 3 linked groups, chained through NodeGates,
+    /// parked on a 10 km grid from 40000, 40000." — `generate_pack` parks
+    /// each group with `placement::move_to_grid` (square grid from MAP_MIN).
+    fn fighter_pack_sentence(custom: Option<&str>, groups: usize) -> String {
+        let logic = match custom {
+            Some(file) => format!("Group logic from {file}."),
+            None => "Group logic is built in.".to_string(),
+        };
+        let (x, z) = crate::placement::grid_xz(0, groups);
+        let parking = if groups <= 1 {
+            format!("One group, parked at {x:.0}, {z:.0}.")
+        } else {
+            format!(
+                "{groups} linked groups, chained through NodeGates, parked on a {:.0} km grid from {x:.0}, {z:.0}.",
+                crate::placement::GRID_STEP / 1000.0
+            )
+        };
+        format!("{logic} {parking}")
+    }
+
+    /// Group cards and NodeGate links, broken into rows so a link always
+    /// travels with the card after it (a row never ends on a link).
+    fn fighter_group_cards(ui: &mut egui::Ui, groups: usize, total: usize, country: i32) {
+        let width = ui.available_width();
+        for (r, row) in Self::pack_card_rows(groups, width).into_iter().enumerate() {
+            let n = row.len() as f32;
+            let links = if r == 0 { n - 1.0 } else { n };
+            let row_w = n * PACK_CARD_W + links * PACK_LINK_W;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.add_space(((width - row_w) / 2.0).max(0.0));
+                for g in row {
+                    if g > 0 {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::new(PACK_LINK_W, PACK_CARD_H), Sense::hover());
+                        let y = rect.center().y;
+                        let p = ui.painter();
+                        p.line_segment(
+                            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+                            Stroke::new(1.0_f32, c::NEUTRAL_500),
+                        );
+                        p.text(
+                            Pos2::new(rect.center().x, y + 4.0),
+                            Align2::CENTER_TOP,
+                            "NodeGate",
+                            FontId::proportional(12.0),
+                            c::NEUTRAL_700,
+                        );
+                    }
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(PACK_CARD_W, PACK_CARD_H), Sense::hover());
+                    let title = format!("Group {}", g + 1);
+                    let note = format!("{total} aircraft");
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{title} · {note}"))
+                    });
+                    let p = ui.painter();
+                    let border = if g == 0 { c::ACCENT } else { c::DIVIDER };
+                    p.rect_filled(rect, 0.0, c::BG);
+                    p.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, border), egui::StrokeKind::Inside);
+                    shell::corner_marks(p, rect, c::MARK);
+                    let left = rect.left() + 10.0;
+                    paint_seat_marker(p, Pos2::new(left + 6.0, rect.top() + 18.0), 12.0, country);
                     p.text(
-                        Pos2::new(x_of(*alt), y + 10.0),
-                        Align2::CENTER_TOP,
-                        crate::aircraft::flight_number(f, 0).to_string(),
-                        FontId::monospace(12.0),
+                        Pos2::new(left + 18.0, rect.top() + 18.0),
+                        Align2::LEFT_CENTER,
+                        title,
+                        FontId::new(13.0, theme::bold_family()),
+                        c::TEXT,
+                    );
+                    p.text(
+                        Pos2::new(left, rect.top() + 36.0),
+                        Align2::LEFT_CENTER,
+                        note,
+                        FontId::proportional(12.0),
                         c::NEUTRAL_700,
                     );
                 }
+            });
+            ui.add_space(8.0);
+        }
+    }
+
+    /// Which groups share a row of `width`. The first row starts with a card;
+    /// every later row starts with the link to its first card.
+    fn pack_card_rows(groups: usize, width: f32) -> Vec<std::ops::Range<usize>> {
+        let unit = PACK_CARD_W + PACK_LINK_W;
+        let first = 1 + ((width - PACK_CARD_W).max(0.0) / unit).floor() as usize;
+        let rest = ((width / unit).floor() as usize).max(1);
+        let mut rows = Vec::new();
+        let (mut start, mut cap) = (0, first);
+        while start < groups {
+            let end = (start + cap).min(groups);
+            rows.push(start..end);
+            start = end;
+            cap = rest;
+        }
+        rows
+    }
+
+    /// Low and high element altitudes of a flight: its AttackArea leads.
+    /// A complete 4-ship has a high pair; wingmen stack 25–50 m on their lead
+    /// and are not shown.
+    fn flight_element_altitudes(seats: &[(f64, bool)]) -> (f64, Option<f64>) {
+        if seats.is_empty() {
+            return (0.0, None);
+        }
+        let leads = seats.iter().filter(|s| s.1).map(|s| s.0);
+        let low = leads.clone().fold(f64::MAX, f64::min);
+        let high = leads.fold(f64::MIN, f64::max);
+        (low, (high - low >= 1.0).then_some(high))
+    }
+
+    /// "1 800 / 3 800 m" or "5 200 m".
+    fn altitude_text(low: f64, high: Option<f64>) -> String {
+        match high {
+            Some(high) => format!("{} / {} m", group_digits(low), group_digits(high)),
+            None => format!("{} m", group_digits(low)),
+        }
+    }
+
+    /// Role column: leads fly AttackArea, wingmen Cover their lead.
+    fn flight_role_text(seats: &[(f64, bool)]) -> String {
+        let leads = seats.iter().filter(|s| s.1).count();
+        let covers = seats.len() - leads;
+        match (leads, covers) {
+            (1, 0) => "AttackArea".into(),
+            (1, 1) => "AttackArea + Cover".into(),
+            (l, 0) => format!("{l} AttackArea"),
+            (l, c) => format!("{l} AttackArea · {c} Cover"),
+        }
+    }
+
+    /// The altitude band with one tick per flight (at its low element), the
+    /// range at the ends and flight names below. A name that would touch the
+    /// one drawn before it is skipped; its tick still names it on hover.
+    fn fighter_altitude_strip(ui: &mut egui::Ui, flights: &[crate::flights::FlightPreview], min: f32, max: f32) {
+        let lo = min.min(max) as f64;
+        let hi = (min.max(max) as f64).max(lo + 1.0);
+        let font = FontId::proportional(12.0);
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 42.0), Sense::hover());
+        let p = ui.painter().clone();
+        let lo_g = p.layout_no_wrap(format!("{} m", group_digits(lo)), font.clone(), c::NEUTRAL_700);
+        let hi_g = p.layout_no_wrap(format!("{} m", group_digits(hi)), font.clone(), c::NEUTRAL_700);
+        let y = rect.top() + 10.0;
+        let bar = Rect::from_min_max(
+            Pos2::new(rect.left() + lo_g.size().x + 10.0, y - 4.0),
+            Pos2::new(rect.right() - hi_g.size().x - 10.0, y + 4.0),
+        );
+        p.galley(Pos2::new(rect.left(), y - lo_g.size().y / 2.0), lo_g, c::NEUTRAL_700);
+        p.galley(Pos2::new(rect.right() - hi_g.size().x, y - hi_g.size().y / 2.0), hi_g, c::NEUTRAL_700);
+        p.rect_filled(bar, 0.0, c::ACCENT_200);
+        p.rect_stroke(bar, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
+        let x_of = |alt: f64| bar.left() + ((alt - lo) / (hi - lo)).clamp(0.0, 1.0) as f32 * bar.width();
+
+        let ticks: Vec<(f32, String, String)> = flights
+            .iter()
+            .enumerate()
+            .map(|(f, fl)| {
+                let (low, high) = Self::flight_element_altitudes(&fl.seats);
+                let name = crate::aircraft::plane_display_name(f, 0);
+                let hover = format!("{name} · {} · {}", fl.type_label, Self::altitude_text(low, high));
+                (x_of(low), name, hover)
+            })
+            .collect();
+        let galleys: Vec<_> = ticks
+            .iter()
+            .map(|(_, name, _)| p.layout_no_wrap(name.clone(), font.clone(), c::NEUTRAL_700))
+            .collect();
+        let lefts: Vec<f32> = ticks
+            .iter()
+            .zip(&galleys)
+            .map(|((x, _, _), g)| (x - g.size().x / 2.0).clamp(rect.left(), (rect.right() - g.size().x).max(rect.left())))
+            .collect();
+        let widths: Vec<f32> = galleys.iter().map(|g| g.size().x).collect();
+        let shown = strip_labels_shown(&lefts, &widths, 6.0);
+        for (f, ((x, name, _), galley)) in ticks.iter().zip(galleys).enumerate() {
+            p.line_segment(
+                [Pos2::new(*x, bar.top() - 3.0), Pos2::new(*x, bar.bottom() + 3.0)],
+                Stroke::new(2.0_f32, c::ACCENT_800),
+            );
+            if shown[f] {
+                p.galley(Pos2::new(lefts[f], bar.bottom() + 6.0), galley, c::NEUTRAL_700);
             }
-        });
+            // Hover names every flight on this tick, so a skipped label is still identifiable.
+            let hover: Vec<&str> = ticks
+                .iter()
+                .filter(|(other, _, _)| (other - x).abs() < 3.0)
+                .map(|(_, _, h)| h.as_str())
+                .collect();
+            let hit = Rect::from_center_size(Pos2::new(*x, bar.center().y), Vec2::new(9.0, 22.0));
+            let resp = ui.interact(hit, ui.id().with(("altitude_tick", f)), Sense::hover());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, format!("Altitude tick {name}")));
+            resp.on_hover_text(hover.join("\n"));
+        }
     }
 
     fn fighter_settings_panel(&mut self, ui: &mut egui::Ui) {
@@ -6416,30 +6559,28 @@ impl GroupGeneratorApp {
             let file = slot.path.file_name().and_then(|f| f.to_str()).unwrap_or("file").to_string();
             let title = format!("{} · {}", i + 1, slot.info.name);
             let meta = format!("{file} · {} units", slot.info.unit_count);
-            let state = if slot.selected_triggers.is_empty() {
-                Some("⚠ Checkzone")
-            } else if slot.selected_completion.is_none() {
-                Some("⚠ End timer")
-            } else {
-                None
-            };
+            let tags = plan_tags(slot);
+            let selected = self.bomber_selected == Some(i);
             let resp = ui
                 .scope_builder(
                     egui::UiBuilder::new().id_salt(("bomber_card", i)).sense(Sense::click()),
                     |ui| {
-                        shell::card(ui, self.bomber_selected == Some(i), |ui| {
+                        let hovered = ui.response().hovered();
+                        plan_card(ui, selected, hovered, |ui| {
                             ui.horizontal(|ui| {
-                                ui.add(
-                                    egui::Label::new(RichText::new(title).font(FontId::new(13.0, theme::bold_family())))
-                                        .truncate(),
-                                );
-                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| match state {
-                                    None => {
-                                        shell::tag(ui, "Ready", true);
+                                // Tags first (right to left), so a long name truncates instead of pushing them out.
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    for (text, accent) in tags.iter().rev() {
+                                        shell::tag(ui, text, *accent);
                                     }
-                                    Some(text) => {
-                                        ui.label(RichText::new(text).small().color(c::WARN_TEXT));
-                                    }
+                                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(title).font(FontId::new(13.0, theme::bold_family())),
+                                            )
+                                            .truncate(),
+                                        );
+                                    });
                                 });
                             });
                             ui.label(RichText::new(meta).small().color(c::NEUTRAL_700));
@@ -6473,7 +6614,7 @@ impl GroupGeneratorApp {
             let file = slot.path.file_name().and_then(|f| f.to_str()).unwrap_or("file").to_string();
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(format!("PLAN {}", i + 1)).small().color(c::NEUTRAL_700));
+                    ui.label(RichText::new(format!("Plan {}", i + 1)).small().color(c::NEUTRAL_700));
                     ui.label(RichText::new(&slot.info.name).font(FontId::new(24.0, theme::heading_family())));
                     ui.label(
                         RichText::new(format!("{file} · {} units", slot.info.unit_count))
@@ -6498,7 +6639,7 @@ impl GroupGeneratorApp {
         shell::blueprint(ui, c::DIVIDER, |ui| {
             shell::section_title(ui, "Start checkzones", Some("opens this plan, closes the others"));
             if zones.len() > 1 {
-                shell::warning(ui, "Multiple checkzones: select which ones this plan should enable and disable.");
+                shell::warning(ui, "Several checkzones found. Pick the ones this plan enables and disables.");
             }
             for zone in &zones {
                 let mut on = slot.selected_triggers.contains(&zone.index);
@@ -6513,7 +6654,8 @@ impl GroupGeneratorApp {
                         }
                     }
                     if suggested_triggers.contains(&zone.index) {
-                        ui.label(RichText::new("(suggested)").small().color(c::NEUTRAL_700));
+                        ui.label(RichText::new("(suggested)").small().color(c::NEUTRAL_700))
+                            .on_hover_text(format!("Picked because it is named {SUGGESTED_TRIGGER_NAMES}."));
                     }
                 });
             }
@@ -6529,19 +6671,17 @@ impl GroupGeneratorApp {
         ui.add_space(10.0);
         let end_missing = slot.selected_completion.is_none();
         shell::blueprint(ui, if end_missing { c::WARN } else { c::DIVIDER }, |ui| {
-            shell::section_title(ui, "End timer", None);
+            shell::section_title(ui, "End timer", Some("finishes the plan"));
             if end_missing {
                 shell::warning(
                     ui,
-                    &format!(
-                        "No end timer was detected. Select the MCU_Timer that finishes the plan. Name it {SUGGESTED_END_NAMES}; it should target a Deactivate and/or Delete MCU that lists the units."
-                    ),
+                    "No end timer was detected. Select the MCU_Timer that finishes the plan. It should target a Deactivate and/or Delete MCU that lists the units.",
                 );
             }
             let selected_label = slot
                 .selected_completion
                 .and_then(|id| timers.iter().find(|t| t.index == id).map(|t| t.name.clone()))
-                .unwrap_or_else(|| "Select end trigger timer…".into());
+                .unwrap_or_else(|| "Select end timer…".into());
             egui::ComboBox::from_id_salt(format!("bomber-end-{i}"))
                 .selected_text(selected_label)
                 .width(280.0)
@@ -6554,7 +6694,9 @@ impl GroupGeneratorApp {
                         };
                         ui.selectable_value(&mut slot.selected_completion, Some(timer.index), text);
                     }
-                });
+                })
+                .response
+                .on_hover_text(format!("A timer named {SUGGESTED_END_NAMES} is picked automatically."));
             if let Some(id) = slot.selected_completion {
                 if let Some(msg) = slot.info.cleanup_warnings.get(&id) {
                     shell::warning(ui, msg);
@@ -6580,11 +6722,11 @@ impl GroupGeneratorApp {
             p.text(
                 rect.left_center() + Vec2::new(10.0, 0.0),
                 Align2::LEFT_CENTER,
-                format!("{} · {}", j + 1, s.info.name),
+                format!("Plan {}", j + 1),
                 FontId::new(13.0, if sel { theme::bold_family() } else { FontFamily::Proportional }),
                 c::TEXT,
             );
-            if resp.clicked() {
+            if resp.on_hover_text(format!("{} · {}", j + 1, s.info.name)).clicked() {
                 pick = Some(j);
             }
             ui.add_space(4.0);
@@ -6619,17 +6761,12 @@ impl GroupGeneratorApp {
             "Off: new templates park on a 10 km grid from 40000, 40000. On: groups stay where they are.",
             false,
         );
-        shell::hint(
-            ui,
-            "Loading a generated Exclusive Activation pack lists its plans, so you can add one and write it back in place.",
-            false,
-        );
         ui.add_space(4.0);
         ui.separator();
         shell::section_title(ui, "Naming", None);
         if shell::hint(
             ui,
-            &format!("Name start zones {SUGGESTED_TRIGGER_NAMES}, and the end timer {SUGGESTED_END_NAMES}."),
+            "Name start zones and the end timer as listed in Help so they are found automatically.",
             true,
         ) {
             self.open_help(HelpTopic::Exclusive);
@@ -6639,7 +6776,7 @@ impl GroupGeneratorApp {
         shell::section_title(ui, "Use it for", None);
         shell::hint(
             ui,
-            "Groups with heavy logic, such as preplanned bomber flights, where only one should run at a time.",
+            "Groups with heavy logic where only one should run at a time, such as preplanned bomber flights.",
             false,
         );
     }
@@ -6653,10 +6790,7 @@ impl GroupGeneratorApp {
     }
 
     fn airfield_left_panel(&mut self, ui: &mut egui::Ui) {
-        self.harvest_section(ui);
-        ui.add_space(6.0);
-        ui.separator();
-        shell::section_title(ui, "Get the file", Some("one airfield"));
+        shell::section_title(ui, "Get the file", None);
         numbered_step(ui, 1, "In game, open a Freeflight mission and take off from the airfield.");
         numbered_step(
             ui,
@@ -6672,11 +6806,14 @@ impl GroupGeneratorApp {
         shell::section_title(ui, "Friendly plane coalition", None);
         shell::segmented(ui, &mut self.airfield_western, &[(true, "NATO [2]"), (false, "DPRK [1]")]);
         shell::hint(ui, "USA airfields use NATO.", false);
+        ui.add_space(6.0);
+        ui.separator();
+        self.harvest_section(ui);
     }
 
     fn airfield_center(&mut self, ui: &mut egui::Ui) {
         shell::section_title(ui, "What Generate will change", None);
-        ui.label("Generate strips the single-player parts and relinks the checkzones, so the field works in multiplayer.");
+        ui.label("Strips the player and SP logic, then retargets the checkzones that were linked to the player.");
         ui.add_space(10.0);
         let Some(info) = &self.airfield_info else {
             if empty_state(ui, "Load an airfield group exported from _gen.mission.", "Load airfield…") {
@@ -6693,30 +6830,23 @@ impl GroupGeneratorApp {
                     shell::warning(ui, "No player aircraft found; this file may already be cleaned.");
                 } else {
                     for p in &info.player_planes {
-                        let country = COUNTRIES
-                            .iter()
-                            .find(|(id, _)| *id == p.country)
-                            .map_or("unknown country", |(_, label)| *label);
-                        ui.label(format!("{}  ({country})", p.name));
+                        fact_row(ui, &format!("Player · {}", p.name), &country_name(p.country));
                     }
                 }
                 if info.has_autoremove {
-                    ui.label("AutoRemove subgroup");
+                    fact_row(ui, "AutoRemove subgroup", "");
                 }
-                ui.label(format!("Player / SP graph objects: {}", info.strip_count));
+                fact_row(ui, "Player / SP graph objects", &info.strip_count.to_string());
             });
             shell::blueprint(&mut cols[1], c::ACCENT, |ui| {
-                shell::section_title(ui, &format!("Relinked to {side}"), None);
+                let n = info.unlink_zones.len();
+                let note = format!("{n} checkzone{}", if n == 1 { "" } else { "s" });
+                shell::section_title(ui, &format!("Relinked to {side}"), Some(&note));
                 if info.unlink_zones.is_empty() {
-                    ui.label("No checkzones are object-linked to the player.");
-                } else {
-                    ui.label(format!(
-                        "{} checkzones drop the player object link and use {side}:",
-                        info.unlink_zones.len()
-                    ));
-                    for name in &info.unlink_zones {
-                        ui.label(RichText::new(name).monospace());
-                    }
+                    ui.label("No checkzones are linked to the player.");
+                }
+                for name in &info.unlink_zones {
+                    fact_row(ui, name, "");
                 }
             });
         });
@@ -6748,14 +6878,14 @@ impl GroupGeneratorApp {
         };
         egui::Grid::new("airfield_facts").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label(RichText::new("Name").color(c::NEUTRAL_700));
-            ui.label(&info.name);
+            ui.label(RichText::new(&info.name).font(FontId::new(13.0, theme::bold_family())));
             ui.end_row();
             ui.label(RichText::new("Layout").color(c::NEUTRAL_700));
-            ui.label(if info.in_group { "inside a Group" } else { "blocks at the root" });
+            ui.label(if info.in_group { "Inside a Group" } else { "Blocks at the root" });
             ui.end_row();
             if let Some((x, z)) = info.origin_xz {
                 ui.label(RichText::new("Origin").color(c::NEUTRAL_700));
-                ui.label(RichText::new(format!("{x:.0}, {z:.0}")).monospace());
+                ui.label(RichText::new(format!("{}, {}", group_digits(x), group_digits(z))).monospace());
                 ui.end_row();
             }
         });
@@ -9868,7 +9998,10 @@ impl GroupGeneratorApp {
             }
         }
         let (severity, msg) = match &self.status {
-            Status::Idle => (Severity::Info, self.idle_hint().to_owned()),
+            Status::Idle => match self.idle_problem() {
+                Some(problem) => (Severity::Warn, problem),
+                None => (Severity::Info, self.idle_hint().to_owned()),
+            },
             Status::Info(msg) => (Severity::Info, msg.clone()),
             Status::Warn { lead, items } => {
                 let msg = if lead.is_empty() {
@@ -9932,11 +10065,20 @@ impl GroupGeneratorApp {
                 }
             },
             AppMode::Airfield => {
-                "Load a Freeflight airfield from _gen.mission, then export the cleaned group."
+                "Load a Freeflight airfield from _gen.mission, then generate the cleaned group."
             }
             AppMode::Map => {
                 "Draw a box on the Korea map, then generate icons for that area."
             },
+        }
+    }
+
+    /// With nothing else to report, the idle status names the first thing
+    /// that blocks Generate on this tab (Exclusive Activation plans).
+    fn idle_problem(&self) -> Option<String> {
+        match self.mode {
+            AppMode::Exclusive => exclusive_first_problem(&self.bomber_slots),
+            _ => None,
         }
     }
 
@@ -9998,10 +10140,11 @@ impl GroupGeneratorApp {
         let mut last_err = None;
         let mut loaded_pack = false;
         for path in paths {
-            match self.add_bomber_from_path(path) {
+            match self.add_bomber_from_path(path.clone()) {
                 Ok(from_pack) => {
                     if from_pack {
                         loaded_pack = true;
+                        self.bomber_loaded_path = Some(path);
                     }
                 }
                 Err(err) => last_err = Some(err),
@@ -10125,6 +10268,9 @@ impl GroupGeneratorApp {
             if n == 1 { "" } else { "s" }
         );
         self.status = save_with_sidecars(&save_path, &text, &locale_paths, &summary);
+        if !matches!(self.status, Status::Error(_)) {
+            self.bomber_loaded_path = None;
+        }
     }
 
     fn add_recon_from_path(&mut self, path: PathBuf) -> Result<(), String> {
@@ -10547,10 +10693,10 @@ impl GroupGeneratorApp {
     /// Airfield tab, left panel: the automatic database harvest (watch the
     /// game's _gen.mission and file every start airfield).
     fn harvest_section(&mut self, ui: &mut egui::Ui) {
-        shell::section_title(ui, "Airfield database", Some("automatic"));
+        shell::section_title(ui, "Harvest automatically", Some("many airfields"));
         shell::hint(
             ui,
-            "Watch, then start a Freeflight from each airfield in turn. Each new _gen.mission is cut, cleaned for multiplayer and filed.",
+            "Instead of the steps above: watch, then start a Freeflight from each airfield in turn. Each new _gen.mission is cut, cleaned for multiplayer and filed in the database.",
             false,
         );
         ui.add_space(4.0);
@@ -10662,9 +10808,23 @@ impl GroupGeneratorApp {
             *w = GenWatcher::new(dir);
         }
         if let Some(path) = w.poll(std::time::Instant::now()) {
-            self.run_harvest(&path);
+            // The watcher runs on every tab; it reports on the Airfield tab's status.
+            self.with_tab_status(AppMode::Airfield, |s| s.run_harvest(&path));
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
+
+    /// Runs `f` with `mode`'s status as `self.status`, so what it reports
+    /// lands on that tab even when another tab is shown.
+    fn with_tab_status(&mut self, mode: AppMode, f: impl FnOnce(&mut Self)) {
+        if mode == self.mode {
+            f(self);
+            return;
+        }
+        let slot = mode_slot(mode);
+        let shown = std::mem::replace(&mut self.status, std::mem::take(&mut self.tab_status[slot]));
+        f(self);
+        self.tab_status[slot] = std::mem::replace(&mut self.status, shown);
     }
 
     fn run_harvest(&mut self, source: &Path) {
@@ -11769,6 +11929,120 @@ fn drop_rework_path(slots: &mut Vec<ReconSlot>, path: &Path) {
 }
 
 /// A fixed-width side panel whose contents scroll on their own (README §6.1).
+/// Fighter Pack preview: group card and NodeGate link sizes.
+const PACK_CARD_W: f32 = 120.0;
+const PACK_CARD_H: f32 = 52.0;
+const PACK_LINK_W: f32 = 70.0;
+
+/// Whole numbers with a space every three digits: 227880 → "227 880".
+fn group_digits(value: f64) -> String {
+    let n = value.round() as i64;
+    let digits = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(ch);
+    }
+    if n < 0 {
+        out.insert(0, '-');
+    }
+    out
+}
+
+/// Which labels to draw along a strip: taken left to right, a label is
+/// skipped when it would come within `gap` of the last drawn one.
+fn strip_labels_shown(lefts: &[f32], widths: &[f32], gap: f32) -> Vec<bool> {
+    let mut order: Vec<usize> = (0..lefts.len()).collect();
+    order.sort_by(|a, b| lefts[*a].total_cmp(&lefts[*b]));
+    let mut shown = vec![false; lefts.len()];
+    let mut last_right = f32::NEG_INFINITY;
+    for i in order {
+        if lefts[i] >= last_right + gap {
+            shown[i] = true;
+            last_right = lefts[i] + widths[i];
+        }
+    }
+    shown
+}
+
+/// Exclusive Activation card tags: what a plan lacks, else "⚠ Check" when a
+/// selected zone or the end timer has a wiring warning, else "Ready".
+fn plan_tags(slot: &BomberSlot) -> Vec<(&'static str, bool)> {
+    let mut tags = Vec::new();
+    if slot.selected_triggers.is_empty() {
+        tags.push(("⚠ Checkzone", false));
+    }
+    if slot.selected_completion.is_none() {
+        tags.push(("⚠ End timer", false));
+    }
+    if tags.is_empty() {
+        let warned = slot.selected_triggers.iter().any(|id| slot.info.trigger_warnings.contains_key(id))
+            || slot
+                .selected_completion
+                .is_some_and(|id| slot.info.cleanup_warnings.contains_key(&id));
+        tags.push(if warned { ("⚠ Check", false) } else { ("Ready", true) });
+    }
+    tags
+}
+
+/// The first plan that cannot generate, as the idle status names it.
+fn exclusive_first_problem(slots: &[BomberSlot]) -> Option<String> {
+    slots.iter().enumerate().find_map(|(n, slot)| {
+        if slot.selected_triggers.is_empty() {
+            Some(format!("Plan {} has no start checkzone", n + 1))
+        } else if slot.selected_completion.is_none() {
+            Some(format!("Plan {} has no end timer", n + 1))
+        } else {
+            None
+        }
+    })
+}
+
+/// A plan card: `shell::card` plus the hover state (ACCENT_100 fill, ACCENT border).
+fn plan_card<R>(ui: &mut egui::Ui, selected: bool, hovered: bool, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let (stroke, fill) = if selected || hovered {
+        (Stroke::new(1.0_f32, c::ACCENT), c::ACCENT_100)
+    } else {
+        (Stroke::new(1.0_f32, c::DIVIDER), Color32::TRANSPARENT)
+    };
+    let inner = egui::Frame::new()
+        .stroke(stroke)
+        .fill(fill)
+        .inner_margin(egui::Margin::symmetric(11, 9))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        });
+    if selected {
+        shell::corner_marks(ui.painter(), inner.response.rect, c::MARK);
+    }
+    inner.inner
+}
+
+/// Country name without its code: 601 → "USA".
+fn country_name(country: i32) -> String {
+    COUNTRIES
+        .iter()
+        .find(|(id, _)| *id == country)
+        .and_then(|(_, label)| label.split_whitespace().last())
+        .map_or_else(|| format!("country {country}"), str::to_owned)
+}
+
+/// A label on the left, a monospace value on the right, a hairline below.
+fn fact_row(ui: &mut egui::Ui, label: &str, value: &str) {
+    let resp = ui.horizontal(|ui| {
+        ui.set_min_height(26.0);
+        ui.label(label);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(RichText::new(value).monospace().color(c::NEUTRAL_800));
+        });
+    });
+    let r = resp.response.rect;
+    ui.painter().hline(r.x_range(), r.bottom() + 1.0, Stroke::new(1.0_f32, c::DIVIDER));
+}
+
 fn side_panel(ctx: &egui::Context, id: &str, left: bool, width: f32, add: impl FnOnce(&mut egui::Ui)) {
     let panel = if left {
         egui::SidePanel::left(id.to_owned())

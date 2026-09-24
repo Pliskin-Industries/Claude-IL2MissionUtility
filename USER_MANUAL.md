@@ -110,11 +110,21 @@ You do not need to load a file. The built-in 3-pack supplies `NodeGates` and `RT
 - **Linked groups** (1–10) — clones of Group 1, chained through NodeGates.
 - **Flights** / **Max in a flight** — how many randomizer slots and aircraft per slot. Sizes are spread (for example 4 flights × max 4 is not always 4/4/4/4).
 - **Aircraft types and skill** — flights cycle through the checked types. Skill is 0–4; lead is never below wingman.
-- **Country** — 501 / 502 / 503 / 601. This also sets Zone IN/OUT plane coalitions.
+- **Country** — 501 / 502 / 503 / 601. This also sets the Zone In / Zone Out plane coalitions: DPRK `[1]` for the 500-series, NATO `[2]` for 601.
 - **Cooldown, Reinforcement, Delete orders** (seconds) — timers inside each group.
 - **Altitude min/max** — 1- and 2-ships spread between min and max. Each complete 4-ship finger-four is 2 low / 2 high (~2000 m). Leftover odd ships and trailing incomplete pairs stay low (3-ship all low, 6-ship 4 down 2 up, 8-ship 4 down 4 up). Low cover sits in a 500–1500 m band that rises with max altitude. Wingmen stack 25–50 m on their lead.
 
-Each flight is one randomizer slot, placed as a finger-four (Inverted Vee) like Template Builder. A pair is Independent + Cover (lead AttackArea, wing Cover). A leftover singleton and every extra pair lead also get their own AttackArea from OnSpawned. Events (critical damage, wounded, bingo MG, bingo fuel) pulse **that plane’s** Mission Complete: Force Complete, then its RTB waypoint, then deactivate after the **Delete orders** delay. The rest of the flight stays on station. Zone IN is 16 km, Zone OUT is 35 km, AttackArea is 30 km air for 600 s — same as the original pack.
+Each flight is one randomizer slot, placed as a finger-four (Inverted Vee) like Template Builder. A pair is Independent + Cover (lead AttackArea, wing Cover). A leftover singleton and every extra pair lead also get their own AttackArea from OnSpawned. Events (critical damage, wounded, bingo MG, bingo fuel) pulse **that plane’s** Mission Complete: Force Complete, then its RTB waypoint, then deactivate after the **Delete orders** delay. The rest of the flight stays on station. `Zone IN` is 16 km, `Zone OUT` is 35 km, AttackArea is 30 km air for 600 s — same as the original pack.
+
+### Pack preview
+
+The center shows what Generate will build, without writing anything:
+
+- The linked groups as cards joined by NodeGate links. Generate parks them on the 10 km grid from 40000, 40000.
+- **Group 1 · flights** — one row per flight. **Flight** is the lead's tactical colour and number (Red 11, Blue 21, …), so every flight in the pack has its own name. **Role** counts the AttackArea leads and Cover wingmen. **Altitude** is the low element, and for a complete 4-ship the high pair (for example 1 800 / 3 800 m). Wingmen fly 25–50 m above their lead and are not listed.
+- The altitude strip runs from the minimum to the maximum altitude, with one tick per flight at its low element. When names would overlap, some are left out; hover a tick to see its flight, type and altitudes.
+
+With no aircraft type checked there is nothing to preview, and Generate stays off.
 
 ### Required template structure (custom pack)
 
@@ -133,7 +143,7 @@ These names are created on generate so NodeGates can clone the group. Do not ren
 **Spawn / enable path**
 
 - **`ENABLE / PULSE IN`** — NodeGates `nIN - ENABLE` targets this together with **`Enable Spawner`**. This is the pulse that starts the group’s spawn chain.
-- **`Enable Spawner`** — enables Zone IN.
+- **`Enable Spawner`** — enables `Zone IN`.
 - **`Disable Spawner`** — NodeGates `nIN - DISABLE` targets this together with **`Delete Orders`**.
 - **`Delete Orders`** — cleanup when the group is closed (`MISSION END`).
 
@@ -170,12 +180,23 @@ Copies park on the 10 km grid from 40000, 40000 so you can sort them, then place
 
 ### What you set in the app
 
-- **Add templates…** — one `.Group` per plan, or a generated **Exclusive Activation** file. A pack is detected automatically: each original plan is listed, NodeGates are stripped, and **Export in place** turns on so positions stay where you placed them. Add another template afterward to insert a new plan into that developed group. **Add again** duplicates a slot (same file, second copy).
+- **Add templates…** — one `.Group` per plan, or a generated **Exclusive Activation** file. A pack is detected automatically: each original plan is listed, NodeGates are stripped, and **Export in place** turns on so positions stay where you placed them. The header then reads **Editing** and the pack's name until you generate. Loading a generated pack this way lets you add a plan and write it back in place: add another template afterward to insert a new plan into that developed group. **Add again** duplicates a slot (same file, second copy). **Remove** takes a plan out; undo it with **Ctrl Z** or the status bar's **Undo**.
 - **Export in place** — leave groups at their current X/Z (do not park on the grid). Use this when regenerating a pack you already placed in the editor.
 - For each plan, tick the **start checkzones** this plan should open and close.
 - Pick the **end timer** that means “this plan is finished.”
 
-The app suggests names and warns when a zone or timer is wired incorrectly. Fix the template in the editor if you see a red warning; do not ignore it.
+Each plan card shows **Ready**, or what the plan still lacks: **⚠ Checkzone** (no start checkzone selected) and **⚠ End timer** (no end timer). **⚠ Check** means both are picked but one of them is wired in a way that warns (see below). While a plan lacks something, the status bar names the first one, for example "Plan 2 has no end timer", and **Generate File** stays off.
+
+The app finds start zones and end timers by name (see **Naming** below) and warns when a zone or timer is wired incorrectly. Fix the template in the editor if you see a warning; do not ignore it.
+
+### Naming
+
+Name the MCUs like this so the app selects them for you:
+
+- Start checkzones: `Zone IN` or `MISSION START`
+- End timer: `END` or `MISSION END`
+
+Names are matched without regard to case. Other names work too; you then pick them by hand.
 
 ### Required MCUs in each template
 
@@ -323,11 +344,11 @@ Import, then **move copies off the parking grid** onto the map. Keep each copy�
 
 ### Intended use
 
-Freeflight missions from the Task Editor include a **player aircraft** and single-player graph (takeoff helpers, music, objectives, tiny player-out bubbles). Multiplayer does not use that. This mode strips the player and retargets proximity checkzones that were object-linked to the player, so the field can sit in an MP mission as AI + blocks + friendly-plane zones.
+Freeflight missions from the Task Editor include a **player aircraft** and single-player graph (takeoff helpers, music, objectives, tiny player-out bubbles). Multiplayer does not use that. **Generate File** strips the player and the SP logic, then retargets the proximity checkzones that were object-linked to the player, so the field can sit in an MP mission as AI + blocks + friendly-plane zones.
 
 ### Airfield database (automatic harvest)
 
-Use this to collect many airfields without the mission editor. It sits at the top of the Airfield tab's left panel; the log appears in the center. Every time you start a Freeflight, the game rewrites `data\Missions\_gen.mission` with the whole generated mission. The harvester reads that file directly.
+Use this to collect many airfields without the mission editor; it is the automatic way to get the file. It sits under **Harvest automatically** at the bottom of the Airfield tab's left panel; the log appears in the center. While **Watch for new airfields** is on, harvests also run when another tab is open; their messages appear on the Airfield tab's status bar. Every time you start a Freeflight, the game rewrites `data\Missions\_gen.mission` with the whole generated mission. The harvester reads that file directly.
 
 1. Check **Game Missions folder**. It is filled in when the Steam or standalone install is in its default place; otherwise **Browse…** to `…\data\Missions`.
 2. Pick a **Database folder** (default `References\Airfields`).
@@ -357,7 +378,7 @@ In the IL-2 map / mission editor:
 3. Select the field and use **File › Save Selection to File** (it may be inside a `Group` wrapper or as loose blocks at the root).
 4. **Load airfield…** here.
 
-The inspector shows name, layout, origin, vehicles, AI aircraft, blocks, checkzones, player aircraft to remove, and which zones will be unlinked.
+The center then shows what Generate will change: **Removed** (player aircraft with their country, the AutoRemove subgroup, the count of player / SP graph objects), **Relinked** (the checkzones that get the friendly-plane coalition) and **Kept** (vehicles and ships, AI aircraft, blocks, checkzones). The right panel shows the airfield's name, layout and origin.
 
 ### What you set
 
@@ -379,13 +400,13 @@ There are no “name this MCU” hooks. Behavior is structural:
 
 **Kept, but retargeted**
 
-- `MCU_CheckZone`s that object-linked the player and are **not** tiny bubbles: the player id is dropped from **Objects**, and **`PlaneCoalitions`** is set to Western `[2]` or Eastern `[1]`
+- `MCU_CheckZone`s that object-linked the player and are **not** tiny bubbles: the player id is dropped from **Objects**, and **`PlaneCoalitions`** is set to NATO `[2]` or DPRK `[1]`
 
 AI aircraft, vehicles, ships, blocks, and normal field checkzones stay.
 
-If no player aircraft is found, the file may already be cleaned; export is then a no-op besides rewriting the group.
+If no player aircraft is found, the file may already be cleaned; Generate then only rewrites the group.
 
-### After export
+### After Generate
 
 Import into an MP mission. Confirm friendly-plane coalitions on the field’s checkzones. You still place spawners / ramps in the editor as usual; this mode does not add MP spawn logic.
 

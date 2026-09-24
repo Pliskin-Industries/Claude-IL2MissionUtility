@@ -492,6 +492,133 @@ fn fighter_types_reset_confirm_and_generate() {
     assert_group_file(&out);
 }
 
+#[test]
+fn fighter_preview_sentence_table_and_empty_state() {
+    let mut h = Harness::new("fighter_preview");
+    h.tab("Fighter Pack");
+    h.app.linked_groups = 3;
+    h.app.flight_count = 3;
+    h.app.max_in_flight = 4;
+    h.settle();
+    assert!(
+        h.has("Group logic is built in. 3 linked groups, chained through NodeGates, parked on a 10 km grid from 40000, 40000."),
+        "{:?}",
+        h.labels()
+    );
+    // Flights 4/3/2: colour + number, roles counted from the preview seats.
+    for name in ["Red 11", "Blue 21", "Yellow 31"] {
+        assert!(h.has(name), "flight {name}: {:?}", h.labels());
+    }
+    assert!(h.has("2 AttackArea · 2 Cover"));
+    assert!(h.has("2 AttackArea · 1 Cover"));
+    assert!(h.has("AttackArea + Cover"));
+    // The 4-ship shows its low and high elements, the 2-ship one altitude.
+    let flights = crate::flights::preview_flights(&h.app.fighter_flight_config());
+    let (low, high) = GroupGeneratorApp::flight_element_altitudes(&flights[0].seats);
+    let high = high.expect("a complete 4-ship has a high pair");
+    assert!(h.has(&format!("{} / {} m", group_digits(low), group_digits(high))));
+    assert_eq!(GroupGeneratorApp::flight_element_altitudes(&flights[2].seats).1, None);
+    assert!(h.has("Group 3 · 9 aircraft"));
+
+    h.app.linked_groups = 1;
+    h.app.custom_path = Some(PathBuf::from("My_Pack.Group"));
+    h.settle();
+    assert!(h.has("Group logic from My_Pack.Group. One group, parked at 40000, 40000."), "{:?}", h.labels());
+    h.app.custom_path = None;
+
+    // No types: an empty state instead of the fallback type, and Generate is off.
+    h.app.type_enabled.iter_mut().for_each(|e| *e = false);
+    h.settle();
+    assert!(h.has("Select at least one aircraft type to preview the pack."));
+    assert!(!h.has("GROUP 1 · FLIGHTS"));
+    assert!(!h.has("Red 11"));
+    assert!(h.find("Generate File").disabled);
+}
+
+#[test]
+fn fighter_flight_names_stay_unique_up_to_ten_flights() {
+    let names: Vec<String> = (0..10).map(|f| crate::aircraft::plane_display_name(f, 0)).collect();
+    let unique: std::collections::HashSet<&String> = names.iter().collect();
+    assert_eq!(unique.len(), names.len(), "{names:?}");
+    assert_eq!(names[0], "Red 11");
+    assert_eq!(names[6], "Red 71", "the colour list wraps after six");
+}
+
+#[test]
+fn fighter_role_and_altitude_text() {
+    assert_eq!(GroupGeneratorApp::flight_role_text(&[(1.0, true)]), "AttackArea");
+    assert_eq!(GroupGeneratorApp::flight_role_text(&[(1.0, true), (1.0, false)]), "AttackArea + Cover");
+    assert_eq!(
+        GroupGeneratorApp::flight_role_text(&[(1.0, true), (1.0, false), (3.0, true), (3.0, false)]),
+        "2 AttackArea · 2 Cover"
+    );
+    assert_eq!(GroupGeneratorApp::altitude_text(1800.0, Some(3800.0)), "1 800 / 3 800 m");
+    assert_eq!(GroupGeneratorApp::altitude_text(5200.0, None), "5 200 m");
+    assert_eq!(group_digits(227_880.4), "227 880");
+    assert_eq!(group_digits(950.0), "950");
+    assert_eq!(group_digits(-1234.0), "-1 234");
+}
+
+#[test]
+fn fighter_nodegate_links_never_end_a_row() {
+    for groups in 1..=10 {
+        let mut w = 130.0;
+        while w < 1400.0 {
+            let rows = GroupGeneratorApp::pack_card_rows(groups, w);
+            let mut next = 0;
+            for (r, row) in rows.iter().enumerate() {
+                assert_eq!(row.start, next, "rows are contiguous");
+                assert!(!row.is_empty());
+                next = row.end;
+                // A row is its cards plus the link in front of each card after group 1,
+                // so every link sits directly before a card on the same row.
+                let n = row.len() as f32;
+                let links = if r == 0 { n - 1.0 } else { n };
+                let row_w = n * PACK_CARD_W + links * PACK_LINK_W;
+                assert!(row_w <= w || row.len() == 1, "{groups} groups at {w} px: row {r} is {row_w} px");
+            }
+            assert_eq!(next, groups);
+            w += 37.0;
+        }
+    }
+    // Ten groups render as cards, each inside the window.
+    let mut h = Harness::new("fighter_cards");
+    h.tab("Fighter Pack");
+    h.app.linked_groups = 10;
+    h.settle();
+    for g in 1..=10 {
+        let card = h.find_prefix(&format!("Group {g} · "));
+        assert!(card.rect.right() <= SCREEN.x, "Group {g} card off screen: {:?}", card.rect);
+    }
+}
+
+#[test]
+fn fighter_altitude_strip_skips_crowded_labels_but_every_tick_hovers() {
+    // Skipping: a label that would touch the last drawn one is left out.
+    let shown = strip_labels_shown(&[0.0, 20.0, 45.0, 100.0], &[40.0, 40.0, 40.0, 40.0], 6.0);
+    assert_eq!(shown, vec![true, false, false, true]);
+    let shown = strip_labels_shown(&[100.0, 0.0], &[40.0, 40.0], 6.0);
+    assert_eq!(shown, vec![true, true], "order follows position, not flight number");
+
+    let mut h = Harness::new("fighter_strip");
+    h.tab("Fighter Pack");
+    h.app.flight_count = 10;
+    h.settle();
+    let ticks: Vec<Node> = h.nodes.iter().filter(|n| n.label.starts_with("Altitude tick ")).cloned().collect();
+    assert_eq!(ticks.len(), 10, "one tick per flight: {:?}", h.labels());
+    // Hovering a tick names its flight (whether or not its label was drawn).
+    let tick = h.find("Altitude tick Green 11");
+    h.move_to(tick.rect.center());
+    for _ in 0..40 {
+        h.step(Vec::new());
+    }
+    assert!(
+        h.nodes.iter().any(|n| n.label.starts_with("Green 11 · ")),
+        "hover names the flight: {:?}",
+        h.labels()
+    );
+}
+
 // ── Exclusive Activation ──────────────────────────────────────────────────
 
 #[test]
@@ -513,6 +640,65 @@ fn exclusive_plans_select_remove_undo_and_generate() {
     dialog::answer(vec![out.clone()]);
     h.key_with(Key::G, CTRL);
     assert_group_file(&out);
+}
+
+#[test]
+fn exclusive_header_tags_kicker_and_idle_problem() {
+    let mut h = Harness::new("exclusive_tags");
+    h.tab("Exclusive Activation");
+    assert!(!h.labels().iter().any(|l| l.starts_with("Editing")), "no pack loaded yet");
+    dialog::answer(vec![repo("TemplateExamples/Exclusive_Activation_6plan.Group")]);
+    h.click("Add templates…");
+    assert!(h.has("Editing Exclusive_Activation_6plan"), "{:?}", h.labels());
+    assert!(h.has("Plan 1"), "kicker in sentence case");
+    assert!(!h.has("PLAN 1"));
+
+    // Plan 2 loses its end timer, then its checkzones: tags and the idle status follow.
+    h.app.bomber_slots[1].selected_completion = None;
+    h.app.status = Status::Idle;
+    h.settle();
+    assert_eq!(plan_tags(&h.app.bomber_slots[1]), vec![("⚠ End timer", false)]);
+    assert!(h.has("Plan 2 has no end timer"), "{:?}", h.labels());
+    h.app.bomber_slots[1].selected_triggers.clear();
+    h.settle();
+    assert_eq!(plan_tags(&h.app.bomber_slots[1]), vec![("⚠ Checkzone", false), ("⚠ End timer", false)]);
+    assert!(h.has("Plan 2 has no start checkzone"));
+    assert!(h.find("Generate File").disabled);
+
+    // A plan with a wiring warning is not Ready.
+    let mut warned = h.app.bomber_slots[0].clone();
+    let zone = warned.selected_triggers[0];
+    warned.info.trigger_warnings.insert(zone, "zone is not Closer".into());
+    assert_eq!(plan_tags(&warned), vec![("⚠ Check", false)]);
+
+    // A long name truncates and leaves room for the tag.
+    let long = "Very long plan name ".repeat(12);
+    h.app.bomber_slots[0].info.name = long.clone();
+    h.settle();
+    let card = h.find("Plan card 1");
+    let title = h.find(&format!("1 · {long}"));
+    assert!(title.rect.right() + 30.0 < card.rect.right(), "title {:?} leaves no room in {:?}", title.rect, card.rect);
+}
+
+#[test]
+fn exclusive_editing_clears_on_generate_and_when_emptied() {
+    let mut h = Harness::new("exclusive_editing");
+    h.tab("Exclusive Activation");
+    dialog::answer(vec![repo("TemplateExamples/Exclusive_Activation_6plan.Group")]);
+    h.click("Add templates…");
+    assert!(h.has("Editing Exclusive_Activation_6plan"));
+    let out = h.out("exclusive.Group");
+    dialog::answer(vec![out.clone()]);
+    h.click("Generate File");
+    assert_group_file(&out);
+    assert!(h.app.bomber_loaded_path.is_none());
+    assert!(!h.has("Editing Exclusive_Activation_6plan"));
+
+    dialog::answer(vec![repo("TemplateExamples/Exclusive_Activation_6plan.Group")]);
+    h.click("Add templates…");
+    h.app.bomber_slots.retain(|s| s.path != repo("TemplateExamples/Exclusive_Activation_6plan.Group"));
+    h.settle();
+    assert!(!h.labels().iter().any(|l| l.starts_with("Editing")), "no plans from the pack, no Editing");
 }
 
 // ── Airfield ──────────────────────────────────────────────────────────────
@@ -563,6 +749,81 @@ fn airfield_harvest_file_and_watch() {
     assert!(h.app.harvest_log.len() > logged, "watcher harvested the new file: {}", h.status());
     h.click("Watch for new airfields");
     assert!(h.app.harvest_watcher.is_none());
+}
+
+#[test]
+fn airfield_panels_order_and_wording() {
+    let mut h = Harness::new("airfield_panels");
+    h.tab("Airfield");
+    let get = h.find("GET THE FILE").rect.top();
+    let side = h.find("FRIENDLY PLANE COALITION").rect.top();
+    let harvest = h.find("HARVEST AUTOMATICALLY").rect.top();
+    assert!(get < side && side < harvest, "Get the file, coalition, then the harvester");
+    assert!(h.has("Load a Freeflight airfield from _gen.mission, then generate the cleaned group."));
+
+    dialog::answer(vec![repo("TemplateExamples/Airfield_Mess.Group")]);
+    h.click("Load airfield…");
+    let info = h.app.airfield_info.clone().expect("airfield loaded");
+    assert!(h.has("Strips the player and SP logic, then retargets the checkzones that were linked to the player."));
+    // Removed: country name only.
+    for p in &info.player_planes {
+        assert!(h.has(&country_name(p.country)), "{:?}", h.labels());
+    }
+    assert!(!h.labels().iter().any(|l| COUNTRIES.iter().any(|(_, c)| l.contains(c))), "no raw country labels");
+    // Relinked: a short count beside the side.
+    let n = info.unlink_zones.len();
+    assert!(h.has(&format!("{n} checkzone{}", if n == 1 { "" } else { "s" })), "{:?}", h.labels());
+    // Right panel: sentence case layout, grouped origin.
+    assert!(h.has(if info.in_group { "Inside a Group" } else { "Blocks at the root" }));
+    if let Some((x, z)) = info.origin_xz {
+        assert!(h.has(&format!("{}, {}", group_digits(x), group_digits(z))));
+    }
+    assert_eq!(country_name(601), "USA");
+    assert_eq!(country_name(999), "country 999");
+}
+
+// ── Per-tab status and saved state ────────────────────────────────────────
+
+#[test]
+fn each_tab_keeps_its_own_status() {
+    let mut h = Harness::new("tab_status");
+    h.tab("Fighter Pack");
+    h.app.status = Status::Info("Fighter message".into());
+    h.tab("Airfield");
+    assert_ne!(h.status(), "Fighter message", "a message stays on its tab");
+    h.app.status = Status::Error("Airfield message".into());
+    h.key_with(Key::Num3, CTRL);
+    assert_eq!(h.status(), "Fighter message");
+    h.tab("Airfield");
+    assert_eq!(h.status(), "Airfield message");
+}
+
+#[test]
+fn a_second_identical_generate_marks_the_tab_saved() {
+    let mut h = Harness::new("saved");
+    h.tab("Template");
+    add_model(&mut h, "F-51D");
+    let out = h.out("tpl.Group");
+    dialog::answer(vec![out.clone()]);
+    h.click("Generate File");
+    assert_group_file(&out);
+    assert!(!h.app.is_dirty(AppMode::Template));
+    let first = h.status();
+
+    // An edit that does not change the Generate message.
+    h.app.tpl_zone_in += 500.0;
+    assert!(h.app.is_dirty(AppMode::Template));
+    dialog::answer(vec![out.clone()]);
+    h.click("Generate File");
+    assert_eq!(h.status(), first, "same message as the first Generate");
+    assert!(!h.app.is_dirty(AppMode::Template), "the second Generate counts as saved");
+
+    // A cancelled dialog reports nothing: the status stays and the edits stay unsaved.
+    h.app.tpl_zone_in += 500.0;
+    dialog::answer(Vec::new());
+    h.click("Generate File");
+    assert_eq!(h.status(), first);
+    assert!(h.app.is_dirty(AppMode::Template));
 }
 
 // ── Map ───────────────────────────────────────────────────────────────────
