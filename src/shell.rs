@@ -165,17 +165,33 @@ pub fn settings_section(
     body: impl FnOnce(&mut Ui),
 ) {
     let id = ui.make_persistent_id(id);
-    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, default_open)
-        .show_header(ui, |ui| {
+    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, default_open);
+    // The whole 28 px header row toggles (§6.6), not only the small arrow.
+    let row = ui.allocate_ui_with_layout(
+        Vec2::new(ui.available_width(), 28.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            state.show_toggle_button(ui, egui::collapsing_header::paint_default_icon);
+            ui.spacing_mut().item_spacing.x = 6.0;
             ui.label(RichText::new(title).font(FontId::new(13.0, bold_family())));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add(egui::Label::new(RichText::new(summary).small().color(c::NEUTRAL_700)).truncate());
             });
-        })
-        .body(|ui| {
-            ui.add_space(4.0);
-            body(ui);
-        });
+        },
+    );
+    let hit = ui.interact(row.response.rect, id.with("header"), Sense::click());
+    hit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, title));
+    if hit.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if hit.clicked() {
+        state.toggle(ui);
+    }
+    state.show_body_indented(&row.response, ui, |ui| {
+        ui.add_space(4.0);
+        body(ui);
+    });
     ui.separator();
 }
 
@@ -399,15 +415,66 @@ pub fn mode_rail(ui: &mut Ui, labels: &[&str], selected: &mut usize) -> bool {
     help
 }
 
+// ── Readiness (README §10) ──────────────────────────────────────────────────
+/// One rule a tab's output must meet before Generate is enabled.
+pub struct Check {
+    pub ok: bool,
+    pub text: String,
+}
+
+impl Check {
+    pub fn new(ok: bool, text: impl Into<String>) -> Self {
+        Check { ok, text: text.into() }
+    }
+}
+
+pub fn all_ok(checks: &[Check]) -> bool {
+    checks.iter().all(|c| c.ok)
+}
+
+/// Chip beside Generate: "✓ Ready" or "⚠ n to do". Its menu lists every
+/// check, so the reason Generate is disabled is never hidden (§6.5).
+pub fn readiness(ui: &mut Ui, checks: &[Check]) {
+    if checks.is_empty() {
+        return;
+    }
+    let open = checks.iter().filter(|c| !c.ok).count();
+    let label = if open == 0 {
+        RichText::new("✓ Ready ▾").color(c::ACCENT_700)
+    } else {
+        RichText::new(format!("⚠ {open} to do ▾")).color(c::WARN_TEXT)
+    };
+    ui.menu_button(label, |ui| {
+        ui.set_min_width(260.0);
+        ui.label(RichText::new("BEFORE YOU GENERATE").small().color(c::NEUTRAL_700));
+        for check in checks {
+            ui.horizontal(|ui| {
+                if check.ok {
+                    ui.label(RichText::new("✓").color(c::ACCENT_700));
+                    ui.label(&check.text);
+                } else {
+                    ui.label(RichText::new("✗").color(c::WARN_TEXT));
+                    ui.label(RichText::new(&check.text).strong());
+                }
+            });
+        }
+    })
+    .response
+    .on_hover_text("What this tab needs before Generate");
+}
+
 /// Header row. `leading` draws right after the title (e.g. a sub-mode switch).
 /// `secondary` runs inside a right-to-left layout: add buttons in REVERSE order.
+/// `checks` show as a readiness chip next to the primary button.
 /// Returns true when the primary button is clicked.
+#[allow(clippy::too_many_arguments)]
 pub fn page_header(
     ui: &mut Ui,
     title: &str,
     file: Option<&str>,
     primary: &str,
     primary_enabled: bool,
+    checks: &[Check],
     leading: impl FnOnce(&mut Ui),
     secondary: impl FnOnce(&mut Ui),
 ) -> bool {
@@ -421,6 +488,8 @@ pub fn page_header(
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             clicked = primary_button(ui, primary, "Ctrl G", primary_enabled).clicked();
             ui.add_space(4.0);
+            readiness(ui, checks);
+            ui.add_space(8.0);
             secondary(ui);
         });
     });
@@ -496,13 +565,14 @@ pub fn confirm_dialog(ctx: &egui::Context, open: &mut bool, title: &str, body: &
             // A fixed-height row: a bare with_layout would take the window's full height.
             let row = Vec2::new(ui.available_width(), 32.0);
             ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
-                if primary_button(ui, confirm, "Enter", true).clicked()
-                    || ui.input(|i| i.key_pressed(egui::Key::Enter))
-                {
-                    confirmed = true;
+                let ok = primary_button(ui, confirm, "Enter", true);
+                let cancel = ui.button("Cancel").on_hover_text("Esc");
+                // Enter confirms, except when the keyboard focus is on Cancel.
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter)) && !cancel.has_focus();
+                if cancel.clicked() {
                     *open = false;
-                }
-                if ui.button("Cancel").clicked() {
+                } else if ok.clicked() || enter {
+                    confirmed = true;
                     *open = false;
                 }
             });
@@ -513,11 +583,13 @@ pub fn confirm_dialog(ctx: &egui::Context, open: &mut bool, title: &str, body: &
 // ── Undo (one snapshot per tab, spec item 7) ────────────────────────────────
 pub struct Undo<T> {
     slot: Option<(String, T)>,
+    /// Fingerprint of the tab right after the change; see `settle`.
+    after: Option<u64>,
 }
 
 impl<T> Default for Undo<T> {
     fn default() -> Self {
-        Self { slot: None }
+        Self { slot: None, after: None }
     }
 }
 
@@ -525,6 +597,21 @@ impl<T> Undo<T> {
     /// Call BEFORE the destructive change with a clone of what it removes.
     pub fn record(&mut self, label: impl Into<String>, before: T) {
         self.slot = Some((label.into(), before));
+        self.after = None;
+    }
+    /// Call once per frame with a fingerprint of the tab's state. The first
+    /// call after `record` remembers the state the change left; any later
+    /// edit makes the snapshot stale, so it is dropped rather than letting
+    /// Ctrl Z silently throw that edit away.
+    pub fn settle(&mut self, fingerprint: u64) {
+        if self.slot.is_none() {
+            return;
+        }
+        match self.after {
+            None => self.after = Some(fingerprint),
+            Some(a) if a != fingerprint => self.clear(),
+            Some(_) => {}
+        }
     }
     pub fn label(&self) -> Option<&str> {
         self.slot.as_ref().map(|(l, _)| l.as_str())

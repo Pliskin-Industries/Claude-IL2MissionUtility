@@ -1740,6 +1740,7 @@ impl GroupGeneratorApp {
         }
         self.confirm_dialogs(ctx);
         help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
+        self.settle_undo();
     }
 }
 
@@ -1809,9 +1810,72 @@ impl GroupGeneratorApp {
     }
 
     fn primary_enabled(&self) -> bool {
+        shell::all_ok(&self.readiness_checks())
+    }
+
+    /// The smallest output each tab allows (README §10). These mirror the
+    /// errors the generate functions already return; Generate stays disabled
+    /// until all pass. Map has none: any period makes a valid base map.
+    fn readiness_checks(&self) -> Vec<shell::Check> {
+        use shell::Check;
         match self.mode {
-            AppMode::Airfield => self.airfield_info.is_some(),
-            _ => true,
+            AppMode::Template => vec![Check::new(!self.tpl_seats.is_empty(), "At least one unit")],
+            AppMode::Recon => match self.recon_submode {
+                ReconSubmode::New => {
+                    let mut checks = vec![Check::new(!self.recon_slots.is_empty(), "At least one template")];
+                    if !self.recon_slots.is_empty() {
+                        let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
+                        checks.push(Check::new(
+                            weights.iter().any(|w| *w > 0),
+                            "Influence above 0 on at least one template",
+                        ));
+                        let copies = allocate_copies(&weights, self.recon_total as usize);
+                        for (slot, n) in self.recon_slots.iter().zip(copies) {
+                            if n > 0 {
+                                checks.push(Check::new(
+                                    !slot.selected_triggers.is_empty(),
+                                    format!("Zone In for {}", slot.info.name),
+                                ));
+                            }
+                        }
+                    }
+                    checks
+                }
+                ReconSubmode::Rework => {
+                    let mut checks = vec![Check::new(!self.recon_rework.is_empty(), "At least one placed pack")];
+                    for slot in &self.recon_rework {
+                        checks.push(if self.recon_strip_randomizer {
+                            Check::new(
+                                !slot.restore_start.is_empty(),
+                                format!("Start timer or checkzone for {}", slot.info.name),
+                            )
+                        } else {
+                            Check::new(!slot.selected_triggers.is_empty(), format!("Zone In for {}", slot.info.name))
+                        });
+                    }
+                    checks
+                }
+            },
+            AppMode::Fighter => vec![Check::new(
+                !self.selected_types().0.is_empty(),
+                "At least one aircraft type",
+            )],
+            AppMode::Exclusive => {
+                let mut checks = vec![Check::new(!self.bomber_slots.is_empty(), "At least one plan")];
+                for (n, slot) in self.bomber_slots.iter().enumerate() {
+                    checks.push(Check::new(
+                        !slot.selected_triggers.is_empty(),
+                        format!("Plan {}: a start checkzone", n + 1),
+                    ));
+                    checks.push(Check::new(
+                        slot.selected_completion.is_some(),
+                        format!("Plan {}: an end timer", n + 1),
+                    ));
+                }
+                checks
+            }
+            AppMode::Airfield => vec![Check::new(self.airfield_info.is_some(), "An airfield file loaded")],
+            AppMode::Map => Vec::new(),
         }
     }
 
@@ -1889,12 +1953,14 @@ impl GroupGeneratorApp {
         let submode = self.recon_submode;
         let mut new_submode = submode;
         let (mut load, mut reset, mut add_folder) = (false, false, false);
+        let checks = self.readiness_checks();
         let generate = shell::page_header(
             ui,
             title,
             file.as_deref(),
             primary,
-            self.primary_enabled(),
+            shell::all_ok(&checks),
+            &checks,
             |ui| {
                 if mode == AppMode::Recon {
                     shell::segmented(
@@ -5110,6 +5176,60 @@ impl GroupGeneratorApp {
     fn record_map_undo(&mut self, label: String) {
         self.map_undo.record(label, self.map_forces());
         self.map_undo_marks = self.drawn_marks.len();
+    }
+
+    /// Drop the current tab's undo snapshot once the tab is edited after it
+    /// (shell::Undo::settle). Only cheap fields go into the fingerprint.
+    fn settle_undo(&mut self) {
+        use std::hash::{Hash, Hasher};
+        fn hash(text: String) -> u64 {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut h);
+            h.finish()
+        }
+        match self.mode {
+            AppMode::Template => {
+                let fp = hash(self.tpl_fingerprint());
+                self.tpl_undo.settle(fp);
+            }
+            AppMode::Recon => {
+                let slots = match self.recon_submode {
+                    ReconSubmode::New => &self.recon_slots,
+                    ReconSubmode::Rework => &self.recon_rework,
+                };
+                let fp = hash(format!(
+                    "{}{:?}",
+                    self.recon_submode == ReconSubmode::New,
+                    slots
+                        .iter()
+                        .map(|s| (&s.path, s.kind, &s.selected_triggers, s.influence, &s.restore_start))
+                        .collect::<Vec<_>>()
+                ));
+                self.recon_undo.settle(fp);
+            }
+            AppMode::Exclusive => {
+                let fp = hash(format!(
+                    "{:?}",
+                    self.bomber_slots
+                        .iter()
+                        .map(|s| (&s.path, &s.selected_triggers, s.selected_completion))
+                        .collect::<Vec<_>>()
+                ));
+                self.bomber_undo.settle(fp);
+            }
+            AppMode::Map => {
+                let fp = hash(format!(
+                    "{:?}",
+                    (
+                        (&self.map_ships, &self.map_ground_east, &self.map_ground_nato, &self.map_fighters),
+                        (&self.east_objectives, &self.nato_objectives, self.map_armies.len(), self.map_refs.len()),
+                        self.map_imported_fighters.len(),
+                    )
+                ));
+                self.map_undo.settle(fp);
+            }
+            AppMode::Fighter | AppMode::Airfield => {}
+        }
     }
 
     fn record_tpl_undo(&mut self, label: String) {
@@ -11624,7 +11744,17 @@ fn army_mix_label(copies: &[ArmyCopyInfo]) -> String {
 fn load_group(path: &Path) -> Result<crate::ast::Il2Entity, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|err| format!("Could not read file: {err}"))?;
-    parse_group_file(&text).map_err(|err| format!("Parse failed: {err}"))
+    parse_group_file(&text).map_err(|err| {
+        // A flat "Save Selection to File" export has many root blocks and no Group.
+        match parse_il2_document(&text) {
+            Ok(root) if root.children.len() > 1 && root.name() == Some("Airfield") => format!(
+                "{} holds {} separate blocks, not one Group. Group them in the mission editor, then save the group and add that file.",
+                path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+                root.children.len()
+            ),
+            _ => format!("Parse failed: {err}"),
+        }
+    })
 }
 
 fn drop_rework_path(slots: &mut Vec<ReconSlot>, path: &Path) {
