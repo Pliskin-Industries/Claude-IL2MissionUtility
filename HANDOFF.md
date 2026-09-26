@@ -1,20 +1,23 @@
 # HANDOFF — IL-2 Mission Utility (Claude working copy)
 
 > Read this first in every new session. Update the **Session log** and
-> **State** sections before you stop. Last updated: 2026-09-24.
+> **State** sections before you stop. Last updated: 2026-09-26.
 
 ## 1. Where things live
 
 | What | Path |
 |---|---|
-| **Working copy (all work happens here)** | `C:\Claude\IL2MissionUtility\Claude IL2Mission Utility\` |
-| Original drop (read-only reference, do not edit) | `C:\Claude\IL2MissionUtility\` (everything except this folder) |
+| **GitHub (source of truth)** | `Pliskin-Industries/Claude-IL2MissionUtility` (public fork of `eszyman/IL2MissionUtility`, remote `upstream`) |
+| **Backlog** | **GitHub Issues** on the fork (#1–#27, imported 2026-09-26). §4 below and `handoff/*.md` hold the design detail the issues link to. |
+| **Working copy (current machine)** | `C:\Machine Intelligence\Claude-IL2MissionUtility\` (cloned 2026-09-26) |
+| Old working copy (previous machine, not present here) | `C:\Claude\IL2MissionUtility\Claude IL2Mission Utility\` |
 | Module map for `src/` (read before editing) | `docs/src-guide.md` |
 | End-user manual (embedded in the Help window) | `USER_MANUAL.md` |
 | Coding rules | `.cursorrules` (nom parser only, schema-agnostic AST, never skip tests, GUI decoupled from AST, minimal UI) |
 
-**Git.** The working copy is a local git repo (`main`). There is **no
-GitHub remote** yet. The first commit is the untouched 2026-09-04 source.
+**Git.** `main` tracks `origin` (the Pliskin-Industries fork). The first
+commit is the untouched 2026-09-04 source. Don't push `v*` tags casually:
+they trigger the release build.
 `.gitattributes` is `* -text`: files are stored byte-for-byte because `.Group`
 fixtures are line-ending sensitive. Do not remove it.
 
@@ -25,7 +28,9 @@ cargo test --offline     # 376 passed after P1 (371 at baseline); ~45 s cold bui
 cargo build --release    # ships target/release/il2_mission_utility.exe
 ```
 
-`--offline` works because every crate is already in the local cargo cache.
+`--offline` works only once every crate is in the local cargo cache. On a
+fresh machine, run `cargo fetch` (or one online `cargo build`) first. Windows
+needs rustup plus the Visual Studio C++ Build Tools (MSVC linker).
 
 ## 2. Team roles (codex-delegation skill)
 
@@ -107,6 +112,21 @@ writes the UTF-16 translation sidecars (`.eng`, `.rus`, …).
 - The UI is English-only.
 
 ## 4. Next development phases
+
+**Tracked as GitHub Issues since 2026-09-26.** Map: P2 #4, P3 #5, P4 #6,
+P5 #7, P6 #8, R3 F1–F9 #9–#17, in-game checks #18, harvester in-game test
+#19, harvester next phase (Map airfield states) #20, `Developer_AAA.Group`
+parse bug #21, P9–P13 #22–#26, R2 sources #27. Close an issue when its work
+merges, and keep this table for design context only.
+
+**Terrain heights (user direction 2026-09-26).**
+- The original creator (eszyman) is building a **macro for 3D terrain
+  mapping**. It is now the expected source of the height grid (#1).
+- The in-app **probe-snap load-in** (T-34 probe export, editor *set to
+  ground*, Import snapped; `heightprobe.rs`) is **deferred for now** (#3).
+  Keep it working; don't extend it (no 200 m / rough-100 m pass buttons).
+- **Long term:** build the macro into the app (#2).
+- P12 terrain-aware placement (#25) is blocked on #1.
 
 **Author-stated** (README "Todo"):
 - **Rewrite `USER_MANUAL.md`** into plain, human-readable text. The current
@@ -218,3 +238,4 @@ continue at delegation-loop step 3 (§2).
 | 2026-09-24 | Claude Opus (Fable role) | **UI redesign finished on `claude/ui-final` (`85ca06e` + docs), NOT merged or pushed: the user wants to check it first.** Audited every tab against README §4–§8 and the mockups (≈75 gaps), then fixed them in three parallel worktrees (Template+Army `33f87dd`, Fighter/Exclusive/Airfield `88d2153`, Map/side markers/shell/Help `8c2c84a`). Added the README §10 readiness chip (`b855a2f`: Generate disabled until each tab's minimum is met), stale-undo guard, clickable section headers, flight colour names, per-tab status, Map front/clear undo, painted tool icons, dock tabs, fighter side markers (ring removed, cropped), Keyboard shortcuts help. **Live click-through done** with `tools/ui-live/drive.ps1` + new `dialog.ps1` (native file dialogs): every tab, Generate via Ctrl G + save dialog, Load/Add via dialogs, undo/confirm, map tools, Terrain layers + readout, Help Esc, 1280×800. Live bugs fixed in `85ca06e` (missing ✓ glyph, Airfield panel overflow + black gap, COPY MIX clipped, chip names cut, wrapped button), each with a guard test. 466 tests, 69 warnings. Only message strings and two count fields changed outside the UI; generation untouched. User decisions: skill 3 reads **Veteran** (Plain/Low/Normal/Veteran/Ace); Template translation sidecars **on hold** (Army's warning stays for now); `claude/terrain-apply` stays out of this merge, its toggle to default off. |
 | 2026-09-24 | Claude Opus (Fable role) | **UI polish merged to local `main` (`e796a3c`), not pushed.** Exclusive undo reselects the restored plan; Terrain counts digit-grouped; Fighter flights stripes full width; status info/error messages retire after the next edit on that tab (`age_status`); order tree gets a visible solid scrollbar; Map AO/height readouts fade under the pointer. Verified live. 468 tests, 69 warnings. |
 | 2026-09-24 | Claude Opus (Fable role) | **All branches merged to `main`; tagged v0.6.** `claude/historical-templates-1950` (+ `historical-reference`) were stale pre-rebase copies whose content was already on `main` (`fc8e98f`, `989b3fe`); merged to close them. `claude/terrain-apply` (terrain heights phase 2) merged onto the redesigned UI: conflicts in the Terrain tab and the Exclusive generate path resolved; **Apply terrain heights on export now defaults to off** (user decision), test added; manual and src-guide updated. 476 tests, 69 warnings. |
+| 2026-09-26 | Claude Opus | **New machine; backlog moved to GitHub Issues.** Installed Git, GitHub CLI, rustup and VS C++ Build Tools. Cloned the fork to `C:\Machine Intelligence\Claude-IL2MissionUtility`. Turned on Issues for the fork and imported the backlog as #1–#27 (map in §4), with labels `terrain`, `template-builder`, `verify-in-game`, `proposal`, `deferred`, `blocked`, `long-term`, `author-todo`, `research`, `airfield`, `cleanup`. User direction: the creator's 3D-mapping macro replaces the probe-snap method for terrain heights (probe-snap deferred), and integrating the macro into the app is a long-term goal. Updated §1 paths and git notes. No code changed. |
