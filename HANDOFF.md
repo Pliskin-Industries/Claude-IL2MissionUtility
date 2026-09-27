@@ -1,7 +1,7 @@
 # HANDOFF — IL-2 Mission Utility (Claude working copy)
 
 > Read this first in every new session. Update the **Session log** and
-> **State** sections before you stop. Last updated: 2026-09-26.
+> **State** sections before you stop. Last updated: 2026-09-27.
 
 ## 1. Where things live
 
@@ -24,7 +24,7 @@ fixtures are line-ending sensitive. Do not remove it.
 **Build and test.**
 
 ```bash
-cargo test --offline     # 376 passed after P1 (371 at baseline); ~45 s cold build
+cargo test --offline     # 469 passed, 3 ignored at a34a00e (2026-09-27); ~45 s cold build
 cargo build --release    # ships target/release/il2_mission_utility.exe
 ```
 
@@ -36,8 +36,8 @@ needs rustup plus the Visual Studio C++ Build Tools (MSVC linker).
 
 | Role | Who | Notes |
 |---|---|---|
-| Overlord / reviewer | **Claude Opus acting as Fable** (Fable quota exhausted, per user 2026-09-23) | Plans, scopes, reviews every diff, merges, owns accountability. |
-| Executor | **GPT-6 Astra via Codex broker**, if the account gets access | All coding work. `max` effort for implementation, `ultra` for reviews. **Not available as of 2026-09-23** (see below). |
+| Overlord / reviewer | **Claude Fable 5.1** when the user runs a Fable session (it ran the P14 review and revision, 2026-09-27); otherwise Claude Opus in the Fable role | Plans, scopes, reviews every diff, merges, owns accountability. Writes code only with the user's permission for that task. |
+| Executor | **GPT-6 Astra via Codex broker** | All coding work. `max` effort for implementation, `ultra` for reviews. On the account since 2026-09-27 (see below). The user chose Astra to build P14. |
 
 **Delegation loop in use.** There is no remote, but Claude and Codex share
 this machine's disk. So the loop is:
@@ -51,6 +51,10 @@ this machine's disk. So the loop is:
 4. Claude merges with `--no-ff` into `main`, or sends it back with `codex_resume`.
 
 Once a GitHub remote exists, switch to the skill's standard `git_push`/`git_pull` flow.
+
+**Update 2026-09-27: Astra is on the account.** `~/.codex/config.toml` sets
+`model = "gpt-6-astra"` and the models cache lists it. The P14 review job ran
+on it (confirmed in the job's `output.log`). The note below is history.
 
 **Astra is not on this OpenAI account (verified 2026-09-23).**
 `~/.codex/models_cache.json` lists only `gpt-6-luna` (the CLI default when no
@@ -139,20 +143,20 @@ merges, and keep this table for design context only.
 
 | # | Phase | Why | Size |
 |---|---|---|---|
-| P1 | **Template altitude defaults** (in progress, see §5) | User request, 2026-09-23. | S |
+| P1 | **Template altitude defaults** (done 2026-09-23; **replaced 2026-09-27** by the creator's upstream commit `c1d88c3`: airstart is 1500 m for every aircraft, see §5) | User request, 2026-09-23. | S |
 | P2 | **Hygiene:** clear the 70 warnings (wire or delete dead code); add a GitHub remote | Warnings hide real regressions. A remote unlocks the standard broker flow. | S |
 | P3 | **Wire `mapload.rs`** reference catalog (airfields/buildings from `References/`) into Map-mode labels and snapping | Already built and tested, but unused. | M |
 | P4 | **Split `ui.rs`** (10k lines) into per-mode panel modules, with no behavior change | Prerequisite for localization. Lowers merge risk for every UI task. | M–L |
 | P5 | **UI localization:** string table plus a language picker | Author todo. Easier after P4. | L |
 | P6 | **Manual rewrite** (author todo) | Should follow the feature changes so it does not go stale twice. | M |
-| P7 | **Template altitude follow-ups** (see §5) | All done or closed (2026-09-23). | S |
+| P7 | **Template altitude follow-ups** (see §5) | All done or closed (2026-09-23). Match-lead and the 50 % ceiling button went with `c1d88c3`. | S |
 | P8 | **Features the historical templates need.** Details and acceptance criteria are in `handoff/R3-template-feature-gaps.md`. F1: respawn linked flights on a cooldown. F2: loader round-trip for every spawn layout. F3: break off after N losses. F4: cross-template trigger hooks. F5: date-aware aircraft warning (La-11 in 1950). F6: headless generation via lib/CLI. F7: waypoint speed without the UI. F8: searchlight defended-area preset. F9: per-element altitude step. | Found while building `TemplateExamples/Historical1950/` (2026-09-24). Each one forced a workaround or left out sourced behaviour. **Not scheduled; not in a 0.6 release.** | S–M each |
 | P9 | **Mission logic checker** (frontier pick). A "Check" panel that takes any `.Group` and lists broken targets/object links, empty checkzones, MCUs nothing triggers, timer-less loops, and spawn/cooldown settings that will be ignored. A dry-run trigger simulator follows in v0.2. Details: `handoff/R4-frontier-proposals.md`. | The editor has no debugger; today broken wiring is found by flying. `inspect_plan` only checks that a checkzone and a timer exist. F1 shows even the app's own output can fail silently. | M |
 | P10 | **Playtest replay.** *Now part of P14 #28 (2026-09-25): the core (log parser, replay, CLI) is P14 step 0T, built before the probe flights together with trace builds; the UI is P14 step 9T.* Parse IL-2's text mission report (ATYPE log) into a spawn timeline and Map-tab overlay; flag templates that never spawned. | Runtime half of P9. Also field-checks the heightmap (underground spawns). Needs text logging on in `startup.cfg`. | M |
 | P11 | **Historical order of battle from date.** Reference §2.2/§3/§7 as data; Map-mode "Historical fill" seeds Fighter Pack / Army Generator pickers with date-valid types and writes source citations into group descriptions. | Goes beyond F5 (a warning) to generation. Uses the evidence-checked reference and `timeline.rs`. Coverage is uneven past 1950 (R2), so show a coverage indicator. | M–L |
 | P12 | **Terrain-aware placement.** v0.1: terrain clearance along whole flight legs. Later: line of sight for AAA/searchlights (§8.9), reverse-slope CCF positions (§5 D). | Blocked on the heightmap. Store heights as a queryable grid, not only a relief image. Settles the heightmap "Revisit" on AGL waypoints. | M |
 | P13 | **Semantic `.Group` diff.** Show what changed between two mission versions (added units, changed radii, retargeted MCUs), matched by index + name. | Cheap on the lossless parser. Niche unless co-authoring MP missions. First check whether the editor renumbers indices on import. | S–M |
-| P14 | **Air Tasking.** Historical air sorties against Map objectives: a shared sortie shell (START/DONE exactly once, hard stop + one engaged extension), a per-side air budget, an in-mission player threshold (CheckZone for N = 1; Complex Trigger + Counter for N ≥ 2 once probed), a mission-clock front end (timer chain, weighted reroll, jitter, quiet chance) and a check-zone front end. New "Air Tasking" rail tab (Ctrl 7) and Map dock "Air" tab. **Fully planned 2026-09-24/25, nothing built; issue #28.** The whole brief, with decisions, MCU diagrams, build steps 0–11 and named acceptance tests, is in `handoff/P14-air-tasking.md`. | User request 2026-09-24. Step 0 is an in-game MCU probe (two user flights) that settles unverified engine behaviour before later steps rely on it. | L (12 steps, S–L each) |
+| P14 | **Air Tasking** (the user also calls it "Wing Commander / WG/CC"). Historical air sorties against Map objectives: a shared sortie shell (START in, DONE exactly once, a final hard stop, one extension decided from the target area's state), a per-side air budget kept as a head count, an in-mission player threshold for one player (two or more players is step 12), a mission-clock front end (timer chain, weighted reroll, jitter, quiet chance) and a check-zone front end. New "Air Tasking" rail tab (Ctrl 7) and Map dock "Air" tab. **Planned, reviewed and revised (round 4, 2026-09-27); nothing built; issue #28.** The whole brief is `handoff/P14-air-tasking.md`; the review and the user's decisions are `handoff/P14-review-fable-astra.md`. | User request 2026-09-24. **Astra builds it, one step at a time.** Step 0 is three short solo probe flights (0, 1A, 1B); step 3 waits for flight 0 and step 4 for flight 1A. Design rule: fewest MCUs and check zones. User templates: tested shapes only. The budget is a hard limit on the flights whose aircraft exist. | L (steps 0–12, S–L each) |
 
 P9–P13 came from the frontier-feature review on 2026-09-24. **All are proposals, not scheduled.** Ranked in that order; P9 and P10 together make one "debugging" phase. If most users only produce missions and rarely debug them, P11 moves to the top.
 
@@ -202,6 +206,8 @@ altitude to automatically be set at 50% of operating ceiling."
 - **Persistence. RULED: default on is correct.** Resetting to on at each
   app start is the intended behavior. No persistence is needed. Closed.
 
+**Replaced 2026-09-27.** The user chose to merge the creator's upstream commit `c1d88c3` in full. It removes the 50 % ceiling auto altitude, the "Auto altitude" checkbox, match-lead and `model_spec::auto_altitude_m`. Airstart now puts every aircraft at 1500 m (`template::AIR_START_ALTITUDE_M`, `apply_plane_start`); the slider still changes one plane. The same commit removes the Fighter Pack reinforcement timer, which could start another flight during cleanup. The text below is the record of what P1 was.
+
 **Status: DONE, merged to `main` 2026-09-23** (`aab880c`, merge `9389c6a`).
 Claude implemented it (user waiver: Astra is unavailable on the account).
 The tests went from 371 to 376, and the build still has the same 70
@@ -244,3 +250,5 @@ continue at delegation-loop step 3 (§2).
 | 2026-09-24 | Claude Opus (Fable role) | **P14 Air Tasking planned (`handoff/P14-air-tasking.md`, committed 2026-09-27).** User decisions: Option A in-mission player threshold (no external server helper), window/dwell from F-80 transit time at cruise, N set later, timer-chain slots, reroll on threshold fail, one engaged extension at the hard stop, drop-and-re-arm when the budget is full, rail tab + Map dock, air starts in v1. Plan built by a 13-agent workflow (5 grounding readers, draft, 4 adversarial critics, 2 revise rounds), then a 3-agent verification round (19 more fixes) and one Claude fix (`LAST CLEAR`). §10 lists 12 additions/deviations for the user to confirm. Implementation is for a separate Opus ultracode session. |
 | 2026-09-25 | Claude Opus (Fable role) | **P14 plan extended with trace builds and the P10 replay core (user request U12).** New step 0T: Mission Objective breadcrumbs (spawned-vehicle fallback) that write to the server's text mission log, a `.trace.json` sidecar, a `missionlog.rs` parser with replay (fired / never fired / first dead link / never spawned) and a `replay` CLI, all built before probe flight 1. Flight 1 flies a traced probe; new cell T-t tests the breadcrumbs (risks t1–t6). Step 9T adds the UI. One reviewer found 9 issues, all fixed. Committed 2026-09-27. |
 | 2026-09-27 | Claude Opus (Fable role) | **P14 plan pushed to `main`; issues filed.** Fast-forwarded to `88850a5` (new machine / Issues), re-applied the P14 edits to the new §4 layout, committed `handoff/P14-air-tasking.md`. New issues: #28 P14 Air Tasking, #29 P14 probe flights (verify in game), #30 Historical1950 README says the ground AttackArea is flown at WP 1, but it sits on the spawn point. Commented on #23 (P10 core → P14 step 0T, UI → 9T), #9, #12, #13 and #22. `.gitignore` now ignores `__pycache__/`. The untracked `UI mockups form survey.zip` was left out: its contents are already committed under `docs/ui-redesign/`. |
+| 2026-09-27 | Claude Fable 5.1 + GPT-6 Astra | **P14 plan reviewed before build (user calls it "Wing Commander / WG/CC"). Verdict: not ready as written; one revision round needed, no redesign.** Both reviews found the code anchors and template facts accurate. Main defect: the budget loses a release when two DONEs land within the 0.1 s settle gap, so a side can lock itself out (two sorties on one objective share a Zone Out). Also: HOT drops at each re-check, slot close does not stop the attempt in flight, fallback matrix holes, user templates have no compatibility contract, replay follows state links as pulses, the cruise fallback would change Template Builder output, several tests cannot pass as written, `trace.rs` uses `i64` against the codebase `i32`. Triage, decisions for the user and the full Astra report: `handoff/P14-review-fable-astra.md`. Astra job `20260927054911-7a36f64e` (`ultra`, read-only). **No plan or code changed.** Astra is now on the account (§2). Not committed. |
+| 2026-09-27 | Claude Fable 5.1 + GPT-6 Astra | **Upstream merged; P14 plan revised (round 4) and reviewed twice more.** User decisions U13–U23: fewest MCUs is a design rule; head-count budget; all testing solo, with a flight 0; merge upstream `c1d88c3` in full; multi-player testing (and the threshold for 2+ players) after everything else is confirmed; extension from the area state; user templates stay, **tested shapes only**; **hard limit on aircraft** (budget released at deletion); Astra builds; no further full review. **Merge:** `c1d88c3` on `main` as `a34a00e` (branch `claude/upstream-sync`); 469 tests pass, 3 ignored. It removes the 50 % ceiling auto altitude (P1/P7) and the Fighter Pack reinforcement timer. **Plan:** `handoff/P14-air-tasking.md` rewritten in §3.2–3.5, §3.7–3.9, step 0 (three solo flights 0 / 1A / 1B and a table of supported probe outcomes), steps 3–6, 11, new step 12 and §10 (serial build by Astra, gates G0 and G1). MCU counts: 17 per copy (was about 38), 16 per side (14 at budget 1), 23 per area, 12 per clock entry, 17 per zone entry, 1 shared per entry. **Reviews:** Astra jobs `20260927094211-595e56e3` (second) and `20260927105821-1e970592` (third); each found the core designs and every MCU count sound; findings R4-1 to R4-8 and T1 to T15 all applied. All three reports and the triage: `handoff/P14-review-fable-astra.md`. **The third-review fixes have had no second-model review (user decision U23);** Fable re-reads each step's section when it scopes that step. **No code written.** Open for the user: §10 items 22 (one check zone per area) and 23 (smaller Auto-fill). Committed on `main`; **not pushed**. Next: push when the user says; then step 1a (skeleton), and flight 0 once steps 0T and 0b are built. |
