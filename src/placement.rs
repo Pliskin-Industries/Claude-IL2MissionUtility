@@ -201,6 +201,27 @@ fn rotate_visual_walk(
     }
 }
 
+/// Rotate all positioned nodes around an X/Z pivot, including mission logic.
+/// Only the visual bodies used by `apply_group_heading` receive a yaw change.
+#[allow(dead_code)] // P14
+pub(crate) fn rotate_tree(root: &mut Il2Entity, pivot: (f64, f64), theta_deg: f64) {
+    if theta_deg.rem_euclid(360.0).abs() < 1e-9 {
+        return;
+    }
+    let linked = linked_tr_ids(root);
+    let (sin, cos) = theta_deg.to_radians().sin_cos();
+    root.for_each_mut(&mut |e| {
+        if let Some((x, z)) = e.pos_xz() {
+            let (dx, dz) = (x - pivot.0, z - pivot.1);
+            set_coord(e, "XPos", pivot.0 + dx * cos - dz * sin);
+            set_coord(e, "ZPos", pivot.1 + dx * sin + dz * cos);
+        }
+        if is_visual_body(e, &linked) && (e.property("YOri").is_some() || has_model(e)) {
+            add_yori(e, theta_deg);
+        }
+    });
+}
+
 pub(crate) fn set_coord(entity: &mut Il2Entity, key: &str, value: f64) {
     let decimals = entity
         .property(key)
@@ -405,6 +426,74 @@ pub fn heading_toward_nearest(from: (f64, f64), targets: &[(f64, f64)]) -> Optio
 mod tests {
     use super::*;
     use crate::ast::Il2Entity;
+
+    #[test]
+    fn rotate_tree_quarter_turn() {
+        let mut root = crate::parser::parse_group_file(include_str!(
+            "../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group"
+        ))
+        .unwrap();
+        let before = root.clone();
+        assert_eq!(before.find_by_name("WP 1").unwrap().pos_xz(), Some((44_000.0, 40_000.0)));
+        rotate_tree(&mut root, (40_000.0, 40_000.0), 90.0);
+        assert_eq!(root.find_by_name("WP 1").unwrap().pos_xz(), Some((40_000.0, 44_000.0)));
+
+        fn check(before: &Il2Entity, after: &Il2Entity, linked: &HashSet<i32>) {
+            assert_eq!(before.block_type, after.block_type);
+            assert_eq!(before.index, after.index);
+            assert_eq!(before.targets, after.targets);
+            assert_eq!(before.objects, after.objects);
+            if let Some((x, z)) = before.pos_xz() {
+                let (nx, nz) = after.pos_xz().unwrap();
+                assert!((nx - (80_000.0 - z)).abs() < 0.001, "{:?}: XPos", before.name());
+                assert!((nz - x).abs() < 0.001, "{:?}: ZPos", before.name());
+            }
+            let visual = before.property("Model").is_some()
+                || matches!(before.block_type.as_str(), "Block" | "Ground")
+                || (before.block_type == "MCU_TR_Entity"
+                    && before.index.is_some_and(|i| linked.contains(&i)));
+            if visual {
+                let yaw = |e: &Il2Entity| e.property("YOri").unwrap().parse::<f64>().unwrap();
+                assert!((yaw(after) - (yaw(before) + 90.0).rem_euclid(360.0)).abs() < 0.001);
+            } else {
+                assert_eq!(before.property("YOri"), after.property("YOri"), "MCU yaw");
+            }
+            for key in ["YPos", "XOri", "ZOri"] {
+                assert_eq!(before.property(key), after.property(key), "{key} must stay verbatim");
+            }
+            assert_eq!(before.children.len(), after.children.len());
+            for (a, b) in before.children.iter().zip(&after.children) {
+                check(a, b, linked);
+            }
+        }
+        let linked = linked_tr_ids(&before);
+        assert_eq!(before.count_block_type("Plane"), 4);
+        assert_eq!(linked.len(), 4);
+        check(&before, &root, &linked);
+
+        // Logic-only trees still move. Blocks and Ground turn without a Model;
+        // an unlinked entity and an icon keep their yaw. Nonzero pitch/roll stay.
+        let mut extra = Il2Entity::new("Group");
+        for block in ["Block", "Ground", "MCU_TR_Entity", "MCU_Icon"] {
+            let mut e = Il2Entity::new(block);
+            e.set_property("XPos", "44000.00");
+            e.set_property("YPos", "3050.125");
+            e.set_property("ZPos", "40000.000");
+            e.set_property("XOri", "12.500");
+            e.set_property("YOri", "350.00");
+            e.set_property("ZOri", "-4.000");
+            extra.children.push(e);
+        }
+        let extra_before = extra.clone();
+        rotate_tree(&mut extra, (40_000.0, 40_000.0), 90.0);
+        check(&extra_before, &extra, &HashSet::new());
+        assert_eq!(extra.children[0].property("XPos"), Some("40000.00"));
+        assert_eq!(extra.children[0].property("ZPos"), Some("44000.000"));
+        assert_eq!(extra.children[0].property("YOri"), Some("80.00"));
+        let unchanged = extra.clone();
+        rotate_tree(&mut extra, (40_000.0, 40_000.0), 360.0);
+        assert_eq!(extra, unchanged);
+    }
 
     fn at(x: f64, z: f64) -> Il2Entity {
         let mut e = Il2Entity::new("Vehicle");
