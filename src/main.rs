@@ -8,7 +8,10 @@
 
 mod aircraft;
 mod airfield;
+mod airtask;
 mod ast;
+#[cfg(test)]
+mod baseline_tests;
 mod bombers;
 mod duplicate;
 mod flights;
@@ -17,6 +20,7 @@ mod geo;
 mod harvest;
 mod heightprobe;
 mod help;
+mod in_theatre;
 mod locale;
 mod mapclip;
 mod mapfighters;
@@ -24,6 +28,7 @@ mod mapground;
 mod mapload;
 mod mapnet;
 mod mapshipping;
+mod missionlog;
 mod model_spec;
 mod pack;
 mod placement;
@@ -36,6 +41,7 @@ mod template;
 mod terrain;
 mod terrain_apply;
 mod theme;
+mod trace;
 mod ui;
 mod watermap;
 mod weapon_range;
@@ -43,6 +49,9 @@ mod weapon_range;
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = heightprobe::run_cli(&args) {
+        std::process::exit(code);
+    }
+    if let Some(code) = missionlog::run_cli(&args) {
         std::process::exit(code);
     }
     ui::run()

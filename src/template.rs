@@ -3740,7 +3740,7 @@ fn build_order(
     cmd
 }
 
-fn checkzone(
+pub(crate) fn checkzone(
     name: &str,
     radius: f64,
     closer: bool,
@@ -3757,21 +3757,36 @@ fn checkzone(
     e
 }
 
-fn timer(name: &str, time: f64, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
+pub(crate) fn timer(name: &str, time: f64, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
     let mut e = mcu("MCU_Timer", name, next_id, x, z);
     e.set_property("Time", format_time(time));
     e.set_property("Random", "100");
     e
 }
 
-fn counter(name: &str, count: i32, drop: i32, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
+/// A timer with the given Random percentage.
+#[allow(dead_code)] // P14
+pub(crate) fn timer_random(
+    name: &str,
+    time: f64,
+    pct: u8,
+    next_id: &mut i32,
+    x: f64,
+    z: f64,
+) -> Il2Entity {
+    let mut e = timer(name, time, next_id, x, z);
+    e.set_property("Random", pct.to_string());
+    e
+}
+
+pub(crate) fn counter(name: &str, count: i32, drop: i32, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
     let mut e = mcu("MCU_Counter", name, next_id, x, z);
     e.set_property("Counter", count.to_string());
     e.set_property("Dropcount", drop.to_string());
     e
 }
 
-fn modifier_set_val(name: &str, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
+pub(crate) fn modifier_set_val(name: &str, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
     let mut e = mcu("MCU_ModifierSetVal", name, next_id, x, z);
     e.set_property("ParamIndex", "0");
     e.set_property("Data0", "0");
@@ -3789,7 +3804,7 @@ fn format_time(t: f64) -> String {
     }
 }
 
-fn mcu(block: &str, name: &str, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
+pub(crate) fn mcu(block: &str, name: &str, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
     let mut e = Il2Entity::new(block);
     let id = *next_id;
     *next_id += 1;
@@ -3819,7 +3834,7 @@ fn named_group(name: &str, next_id: &mut i32) -> Il2Entity {
     g
 }
 
-fn attach_event(entity: &mut Il2Entity, event_type: i32, tar_id: i32) {
+pub(crate) fn attach_event(entity: &mut Il2Entity, event_type: i32, tar_id: i32) {
     let mut ev = Il2Entity::new("OnEvent");
     ev.set_property("Type", event_type.to_string());
     ev.set_property("TarId", tar_id.to_string());

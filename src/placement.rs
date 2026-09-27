@@ -201,7 +201,7 @@ fn rotate_visual_walk(
     }
 }
 
-fn set_coord(entity: &mut Il2Entity, key: &str, value: f64) {
+pub(crate) fn set_coord(entity: &mut Il2Entity, key: &str, value: f64) {
     let decimals = entity
         .property(key)
         .and_then(|v| v.split('.').nth(1))
@@ -210,7 +210,7 @@ fn set_coord(entity: &mut Il2Entity, key: &str, value: f64) {
     entity.set_property(key, format!("{value:.decimals$}"));
 }
 
-fn add_yori(entity: &mut Il2Entity, delta: f64) {
+pub(crate) fn add_yori(entity: &mut Il2Entity, delta: f64) {
     let raw = entity.property("YOri");
     let current = raw.and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
     let decimals = raw
