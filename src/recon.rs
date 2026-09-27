@@ -1678,7 +1678,7 @@ fn mission_begin_targets(root: &Il2Entity) -> Vec<i32> {
 }
 
 /// IL-2 still runs Mission Begin when Enabled = 0. Empty the target list.
-fn silence_clone_starts(root: &mut Il2Entity) {
+pub(crate) fn silence_clone_starts(root: &mut Il2Entity) {
     root.for_each_mut(&mut |e| {
         if e.block_type == "MCU_TR_MissionBegin" {
             e.set_property("Enabled", "0");
@@ -1724,13 +1724,13 @@ fn first_pos(root: &Il2Entity) -> Option<(f64, f64, f64)> {
     root.children.iter().find_map(first_pos)
 }
 
-fn clone_named(proto: &Il2Entity, next_id: &mut i32, name: &str) -> Il2Entity {
+pub(crate) fn clone_named(proto: &Il2Entity, next_id: &mut i32, name: &str) -> Il2Entity {
     let (mut cloned, _) = duplicate_template(proto, next_id);
     cloned.set_name(name);
     cloned
 }
 
-fn synthesize_mcu(block_type: &str, next_id: &mut i32, name: &str) -> Il2Entity {
+pub(crate) fn synthesize_mcu(block_type: &str, next_id: &mut i32, name: &str) -> Il2Entity {
     let mut e = Il2Entity::new(block_type);
     e.index = Some(*next_id);
     e.set_property("Index", next_id.to_string());

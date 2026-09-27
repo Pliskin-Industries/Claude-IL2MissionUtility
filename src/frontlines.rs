@@ -330,6 +330,13 @@ pub struct MapGroundPack {
     pub root: Il2Entity,
 }
 
+/// One air-tasking sortie pack parked on the map.
+#[allow(dead_code)] // P14
+#[derive(Debug, Clone)]
+pub struct MapAirPack {
+    pub root: Il2Entity,
+}
+
 /// A previously generated Korea base map, split back into Map-mode pieces.
 #[derive(Clone, Debug)]
 pub struct ImportedBaseMap {
