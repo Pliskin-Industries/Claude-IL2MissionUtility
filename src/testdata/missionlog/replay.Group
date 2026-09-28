@@ -1,0 +1,58 @@
+Group
+{
+  Name = "Replay synthetic";
+  Index = 50;
+  MCU_Timer
+  {
+    Name = "A";
+    Index = 1;
+    Targets = [2];
+    Time = 0;
+    Random = 100;
+  }
+  MCU_Timer
+  {
+    Name = "Relay";
+    Index = 2;
+    Targets = [3];
+    Time = 2;
+    Random = 100;
+  }
+  MCU_Timer
+  {
+    Name = "B";
+    Index = 3;
+    Targets = [4];
+    Time = 1;
+    Random = 100;
+  }
+  MCU_Timer
+  {
+    Name = "C";
+    Index = 4;
+    Targets = [];
+    Time = 1;
+    Random = 100;
+  }
+  Group
+  {
+    Name = "Copy 1";
+    Index = 51;
+    Plane { Name = "F-80C"; Index = 10; }
+    Plane { Name = "F-80C"; Index = 11; }
+    Plane { Name = "F-80C"; Index = 12; }
+    Plane { Name = "F-80C"; Index = 13; }
+    Vehicle { Name = "Only truck"; Index = 14; }
+  }
+  Group
+  {
+    Name = "Copy 2";
+    Index = 52;
+    Plane { Name = "F-80C"; Index = 20; }
+    Plane { Name = "F-80C"; Index = 21; }
+    Plane { Name = "F-80C"; Index = 22; }
+    Plane { Name = "F-80C"; Index = 23; }
+    Ship { Name = "Only ship"; Index = 24; }
+    Train { Name = "Only train"; Index = 25; }
+  }
+}
