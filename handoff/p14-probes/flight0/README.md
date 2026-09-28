@@ -18,3 +18,23 @@ Procedure: plan §8 step 0, "0c", and the flight 0 run sheet in
 
 If the probe code changes, regenerate and copy again; these files are not
 checked against the generator by any test.
+
+## Without the editor (built 2026-09-28)
+
+`tools/p14/build_probe_mission.py` builds the flight as a finished Korea
+dogfight mission: the Options block of the game's own
+`data/Multiplayer/Dogfight/_test_dogfight_IL-3.Mission` (MissionType 2),
+the probe (indexes unchanged, so the `.trace.json` still matches), and
+`K14 AFB_mp.Group` renumbered from 1000 with its language table merged. It
+then runs `bin/resaver/MissionResaver.exe` for the `.msnbin`, the six
+language files and the `.list`. Checked after the build: all indexes unique,
+every link resolves, all 51 breadcrumbs present, every text id in the table.
+
+```
+python tools/p14/build_probe_mission.py --game "C:\Program Files\IL2Series\game" --probe target/p14/P14_Probe_0_traced.Group --ref "TemplateExamples/K14 AFB_mp.Group" --name P14_Probe_0_traced --title "P14 probe flight 0 (traced)" --out "<folder>"
+```
+
+Deploy: copy `P14_Probe_0_traced.msnbin`, `.list` and the six language
+files (`.eng` `.chs` `.fra` `.ger` `.rus` `.spa`) into the server's
+`data\Multiplayer\Dogfight\` and add `Multiplayer/Dogfight/P14_Probe_0_traced`
+to the server's mission rotation.
