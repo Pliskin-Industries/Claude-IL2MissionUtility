@@ -97,16 +97,15 @@ pub fn serialize_locale(table: &LocaleTable) -> String {
     out
 }
 
+/// Match Generate's small locale base, independently of MCU indexes.
+#[cfg(test)]
+pub(crate) const P14_PROBE_LC_START: i32 = 2;
+
 /// The probe writers use their MCU names as the English observation/marker text.
 /// Kept test-only so the existing Generate locale tables are unchanged.
 #[cfg(test)]
-pub(crate) const P14_PROBE_TRACE_LCNAME: i32 = 1_400_000;
-
-#[cfg(test)]
 pub(crate) fn p14_probe_locale(root: &crate::ast::Il2Entity) -> LocaleTable {
     let mut table = LocaleTable::default();
-    table.insert(P14_PROBE_TRACE_LCNAME, "T-t T4: named objective");
-    table.insert(P14_PROBE_TRACE_LCNAME + 1, "");
     root.for_each(&mut |node| {
         if node.block_type == "MCU_TR_Subtitle" {
             for info in &node.children {
@@ -118,6 +117,13 @@ pub(crate) fn p14_probe_locale(root: &crate::ast::Il2Entity) -> LocaleTable {
         } else if node.block_type == "MCU_Icon" {
             let id = node.property("LCName").unwrap().parse().unwrap();
             table.insert(id, node.name().unwrap());
+            let id = node.property("LCDesc").unwrap().parse().unwrap();
+            table.insert(id, "");
+        } else if node.block_type == "MCU_TR_MissionObjective" {
+            let id = node.property("LCName").unwrap().parse().unwrap();
+            if id != 0 {
+                table.insert(id, "T-t T4: named objective");
+            }
         }
     });
     table

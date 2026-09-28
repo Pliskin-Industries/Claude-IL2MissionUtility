@@ -284,9 +284,8 @@ pub fn breadcrumb(
             ] {
                 objective.set_property(key, value);
             }
-            if let Some(id) = style.lc_name {
-                objective.set_property("LCName", id.to_string());
-            }
+            objective.set_property("LCName", style.lc_name.unwrap_or(0).to_string());
+            objective.set_property("LCDesc", "0");
             for (key, value) in [
                 ("TaskType", 0),
                 ("Coalition", style.coalition),
@@ -324,11 +323,21 @@ fn spawn_breadcrumb(name: &str, next_id: &mut i32) -> Vec<Il2Entity> {
     spawn.set_property("SpawnAtMe", "0");
     // Property set copied from K14 AFB_mp.Group's WillysMB, Index 117.
     let mut vehicle = Il2Entity::new("Vehicle");
+    vehicle.set_name(name);
     vehicle.index = Some(*next_id);
     vehicle.set_property("Index", next_id.to_string());
     *next_id += 1;
-    vehicle.set_name(name);
+    let mut entity = mcu("MCU_TR_Entity", &format!("{name} entity"), next_id, x, z);
+    entity.set_property("Enabled", "0");
+    entity.set_property("MisObjID", vehicle.index.unwrap().to_string());
+    vehicle.set_property("LinkTrId", entity.index.unwrap().to_string());
+    vehicle.set_property("XPos", format!("{x:.3}"));
+    vehicle.set_property("YPos", "0.000");
+    vehicle.set_property("ZPos", format!("{z:.3}"));
     for (key, value) in [
+        ("XOri", "0"),
+        ("YOri", "0"),
+        ("ZOri", "0"),
         (
             "Script",
             r#""LuaScripts\WorldObjects\Vehicles\WillysMB.txt""#,
@@ -363,19 +372,9 @@ fn spawn_breadcrumb(name: &str, next_id: &mut i32) -> Vec<Il2Entity> {
         ("TCodeColor", "\"11111111\""),
         ("TrailerAtStart", "1"),
         ("PinToTerrain", "1"),
-        ("YPos", "0.000"),
-        ("XOri", "0"),
-        ("YOri", "0"),
-        ("ZOri", "0"),
     ] {
         vehicle.set_property(key, value);
     }
-    vehicle.set_property("XPos", format!("{x:.3}"));
-    vehicle.set_property("ZPos", format!("{z:.3}"));
-    let mut entity = mcu("MCU_TR_Entity", &format!("{name} entity"), next_id, x, z);
-    entity.set_property("Enabled", "0");
-    entity.set_property("MisObjID", vehicle.index.unwrap().to_string());
-    vehicle.set_property("LinkTrId", entity.index.unwrap().to_string());
     spawn.set_objects(vec![entity.index.unwrap()]);
     let mut delay = timer(&format!("{name} DELETE DELAY"), 1.0, next_id, x, z);
     let mut delete = mcu("MCU_Delete", &format!("{name} DELETE"), next_id, x, z);
@@ -1212,14 +1211,24 @@ mod tests {
                 s.event_type = Some(4);
                 s.expected_s = Some(275.125);
                 let b = breadcrumb(TraceCarrier::Objective(style), &mut map, &mut next, s);
-                let mut expected_keys = vec![
-                    "Index", "Targets", "Objects", "XPos", "YPos", "ZPos", "XOri", "YOri", "ZOri",
+                let expected_keys = vec![
+                    "Index",
+                    "Targets",
+                    "Objects",
+                    "XPos",
+                    "YPos",
+                    "ZPos",
+                    "XOri",
+                    "YOri",
+                    "ZOri",
                     "Enabled",
+                    "LCName",
+                    "LCDesc",
+                    "TaskType",
+                    "Coalition",
+                    "Success",
+                    "IconType",
                 ];
-                if style.lc_name.is_some() {
-                    expected_keys.push("LCName");
-                }
-                expected_keys.extend(["TaskType", "Coalition", "Success", "IconType"]);
                 assert_eq!(
                     b[0].properties
                         .iter()
@@ -1229,7 +1238,8 @@ mod tests {
                 );
                 assert_eq!(integer(&b[0], "Coalition"), Some(coalition));
                 assert_eq!(integer(&b[0], "Success"), Some(success));
-                assert_eq!(integer(&b[0], "LCName"), style.lc_name);
+                assert_eq!(integer(&b[0], "LCName"), Some(style.lc_name.unwrap_or(0)));
+                assert_eq!(integer(&b[0], "LCDesc"), Some(0));
                 assert_eq!(integer(&b[0], "TaskType"), Some(0));
                 assert_eq!(integer(&b[0], "IconType"), Some(0));
             }

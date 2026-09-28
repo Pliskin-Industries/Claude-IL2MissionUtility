@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 
 use crate::ast::Il2Entity;
-use crate::locale::{P14_PROBE_TRACE_LCNAME, p14_probe_locale};
+use crate::locale::{P14_PROBE_LC_START, p14_probe_locale};
 use crate::parser::parse_group_file;
 use crate::serialize::serialize_group;
 use crate::template::{
@@ -361,6 +361,7 @@ pub(crate) fn probe_flight(
 struct Probe {
     root: Il2Entity,
     next_id: i32,
+    next_lc: i32,
     begin: i32,
     init_off: i32,
     cell: Option<Cell>,
@@ -399,6 +400,7 @@ impl Probe {
         Self {
             root,
             next_id,
+            next_lc: P14_PROBE_LC_START,
             begin: begin_id,
             init_off,
             cell: None,
@@ -414,6 +416,12 @@ impl Probe {
         self.cell
             .map(|cell| world(cell.centre_km))
             .unwrap_or(K14_ORIGIN)
+    }
+
+    fn locale_id(&mut self) -> i32 {
+        let id = self.next_lc;
+        self.next_lc += 1;
+        id
     }
 
     fn add(&mut self, node: Il2Entity) -> i32 {
@@ -513,7 +521,7 @@ impl Probe {
             ("RColor", 0),
             ("GColor", 100),
             ("BColor", 0),
-            ("LCText", P14_PROBE_TRACE_LCNAME + 10 + node.index.unwrap()),
+            ("LCText", self.locale_id()),
         ] {
             info.set_property(key, value.to_string());
         }
@@ -564,10 +572,12 @@ impl Probe {
     fn icon(&mut self, text: &str, km: (f64, f64), coalitions: &str) {
         let (x, z) = world(km);
         let mut node = mcu("MCU_Icon", text, &mut self.next_id, x, z);
+        // Shipped named icons keep Name, but use LCDesc instead of Desc.
+        node.properties.retain(|(key, _)| key != "Desc");
         for (key, value) in [
             ("Enabled", 1),
-            ("LCName", P14_PROBE_TRACE_LCNAME + 10 + node.index.unwrap()),
-            ("LCDesc", P14_PROBE_TRACE_LCNAME + 1),
+            ("LCName", self.locale_id()),
+            ("LCDesc", self.locale_id()),
             // The existing frontlines::BATTLE stand-alone point marker.
             ("IconId", 501),
             ("RColor", 0),
@@ -864,7 +874,7 @@ fn build_tt(p: &mut Probe) {
         let carrier = TraceCarrier::Objective(ObjectiveStyle {
             coalition,
             success,
-            lc_name: (i == 5).then_some(P14_PROBE_TRACE_LCNAME),
+            lc_name: (i == 5).then(|| p.locale_id()),
         });
         p.hand_breadcrumb(source, &[source], carrier, Some(time));
     }
@@ -1090,19 +1100,33 @@ pub(crate) fn generate_probe_1b() -> Il2Entity {
     build(Flight::OneB).root
 }
 
+fn serialize_probe(root: &Il2Entity) -> String {
+    let mut exported = root.clone();
+    exported.for_each_mut(&mut |node| {
+        if node.block_type == "Group" {
+            // Cell centres are run-sheet metadata. Shipped Group wrappers have
+            // no position keys; each child already has its absolute position.
+            node.properties
+                .retain(|(key, _)| !matches!(key.as_str(), "XPos" | "ZPos"));
+        }
+    });
+    serialize_group(&exported)
+}
+
 fn write_probe(flight: Flight, carrier: TraceCarrier) {
     let dir = Path::new("target/p14");
     std::fs::create_dir_all(dir).expect("create target/p14");
     let probe = build(flight);
     let plain = dir.join(format!("{}.Group", flight.stem()));
     let traced = dir.join(format!("{}_traced.Group", flight.stem()));
-    let locale = p14_probe_locale(&probe.root);
-    let english = crate::locale::encode_locale_utf16le(&crate::locale::serialize_locale(&locale));
-    std::fs::write(&plain, serialize_group(&probe.root)).expect("write plain probe");
+    let plain_root = probe.root.clone();
     let (root, map) = probe.traced(carrier);
-    std::fs::write(&traced, serialize_group(&root)).expect("write traced probe");
-    for path in [&plain, &traced] {
-        std::fs::write(path.with_extension("eng"), &english).expect("write probe English locale");
+    for (path, tree) in [(&plain, &plain_root), (&traced, &root)] {
+        std::fs::write(path, serialize_probe(tree)).expect("write probe");
+        let locale = p14_probe_locale(tree);
+        let english =
+            crate::locale::encode_locale_utf16le(&crate::locale::serialize_locale(&locale));
+        std::fs::write(path.with_extension("eng"), english).expect("write probe English locale");
     }
     let sidecar = traced.with_extension("trace.json");
     if let Err(error) = trace::write_trace_sidecar(&sidecar, &map) {
@@ -1455,6 +1479,142 @@ fn probe_files_parse_and_links_resolve() {
 }
 
 #[test]
+fn probe_blocks_match_shipped_shapes() {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    fn group_files(dir: &Path, paths: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                group_files(&path, paths);
+            } else if path.extension().is_some_and(|ext| ext == "Group") {
+                paths.push(path);
+            }
+        }
+    }
+
+    fn keys(node: &Il2Entity) -> Vec<String> {
+        node.properties.iter().map(|(key, _)| key.clone()).collect()
+    }
+
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut paths = Vec::new();
+    group_files(&manifest.join("TemplateExamples"), &mut paths);
+    paths.sort();
+    assert!(!paths.is_empty(), "no shipped .Group files found");
+    let mut shipped = BTreeMap::<_, BTreeMap<_, _>>::new();
+    for path in paths {
+        let text = std::fs::read_to_string(&path).unwrap();
+        let file = path.strip_prefix(manifest).unwrap().display().to_string();
+        let mut rest = text.trim_start_matches('\u{feff}').trim_start();
+        // Parse actual top-level blocks, without parse_il2_document's synthetic Group.
+        while !rest.is_empty() {
+            let (tail, root) =
+                crate::parser::parse_entity(rest).unwrap_or_else(|error| panic!("{file}: {error}"));
+            root.for_each(&mut |node| {
+                shipped
+                    .entry(node.block_type.clone())
+                    .or_default()
+                    .entry(keys(node))
+                    .or_insert_with(|| file.clone());
+            });
+            rest = tail.trim_start();
+        }
+    }
+
+    let mut matched = BTreeMap::<_, BTreeSet<_>>::new();
+    let mut missing = BTreeSet::new();
+    let mut mismatches = BTreeMap::new();
+    for flight in [Flight::Zero, Flight::OneA, Flight::OneB] {
+        let probe = build(flight);
+        let plain = probe.root.clone();
+        let (traced, _) = probe.traced(TraceCarrier::default());
+        for (suffix, root) in [("", plain), ("_traced", traced)] {
+            let file = format!("{}{suffix}", flight.stem());
+            // Check the serialized Group and UTF-16 .eng that the writers emit.
+            let english = crate::locale::encode_locale_utf16le(&crate::locale::serialize_locale(
+                &p14_probe_locale(&root),
+            ));
+            let root = parse_group_file(&serialize_probe(&root)).unwrap();
+            super::testkit::assert_links_resolve(&root);
+            let english = crate::locale::decode_locale_bytes(&english).unwrap();
+            let locale = crate::locale::parse_locale(&english);
+            let table_ids: BTreeSet<i32> = english
+                .lines()
+                .map(|line| line.split_once(':').unwrap().0.parse().unwrap())
+                .collect();
+            let mut used_ids = BTreeSet::new();
+            root.for_each(&mut |node| {
+                let ordered_keys = keys(node);
+                if let Some(shapes) = shipped.get(&node.block_type) {
+                    if let Some(example) = shapes.get(&ordered_keys) {
+                        matched
+                            .entry(node.block_type.clone())
+                            .or_default()
+                            .insert(example.clone());
+                    } else {
+                        mismatches
+                            .entry((node.block_type.clone(), ordered_keys))
+                            .or_insert_with(|| {
+                                format!("{file}.Group: Index {:?}, {:?}", node.index, node.name())
+                            });
+                    }
+                } else {
+                    missing.insert(node.block_type.clone());
+                }
+                for (key, value) in &node.properties {
+                    if matches!(key.as_str(), "LCName" | "LCDesc" | "LCText") {
+                        let id: i32 = value.parse().unwrap();
+                        assert!((0..10_000).contains(&id), "{file}: {key} = {id}");
+                        if id != 0 {
+                            assert!(locale.get(id).is_some(), "{file}.eng lacks {key} = {id}");
+                            used_ids.insert(id);
+                        }
+                    }
+                }
+            });
+            assert_eq!(
+                table_ids, used_ids,
+                "{file}.eng must contain exactly the used ids"
+            );
+            assert_eq!(
+                used_ids,
+                (P14_PROBE_LC_START..P14_PROBE_LC_START + table_ids.len() as i32).collect(),
+                "{file}: locale ids must be contiguous from {P14_PROBE_LC_START}"
+            );
+            println!(
+                "{file}: locale ids {}..={} ({} strings)",
+                used_ids.first().unwrap(),
+                used_ids.last().unwrap(),
+                used_ids.len()
+            );
+        }
+    }
+    for (block, files) in matched {
+        println!(
+            "{block}: {}",
+            files.into_iter().collect::<Vec<_>>().join(", ")
+        );
+    }
+    println!("Block types with no shipped example: {missing:?}");
+    let failures = mismatches
+        .iter()
+        .map(|((block, ordered_keys), file)| {
+            format!(
+                "{file}\n{block}: {ordered_keys:?}\nShipped shapes: {:?}",
+                shipped[block].keys().collect::<Vec<_>>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        mismatches.is_empty(),
+        "unmatched probe block shapes:\n{failures}"
+    );
+}
+
+#[test]
 fn probe_subtitles_are_unique() {
     for flight in [Flight::Zero, Flight::OneA, Flight::OneB] {
         let root = build(flight).root;
@@ -1485,8 +1645,8 @@ fn probe_subtitles_are_unique() {
         });
         assert!(!seen.is_empty());
         assert_eq!(
-            locale.get(P14_PROBE_TRACE_LCNAME),
-            Some("T-t T4: named objective")
+            locale.contains_text("T-t T4: named objective"),
+            flight == Flight::Zero
         );
         let bytes = crate::locale::encode_locale_utf16le(&crate::locale::serialize_locale(&locale));
         assert_eq!(&bytes[..2], &[0xff, 0xfe]);
@@ -2104,8 +2264,9 @@ fn probe_tt_breadcrumbs_match_the_table() {
         assert_eq!(number(node, "Success"), f64::from(success));
         assert_eq!(
             node.property("LCName").map(|v| v.parse::<i32>().unwrap()),
-            lc_name
+            Some(lc_name.unwrap_or(0))
         );
+        assert_eq!(node.property("LCDesc"), Some("0"));
         assert_eq!(node.pos_xz(), Some(entry.pos));
         entry.breadcrumb_index
     };
@@ -2135,12 +2296,16 @@ fn probe_tt_breadcrumbs_match_the_table() {
     let mut t4_times = vec![];
     for i in 0..6 {
         let name = format!("T-t T4 C{} S{}", i / 2, i % 2);
-        let breadcrumb = objective(
-            &name,
-            i / 2,
-            i % 2,
-            (i == 5).then_some(P14_PROBE_TRACE_LCNAME),
-        );
+        let lc_name = (i == 5).then(|| {
+            let node = by_id(root, entry_for(&name).breadcrumb_index);
+            let id = number(node, "LCName") as i32;
+            assert_eq!(
+                p14_probe_locale(root).get(id),
+                Some("T-t T4: named objective")
+            );
+            id
+        });
+        let breadcrumb = objective(&name, i / 2, i % 2, lc_name);
         let source = named(root, &name);
         let time = 290.0 + f64::from(i) * 4.0;
         assert_at(root, &name, time, &source.targets);
