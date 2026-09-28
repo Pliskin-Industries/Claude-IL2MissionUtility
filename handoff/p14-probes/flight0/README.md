@@ -1,7 +1,7 @@
 # P14 probe flight 0 files
 
 Written by `cargo test --offline write_p14_probe_0 -- --ignored` on
-`claude/p14-air-tasking` (2026-09-28). Copies of `target/p14/`, committed so
+`claude/p14-air-tasking` (2026-09-28, after the block-shape fix). Copies of `target/p14/`, committed so
 the mission can be built on another machine.
 
 | File | Use |
