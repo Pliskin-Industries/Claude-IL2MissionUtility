@@ -190,7 +190,7 @@ pub(crate) const CUES: &[Cue] = &[
     Cue {
         flight: Flight::OneB,
         time_s: 720.0,
-        text: "T-g: shoot down both G1 planes at the T-g G1 icon; leave the other flights alone",
+        text: "T-g: shoot down both G1 planes at the T-g G1 icon, leave the other flights alone",
     },
     Cue {
         flight: Flight::OneB,
@@ -760,7 +760,7 @@ fn build_e(p: &mut Probe) {
         );
         p.observe(count, &format!("E{n} fired"));
         if [1, 2, 6, 8].contains(&n) {
-            p.readout(count, &format!("E{n} fired ≥2"), 2);
+            p.readout(count, &format!("E{n} fired 2+"), 2);
         }
         counts.push(count);
     }
@@ -920,7 +920,7 @@ fn build_j(p: &mut Probe) {
     let off = p.control("MCU_Deactivate", "J4 LATCH OFF", &[j4]);
     p.link(j4, off);
     p.observe(j4, "J4 out");
-    p.readout(j4, "J4 out ≥2", 2);
+    p.readout(j4, "J4 out 2+", 2);
     let mut inputs = vec![];
     for n in 1..=2 {
         let input = p.relay(&format!("J4 INPUT {n}"), 0.0);
@@ -932,7 +932,7 @@ fn build_j(p: &mut Probe) {
     p.link(p.arm, j5);
     p.at("J5 RETRIGGER", 545.0, &[j5]);
     p.observe(j5, "J5 out");
-    p.readout(j5, "J5 out ≥2", 2);
+    p.readout(j5, "J5 out 2+", 2);
     for relay in [j1, j2, j3, j4, j5] {
         p.close_node(relay);
     }
@@ -1007,8 +1007,8 @@ fn build_c(p: &mut Probe) {
     p.at("C4 PULSE", 690.1, &[zones[4]]);
     p.switch_at("MCU_Deactivate", "C4 OFF", 705.0, &[zones[4]]);
     p.at("C5 PULSE", 630.0, &[zones[5]]);
-    p.readout(zones[5], "C5 fired ≥2", 2);
-    p.readout(zones[5], "C5 fired ≥10", 10);
+    p.readout(zones[5], "C5 fired 2+", 2);
+    p.readout(zones[5], "C5 fired 10+", 10);
     p.icon("T-c C", centre, "[2]");
     p.icon("T-c C4", C4_KM, "[2]");
 }
@@ -1045,9 +1045,9 @@ fn build_g(p: &mut Probe) {
                 attach_event(by_id_mut(&mut p.root, entity), event_type, subtitle);
                 p.sources.push(p.source(entity, Some(event_type), None));
                 if event_type == 4 {
-                    let readout = p.count(&format!("READ {text} ≥2"), 2, 0);
+                    let readout = p.count(&format!("READ {text} 2+"), 2, 0);
                     attach_event(by_id_mut(&mut p.root, entity), event_type, readout);
-                    p.observe(readout, &format!("{text} ≥2"));
+                    p.observe(readout, &format!("{text} 2+"));
                 }
             }
         }
@@ -1478,6 +1478,35 @@ fn probe_files_parse_and_links_resolve() {
     }
 }
 
+/// IL-2's mission loader (editor and MissionResaver) rejects the whole file
+/// when a quoted value holds `;`, `=`, `{`, `}`, `'` or a non-ASCII character
+/// such as `≥`; the editor shows an empty error box. Each was checked with
+/// MissionResaver on 2026-09-28 (`:`, `,`, `+`, `-`, brackets pass).
+#[test]
+fn probe_strings_are_loader_safe() {
+    for flight in [Flight::Zero, Flight::OneA, Flight::OneB] {
+        let probe = build(flight);
+        let plain = probe.root.clone();
+        let (traced, _) = probe.traced(TraceCarrier::default());
+        for root in [plain, traced] {
+            let text = serialize_probe(&root);
+            for line in text.lines() {
+                let Some((_, quoted)) = line.split_once(" = \"") else {
+                    continue;
+                };
+                // The text between the quotes; `";` closes the line.
+                let value = quoted.rsplit_once('"').map_or(quoted, |(v, _)| v);
+                assert!(
+                    value.is_ascii() && !value.contains(['=', ';', '{', '}', '\'']),
+                    "{}: loader-unsafe string: {}",
+                    flight.stem(),
+                    line.trim()
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn probe_blocks_match_shipped_shapes() {
     use std::collections::BTreeMap;
@@ -1737,7 +1766,7 @@ fn probe_cells_match_the_table() {
     assert_fan(&zero, "E8 SAME TICK", 110.0, 2, id(&zero, "E8"));
     assert_pulses(&zero, "E9", &[120.0, 120.05, 120.1], id(&zero, "E9"));
     for name in ["E1", "E2", "E6", "E8"] {
-        assert_readout(&zero, id(&zero, name), &format!("{name} fired ≥2"), 2);
+        assert_readout(&zero, id(&zero, name), &format!("{name} fired 2+"), 2);
     }
 
     assert_eq!(named(&zero, "F1").property("Random"), Some("50"));
@@ -1840,7 +1869,7 @@ fn probe_cells_match_the_table() {
         assert_observation(&zero, id(&zero, name), &format!("{name} out"));
     }
     for name in ["J4", "J5"] {
-        assert_readout(&zero, id(&zero, name), &format!("{name} out ≥2"), 2);
+        assert_readout(&zero, id(&zero, name), &format!("{name} out 2+"), 2);
     }
 
     assert_zone(&zero, "Z1", 5000.0, false, "[1]", (-40.0, -40.0));
@@ -1938,8 +1967,8 @@ fn probe_cells_match_the_table() {
         }
     });
     assert_eq!(c5_inputs, [id(&one_a, "C5 PULSE")]);
-    assert_readout(&one_a, id(&one_a, "C5"), "C5 fired ≥2", 2);
-    assert_readout(&one_a, id(&one_a, "C5"), "C5 fired ≥10", 10);
+    assert_readout(&one_a, id(&one_a, "C5"), "C5 fired 2+", 2);
+    assert_readout(&one_a, id(&one_a, "C5"), "C5 fired 10+", 10);
 
     for (name, km) in [("T-n START", (30.0, 30.0)), ("T-n END", (54.0, 30.0))] {
         let zone_name = format!("{name} ZONE");
@@ -2009,10 +2038,10 @@ fn probe_cells_match_the_table() {
                             && number(e, "TarId") == f64::from(id(&one_b, &text)))
                 );
             }
-            let read_name = format!("READ {label} ev4 ≥2");
+            let read_name = format!("READ {label} ev4 2+");
             assert_counter(&one_b, &read_name, 2, 0);
             let read = named(&one_b, &read_name);
-            assert_eq!(read.targets, [id(&one_b, &format!("{label} ev4 ≥2"))]);
+            assert_eq!(read.targets, [id(&one_b, &format!("{label} ev4 2+"))]);
             assert!(events.children.iter().any(|e| number(e, "Type") == 4.0
                 && number(e, "TarId") == f64::from(read.index.unwrap())));
         }
@@ -2113,7 +2142,7 @@ fn probe_run_sheets_match_the_tables() {
         (
             Flight::OneB,
             720.0,
-            "T-g: shoot down both G1 planes at the T-g G1 icon; leave the other flights alone",
+            "T-g: shoot down both G1 planes at the T-g G1 icon, leave the other flights alone",
         ),
         (
             Flight::OneB,
