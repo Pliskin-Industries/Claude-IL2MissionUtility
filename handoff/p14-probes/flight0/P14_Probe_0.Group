@@ -1031,7 +1031,7 @@ Group
     MCU_Counter
     {
       Index = 62;
-      Name = "READ E1 fired ≥2";
+      Name = "READ E1 fired 2+";
       Desc = "";
       Targets = [63];
       Objects = [];
@@ -1049,7 +1049,7 @@ Group
     MCU_TR_Subtitle
     {
       Index = 63;
-      Name = "E1 fired ≥2";
+      Name = "E1 fired 2+";
       Desc = "";
       Targets = [];
       Objects = [];
@@ -1129,7 +1129,7 @@ Group
     MCU_Counter
     {
       Index = 66;
-      Name = "READ E2 fired ≥2";
+      Name = "READ E2 fired 2+";
       Desc = "";
       Targets = [67];
       Objects = [];
@@ -1147,7 +1147,7 @@ Group
     MCU_TR_Subtitle
     {
       Index = 67;
-      Name = "E2 fired ≥2";
+      Name = "E2 fired 2+";
       Desc = "";
       Targets = [];
       Objects = [];
@@ -1374,7 +1374,7 @@ Group
     MCU_Counter
     {
       Index = 76;
-      Name = "READ E6 fired ≥2";
+      Name = "READ E6 fired 2+";
       Desc = "";
       Targets = [77];
       Objects = [];
@@ -1392,7 +1392,7 @@ Group
     MCU_TR_Subtitle
     {
       Index = 77;
-      Name = "E6 fired ≥2";
+      Name = "E6 fired 2+";
       Desc = "";
       Targets = [];
       Objects = [];
@@ -1521,7 +1521,7 @@ Group
     MCU_Counter
     {
       Index = 82;
-      Name = "READ E8 fired ≥2";
+      Name = "READ E8 fired 2+";
       Desc = "";
       Targets = [83];
       Objects = [];
@@ -1539,7 +1539,7 @@ Group
     MCU_TR_Subtitle
     {
       Index = 83;
-      Name = "E8 fired ≥2";
+      Name = "E8 fired 2+";
       Desc = "";
       Targets = [];
       Objects = [];
@@ -4594,7 +4594,7 @@ Group
     MCU_Counter
     {
       Index = 234;
-      Name = "READ J4 out ≥2";
+      Name = "READ J4 out 2+";
       Desc = "";
       Targets = [235];
       Objects = [];
@@ -4612,7 +4612,7 @@ Group
     MCU_TR_Subtitle
     {
       Index = 235;
-      Name = "J4 out ≥2";
+      Name = "J4 out 2+";
       Desc = "";
       Targets = [];
       Objects = [];
@@ -4764,7 +4764,7 @@ Group
     MCU_Counter
     {
       Index = 242;
-      Name = "READ J5 out ≥2";
+      Name = "READ J5 out 2+";
       Desc = "";
       Targets = [243];
       Objects = [];
@@ -4782,7 +4782,7 @@ Group
     MCU_TR_Subtitle
     {
       Index = 243;
-      Name = "J5 out ≥2";
+      Name = "J5 out 2+";
       Desc = "";
       Targets = [];
       Objects = [];
