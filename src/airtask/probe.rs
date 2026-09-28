@@ -2063,7 +2063,6 @@ fn probe_run_sheets_match_the_tables() {
 }
 
 #[test]
-#[ignore = "needs step 0T trace bodies"]
 fn probe_tt_breadcrumbs_match_the_table() {
     let p = build(Flight::Zero);
     let root = &p.root;
