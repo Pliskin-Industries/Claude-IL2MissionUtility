@@ -2207,3 +2207,207 @@ fn probe_tt_breadcrumbs_match_the_table() {
         );
     }
 }
+
+#[test]
+fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
+    use std::collections::BTreeMap;
+
+    fn links(node: &Il2Entity) -> Vec<(Option<i32>, i32)> {
+        let mut links: Vec<_> = node.targets.iter().map(|&target| (None, target)).collect();
+        if node.block_type == "MCU_TR_Entity" {
+            node.for_each(&mut |event| {
+                if event.block_type == "OnEvent" {
+                    links.push((
+                        Some(number(event, "Type") as i32),
+                        number(event, "TarId") as i32,
+                    ));
+                }
+            });
+        }
+        links
+    }
+
+    for (flight, subtitle_count, source_count, entity_count, hand_count) in [
+        (Flight::Zero, 51, 52, 0, 12),
+        (Flight::OneA, 17, 17, 0, 0),
+        (Flight::OneB, 39, 15, 6, 0),
+    ] {
+        let probe = build(flight);
+        let plain = probe.root.clone();
+        let hand_entries = probe.map.entries.clone();
+        let hand_ids: HashSet<_> = hand_entries.iter().map(|e| e.breadcrumb_index).collect();
+        let subtitles: HashSet<_> = block_ids(&plain, "MCU_TR_Subtitle").into_iter().collect();
+        let mut seen_subtitles = HashSet::new();
+        let mut sources = BTreeMap::<i32, BTreeSet<Option<i32>>>::new();
+        // Discover observations from the wiring, independently of Probe::sources.
+        plain.for_each(&mut |node| {
+            for (event_type, target) in links(node) {
+                if subtitles.contains(&target) {
+                    seen_subtitles.insert(target);
+                    sources
+                        .entry(node.index.unwrap())
+                        .or_default()
+                        .insert(event_type);
+                }
+            }
+        });
+        assert_eq!(subtitles.len(), subtitle_count, "{flight:?} subtitles");
+        assert_eq!(seen_subtitles, subtitles, "{flight:?} orphan subtitle");
+        assert_eq!(sources.len(), source_count, "{flight:?} subtitle sources");
+        assert_eq!(hand_entries.len(), hand_count, "{flight:?} T-t breadcrumbs");
+
+        let mut tt_ids = Vec::new();
+        if flight == Flight::Zero {
+            named(&plain, "T-t").collect_indexes(&mut tt_ids);
+        }
+        let (traced, map) = probe.traced(TraceCarrier::default());
+        super::testkit::assert_links_resolve(&traced);
+        // Include T7's upstream timer and both inputs, not just mapped sources.
+        assert_eq!(
+            map.entries
+                .iter()
+                .filter(|e| tt_ids.contains(&e.source_index))
+                .collect::<Vec<_>>(),
+            hand_entries.iter().collect::<Vec<_>>(),
+            "{flight:?} T-t must retain only its hand-built entries"
+        );
+        if flight == Flight::Zero {
+            assert_eq!(
+                named(&traced, "T-t"),
+                named(&plain, "T-t"),
+                "instrument changed T-t"
+            );
+        }
+
+        let mut entity_sources = 0;
+        let mut instrumented_count = 0;
+        for (&source_id, event_types) in &sources {
+            let source = by_id(&traced, source_id);
+            let context = format!("{flight:?} {:?} ({source_id})", source.name());
+            let mut expected_links = links(by_id(&plain, source_id));
+            if tt_ids.contains(&source_id) {
+                // T7's two subtitle inputs share the entry registered to its
+                // upstream timer; neither input gets an instrumented breadcrumb.
+                assert_eq!(
+                    expected_links
+                        .iter()
+                        .filter(|(_, target)| hand_ids.contains(target))
+                        .count(),
+                    1,
+                    "{context}: one hand-built breadcrumb per subtitle source"
+                );
+            } else {
+                if source.block_type == "MCU_TR_Entity" {
+                    entity_sources += 1;
+                    assert_eq!(
+                        event_types.iter().copied().collect::<Vec<_>>(),
+                        [Some(0), Some(2), Some(4), Some(5), Some(13)],
+                        "{context}: T-g event types"
+                    );
+                } else {
+                    assert_eq!(
+                        event_types.iter().copied().collect::<Vec<_>>(),
+                        [None],
+                        "{context}"
+                    );
+                }
+                let entries: Vec<_> = map
+                    .entries
+                    .iter()
+                    .filter(|e| e.source_index == source_id)
+                    .collect();
+                assert_eq!(
+                    entries.len(),
+                    event_types.len(),
+                    "{context}: breadcrumb count"
+                );
+                for &event_type in event_types {
+                    let matching: Vec<_> = entries
+                        .iter()
+                        .copied()
+                        .filter(|e| e.event_type == event_type)
+                        .collect();
+                    assert_eq!(matching.len(), 1, "{context}: event {event_type:?}");
+                    let entry = matching[0];
+                    assert!(
+                        entry.breadcrumb_index > plain.max_index(),
+                        "{context}: breadcrumb must come from instrument"
+                    );
+                    assert_eq!(entry.source_name, source.name().unwrap(), "{context}");
+                    assert_eq!(entry.source_type, source.block_type, "{context}");
+                    assert_eq!(entry.carrier, TraceCarrier::default(), "{context}");
+                    assert_eq!(
+                        by_id(&traced, entry.breadcrumb_index).block_type,
+                        "MCU_TR_MissionObjective",
+                        "{context}: breadcrumb must exist in the tree"
+                    );
+                    expected_links.push((event_type, entry.breadcrumb_index));
+                    instrumented_count += 1;
+                }
+            }
+            // Compare every link, retaining multiplicity: an extra breadcrumb or
+            // duplicate Targets/OnEvent link must fail even if absent from the map.
+            expected_links.sort_unstable();
+            let mut actual_links = links(source);
+            actual_links.sort_unstable();
+            assert_eq!(actual_links, expected_links, "{context}: tree breadcrumbs");
+        }
+        assert_eq!(entity_sources, entity_count, "{flight:?} entity sources");
+        assert_eq!(
+            map.entries.len(),
+            hand_count + instrumented_count,
+            "{flight:?} unexpected breadcrumb"
+        );
+
+        let mut cue_times = Vec::new();
+        for cue in CUES.iter().filter(|cue| cue.flight == flight) {
+            let subtitle = id(&traced, cue.text);
+            let entries: Vec<_> = map
+                .entries
+                .iter()
+                .filter(|entry| {
+                    by_id(&traced, entry.source_index)
+                        .targets
+                        .contains(&subtitle)
+                })
+                .collect();
+            assert_eq!(entries.len(), 1, "{flight:?} cue {:?}", cue.text);
+            assert_eq!(
+                entries[0].expected_s,
+                Some(cue.time_s),
+                "{flight:?} cue {:?}",
+                cue.text
+            );
+            cue_times.push(entries[0].expected_s.unwrap());
+        }
+
+        let path = std::env::temp_dir().join(format!(
+            "p14_probe_subtitle_breadcrumbs_{}_{}.trace.json",
+            std::process::id(),
+            flight.stem()
+        ));
+        trace::write_trace_sidecar(&path, &map).expect("write probe trace sidecar");
+        let restored = trace::read_trace_sidecar(&path);
+        std::fs::remove_file(&path).expect("remove probe trace sidecar");
+        let restored = restored.expect("read probe trace sidecar");
+        for entry in &hand_entries {
+            assert_eq!(
+                restored
+                    .entries
+                    .iter()
+                    .filter(|e| e.breadcrumb_index == entry.breadcrumb_index)
+                    .collect::<Vec<_>>(),
+                [entry],
+                "{flight:?} sidecar lost or duplicated T-t breadcrumb {}",
+                entry.source_name
+            );
+        }
+        assert_eq!(restored, map, "{flight:?} trace sidecar round trip");
+        println!(
+            "{flight:?}: {} subtitles, {} source MCUs ({} source/event checks), {entity_sources} entity sources, cue expected_s {cue_times:?}, {hand_count} T-t breadcrumbs",
+            subtitles.len(),
+            sources.len(),
+            sources.values().map(BTreeSet::len).sum::<usize>()
+        );
+    }
+}
