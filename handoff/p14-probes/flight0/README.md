@@ -13,7 +13,7 @@ the mission can be built on another machine.
 Procedure: plan §8 step 0, "0c", and the flight 0 run sheet in
 `handoff/P14-air-tasking.md`. Server: `mission_text_log = 1` under
 `[KEY = system]` in `startup.cfg` (the key exists in the game's own
-`startup.cfg`, default 0). Files land in `data\logs	xt\`
+`startup.cfg`, default 0). Files land in `data\logs\txt\`
 (`text_log_folder`). Copy them to `target/p14/logs/flight0/` afterwards.
 
 If the probe code changes, regenerate and copy again; these files are not
