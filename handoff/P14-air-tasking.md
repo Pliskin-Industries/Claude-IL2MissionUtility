@@ -94,6 +94,7 @@ There are six built-in templates, all Template Builder output:
 | U21 | **User templates: tested shapes only.** v1 accepts a template only if its shape has a test, and refuses the rest with a clear message. | user, 2026-09-27 |
 | U22 | **Hard limit on aircraft.** The budget is released when a sortie's aircraft are deleted, not when the sortie ends. It costs 1 MCU per copy. | user, 2026-09-27 |
 | U23 | No further full review before the build. Fable re-reads each step's section when it scopes that step for Astra. | user, 2026-09-27 |
+| U24 | **Try one check zone per area (§10 item 22), provisional.** Revisit after testing (the triggers are in §10 item 22). §3.5 is rewritten when step 4 is scoped. | user, 2026-09-27 |
 
 ### 2.2 Agreed architecture
 
@@ -1745,7 +1746,9 @@ The repo does not prove any of these in game. The shipped files only show what t
 25. **Decided (U21): tested template shapes only** (§3.2, D39). A template with event or report hooks, with a time-on-target step, or with units that are not planes is refused with a message. A shape is added by adding its test.
 20. **Zone stagger (§3.8).** The second zone entry on an area fires `T_count + 0.2` s after the first, the third twice that.
 21. **Hard stop is 10 min later than in earlier drafts** (`T_final` includes the extension time), because it is now final.
-22. **Not applied, needs the user: one check zone per area in place of two.** Detect inside r_in, then check again one inner-zone transit time later. It saves about 6 MCUs and one check zone per (side, area), but it changes U3 (the dwell would come from the transit of the inner zone, not of the whole zone).
+22. **Decided (U24), provisional: one check zone per area in place of two.** Detect inside r_in, then check again one inner-zone transit time later. It saves about 6 MCUs and one check zone per (side, area), but it changes U3 (the dwell comes from the transit of the inner zone, not of the whole zone). Applied in §3.5 and §4.2 when step 4 is scoped; the two-zone design stays in this file as the fallback.
+    - **Tests.** No extra flight. (1) Flight 1A cell T-c "C2 fired again" already tests the one thing the design needs from the game: a check zone that is deactivated, re-activated and pulsed while the player is inside fires again. (2) Step 4 walker tests: `threshold_one_zone_straight_pass_fails` (a track through the centre at cruise gives FAIL), `threshold_one_zone_loiter_passes` (a track orbiting inside r_in gives PASS and HOT), `threshold_one_zone_edge_orbit_fails` (an orbit between r_in and R never goes HOT). (3) Step 11 adds a check: fly straight through an area without loitering; no winner subtitle for that area.
+    - **Revisit (go back to two zones) if:** C2 does not fire again in flight 1A; or in step 11 a straight pass makes an area HOT, or a loiter of at least D inside r_in does not.
 23. **Not applied, needs the user: a smaller Auto-fill.** "Auto-fill from objectives" adds one entry per date-valid sortie for each target. Adding one entry per target instead (rotating through the side's sorties) would cut the copies, and so the aircraft and MCUs, to a quarter on the NATO side.
 
 **Stop and report.** After each step, list what changed, the test count and the warnings. Say what needs the user in game. Do not start the next step until the user has seen the list if the user asked for that at session start.
