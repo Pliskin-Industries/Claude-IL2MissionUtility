@@ -373,3 +373,58 @@ fn existing_outputs_match_baseline() {
         assert_fixture_matches(&fixture.write(&dir));
     }
 }
+
+#[test]
+fn trace_off_changes_nothing() {
+    let dir = std::env::temp_dir().join(format!("il2_p14_trace_off_{}", std::process::id()));
+    for fixture in fixtures() {
+        assert_fixture_matches(&fixture.write(&dir));
+    }
+
+    // Pin all 37 committed files, including the UI fixture exercised separately
+    // by ui_tests::map_generate_without_air_matches_baseline in the full suite.
+    let mut paths: Vec<_> = std::fs::read_dir(baseline_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.is_file())
+        .collect();
+    paths.sort();
+    assert_eq!(paths.len(), 37);
+    let mut fingerprint = 0xcbf29ce484222325u64;
+    for path in paths {
+        let name = path.file_name().unwrap().to_str().unwrap();
+        for byte in name.bytes().chain(std::fs::read(&path).unwrap()) {
+            fingerprint = (fingerprint ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+        }
+    }
+    assert_eq!(fingerprint, 0xac124eef53f1139f);
+
+    fn check_source(dir: &Path) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                check_source(&path);
+                continue;
+            }
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            let file = path.file_name().unwrap().to_str().unwrap();
+            if matches!(file, "trace.rs" | "probe.rs") || file.ends_with("_tests.rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            let tests = source.find("#[cfg(test)]\nmod tests").or_else(|| {
+                source.find("#[cfg(test)]\r\nmod tests")
+            });
+            for (offset, _) in source.match_indices("instrument(") {
+                assert!(
+                    tests.is_some_and(|start| offset > start),
+                    "unconditional instrumentation in {} at byte {offset}",
+                    path.display()
+                );
+            }
+        }
+    }
+    check_source(&repo("src"));
+}
