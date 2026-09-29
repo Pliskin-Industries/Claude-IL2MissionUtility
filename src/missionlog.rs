@@ -1,5 +1,5 @@
 //! Offline mission-log replay. Flight 0 (2026-09-28) confirmed objective
-//! positions and mission end; the 50 Hz fallback remains UNVERIFIED. Raw
+//! positions and a 50 Hz clock with a +3 tick offset in real_2. Raw
 //! fields survive unknown types, unknown keys and failed typed conversions.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -846,7 +846,7 @@ pub fn report_markdown(replay: &Replay) -> String {
         if replay.tick_rate.fitted {
             "fitted T = offset + rate * seconds"
         } else {
-            "UNVERIFIED fallback"
+            "50 ticks/s fallback (offset uncalibrated)"
         },
         replay.tick_rate.samples
     )
@@ -859,7 +859,7 @@ pub fn report_markdown(replay: &Replay) -> String {
         replay.malformed_lines.len()
     )
     .unwrap();
-    out.push_str("\nFlight 0 (2026-09-28): the objective matched by position, not MCU index, and ended the dogfight round. UNVERIFIED: carrier logging on every firing, tick rate, same-tick multiplicity and log completeness. Observed counts are at least the logged firings; video remains a cross-check.\n");
+    out.push_str("\nFlight 0 (2026-09-28, real_1/real_2): objectives match by position. Success 0 logs without ending the dogfight round; Success 1 ends it about 8.1 s later. Spawned-and-deleted breadcrumb vehicles write no log lines. The real_2 clock fits 50 ticks/s with offset +3 ticks. UNVERIFIED: objective logging on every firing, same-tick multiplicity and log completeness. Observed counts are at least the logged firings; video remains a cross-check.\n");
     if !replay.trace_supplied {
         out.push_str("\nNo trace sidecar: firing and graph diagnostics are unavailable.\n");
     }
@@ -941,7 +941,7 @@ pub fn report_markdown(replay: &Replay) -> String {
     {
         writeln!(out, "- {}", label(firing.entry.breadcrumb_index)).unwrap();
     }
-    out.push_str("\n## Never spawned\n\nCounts are per mission Name (UNVERIFIED mapping from log NAME). Repeated spawn records count again; shared names cannot identify which copy spawned. Group paths are shown only for unique names.\n\n");
+    out.push_str("\n## Never spawned\n\nCounts are per mission Name (UNVERIFIED mapping from log NAME). AType:12 records appear on object events or in the end-of-mission dump; absence does not prove an object never spawned. Repeated records count again; shared names cannot identify which copy spawned. Group paths are shown only for unique names.\n\n");
     let shortfalls: Vec<_> = replay
         .spawn_counts
         .iter()
@@ -1346,6 +1346,121 @@ mod tests {
         let report = report_markdown(&result);
         let header = report.split("\n## ").next().unwrap();
         assert!(header.contains(&format!("Unknown records: {}", logs.unknown_records)));
+    }
+
+    #[test]
+    fn missionlog_real_2_objective_variants() {
+        let logs = parse_log_dir(&fixture("real_2")).unwrap();
+        assert_eq!(logs.files.len(), 26);
+        assert_eq!(logs.records.len(), 40);
+        assert!(logs.malformed_lines.is_empty());
+        assert_eq!(logs.unknown_records, 32);
+        assert!(logs.records.iter().all(|record| record.atype != 12));
+        let trace = read_trace_sidecar(&fixture("real_2/P14_Probe_0_traced.trace.json")).unwrap();
+        let objectives: Vec<_> = logs.records.iter().filter(|r| r.atype == 8).collect();
+        assert_eq!(objectives.len(), 4);
+        let expected = [
+            ("T-o O1", 33_503, 484, 5060.0, 0, 0, 670.0),
+            ("T-o O2", 34_503, 489, 5070.0, 1, 0, 690.0),
+            ("T-o O3", 35_503, 494, 5080.0, 2, 0, 710.0),
+            ("T-o O4", 36_503, 499, 5090.0, 1, 1, 730.0),
+        ];
+        for (record, &(name, ticks, objid, x, coalition, success, time_s)) in
+            objectives.iter().zip(&expected)
+        {
+            assert_eq!(record.t_ticks, ticks);
+            assert_eq!(
+                record.typed(),
+                TypedRecord::MissionObjective(ObjectiveEvent {
+                    id: Some(objid),
+                    pos: Some((x, 0.0, 5000.0)),
+                    coalition: Some(coalition),
+                    task_type: Some(0),
+                    result: Some(success),
+                    icon_type: Some(0),
+                })
+            );
+            let entry = &trace.entries[breadcrumb_match(record, &trace).unwrap()];
+            assert_eq!(entry.source_name, name);
+            assert_eq!(entry.pos, (x, 5000.0));
+            assert_eq!(entry.expected_s, Some(time_s));
+            // Runtime OBJID is not this objective's MCU index. Removing it
+            // must retain attribution, proving that position is sufficient.
+            assert_ne!(i64::from(entry.breadcrumb_index), objid);
+            let mut position_only = (*record).clone();
+            position_only.fields.retain(|(key, _)| key != "OBJID");
+            assert_eq!(
+                breadcrumb_match(&position_only, &trace),
+                breadcrumb_match(record, &trace)
+            );
+        }
+
+        // The flown Group is not in the fixture. The committed sidecar keeps
+        // its source identities, positions, times and edges without rebuilding
+        // a different probe now that T-o has been retired.
+        let result = replay(&logs, &Il2Entity::new("Group"), Some(&trace));
+        assert!(result.tick_rate.fitted);
+        assert_eq!(result.tick_rate.samples, 4);
+        assert!((result.tick_rate.rate - 50.0).abs() <= 0.5);
+        assert!((result.tick_rate.offset - 3.0).abs() <= 5.0);
+        let fired: Vec<_> = result
+            .firings
+            .iter()
+            .filter(|f| !f.times_s.is_empty())
+            .collect();
+        assert_eq!(fired.len(), 4);
+        let objective_events: Vec<_> = result
+            .timeline
+            .iter()
+            .filter(|event| event.description.starts_with("Objective:"))
+            .collect();
+        assert_eq!(objective_events.len(), 4);
+        let report = report_markdown(&result);
+        for ((firing, event), &(name, ticks, objid, x, coalition, success, time_s)) in
+            fired.iter().zip(objective_events).zip(&expected)
+        {
+            assert_eq!(firing.entry.source_name, name);
+            assert_eq!(firing.entry.pos, (x, 5000.0));
+            assert_eq!(firing.times_s, [time_s]);
+            assert_eq!(event.t_ticks, ticks);
+            assert_eq!(event.seconds, time_s);
+            assert_eq!(event.pos, Some((x, 0.0, 5000.0)));
+            assert_eq!(
+                event.description,
+                format!(
+                    "Objective: {name} (OBJID {objid}) (coalition Some({coalition}), type Some(0), result Some({success}), icon Some(0))"
+                )
+            );
+            assert!(report.contains(&format!(
+                "| {time_s:.3} | {ticks} | {} |",
+                event.description
+            )));
+        }
+        let ends: Vec<_> = logs.records.iter().filter(|r| r.atype == 7).collect();
+        assert_eq!(ends.len(), 1);
+        assert_eq!(ends[0].typed(), TypedRecord::MissionEnd);
+        assert_eq!(ends[0].t_ticks, 36_907);
+        let end = result.timeline.last().unwrap();
+        assert_eq!(end.description, "Mission end");
+        assert_eq!(end.t_ticks, 36_907);
+        assert!((end.seconds - 738.08).abs() < 1e-6);
+        assert!((end.seconds - expected[3].6 - 8.08).abs() < 1e-6);
+        assert!(report.contains("| 738.080 | 36907 | Mission end |"));
+        let header = report.split("\n## ").next().unwrap();
+        assert!(header.contains("Unknown records: 32;"));
+        assert!(header.contains("malformed lines retained: 0."));
+        assert!(header.contains(
+            "Tick rate: 50.000000 ticks/s; offset: 3.000000 ticks; fitted T = offset + rate * seconds (4 cue samples)."
+        ));
+        // Keep the acceptance replay excerpt available through --nocapture.
+        for line in report.lines().filter(|line| {
+            line.starts_with("Tick rate:")
+                || line.starts_with("Unknown records:")
+                || line.contains("| Objective: T-o O")
+                || line.contains("| Mission end |")
+        }) {
+            println!("{line}");
+        }
     }
 
     #[test]
