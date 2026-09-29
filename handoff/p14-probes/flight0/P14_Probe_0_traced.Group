@@ -8,7 +8,7 @@ Group
     Index = 2;
     Name = "Translator Mission Begin";
     Desc = "";
-    Targets = [3,6,8,53,57,59,88,90,91,92,93,95,97,98,99,100,101,102,103,105,106,107,108,109,110,111,113,115,119,122,123,124,125,127,129,138,140,159,161,163,165,166,175,176,177,178,179,199,202,203,209,219,221,224,228,240,242,247,249,256,258,261,263,265,267,269,271,273,275];
+    Targets = [3,6,8,53,57,59,88,90,91,92,93,95,97,98,99,100,101,102,103,105,106,107,108,109,110,111,113,115,119,122,123,124,125,127,129,138,140,159,161,163,165,166,175,176,177,178,179,199,202,203,209,219,221,224,228,240,242,247,249,256,258,261,263,264,267,270,273,276,280,282,284,286,288,290,292,294,296];
     Objects = [];
     XPos = 105934.000;
     YPos = 0.000;
@@ -116,7 +116,7 @@ Group
       Index = 9;
       Name = "ZA1";
       Desc = "";
-      Targets = [10,276];
+      Targets = [10,297];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -167,7 +167,7 @@ Group
       Index = 11;
       Name = "ZA2";
       Desc = "";
-      Targets = [12,281];
+      Targets = [12,302];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -984,7 +984,7 @@ Group
       Index = 60;
       Name = "E1";
       Desc = "";
-      Targets = [61,62,286];
+      Targets = [61,62,307];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1033,7 +1033,7 @@ Group
       Index = 62;
       Name = "READ E1 fired 2+";
       Desc = "";
-      Targets = [63,291];
+      Targets = [63,312];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1082,7 +1082,7 @@ Group
       Index = 64;
       Name = "E2";
       Desc = "";
-      Targets = [65,66,296];
+      Targets = [65,66,317];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1131,7 +1131,7 @@ Group
       Index = 66;
       Name = "READ E2 fired 2+";
       Desc = "";
-      Targets = [67,301];
+      Targets = [67,322];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1180,7 +1180,7 @@ Group
       Index = 68;
       Name = "E3";
       Desc = "";
-      Targets = [69,306];
+      Targets = [69,327];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1229,7 +1229,7 @@ Group
       Index = 70;
       Name = "E4";
       Desc = "";
-      Targets = [71,311];
+      Targets = [71,332];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1278,7 +1278,7 @@ Group
       Index = 72;
       Name = "E5";
       Desc = "";
-      Targets = [73,316];
+      Targets = [73,337];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1327,7 +1327,7 @@ Group
       Index = 74;
       Name = "E6";
       Desc = "";
-      Targets = [75,76,321];
+      Targets = [75,76,342];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1376,7 +1376,7 @@ Group
       Index = 76;
       Name = "READ E6 fired 2+";
       Desc = "";
-      Targets = [77,326];
+      Targets = [77,347];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1425,7 +1425,7 @@ Group
       Index = 78;
       Name = "E7";
       Desc = "";
-      Targets = [79,331];
+      Targets = [79,352];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1474,7 +1474,7 @@ Group
       Index = 80;
       Name = "E8";
       Desc = "";
-      Targets = [81,82,336];
+      Targets = [81,82,357];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1523,7 +1523,7 @@ Group
       Index = 82;
       Name = "READ E8 fired 2+";
       Desc = "";
-      Targets = [83,341];
+      Targets = [83,362];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -1572,7 +1572,7 @@ Group
       Index = 84;
       Name = "E9";
       Desc = "";
-      Targets = [85,346];
+      Targets = [85,367];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -2399,7 +2399,7 @@ Group
       Index = 130;
       Name = "F1";
       Desc = "";
-      Targets = [131,132,134,351];
+      Targets = [131,132,134,372];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -2448,7 +2448,7 @@ Group
       Index = 132;
       Name = "READ F1 reached 12";
       Desc = "";
-      Targets = [133,356];
+      Targets = [133,377];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -2497,7 +2497,7 @@ Group
       Index = 134;
       Name = "READ F1 reached 29";
       Desc = "";
-      Targets = [135,361];
+      Targets = [135,382];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -2634,7 +2634,7 @@ Group
       Index = 141;
       Name = "F2 OUT 1";
       Desc = "";
-      Targets = [142,366];
+      Targets = [142,387];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -2683,7 +2683,7 @@ Group
       Index = 143;
       Name = "F2 OUT 2";
       Desc = "";
-      Targets = [144,371];
+      Targets = [144,392];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -2732,7 +2732,7 @@ Group
       Index = 145;
       Name = "F2 OUT 3";
       Desc = "";
-      Targets = [146,376];
+      Targets = [146,397];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -2781,7 +2781,7 @@ Group
       Index = 147;
       Name = "F2 OUT 4";
       Desc = "";
-      Targets = [148,381];
+      Targets = [148,402];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4410,7 +4410,7 @@ Group
       Index = 222;
       Name = "J1";
       Desc = "";
-      Targets = [225,386];
+      Targets = [225,407];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4493,7 +4493,7 @@ Group
       Index = 226;
       Name = "J2";
       Desc = "";
-      Targets = [229,391];
+      Targets = [229,412];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4576,7 +4576,7 @@ Group
       Index = 230;
       Name = "J3";
       Desc = "";
-      Targets = [232,396];
+      Targets = [232,417];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4641,7 +4641,7 @@ Group
       Index = 233;
       Name = "J4";
       Desc = "";
-      Targets = [234,235,236,401];
+      Targets = [234,235,236,422];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4706,7 +4706,7 @@ Group
       Index = 236;
       Name = "READ J4 out 2+";
       Desc = "";
-      Targets = [237,406];
+      Targets = [237,427];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4809,7 +4809,7 @@ Group
       Index = 241;
       Name = "J5";
       Desc = "";
-      Targets = [243,244,411];
+      Targets = [243,244,432];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4876,7 +4876,7 @@ Group
       Index = 244;
       Name = "READ J5 out 2+";
       Desc = "";
-      Targets = [245,416];
+      Targets = [245,437];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4985,7 +4985,7 @@ Group
       Index = 250;
       Name = "Z1";
       Desc = "";
-      Targets = [252,253,421];
+      Targets = [252,253,442];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -5052,7 +5052,7 @@ Group
       Index = 253;
       Name = "Z1 AGAIN OUT";
       Desc = "";
-      Targets = [254,426];
+      Targets = [254,447];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -5191,255 +5191,420 @@ Group
   }
 
   
-  MCU_TR_Subtitle
+  Group
   {
     Index = 260;
+    Name = "T-o";
+    Desc = "";
+    MCU_Timer
+    {
+      Index = 261;
+      Name = "T-o ARM";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 660;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 262;
+      Name = "T-o CLOSE OFF";
+      Desc = "";
+      Targets = [264,267,270,273,276];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 263;
+      Name = "T-o CLOSE";
+      Desc = "";
+      Targets = [262];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 770;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 264;
+      Name = "T-o O1";
+      Desc = "";
+      Targets = [265,266];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 670;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 265;
+      Name = "T-o O1 fired";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 43;
+      }
+
+      
+    }
+
+    
+    MCU_TR_MissionObjective
+    {
+      Index = 266;
+      Targets = [];
+      Objects = [];
+      XPos = 5060.000;
+      YPos = 0.000;
+      ZPos = 5000.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 0;
+      Success = 0;
+      IconType = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 267;
+      Name = "T-o O2";
+      Desc = "";
+      Targets = [268,269];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 690;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 268;
+      Name = "T-o O2 fired";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 44;
+      }
+
+      
+    }
+
+    
+    MCU_TR_MissionObjective
+    {
+      Index = 269;
+      Targets = [];
+      Objects = [];
+      XPos = 5070.000;
+      YPos = 0.000;
+      ZPos = 5000.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 1;
+      Success = 0;
+      IconType = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 270;
+      Name = "T-o O3";
+      Desc = "";
+      Targets = [271,272];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 710;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 271;
+      Name = "T-o O3 fired";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 45;
+      }
+
+      
+    }
+
+    
+    MCU_TR_MissionObjective
+    {
+      Index = 272;
+      Targets = [];
+      Objects = [];
+      XPos = 5080.000;
+      YPos = 0.000;
+      ZPos = 5000.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 2;
+      Success = 0;
+      IconType = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 273;
+      Name = "T-o O4";
+      Desc = "";
+      Targets = [274,275];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 730;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 274;
+      Name = "T-o O4 fired";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 46;
+      }
+
+      
+    }
+
+    
+    MCU_TR_MissionObjective
+    {
+      Index = 275;
+      Targets = [];
+      Objects = [];
+      XPos = 5090.000;
+      YPos = 0.000;
+      ZPos = 5000.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 1;
+      Success = 1;
+      IconType = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 276;
+      Name = "T-o O5";
+      Desc = "";
+      Targets = [277,278];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 750;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 277;
+      Name = "T-o O5 fired";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 105934.000;
+      YPos = 0.000;
+      ZPos = 274477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 47;
+      }
+
+      
+    }
+
+    
+    MCU_TR_MissionObjective
+    {
+      Index = 278;
+      Targets = [];
+      Objects = [];
+      XPos = 5100.000;
+      YPos = 0.000;
+      ZPos = 5000.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 2;
+      Success = 1;
+      IconType = 0;
+    }
+
+    
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 279;
     Name = "Flight 0: stay within 20 km of K14 until 11:00";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 43;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 261;
-    Name = "CUE 01";
-    Desc = "";
-    Targets = [260,431];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 0;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 262;
-    Name = "T-e start";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 44;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 263;
-    Name = "CUE 02";
-    Desc = "";
-    Targets = [262,436];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 60;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 264;
-    Name = "T-f F1 start";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 45;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 265;
-    Name = "CUE 03";
-    Desc = "";
-    Targets = [264,441];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 150;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 266;
-    Name = "T-t start: compare spawn log lines with subtitles in the next 60 s";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 46;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 267;
-    Name = "CUE 04";
-    Desc = "";
-    Targets = [266,446];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 270;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 268;
-    Name = "T-f F2 start";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 47;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 269;
-    Name = "CUE 05";
-    Desc = "";
-    Targets = [268,451];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 330;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 270;
-    Name = "T-j start";
     Desc = "";
     Targets = [];
     Objects = [];
@@ -5469,10 +5634,10 @@ Group
   
   MCU_Timer
   {
-    Index = 271;
-    Name = "CUE 06";
+    Index = 280;
+    Name = "CUE 01";
     Desc = "";
-    Targets = [270,456];
+    Targets = [279,452];
     Objects = [];
     XPos = 105934.000;
     YPos = 0.000;
@@ -5480,15 +5645,15 @@ Group
     XOri = 0;
     YOri = 0;
     ZOri = 0;
-    Time = 540;
+    Time = 0;
     Random = 100;
   }
 
   
   MCU_TR_Subtitle
   {
-    Index = 272;
-    Name = "T-z start";
+    Index = 281;
+    Name = "T-e start";
     Desc = "";
     Targets = [];
     Objects = [];
@@ -5518,10 +5683,10 @@ Group
   
   MCU_Timer
   {
-    Index = 273;
-    Name = "CUE 07";
+    Index = 282;
+    Name = "CUE 02";
     Desc = "";
-    Targets = [272,461];
+    Targets = [281,457];
     Objects = [];
     XPos = 105934.000;
     YPos = 0.000;
@@ -5529,15 +5694,15 @@ Group
     XOri = 0;
     YOri = 0;
     ZOri = 0;
-    Time = 600;
+    Time = 60;
     Random = 100;
   }
 
   
   MCU_TR_Subtitle
   {
-    Index = 274;
-    Name = "Flight 0 done. End the mission normally";
+    Index = 283;
+    Name = "T-f F1 start";
     Desc = "";
     Targets = [];
     Objects = [];
@@ -5567,10 +5732,255 @@ Group
   
   MCU_Timer
   {
-    Index = 275;
+    Index = 284;
+    Name = "CUE 03";
+    Desc = "";
+    Targets = [283,462];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 150;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 285;
+    Name = "T-t start: compare spawn log lines with subtitles in the next 60 s";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 51;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 286;
+    Name = "CUE 04";
+    Desc = "";
+    Targets = [285,467];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 270;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 287;
+    Name = "T-f F2 start";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 52;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 288;
+    Name = "CUE 05";
+    Desc = "";
+    Targets = [287,472];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 330;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 289;
+    Name = "T-j start";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 53;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 290;
+    Name = "CUE 06";
+    Desc = "";
+    Targets = [289,477];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 540;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 291;
+    Name = "T-z start";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 54;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 292;
+    Name = "CUE 07";
+    Desc = "";
+    Targets = [291,482];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 600;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 293;
+    Name = "Flight 0 main cells done. Keep the mission running: objective tests until 12:50";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 55;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 294;
     Name = "CUE 08";
     Desc = "";
-    Targets = [274,466];
+    Targets = [293,487];
     Objects = [];
     XPos = 105934.000;
     YPos = 0.000;
@@ -5583,601 +5993,31 @@ Group
   }
 
   
-  MCU_Spawner
-  {
-    Index = 276;
-    Name = "TRACE 6";
-    Desc = "";
-    Targets = [];
-    Objects = [278];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    SpawnAtMe = 0;
-  }
-
-  
-  Vehicle
-  {
-    Name = "TRACE 6";
-    Index = 277;
-    LinkTrId = 278;
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-    Desc = "";
-    Country = 0;
-    NumberInFormation = 0;
-    Vulnerable = 0;
-    Engageable = 0;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 10;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "%20%20%20%20%20%20%20%20";
-    TCodeColor = "11111111";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-
-  
-  MCU_TR_Entity
-  {
-    Index = 278;
-    Name = "TRACE 6 entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 0;
-    MisObjID = 277;
-    OnReports
-    {
-      OnReport
-      {
-        Type = 0;
-        CmdId = 276;
-        TarId = 279;
-      }
-
-      
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 279;
-    Name = "TRACE 6 DELETE DELAY";
-    Desc = "";
-    Targets = [280];
-    Objects = [];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 1;
-    Random = 100;
-  }
-
-  
-  MCU_Delete
-  {
-    Index = 280;
-    Name = "TRACE 6 DELETE";
-    Desc = "";
-    Targets = [];
-    Objects = [277];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-  }
-
-  
-  MCU_Spawner
-  {
-    Index = 281;
-    Name = "TRACE 7";
-    Desc = "";
-    Targets = [];
-    Objects = [283];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    SpawnAtMe = 0;
-  }
-
-  
-  Vehicle
-  {
-    Name = "TRACE 7";
-    Index = 282;
-    LinkTrId = 283;
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-    Desc = "";
-    Country = 0;
-    NumberInFormation = 0;
-    Vulnerable = 0;
-    Engageable = 0;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 10;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "%20%20%20%20%20%20%20%20";
-    TCodeColor = "11111111";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-
-  
-  MCU_TR_Entity
-  {
-    Index = 283;
-    Name = "TRACE 7 entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 0;
-    MisObjID = 282;
-    OnReports
-    {
-      OnReport
-      {
-        Type = 0;
-        CmdId = 281;
-        TarId = 284;
-      }
-
-      
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 284;
-    Name = "TRACE 7 DELETE DELAY";
-    Desc = "";
-    Targets = [285];
-    Objects = [];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 1;
-    Random = 100;
-  }
-
-  
-  MCU_Delete
-  {
-    Index = 285;
-    Name = "TRACE 7 DELETE";
-    Desc = "";
-    Targets = [];
-    Objects = [282];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-  }
-
-  
-  MCU_Spawner
-  {
-    Index = 286;
-    Name = "TRACE 8";
-    Desc = "";
-    Targets = [];
-    Objects = [288];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    SpawnAtMe = 0;
-  }
-
-  
-  Vehicle
-  {
-    Name = "TRACE 8";
-    Index = 287;
-    LinkTrId = 288;
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-    Desc = "";
-    Country = 0;
-    NumberInFormation = 0;
-    Vulnerable = 0;
-    Engageable = 0;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 10;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "%20%20%20%20%20%20%20%20";
-    TCodeColor = "11111111";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-
-  
-  MCU_TR_Entity
-  {
-    Index = 288;
-    Name = "TRACE 8 entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 0;
-    MisObjID = 287;
-    OnReports
-    {
-      OnReport
-      {
-        Type = 0;
-        CmdId = 286;
-        TarId = 289;
-      }
-
-      
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 289;
-    Name = "TRACE 8 DELETE DELAY";
-    Desc = "";
-    Targets = [290];
-    Objects = [];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 1;
-    Random = 100;
-  }
-
-  
-  MCU_Delete
-  {
-    Index = 290;
-    Name = "TRACE 8 DELETE";
-    Desc = "";
-    Targets = [];
-    Objects = [287];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-  }
-
-  
-  MCU_Spawner
-  {
-    Index = 291;
-    Name = "TRACE 9";
-    Desc = "";
-    Targets = [];
-    Objects = [293];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    SpawnAtMe = 0;
-  }
-
-  
-  Vehicle
-  {
-    Name = "TRACE 9";
-    Index = 292;
-    LinkTrId = 293;
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-    Desc = "";
-    Country = 0;
-    NumberInFormation = 0;
-    Vulnerable = 0;
-    Engageable = 0;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 10;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "%20%20%20%20%20%20%20%20";
-    TCodeColor = "11111111";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-
-  
-  MCU_TR_Entity
-  {
-    Index = 293;
-    Name = "TRACE 9 entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 0;
-    MisObjID = 292;
-    OnReports
-    {
-      OnReport
-      {
-        Type = 0;
-        CmdId = 291;
-        TarId = 294;
-      }
-
-      
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 294;
-    Name = "TRACE 9 DELETE DELAY";
-    Desc = "";
-    Targets = [295];
-    Objects = [];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 1;
-    Random = 100;
-  }
-
-  
-  MCU_Delete
+  MCU_TR_Subtitle
   {
     Index = 295;
-    Name = "TRACE 9 DELETE";
-    Desc = "";
-    Targets = [];
-    Objects = [292];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-  }
-
-  
-  MCU_Spawner
-  {
-    Index = 296;
-    Name = "TRACE 10";
-    Desc = "";
-    Targets = [];
-    Objects = [298];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    SpawnAtMe = 0;
-  }
-
-  
-  Vehicle
-  {
-    Name = "TRACE 10";
-    Index = 297;
-    LinkTrId = 298;
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-    Desc = "";
-    Country = 0;
-    NumberInFormation = 0;
-    Vulnerable = 0;
-    Engageable = 0;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 10;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "%20%20%20%20%20%20%20%20";
-    TCodeColor = "11111111";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-
-  
-  MCU_TR_Entity
-  {
-    Index = 298;
-    Name = "TRACE 10 entity";
+    Name = "Flight 0 done. End the mission normally";
     Desc = "";
     Targets = [];
     Objects = [];
-    XPos = 400000.000;
+    XPos = 105934.000;
     YPos = 0.000;
-    ZPos = 50000.000;
+    ZPos = 269477.000;
     XOri = 0;
     YOri = 0;
     ZOri = 0;
-    Enabled = 0;
-    MisObjID = 297;
-    OnReports
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
     {
-      OnReport
-      {
-        Type = 0;
-        CmdId = 296;
-        TarId = 299;
-      }
-
-      
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 56;
     }
 
     
@@ -6186,45 +6026,29 @@ Group
   
   MCU_Timer
   {
-    Index = 299;
-    Name = "TRACE 10 DELETE DELAY";
+    Index = 296;
+    Name = "CUE 09";
     Desc = "";
-    Targets = [300];
+    Targets = [295,492];
     Objects = [];
-    XPos = 400000.000;
+    XPos = 105934.000;
     YPos = 0.000;
-    ZPos = 50000.000;
+    ZPos = 269477.000;
     XOri = 0;
     YOri = 0;
     ZOri = 0;
-    Time = 1;
+    Time = 770;
     Random = 100;
-  }
-
-  
-  MCU_Delete
-  {
-    Index = 300;
-    Name = "TRACE 10 DELETE";
-    Desc = "";
-    Targets = [];
-    Objects = [297];
-    XPos = 400000.000;
-    YPos = 0.000;
-    ZPos = 50000.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
   }
 
   
   MCU_Spawner
   {
-    Index = 301;
+    Index = 297;
     Name = "TRACE 11";
     Desc = "";
     Targets = [];
-    Objects = [303];
+    Objects = [299];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6238,8 +6062,8 @@ Group
   Vehicle
   {
     Name = "TRACE 11";
-    Index = 302;
-    LinkTrId = 303;
+    Index = 298;
+    LinkTrId = 299;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6282,7 +6106,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 303;
+    Index = 299;
     Name = "TRACE 11 entity";
     Desc = "";
     Targets = [];
@@ -6294,14 +6118,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 302;
+    MisObjID = 298;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 301;
-        TarId = 304;
+        CmdId = 297;
+        TarId = 300;
       }
 
       
@@ -6313,10 +6137,10 @@ Group
   
   MCU_Timer
   {
-    Index = 304;
+    Index = 300;
     Name = "TRACE 11 DELETE DELAY";
     Desc = "";
-    Targets = [305];
+    Targets = [301];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -6331,11 +6155,11 @@ Group
   
   MCU_Delete
   {
-    Index = 305;
+    Index = 301;
     Name = "TRACE 11 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [302];
+    Objects = [298];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6347,11 +6171,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 306;
+    Index = 302;
     Name = "TRACE 12";
     Desc = "";
     Targets = [];
-    Objects = [308];
+    Objects = [304];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6365,8 +6189,8 @@ Group
   Vehicle
   {
     Name = "TRACE 12";
-    Index = 307;
-    LinkTrId = 308;
+    Index = 303;
+    LinkTrId = 304;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6409,7 +6233,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 308;
+    Index = 304;
     Name = "TRACE 12 entity";
     Desc = "";
     Targets = [];
@@ -6421,14 +6245,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 307;
+    MisObjID = 303;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 306;
-        TarId = 309;
+        CmdId = 302;
+        TarId = 305;
       }
 
       
@@ -6440,10 +6264,10 @@ Group
   
   MCU_Timer
   {
-    Index = 309;
+    Index = 305;
     Name = "TRACE 12 DELETE DELAY";
     Desc = "";
-    Targets = [310];
+    Targets = [306];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -6458,11 +6282,11 @@ Group
   
   MCU_Delete
   {
-    Index = 310;
+    Index = 306;
     Name = "TRACE 12 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [307];
+    Objects = [303];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6474,11 +6298,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 311;
+    Index = 307;
     Name = "TRACE 13";
     Desc = "";
     Targets = [];
-    Objects = [313];
+    Objects = [309];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6492,8 +6316,8 @@ Group
   Vehicle
   {
     Name = "TRACE 13";
-    Index = 312;
-    LinkTrId = 313;
+    Index = 308;
+    LinkTrId = 309;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6536,7 +6360,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 313;
+    Index = 309;
     Name = "TRACE 13 entity";
     Desc = "";
     Targets = [];
@@ -6548,14 +6372,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 312;
+    MisObjID = 308;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 311;
-        TarId = 314;
+        CmdId = 307;
+        TarId = 310;
       }
 
       
@@ -6567,10 +6391,10 @@ Group
   
   MCU_Timer
   {
-    Index = 314;
+    Index = 310;
     Name = "TRACE 13 DELETE DELAY";
     Desc = "";
-    Targets = [315];
+    Targets = [311];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -6585,11 +6409,11 @@ Group
   
   MCU_Delete
   {
-    Index = 315;
+    Index = 311;
     Name = "TRACE 13 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [312];
+    Objects = [308];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6601,11 +6425,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 316;
+    Index = 312;
     Name = "TRACE 14";
     Desc = "";
     Targets = [];
-    Objects = [318];
+    Objects = [314];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6619,8 +6443,8 @@ Group
   Vehicle
   {
     Name = "TRACE 14";
-    Index = 317;
-    LinkTrId = 318;
+    Index = 313;
+    LinkTrId = 314;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6663,7 +6487,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 318;
+    Index = 314;
     Name = "TRACE 14 entity";
     Desc = "";
     Targets = [];
@@ -6675,14 +6499,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 317;
+    MisObjID = 313;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 316;
-        TarId = 319;
+        CmdId = 312;
+        TarId = 315;
       }
 
       
@@ -6694,10 +6518,10 @@ Group
   
   MCU_Timer
   {
-    Index = 319;
+    Index = 315;
     Name = "TRACE 14 DELETE DELAY";
     Desc = "";
-    Targets = [320];
+    Targets = [316];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -6712,11 +6536,11 @@ Group
   
   MCU_Delete
   {
-    Index = 320;
+    Index = 316;
     Name = "TRACE 14 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [317];
+    Objects = [313];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6728,11 +6552,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 321;
+    Index = 317;
     Name = "TRACE 15";
     Desc = "";
     Targets = [];
-    Objects = [323];
+    Objects = [319];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6746,8 +6570,8 @@ Group
   Vehicle
   {
     Name = "TRACE 15";
-    Index = 322;
-    LinkTrId = 323;
+    Index = 318;
+    LinkTrId = 319;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6790,7 +6614,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 323;
+    Index = 319;
     Name = "TRACE 15 entity";
     Desc = "";
     Targets = [];
@@ -6802,14 +6626,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 322;
+    MisObjID = 318;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 321;
-        TarId = 324;
+        CmdId = 317;
+        TarId = 320;
       }
 
       
@@ -6821,10 +6645,10 @@ Group
   
   MCU_Timer
   {
-    Index = 324;
+    Index = 320;
     Name = "TRACE 15 DELETE DELAY";
     Desc = "";
-    Targets = [325];
+    Targets = [321];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -6839,11 +6663,11 @@ Group
   
   MCU_Delete
   {
-    Index = 325;
+    Index = 321;
     Name = "TRACE 15 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [322];
+    Objects = [318];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6855,11 +6679,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 326;
+    Index = 322;
     Name = "TRACE 16";
     Desc = "";
     Targets = [];
-    Objects = [328];
+    Objects = [324];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6873,8 +6697,8 @@ Group
   Vehicle
   {
     Name = "TRACE 16";
-    Index = 327;
-    LinkTrId = 328;
+    Index = 323;
+    LinkTrId = 324;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6917,7 +6741,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 328;
+    Index = 324;
     Name = "TRACE 16 entity";
     Desc = "";
     Targets = [];
@@ -6929,14 +6753,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 327;
+    MisObjID = 323;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 326;
-        TarId = 329;
+        CmdId = 322;
+        TarId = 325;
       }
 
       
@@ -6948,10 +6772,10 @@ Group
   
   MCU_Timer
   {
-    Index = 329;
+    Index = 325;
     Name = "TRACE 16 DELETE DELAY";
     Desc = "";
-    Targets = [330];
+    Targets = [326];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -6966,11 +6790,11 @@ Group
   
   MCU_Delete
   {
-    Index = 330;
+    Index = 326;
     Name = "TRACE 16 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [327];
+    Objects = [323];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -6982,11 +6806,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 331;
+    Index = 327;
     Name = "TRACE 17";
     Desc = "";
     Targets = [];
-    Objects = [333];
+    Objects = [329];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7000,8 +6824,8 @@ Group
   Vehicle
   {
     Name = "TRACE 17";
-    Index = 332;
-    LinkTrId = 333;
+    Index = 328;
+    LinkTrId = 329;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7044,7 +6868,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 333;
+    Index = 329;
     Name = "TRACE 17 entity";
     Desc = "";
     Targets = [];
@@ -7056,14 +6880,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 332;
+    MisObjID = 328;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 331;
-        TarId = 334;
+        CmdId = 327;
+        TarId = 330;
       }
 
       
@@ -7075,10 +6899,10 @@ Group
   
   MCU_Timer
   {
-    Index = 334;
+    Index = 330;
     Name = "TRACE 17 DELETE DELAY";
     Desc = "";
-    Targets = [335];
+    Targets = [331];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -7093,11 +6917,11 @@ Group
   
   MCU_Delete
   {
-    Index = 335;
+    Index = 331;
     Name = "TRACE 17 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [332];
+    Objects = [328];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7109,11 +6933,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 336;
+    Index = 332;
     Name = "TRACE 18";
     Desc = "";
     Targets = [];
-    Objects = [338];
+    Objects = [334];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7127,8 +6951,8 @@ Group
   Vehicle
   {
     Name = "TRACE 18";
-    Index = 337;
-    LinkTrId = 338;
+    Index = 333;
+    LinkTrId = 334;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7171,7 +6995,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 338;
+    Index = 334;
     Name = "TRACE 18 entity";
     Desc = "";
     Targets = [];
@@ -7183,14 +7007,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 337;
+    MisObjID = 333;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 336;
-        TarId = 339;
+        CmdId = 332;
+        TarId = 335;
       }
 
       
@@ -7202,10 +7026,10 @@ Group
   
   MCU_Timer
   {
-    Index = 339;
+    Index = 335;
     Name = "TRACE 18 DELETE DELAY";
     Desc = "";
-    Targets = [340];
+    Targets = [336];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -7220,11 +7044,11 @@ Group
   
   MCU_Delete
   {
-    Index = 340;
+    Index = 336;
     Name = "TRACE 18 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [337];
+    Objects = [333];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7236,11 +7060,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 341;
+    Index = 337;
     Name = "TRACE 19";
     Desc = "";
     Targets = [];
-    Objects = [343];
+    Objects = [339];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7254,8 +7078,8 @@ Group
   Vehicle
   {
     Name = "TRACE 19";
-    Index = 342;
-    LinkTrId = 343;
+    Index = 338;
+    LinkTrId = 339;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7298,7 +7122,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 343;
+    Index = 339;
     Name = "TRACE 19 entity";
     Desc = "";
     Targets = [];
@@ -7310,14 +7134,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 342;
+    MisObjID = 338;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 341;
-        TarId = 344;
+        CmdId = 337;
+        TarId = 340;
       }
 
       
@@ -7329,10 +7153,10 @@ Group
   
   MCU_Timer
   {
-    Index = 344;
+    Index = 340;
     Name = "TRACE 19 DELETE DELAY";
     Desc = "";
-    Targets = [345];
+    Targets = [341];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -7347,11 +7171,11 @@ Group
   
   MCU_Delete
   {
-    Index = 345;
+    Index = 341;
     Name = "TRACE 19 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [342];
+    Objects = [338];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7363,11 +7187,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 346;
+    Index = 342;
     Name = "TRACE 20";
     Desc = "";
     Targets = [];
-    Objects = [348];
+    Objects = [344];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7381,8 +7205,8 @@ Group
   Vehicle
   {
     Name = "TRACE 20";
-    Index = 347;
-    LinkTrId = 348;
+    Index = 343;
+    LinkTrId = 344;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7425,7 +7249,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 348;
+    Index = 344;
     Name = "TRACE 20 entity";
     Desc = "";
     Targets = [];
@@ -7437,14 +7261,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 347;
+    MisObjID = 343;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 346;
-        TarId = 349;
+        CmdId = 342;
+        TarId = 345;
       }
 
       
@@ -7456,10 +7280,10 @@ Group
   
   MCU_Timer
   {
-    Index = 349;
+    Index = 345;
     Name = "TRACE 20 DELETE DELAY";
     Desc = "";
-    Targets = [350];
+    Targets = [346];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -7474,11 +7298,11 @@ Group
   
   MCU_Delete
   {
-    Index = 350;
+    Index = 346;
     Name = "TRACE 20 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [347];
+    Objects = [343];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7490,11 +7314,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 351;
+    Index = 347;
     Name = "TRACE 21";
     Desc = "";
     Targets = [];
-    Objects = [353];
+    Objects = [349];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7508,8 +7332,8 @@ Group
   Vehicle
   {
     Name = "TRACE 21";
-    Index = 352;
-    LinkTrId = 353;
+    Index = 348;
+    LinkTrId = 349;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7552,7 +7376,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 353;
+    Index = 349;
     Name = "TRACE 21 entity";
     Desc = "";
     Targets = [];
@@ -7564,14 +7388,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 352;
+    MisObjID = 348;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 351;
-        TarId = 354;
+        CmdId = 347;
+        TarId = 350;
       }
 
       
@@ -7583,10 +7407,10 @@ Group
   
   MCU_Timer
   {
-    Index = 354;
+    Index = 350;
     Name = "TRACE 21 DELETE DELAY";
     Desc = "";
-    Targets = [355];
+    Targets = [351];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -7601,11 +7425,11 @@ Group
   
   MCU_Delete
   {
-    Index = 355;
+    Index = 351;
     Name = "TRACE 21 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [352];
+    Objects = [348];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7617,11 +7441,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 356;
+    Index = 352;
     Name = "TRACE 22";
     Desc = "";
     Targets = [];
-    Objects = [358];
+    Objects = [354];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7635,8 +7459,8 @@ Group
   Vehicle
   {
     Name = "TRACE 22";
-    Index = 357;
-    LinkTrId = 358;
+    Index = 353;
+    LinkTrId = 354;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7679,7 +7503,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 358;
+    Index = 354;
     Name = "TRACE 22 entity";
     Desc = "";
     Targets = [];
@@ -7691,14 +7515,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 357;
+    MisObjID = 353;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 356;
-        TarId = 359;
+        CmdId = 352;
+        TarId = 355;
       }
 
       
@@ -7710,10 +7534,10 @@ Group
   
   MCU_Timer
   {
-    Index = 359;
+    Index = 355;
     Name = "TRACE 22 DELETE DELAY";
     Desc = "";
-    Targets = [360];
+    Targets = [356];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -7728,11 +7552,11 @@ Group
   
   MCU_Delete
   {
-    Index = 360;
+    Index = 356;
     Name = "TRACE 22 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [357];
+    Objects = [353];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7744,11 +7568,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 361;
+    Index = 357;
     Name = "TRACE 23";
     Desc = "";
     Targets = [];
-    Objects = [363];
+    Objects = [359];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7762,8 +7586,8 @@ Group
   Vehicle
   {
     Name = "TRACE 23";
-    Index = 362;
-    LinkTrId = 363;
+    Index = 358;
+    LinkTrId = 359;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7806,7 +7630,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 363;
+    Index = 359;
     Name = "TRACE 23 entity";
     Desc = "";
     Targets = [];
@@ -7818,14 +7642,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 362;
+    MisObjID = 358;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 361;
-        TarId = 364;
+        CmdId = 357;
+        TarId = 360;
       }
 
       
@@ -7837,10 +7661,10 @@ Group
   
   MCU_Timer
   {
-    Index = 364;
+    Index = 360;
     Name = "TRACE 23 DELETE DELAY";
     Desc = "";
-    Targets = [365];
+    Targets = [361];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -7855,11 +7679,11 @@ Group
   
   MCU_Delete
   {
-    Index = 365;
+    Index = 361;
     Name = "TRACE 23 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [362];
+    Objects = [358];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7871,11 +7695,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 366;
+    Index = 362;
     Name = "TRACE 24";
     Desc = "";
     Targets = [];
-    Objects = [368];
+    Objects = [364];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7889,8 +7713,8 @@ Group
   Vehicle
   {
     Name = "TRACE 24";
-    Index = 367;
-    LinkTrId = 368;
+    Index = 363;
+    LinkTrId = 364;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7933,7 +7757,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 368;
+    Index = 364;
     Name = "TRACE 24 entity";
     Desc = "";
     Targets = [];
@@ -7945,14 +7769,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 367;
+    MisObjID = 363;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 366;
-        TarId = 369;
+        CmdId = 362;
+        TarId = 365;
       }
 
       
@@ -7964,10 +7788,10 @@ Group
   
   MCU_Timer
   {
-    Index = 369;
+    Index = 365;
     Name = "TRACE 24 DELETE DELAY";
     Desc = "";
-    Targets = [370];
+    Targets = [366];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -7982,11 +7806,11 @@ Group
   
   MCU_Delete
   {
-    Index = 370;
+    Index = 366;
     Name = "TRACE 24 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [367];
+    Objects = [363];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -7998,11 +7822,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 371;
+    Index = 367;
     Name = "TRACE 25";
     Desc = "";
     Targets = [];
-    Objects = [373];
+    Objects = [369];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8016,8 +7840,8 @@ Group
   Vehicle
   {
     Name = "TRACE 25";
-    Index = 372;
-    LinkTrId = 373;
+    Index = 368;
+    LinkTrId = 369;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8060,7 +7884,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 373;
+    Index = 369;
     Name = "TRACE 25 entity";
     Desc = "";
     Targets = [];
@@ -8072,14 +7896,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 372;
+    MisObjID = 368;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 371;
-        TarId = 374;
+        CmdId = 367;
+        TarId = 370;
       }
 
       
@@ -8091,10 +7915,10 @@ Group
   
   MCU_Timer
   {
-    Index = 374;
+    Index = 370;
     Name = "TRACE 25 DELETE DELAY";
     Desc = "";
-    Targets = [375];
+    Targets = [371];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -8109,11 +7933,11 @@ Group
   
   MCU_Delete
   {
-    Index = 375;
+    Index = 371;
     Name = "TRACE 25 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [372];
+    Objects = [368];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8125,11 +7949,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 376;
+    Index = 372;
     Name = "TRACE 26";
     Desc = "";
     Targets = [];
-    Objects = [378];
+    Objects = [374];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8143,8 +7967,8 @@ Group
   Vehicle
   {
     Name = "TRACE 26";
-    Index = 377;
-    LinkTrId = 378;
+    Index = 373;
+    LinkTrId = 374;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8187,7 +8011,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 378;
+    Index = 374;
     Name = "TRACE 26 entity";
     Desc = "";
     Targets = [];
@@ -8199,14 +8023,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 377;
+    MisObjID = 373;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 376;
-        TarId = 379;
+        CmdId = 372;
+        TarId = 375;
       }
 
       
@@ -8218,10 +8042,10 @@ Group
   
   MCU_Timer
   {
-    Index = 379;
+    Index = 375;
     Name = "TRACE 26 DELETE DELAY";
     Desc = "";
-    Targets = [380];
+    Targets = [376];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -8236,11 +8060,11 @@ Group
   
   MCU_Delete
   {
-    Index = 380;
+    Index = 376;
     Name = "TRACE 26 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [377];
+    Objects = [373];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8252,11 +8076,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 381;
+    Index = 377;
     Name = "TRACE 27";
     Desc = "";
     Targets = [];
-    Objects = [383];
+    Objects = [379];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8270,8 +8094,8 @@ Group
   Vehicle
   {
     Name = "TRACE 27";
-    Index = 382;
-    LinkTrId = 383;
+    Index = 378;
+    LinkTrId = 379;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8314,7 +8138,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 383;
+    Index = 379;
     Name = "TRACE 27 entity";
     Desc = "";
     Targets = [];
@@ -8326,14 +8150,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 382;
+    MisObjID = 378;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 381;
-        TarId = 384;
+        CmdId = 377;
+        TarId = 380;
       }
 
       
@@ -8345,10 +8169,10 @@ Group
   
   MCU_Timer
   {
-    Index = 384;
+    Index = 380;
     Name = "TRACE 27 DELETE DELAY";
     Desc = "";
-    Targets = [385];
+    Targets = [381];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -8363,11 +8187,11 @@ Group
   
   MCU_Delete
   {
-    Index = 385;
+    Index = 381;
     Name = "TRACE 27 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [382];
+    Objects = [378];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8379,11 +8203,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 386;
+    Index = 382;
     Name = "TRACE 28";
     Desc = "";
     Targets = [];
-    Objects = [388];
+    Objects = [384];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8397,8 +8221,8 @@ Group
   Vehicle
   {
     Name = "TRACE 28";
-    Index = 387;
-    LinkTrId = 388;
+    Index = 383;
+    LinkTrId = 384;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8441,7 +8265,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 388;
+    Index = 384;
     Name = "TRACE 28 entity";
     Desc = "";
     Targets = [];
@@ -8453,14 +8277,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 387;
+    MisObjID = 383;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 386;
-        TarId = 389;
+        CmdId = 382;
+        TarId = 385;
       }
 
       
@@ -8472,10 +8296,10 @@ Group
   
   MCU_Timer
   {
-    Index = 389;
+    Index = 385;
     Name = "TRACE 28 DELETE DELAY";
     Desc = "";
-    Targets = [390];
+    Targets = [386];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -8490,11 +8314,11 @@ Group
   
   MCU_Delete
   {
-    Index = 390;
+    Index = 386;
     Name = "TRACE 28 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [387];
+    Objects = [383];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8506,11 +8330,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 391;
+    Index = 387;
     Name = "TRACE 29";
     Desc = "";
     Targets = [];
-    Objects = [393];
+    Objects = [389];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8524,8 +8348,8 @@ Group
   Vehicle
   {
     Name = "TRACE 29";
-    Index = 392;
-    LinkTrId = 393;
+    Index = 388;
+    LinkTrId = 389;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8568,7 +8392,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 393;
+    Index = 389;
     Name = "TRACE 29 entity";
     Desc = "";
     Targets = [];
@@ -8580,14 +8404,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 392;
+    MisObjID = 388;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 391;
-        TarId = 394;
+        CmdId = 387;
+        TarId = 390;
       }
 
       
@@ -8599,10 +8423,10 @@ Group
   
   MCU_Timer
   {
-    Index = 394;
+    Index = 390;
     Name = "TRACE 29 DELETE DELAY";
     Desc = "";
-    Targets = [395];
+    Targets = [391];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -8617,11 +8441,11 @@ Group
   
   MCU_Delete
   {
-    Index = 395;
+    Index = 391;
     Name = "TRACE 29 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [392];
+    Objects = [388];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8633,11 +8457,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 396;
+    Index = 392;
     Name = "TRACE 30";
     Desc = "";
     Targets = [];
-    Objects = [398];
+    Objects = [394];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8651,8 +8475,8 @@ Group
   Vehicle
   {
     Name = "TRACE 30";
-    Index = 397;
-    LinkTrId = 398;
+    Index = 393;
+    LinkTrId = 394;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8695,7 +8519,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 398;
+    Index = 394;
     Name = "TRACE 30 entity";
     Desc = "";
     Targets = [];
@@ -8707,14 +8531,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 397;
+    MisObjID = 393;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 396;
-        TarId = 399;
+        CmdId = 392;
+        TarId = 395;
       }
 
       
@@ -8726,10 +8550,10 @@ Group
   
   MCU_Timer
   {
-    Index = 399;
+    Index = 395;
     Name = "TRACE 30 DELETE DELAY";
     Desc = "";
-    Targets = [400];
+    Targets = [396];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -8744,11 +8568,11 @@ Group
   
   MCU_Delete
   {
-    Index = 400;
+    Index = 396;
     Name = "TRACE 30 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [397];
+    Objects = [393];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8760,11 +8584,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 401;
+    Index = 397;
     Name = "TRACE 31";
     Desc = "";
     Targets = [];
-    Objects = [403];
+    Objects = [399];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8778,8 +8602,8 @@ Group
   Vehicle
   {
     Name = "TRACE 31";
-    Index = 402;
-    LinkTrId = 403;
+    Index = 398;
+    LinkTrId = 399;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8822,7 +8646,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 403;
+    Index = 399;
     Name = "TRACE 31 entity";
     Desc = "";
     Targets = [];
@@ -8834,14 +8658,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 402;
+    MisObjID = 398;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 401;
-        TarId = 404;
+        CmdId = 397;
+        TarId = 400;
       }
 
       
@@ -8853,10 +8677,10 @@ Group
   
   MCU_Timer
   {
-    Index = 404;
+    Index = 400;
     Name = "TRACE 31 DELETE DELAY";
     Desc = "";
-    Targets = [405];
+    Targets = [401];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -8871,11 +8695,11 @@ Group
   
   MCU_Delete
   {
-    Index = 405;
+    Index = 401;
     Name = "TRACE 31 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [402];
+    Objects = [398];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8887,11 +8711,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 406;
+    Index = 402;
     Name = "TRACE 32";
     Desc = "";
     Targets = [];
-    Objects = [408];
+    Objects = [404];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8905,8 +8729,8 @@ Group
   Vehicle
   {
     Name = "TRACE 32";
-    Index = 407;
-    LinkTrId = 408;
+    Index = 403;
+    LinkTrId = 404;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -8949,7 +8773,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 408;
+    Index = 404;
     Name = "TRACE 32 entity";
     Desc = "";
     Targets = [];
@@ -8961,14 +8785,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 407;
+    MisObjID = 403;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 406;
-        TarId = 409;
+        CmdId = 402;
+        TarId = 405;
       }
 
       
@@ -8980,10 +8804,10 @@ Group
   
   MCU_Timer
   {
-    Index = 409;
+    Index = 405;
     Name = "TRACE 32 DELETE DELAY";
     Desc = "";
-    Targets = [410];
+    Targets = [406];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -8998,11 +8822,11 @@ Group
   
   MCU_Delete
   {
-    Index = 410;
+    Index = 406;
     Name = "TRACE 32 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [407];
+    Objects = [403];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9014,11 +8838,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 411;
+    Index = 407;
     Name = "TRACE 33";
     Desc = "";
     Targets = [];
-    Objects = [413];
+    Objects = [409];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9032,8 +8856,8 @@ Group
   Vehicle
   {
     Name = "TRACE 33";
-    Index = 412;
-    LinkTrId = 413;
+    Index = 408;
+    LinkTrId = 409;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9076,7 +8900,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 413;
+    Index = 409;
     Name = "TRACE 33 entity";
     Desc = "";
     Targets = [];
@@ -9088,14 +8912,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 412;
+    MisObjID = 408;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 411;
-        TarId = 414;
+        CmdId = 407;
+        TarId = 410;
       }
 
       
@@ -9107,10 +8931,10 @@ Group
   
   MCU_Timer
   {
-    Index = 414;
+    Index = 410;
     Name = "TRACE 33 DELETE DELAY";
     Desc = "";
-    Targets = [415];
+    Targets = [411];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -9125,11 +8949,11 @@ Group
   
   MCU_Delete
   {
-    Index = 415;
+    Index = 411;
     Name = "TRACE 33 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [412];
+    Objects = [408];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9141,11 +8965,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 416;
+    Index = 412;
     Name = "TRACE 34";
     Desc = "";
     Targets = [];
-    Objects = [418];
+    Objects = [414];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9159,8 +8983,8 @@ Group
   Vehicle
   {
     Name = "TRACE 34";
-    Index = 417;
-    LinkTrId = 418;
+    Index = 413;
+    LinkTrId = 414;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9203,7 +9027,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 418;
+    Index = 414;
     Name = "TRACE 34 entity";
     Desc = "";
     Targets = [];
@@ -9215,14 +9039,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 417;
+    MisObjID = 413;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 416;
-        TarId = 419;
+        CmdId = 412;
+        TarId = 415;
       }
 
       
@@ -9234,10 +9058,10 @@ Group
   
   MCU_Timer
   {
-    Index = 419;
+    Index = 415;
     Name = "TRACE 34 DELETE DELAY";
     Desc = "";
-    Targets = [420];
+    Targets = [416];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -9252,11 +9076,11 @@ Group
   
   MCU_Delete
   {
-    Index = 420;
+    Index = 416;
     Name = "TRACE 34 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [417];
+    Objects = [413];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9268,11 +9092,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 421;
+    Index = 417;
     Name = "TRACE 35";
     Desc = "";
     Targets = [];
-    Objects = [423];
+    Objects = [419];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9286,8 +9110,8 @@ Group
   Vehicle
   {
     Name = "TRACE 35";
-    Index = 422;
-    LinkTrId = 423;
+    Index = 418;
+    LinkTrId = 419;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9330,7 +9154,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 423;
+    Index = 419;
     Name = "TRACE 35 entity";
     Desc = "";
     Targets = [];
@@ -9342,14 +9166,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 422;
+    MisObjID = 418;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 421;
-        TarId = 424;
+        CmdId = 417;
+        TarId = 420;
       }
 
       
@@ -9361,10 +9185,10 @@ Group
   
   MCU_Timer
   {
-    Index = 424;
+    Index = 420;
     Name = "TRACE 35 DELETE DELAY";
     Desc = "";
-    Targets = [425];
+    Targets = [421];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -9379,11 +9203,11 @@ Group
   
   MCU_Delete
   {
-    Index = 425;
+    Index = 421;
     Name = "TRACE 35 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [422];
+    Objects = [418];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9395,11 +9219,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 426;
+    Index = 422;
     Name = "TRACE 36";
     Desc = "";
     Targets = [];
-    Objects = [428];
+    Objects = [424];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9413,8 +9237,8 @@ Group
   Vehicle
   {
     Name = "TRACE 36";
-    Index = 427;
-    LinkTrId = 428;
+    Index = 423;
+    LinkTrId = 424;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9457,7 +9281,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 428;
+    Index = 424;
     Name = "TRACE 36 entity";
     Desc = "";
     Targets = [];
@@ -9469,14 +9293,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 427;
+    MisObjID = 423;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 426;
-        TarId = 429;
+        CmdId = 422;
+        TarId = 425;
       }
 
       
@@ -9488,10 +9312,10 @@ Group
   
   MCU_Timer
   {
-    Index = 429;
+    Index = 425;
     Name = "TRACE 36 DELETE DELAY";
     Desc = "";
-    Targets = [430];
+    Targets = [426];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -9506,11 +9330,11 @@ Group
   
   MCU_Delete
   {
-    Index = 430;
+    Index = 426;
     Name = "TRACE 36 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [427];
+    Objects = [423];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9522,11 +9346,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 431;
+    Index = 427;
     Name = "TRACE 37";
     Desc = "";
     Targets = [];
-    Objects = [433];
+    Objects = [429];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9540,8 +9364,8 @@ Group
   Vehicle
   {
     Name = "TRACE 37";
-    Index = 432;
-    LinkTrId = 433;
+    Index = 428;
+    LinkTrId = 429;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9584,7 +9408,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 433;
+    Index = 429;
     Name = "TRACE 37 entity";
     Desc = "";
     Targets = [];
@@ -9596,14 +9420,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 432;
+    MisObjID = 428;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 431;
-        TarId = 434;
+        CmdId = 427;
+        TarId = 430;
       }
 
       
@@ -9615,10 +9439,10 @@ Group
   
   MCU_Timer
   {
-    Index = 434;
+    Index = 430;
     Name = "TRACE 37 DELETE DELAY";
     Desc = "";
-    Targets = [435];
+    Targets = [431];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -9633,11 +9457,11 @@ Group
   
   MCU_Delete
   {
-    Index = 435;
+    Index = 431;
     Name = "TRACE 37 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [432];
+    Objects = [428];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9649,11 +9473,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 436;
+    Index = 432;
     Name = "TRACE 38";
     Desc = "";
     Targets = [];
-    Objects = [438];
+    Objects = [434];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9667,8 +9491,8 @@ Group
   Vehicle
   {
     Name = "TRACE 38";
-    Index = 437;
-    LinkTrId = 438;
+    Index = 433;
+    LinkTrId = 434;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9711,7 +9535,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 438;
+    Index = 434;
     Name = "TRACE 38 entity";
     Desc = "";
     Targets = [];
@@ -9723,14 +9547,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 437;
+    MisObjID = 433;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 436;
-        TarId = 439;
+        CmdId = 432;
+        TarId = 435;
       }
 
       
@@ -9742,10 +9566,10 @@ Group
   
   MCU_Timer
   {
-    Index = 439;
+    Index = 435;
     Name = "TRACE 38 DELETE DELAY";
     Desc = "";
-    Targets = [440];
+    Targets = [436];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -9760,11 +9584,11 @@ Group
   
   MCU_Delete
   {
-    Index = 440;
+    Index = 436;
     Name = "TRACE 38 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [437];
+    Objects = [433];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9776,11 +9600,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 441;
+    Index = 437;
     Name = "TRACE 39";
     Desc = "";
     Targets = [];
-    Objects = [443];
+    Objects = [439];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9794,8 +9618,8 @@ Group
   Vehicle
   {
     Name = "TRACE 39";
-    Index = 442;
-    LinkTrId = 443;
+    Index = 438;
+    LinkTrId = 439;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9838,7 +9662,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 443;
+    Index = 439;
     Name = "TRACE 39 entity";
     Desc = "";
     Targets = [];
@@ -9850,14 +9674,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 442;
+    MisObjID = 438;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 441;
-        TarId = 444;
+        CmdId = 437;
+        TarId = 440;
       }
 
       
@@ -9869,10 +9693,10 @@ Group
   
   MCU_Timer
   {
-    Index = 444;
+    Index = 440;
     Name = "TRACE 39 DELETE DELAY";
     Desc = "";
-    Targets = [445];
+    Targets = [441];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -9887,11 +9711,11 @@ Group
   
   MCU_Delete
   {
-    Index = 445;
+    Index = 441;
     Name = "TRACE 39 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [442];
+    Objects = [438];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9903,11 +9727,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 446;
+    Index = 442;
     Name = "TRACE 40";
     Desc = "";
     Targets = [];
-    Objects = [448];
+    Objects = [444];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9921,8 +9745,8 @@ Group
   Vehicle
   {
     Name = "TRACE 40";
-    Index = 447;
-    LinkTrId = 448;
+    Index = 443;
+    LinkTrId = 444;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -9965,7 +9789,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 448;
+    Index = 444;
     Name = "TRACE 40 entity";
     Desc = "";
     Targets = [];
@@ -9977,14 +9801,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 447;
+    MisObjID = 443;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 446;
-        TarId = 449;
+        CmdId = 442;
+        TarId = 445;
       }
 
       
@@ -9996,10 +9820,10 @@ Group
   
   MCU_Timer
   {
-    Index = 449;
+    Index = 445;
     Name = "TRACE 40 DELETE DELAY";
     Desc = "";
-    Targets = [450];
+    Targets = [446];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -10014,11 +9838,11 @@ Group
   
   MCU_Delete
   {
-    Index = 450;
+    Index = 446;
     Name = "TRACE 40 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [447];
+    Objects = [443];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10030,11 +9854,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 451;
+    Index = 447;
     Name = "TRACE 41";
     Desc = "";
     Targets = [];
-    Objects = [453];
+    Objects = [449];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10048,8 +9872,8 @@ Group
   Vehicle
   {
     Name = "TRACE 41";
-    Index = 452;
-    LinkTrId = 453;
+    Index = 448;
+    LinkTrId = 449;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10092,7 +9916,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 453;
+    Index = 449;
     Name = "TRACE 41 entity";
     Desc = "";
     Targets = [];
@@ -10104,14 +9928,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 452;
+    MisObjID = 448;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 451;
-        TarId = 454;
+        CmdId = 447;
+        TarId = 450;
       }
 
       
@@ -10123,10 +9947,10 @@ Group
   
   MCU_Timer
   {
-    Index = 454;
+    Index = 450;
     Name = "TRACE 41 DELETE DELAY";
     Desc = "";
-    Targets = [455];
+    Targets = [451];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -10141,11 +9965,11 @@ Group
   
   MCU_Delete
   {
-    Index = 455;
+    Index = 451;
     Name = "TRACE 41 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [452];
+    Objects = [448];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10157,11 +9981,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 456;
+    Index = 452;
     Name = "TRACE 42";
     Desc = "";
     Targets = [];
-    Objects = [458];
+    Objects = [454];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10175,8 +9999,8 @@ Group
   Vehicle
   {
     Name = "TRACE 42";
-    Index = 457;
-    LinkTrId = 458;
+    Index = 453;
+    LinkTrId = 454;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10219,7 +10043,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 458;
+    Index = 454;
     Name = "TRACE 42 entity";
     Desc = "";
     Targets = [];
@@ -10231,14 +10055,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 457;
+    MisObjID = 453;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 456;
-        TarId = 459;
+        CmdId = 452;
+        TarId = 455;
       }
 
       
@@ -10250,10 +10074,10 @@ Group
   
   MCU_Timer
   {
-    Index = 459;
+    Index = 455;
     Name = "TRACE 42 DELETE DELAY";
     Desc = "";
-    Targets = [460];
+    Targets = [456];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -10268,11 +10092,11 @@ Group
   
   MCU_Delete
   {
-    Index = 460;
+    Index = 456;
     Name = "TRACE 42 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [457];
+    Objects = [453];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10284,11 +10108,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 461;
+    Index = 457;
     Name = "TRACE 43";
     Desc = "";
     Targets = [];
-    Objects = [463];
+    Objects = [459];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10302,8 +10126,8 @@ Group
   Vehicle
   {
     Name = "TRACE 43";
-    Index = 462;
-    LinkTrId = 463;
+    Index = 458;
+    LinkTrId = 459;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10346,7 +10170,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 463;
+    Index = 459;
     Name = "TRACE 43 entity";
     Desc = "";
     Targets = [];
@@ -10358,14 +10182,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 462;
+    MisObjID = 458;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 461;
-        TarId = 464;
+        CmdId = 457;
+        TarId = 460;
       }
 
       
@@ -10377,10 +10201,10 @@ Group
   
   MCU_Timer
   {
-    Index = 464;
+    Index = 460;
     Name = "TRACE 43 DELETE DELAY";
     Desc = "";
-    Targets = [465];
+    Targets = [461];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -10395,11 +10219,11 @@ Group
   
   MCU_Delete
   {
-    Index = 465;
+    Index = 461;
     Name = "TRACE 43 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [462];
+    Objects = [458];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10411,11 +10235,11 @@ Group
   
   MCU_Spawner
   {
-    Index = 466;
+    Index = 462;
     Name = "TRACE 44";
     Desc = "";
     Targets = [];
-    Objects = [468];
+    Objects = [464];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10429,8 +10253,8 @@ Group
   Vehicle
   {
     Name = "TRACE 44";
-    Index = 467;
-    LinkTrId = 468;
+    Index = 463;
+    LinkTrId = 464;
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
@@ -10473,7 +10297,7 @@ Group
   
   MCU_TR_Entity
   {
-    Index = 468;
+    Index = 464;
     Name = "TRACE 44 entity";
     Desc = "";
     Targets = [];
@@ -10485,14 +10309,14 @@ Group
     YOri = 0;
     ZOri = 0;
     Enabled = 0;
-    MisObjID = 467;
+    MisObjID = 463;
     OnReports
     {
       OnReport
       {
         Type = 0;
-        CmdId = 466;
-        TarId = 469;
+        CmdId = 462;
+        TarId = 465;
       }
 
       
@@ -10504,10 +10328,10 @@ Group
   
   MCU_Timer
   {
-    Index = 469;
+    Index = 465;
     Name = "TRACE 44 DELETE DELAY";
     Desc = "";
-    Targets = [470];
+    Targets = [466];
     Objects = [];
     XPos = 400000.000;
     YPos = 0.000;
@@ -10522,11 +10346,773 @@ Group
   
   MCU_Delete
   {
-    Index = 470;
+    Index = 466;
     Name = "TRACE 44 DELETE";
     Desc = "";
     Targets = [];
-    Objects = [467];
+    Objects = [463];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+  }
+
+  
+  MCU_Spawner
+  {
+    Index = 467;
+    Name = "TRACE 45";
+    Desc = "";
+    Targets = [];
+    Objects = [469];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    SpawnAtMe = 0;
+  }
+
+  
+  Vehicle
+  {
+    Name = "TRACE 45";
+    Index = 468;
+    LinkTrId = 469;
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
+    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
+    Desc = "";
+    Country = 0;
+    NumberInFormation = 0;
+    Vulnerable = 0;
+    Engageable = 0;
+    LimitAmmo = 1;
+    AILevel = 2;
+    DamageReport = 50;
+    DamageThreshold = 1;
+    DeleteAfterDeath = 1;
+    CoopStart = 0;
+    Spotter = -1;
+    BeaconChannel = 0;
+    Callsign = 0;
+    PayloadId = 0;
+    ModMask = 10;
+    Fuel = 1;
+    Callnum = 0;
+    Skin = "";
+    BotSkin = "";
+    RepairTimeMultiplier = 0;
+    RehealTimeMultiplier = 0;
+    RearmTimeMultiplier = 0;
+    RefuelTimeMultiplier = 0;
+    MaintenanceRadius = 10;
+    TCode = "%20%20%20%20%20%20%20%20";
+    TCodeColor = "11111111";
+    TrailerAtStart = 1;
+    PinToTerrain = 1;
+  }
+
+  
+  MCU_TR_Entity
+  {
+    Index = 469;
+    Name = "TRACE 45 entity";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 0;
+    MisObjID = 468;
+    OnReports
+    {
+      OnReport
+      {
+        Type = 0;
+        CmdId = 467;
+        TarId = 470;
+      }
+
+      
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 470;
+    Name = "TRACE 45 DELETE DELAY";
+    Desc = "";
+    Targets = [471];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 1;
+    Random = 100;
+  }
+
+  
+  MCU_Delete
+  {
+    Index = 471;
+    Name = "TRACE 45 DELETE";
+    Desc = "";
+    Targets = [];
+    Objects = [468];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+  }
+
+  
+  MCU_Spawner
+  {
+    Index = 472;
+    Name = "TRACE 46";
+    Desc = "";
+    Targets = [];
+    Objects = [474];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    SpawnAtMe = 0;
+  }
+
+  
+  Vehicle
+  {
+    Name = "TRACE 46";
+    Index = 473;
+    LinkTrId = 474;
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
+    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
+    Desc = "";
+    Country = 0;
+    NumberInFormation = 0;
+    Vulnerable = 0;
+    Engageable = 0;
+    LimitAmmo = 1;
+    AILevel = 2;
+    DamageReport = 50;
+    DamageThreshold = 1;
+    DeleteAfterDeath = 1;
+    CoopStart = 0;
+    Spotter = -1;
+    BeaconChannel = 0;
+    Callsign = 0;
+    PayloadId = 0;
+    ModMask = 10;
+    Fuel = 1;
+    Callnum = 0;
+    Skin = "";
+    BotSkin = "";
+    RepairTimeMultiplier = 0;
+    RehealTimeMultiplier = 0;
+    RearmTimeMultiplier = 0;
+    RefuelTimeMultiplier = 0;
+    MaintenanceRadius = 10;
+    TCode = "%20%20%20%20%20%20%20%20";
+    TCodeColor = "11111111";
+    TrailerAtStart = 1;
+    PinToTerrain = 1;
+  }
+
+  
+  MCU_TR_Entity
+  {
+    Index = 474;
+    Name = "TRACE 46 entity";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 0;
+    MisObjID = 473;
+    OnReports
+    {
+      OnReport
+      {
+        Type = 0;
+        CmdId = 472;
+        TarId = 475;
+      }
+
+      
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 475;
+    Name = "TRACE 46 DELETE DELAY";
+    Desc = "";
+    Targets = [476];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 1;
+    Random = 100;
+  }
+
+  
+  MCU_Delete
+  {
+    Index = 476;
+    Name = "TRACE 46 DELETE";
+    Desc = "";
+    Targets = [];
+    Objects = [473];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+  }
+
+  
+  MCU_Spawner
+  {
+    Index = 477;
+    Name = "TRACE 47";
+    Desc = "";
+    Targets = [];
+    Objects = [479];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    SpawnAtMe = 0;
+  }
+
+  
+  Vehicle
+  {
+    Name = "TRACE 47";
+    Index = 478;
+    LinkTrId = 479;
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
+    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
+    Desc = "";
+    Country = 0;
+    NumberInFormation = 0;
+    Vulnerable = 0;
+    Engageable = 0;
+    LimitAmmo = 1;
+    AILevel = 2;
+    DamageReport = 50;
+    DamageThreshold = 1;
+    DeleteAfterDeath = 1;
+    CoopStart = 0;
+    Spotter = -1;
+    BeaconChannel = 0;
+    Callsign = 0;
+    PayloadId = 0;
+    ModMask = 10;
+    Fuel = 1;
+    Callnum = 0;
+    Skin = "";
+    BotSkin = "";
+    RepairTimeMultiplier = 0;
+    RehealTimeMultiplier = 0;
+    RearmTimeMultiplier = 0;
+    RefuelTimeMultiplier = 0;
+    MaintenanceRadius = 10;
+    TCode = "%20%20%20%20%20%20%20%20";
+    TCodeColor = "11111111";
+    TrailerAtStart = 1;
+    PinToTerrain = 1;
+  }
+
+  
+  MCU_TR_Entity
+  {
+    Index = 479;
+    Name = "TRACE 47 entity";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 0;
+    MisObjID = 478;
+    OnReports
+    {
+      OnReport
+      {
+        Type = 0;
+        CmdId = 477;
+        TarId = 480;
+      }
+
+      
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 480;
+    Name = "TRACE 47 DELETE DELAY";
+    Desc = "";
+    Targets = [481];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 1;
+    Random = 100;
+  }
+
+  
+  MCU_Delete
+  {
+    Index = 481;
+    Name = "TRACE 47 DELETE";
+    Desc = "";
+    Targets = [];
+    Objects = [478];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+  }
+
+  
+  MCU_Spawner
+  {
+    Index = 482;
+    Name = "TRACE 48";
+    Desc = "";
+    Targets = [];
+    Objects = [484];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    SpawnAtMe = 0;
+  }
+
+  
+  Vehicle
+  {
+    Name = "TRACE 48";
+    Index = 483;
+    LinkTrId = 484;
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
+    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
+    Desc = "";
+    Country = 0;
+    NumberInFormation = 0;
+    Vulnerable = 0;
+    Engageable = 0;
+    LimitAmmo = 1;
+    AILevel = 2;
+    DamageReport = 50;
+    DamageThreshold = 1;
+    DeleteAfterDeath = 1;
+    CoopStart = 0;
+    Spotter = -1;
+    BeaconChannel = 0;
+    Callsign = 0;
+    PayloadId = 0;
+    ModMask = 10;
+    Fuel = 1;
+    Callnum = 0;
+    Skin = "";
+    BotSkin = "";
+    RepairTimeMultiplier = 0;
+    RehealTimeMultiplier = 0;
+    RearmTimeMultiplier = 0;
+    RefuelTimeMultiplier = 0;
+    MaintenanceRadius = 10;
+    TCode = "%20%20%20%20%20%20%20%20";
+    TCodeColor = "11111111";
+    TrailerAtStart = 1;
+    PinToTerrain = 1;
+  }
+
+  
+  MCU_TR_Entity
+  {
+    Index = 484;
+    Name = "TRACE 48 entity";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 0;
+    MisObjID = 483;
+    OnReports
+    {
+      OnReport
+      {
+        Type = 0;
+        CmdId = 482;
+        TarId = 485;
+      }
+
+      
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 485;
+    Name = "TRACE 48 DELETE DELAY";
+    Desc = "";
+    Targets = [486];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 1;
+    Random = 100;
+  }
+
+  
+  MCU_Delete
+  {
+    Index = 486;
+    Name = "TRACE 48 DELETE";
+    Desc = "";
+    Targets = [];
+    Objects = [483];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+  }
+
+  
+  MCU_Spawner
+  {
+    Index = 487;
+    Name = "TRACE 49";
+    Desc = "";
+    Targets = [];
+    Objects = [489];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    SpawnAtMe = 0;
+  }
+
+  
+  Vehicle
+  {
+    Name = "TRACE 49";
+    Index = 488;
+    LinkTrId = 489;
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
+    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
+    Desc = "";
+    Country = 0;
+    NumberInFormation = 0;
+    Vulnerable = 0;
+    Engageable = 0;
+    LimitAmmo = 1;
+    AILevel = 2;
+    DamageReport = 50;
+    DamageThreshold = 1;
+    DeleteAfterDeath = 1;
+    CoopStart = 0;
+    Spotter = -1;
+    BeaconChannel = 0;
+    Callsign = 0;
+    PayloadId = 0;
+    ModMask = 10;
+    Fuel = 1;
+    Callnum = 0;
+    Skin = "";
+    BotSkin = "";
+    RepairTimeMultiplier = 0;
+    RehealTimeMultiplier = 0;
+    RearmTimeMultiplier = 0;
+    RefuelTimeMultiplier = 0;
+    MaintenanceRadius = 10;
+    TCode = "%20%20%20%20%20%20%20%20";
+    TCodeColor = "11111111";
+    TrailerAtStart = 1;
+    PinToTerrain = 1;
+  }
+
+  
+  MCU_TR_Entity
+  {
+    Index = 489;
+    Name = "TRACE 49 entity";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 0;
+    MisObjID = 488;
+    OnReports
+    {
+      OnReport
+      {
+        Type = 0;
+        CmdId = 487;
+        TarId = 490;
+      }
+
+      
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 490;
+    Name = "TRACE 49 DELETE DELAY";
+    Desc = "";
+    Targets = [491];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 1;
+    Random = 100;
+  }
+
+  
+  MCU_Delete
+  {
+    Index = 491;
+    Name = "TRACE 49 DELETE";
+    Desc = "";
+    Targets = [];
+    Objects = [488];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+  }
+
+  
+  MCU_Spawner
+  {
+    Index = 492;
+    Name = "TRACE 50";
+    Desc = "";
+    Targets = [];
+    Objects = [494];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    SpawnAtMe = 0;
+  }
+
+  
+  Vehicle
+  {
+    Name = "TRACE 50";
+    Index = 493;
+    LinkTrId = 494;
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
+    Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
+    Desc = "";
+    Country = 0;
+    NumberInFormation = 0;
+    Vulnerable = 0;
+    Engageable = 0;
+    LimitAmmo = 1;
+    AILevel = 2;
+    DamageReport = 50;
+    DamageThreshold = 1;
+    DeleteAfterDeath = 1;
+    CoopStart = 0;
+    Spotter = -1;
+    BeaconChannel = 0;
+    Callsign = 0;
+    PayloadId = 0;
+    ModMask = 10;
+    Fuel = 1;
+    Callnum = 0;
+    Skin = "";
+    BotSkin = "";
+    RepairTimeMultiplier = 0;
+    RehealTimeMultiplier = 0;
+    RearmTimeMultiplier = 0;
+    RefuelTimeMultiplier = 0;
+    MaintenanceRadius = 10;
+    TCode = "%20%20%20%20%20%20%20%20";
+    TCodeColor = "11111111";
+    TrailerAtStart = 1;
+    PinToTerrain = 1;
+  }
+
+  
+  MCU_TR_Entity
+  {
+    Index = 494;
+    Name = "TRACE 50 entity";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 0;
+    MisObjID = 493;
+    OnReports
+    {
+      OnReport
+      {
+        Type = 0;
+        CmdId = 492;
+        TarId = 495;
+      }
+
+      
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 495;
+    Name = "TRACE 50 DELETE DELAY";
+    Desc = "";
+    Targets = [496];
+    Objects = [];
+    XPos = 400000.000;
+    YPos = 0.000;
+    ZPos = 50000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 1;
+    Random = 100;
+  }
+
+  
+  MCU_Delete
+  {
+    Index = 496;
+    Name = "TRACE 50 DELETE";
+    Desc = "";
+    Targets = [];
+    Objects = [493];
     XPos = 400000.000;
     YPos = 0.000;
     ZPos = 50000.000;
