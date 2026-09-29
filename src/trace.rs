@@ -1,5 +1,6 @@
 #![allow(dead_code)] // P14: removed in step 9T
-//! Opt-in mission breadcrumbs. Carrier behaviour is UNVERIFIED until flight 0.
+//! Opt-in mission breadcrumbs. Flight 0 ruled out objectives for dogfight rounds;
+//! spawn logging on every firing remains UNVERIFIED.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
@@ -72,16 +73,13 @@ impl Default for ObjectiveStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TraceCarrier {
     Objective(ObjectiveStyle),
+    // Flight 0 (2026-09-28): the first objective breadcrumb ended the Korea
+    // dogfight round (MissionType 2), so use the Spawn fallback (risk t3).
+    #[default]
     Spawn,
-}
-
-impl Default for TraceCarrier {
-    fn default() -> Self {
-        Self::Objective(ObjectiveStyle::default())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1020,7 +1018,7 @@ mod tests {
             &mut root,
             &sel,
             &mut next,
-            TraceCarrier::default(),
+            TraceCarrier::Objective(ObjectiveStyle::default()),
             &mut map,
         );
         assert_eq!(map.entries.len(), expected.len());
@@ -1092,7 +1090,12 @@ mod tests {
         let mut ids = HashSet::new();
         let mut positions = HashSet::new();
         for n in 0..6001 {
-            let blocks = breadcrumb(TraceCarrier::default(), &mut map, &mut next, source(n));
+            let blocks = breadcrumb(
+                TraceCarrier::Objective(ObjectiveStyle::default()),
+                &mut map,
+                &mut next,
+                source(n),
+            );
             assert_eq!(blocks.len(), 1);
             let e = map.entries.last().unwrap();
             assert!(ids.insert(e.breadcrumb_index));
@@ -1135,7 +1138,7 @@ mod tests {
                 ..TraceSelect::default()
             },
             &mut 100,
-            TraceCarrier::default(),
+            TraceCarrier::Objective(ObjectiveStyle::default()),
             &mut map,
         );
         assert_eq!(map.entries.len(), 1);
@@ -1311,8 +1314,9 @@ mod tests {
 
     #[test]
     fn trace_spawn_carrier_deletes_its_object() {
+        assert_eq!(TraceCarrier::default(), TraceCarrier::Spawn);
         let mut map = TraceMap::default();
-        let blocks = breadcrumb(TraceCarrier::Spawn, &mut map, &mut 100, source(1));
+        let blocks = breadcrumb(TraceCarrier::default(), &mut map, &mut 100, source(1));
         assert_eq!(blocks.len(), 5);
         let [spawn, vehicle, entity, delay, delete] = blocks.as_slice() else {
             unreachable!()
