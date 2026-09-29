@@ -1,6 +1,6 @@
-//! Offline mission-log replay. All AType/field meanings and the 50 Hz fallback
-//! are UNVERIFIED until a real flight-0 log is available. Raw fields survive
-//! unknown types, unknown keys and failed typed conversions.
+//! Offline mission-log replay. Flight 0 (2026-09-28) confirmed objective
+//! positions and mission end; the 50 Hz fallback remains UNVERIFIED. Raw
+//! fields survive unknown types, unknown keys and failed typed conversions.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
@@ -83,6 +83,7 @@ pub enum TypedRecord<'a> {
     },
     Takeoff(ObjectEvent),
     Landing(ObjectEvent),
+    MissionEnd,
     MissionObjective(ObjectiveEvent),
     PlayerPlane {
         plane_id: Option<i64>,
@@ -132,6 +133,7 @@ impl Record {
                 id: self.integer("PID"),
                 pos,
             }),
+            7 => TypedRecord::MissionEnd,
             8 => TypedRecord::MissionObjective(ObjectiveEvent {
                 id: self.integer("OBJID"),
                 pos,
@@ -203,8 +205,9 @@ fn position(text: &str) -> Option<Position> {
     }
 }
 
-/// Field boundaries are whitespace + identifier + ':', outside quotes and
-/// parentheses/brackets. This preserves unquoted multiword names and file paths.
+/// Fields start at whitespace + identifier + ':' or '(', outside quotes and
+/// parentheses/brackets. The server writes POS(...) and TARGETS() without a
+/// colon. Preserve their parentheses, unquoted multiword names and file paths.
 fn fields(line: &str) -> Vec<(String, String)> {
     let bytes = line.as_bytes();
     let mut starts = Vec::new();
@@ -243,15 +246,17 @@ fn fields(line: &str) -> Vec<(String, String)> {
             end += 1;
         }
         if bytes.get(end) == Some(&b':') {
-            starts.push((i, end));
+            starts.push((i, end, end + 1));
+        } else if bytes.get(end) == Some(&b'(') {
+            starts.push((i, end, end));
         }
     }
     starts
         .iter()
         .enumerate()
-        .map(|(n, &(start, end))| {
-            let until = starts.get(n + 1).map_or(line.len(), |&(start, _)| start);
-            (line[start..end].into(), line[end + 1..until].trim().into())
+        .map(|(n, &(start, end, value))| {
+            let until = starts.get(n + 1).map_or(line.len(), |&(start, _, _)| start);
+            (line[start..end].into(), line[value..until].trim().into())
         })
         .collect()
 }
@@ -452,22 +457,25 @@ pub struct Replay {
 fn breadcrumb_match(record: &Record, trace: &TraceMap) -> Option<usize> {
     match record.typed() {
         TypedRecord::MissionObjective(objective) => {
-            if let Some(id) = objective.id
-                && let Some(i) = trace.entries.iter().position(|e| {
+            if let Some((x, _, z)) = objective.pos {
+                let mut matches = trace.entries.iter().enumerate().filter(|(_, e)| {
+                    matches!(e.carrier, TraceCarrier::Objective(_))
+                        && (e.pos.0 - x).abs() <= 1.0
+                        && (e.pos.1 - z).abs() <= 1.0
+                });
+                if let Some((i, _)) = matches.next() {
+                    return matches.next().is_none().then_some(i);
+                }
+            }
+            // Flight 0, 2026-09-28: OBJID is not the MCU index (473 vs 305).
+            // Position is the primary key for objectives; retain OBJID only
+            // as a compatibility fallback when no position matches.
+            objective.id.and_then(|id| {
+                trace.entries.iter().position(|e| {
                     matches!(e.carrier, TraceCarrier::Objective(_))
                         && i64::from(e.breadcrumb_index) == id
                 })
-            {
-                return Some(i);
-            }
-            let (x, _, z) = objective.pos?;
-            let mut matches = trace.entries.iter().enumerate().filter(|(_, e)| {
-                matches!(e.carrier, TraceCarrier::Objective(_))
-                    && (e.pos.0 - x).abs() <= 1.0
-                    && (e.pos.1 - z).abs() <= 1.0
-            });
-            let (i, _) = matches.next()?;
-            matches.next().is_none().then_some(i)
+            })
         }
         TypedRecord::Spawn(spawn) => {
             let name = spawn.name?;
@@ -508,7 +516,9 @@ pub fn replay(log: &MissionLog, group: &Il2Entity, trace: Option<&TraceMap>) -> 
     let tick_rate = fit_tick_rate(&pairs);
     let mut timeline = Vec::new();
     for record in &log.records {
-        if let Some((description, pos)) = describe_record(record.typed()) {
+        let breadcrumb =
+            trace.and_then(|map| breadcrumb_match(record, map).map(|i| &map.entries[i]));
+        if let Some((description, pos)) = describe_record(record.typed(), breadcrumb) {
             timeline.push(TimelineEvent {
                 t_ticks: record.t_ticks,
                 seconds: tick_rate.seconds(record.t_ticks),
@@ -700,7 +710,10 @@ fn entry_label(entry: &TraceEntry) -> String {
     )
 }
 
-fn describe_record(record: TypedRecord<'_>) -> Option<(String, Option<Position>)> {
+fn describe_record(
+    record: TypedRecord<'_>,
+    breadcrumb: Option<&TraceEntry>,
+) -> Option<(String, Option<Position>)> {
     let id = |n: Option<i64>| n.map_or_else(|| "?".into(), |n| n.to_string());
     let (description, pos) = match record {
         TypedRecord::MissionStart {
@@ -726,11 +739,15 @@ fn describe_record(record: TypedRecord<'_>) -> Option<(String, Option<Position>)
         ),
         TypedRecord::Takeoff(e) => (format!("Takeoff: {}", id(e.id)), e.pos),
         TypedRecord::Landing(e) => (format!("Landing: {}", id(e.id)), e.pos),
+        TypedRecord::MissionEnd => ("Mission end".into(), None),
         TypedRecord::Removed(e) => (format!("Removed: {}", id(e.id)), e.pos),
         TypedRecord::MissionObjective(e) => (
             format!(
                 "Objective: {} (coalition {:?}, type {:?}, result {:?}, icon {:?})",
-                id(e.id),
+                breadcrumb.map_or_else(
+                    || id(e.id),
+                    |entry| format!("{} (OBJID {})", entry.source_name, id(e.id))
+                ),
                 e.coalition,
                 e.task_type,
                 e.result,
@@ -842,7 +859,7 @@ pub fn report_markdown(replay: &Replay) -> String {
         replay.malformed_lines.len()
     )
     .unwrap();
-    out.push_str("\nUNVERIFIED: log field meanings, carrier logging on every firing, objective ID/position matching, objective visibility/result effects, tick rate, same-tick multiplicity and log completeness (t1-t6). Observed counts are at least the logged firings; video remains a cross-check.\n");
+    out.push_str("\nFlight 0 (2026-09-28): the objective matched by position, not MCU index, and ended the dogfight round. UNVERIFIED: carrier logging on every firing, tick rate, same-tick multiplicity and log completeness. Observed counts are at least the logged firings; video remains a cross-check.\n");
     if !replay.trace_supplied {
         out.push_str("\nNo trace sidecar: firing and graph diagnostics are unavailable.\n");
     }
@@ -1064,7 +1081,7 @@ fn cli_replay(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trace::{TraceSelect, instrument, write_trace_sidecar};
+    use crate::trace::{ObjectiveStyle, TraceSelect, instrument, write_trace_sidecar};
 
     fn fixture(path: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1092,7 +1109,7 @@ mod tests {
                 ..TraceSelect::default()
             },
             &mut 100,
-            TraceCarrier::default(),
+            TraceCarrier::Objective(ObjectiveStyle::default()),
             &mut map,
         );
         map
@@ -1266,12 +1283,69 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs a real log (0L or flight 0)"]
     fn missionlog_real_fixture_parses() {
         let logs = parse_log_dir(&fixture("real_1")).unwrap();
         assert!(!logs.records.is_empty());
-        let report = report_markdown(&replay(&logs, &Il2Entity::new("Group"), None));
-        assert!(report.contains(&format!("Unknown records: {}", logs.unknown_records)));
+        assert!(logs.malformed_lines.is_empty());
+        let trace = read_trace_sidecar(&fixture("real_1/P14_Probe_0_traced.trace.json")).unwrap();
+        let objectives: Vec<_> = logs.records.iter().filter(|r| r.atype == 8).collect();
+        assert_eq!(objectives.len(), 1);
+        let objective = objectives[0];
+        assert_eq!(objective.t_ticks, 3);
+        assert_eq!(
+            objective.typed(),
+            TypedRecord::MissionObjective(ObjectiveEvent {
+                id: Some(473),
+                pos: Some((5430.0, 0.0, 5000.0)),
+                coalition: Some(0),
+                task_type: Some(0),
+                result: Some(1),
+                icon_type: Some(0),
+            })
+        );
+        assert_eq!(objective.field("TARGETS"), Some("()"));
+        assert!(trace.entries.iter().all(|e| e.breadcrumb_index != 473));
+        let entry = &trace.entries[breadcrumb_match(objective, &trace).unwrap()];
+        assert_eq!(entry.breadcrumb_index, 305);
+        assert_eq!(entry.source_name, "CUE 01");
+
+        // Attribution uses the sidecar of the file that actually flew, without
+        // depending on a regenerated probe or on running the ignored writers.
+        let result = replay(&logs, &Il2Entity::new("Group"), Some(&trace));
+        let fired: Vec<_> = result
+            .firings
+            .iter()
+            .filter(|f| !f.times_s.is_empty())
+            .collect();
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].entry, *entry);
+        assert_eq!(fired[0].times_s, [0.06]);
+        assert!(result.timeline.iter().any(|event| {
+            event.t_ticks == 3
+                && event
+                    .description
+                    .starts_with("Objective: CUE 01 (OBJID 473)")
+                && event.pos == Some((5430.0, 0.0, 5000.0))
+        }));
+        assert!(result.timeline.iter().any(|event| {
+            event.t_ticks == 3
+                && event
+                    .description
+                    .starts_with("Breadcrumb: P14_Probe_0 / CUE 01")
+        }));
+        let ends: Vec<_> = logs.records.iter().filter(|r| r.atype == 7).collect();
+        assert_eq!(ends.len(), 1);
+        assert_eq!(ends[0].typed(), TypedRecord::MissionEnd);
+        assert!(
+            result
+                .timeline
+                .iter()
+                .any(|event| { event.t_ticks == 405 && event.description == "Mission end" })
+        );
+        assert_eq!(logs.unknown_records, 8);
+        let report = report_markdown(&result);
+        let header = report.split("\n## ").next().unwrap();
+        assert!(header.contains(&format!("Unknown records: {}", logs.unknown_records)));
     }
 
     #[test]
@@ -1460,8 +1534,15 @@ mod tests {
         assert!(!fit_tick_rate(&[]).fitted);
         assert!(!fit_tick_rate(&[(1.0, 50.0), (1.0, 100.0)]).fitted);
         assert!(!fit_tick_rate(&[(1.0, 100.0), (2.0, 50.0)]).fitted);
-        let outside =
-            log("T:20 AType:8 OBJID:999 POS:(5001.1,0,5000)\nT:21 AType:12 NAME:Not TRACE 3\n");
+        // A runtime OBJID may collide with another MCU's index. Position wins,
+        // including both 1 m boundaries, regardless of altitude or colon syntax.
+        for pos in ["POS(5011,9000,4999)", "POS:(5009,-9000,5001)"] {
+            let boundary = log(&format!("T:1 AType:8 OBJID:100 {pos}"));
+            assert_eq!(breadcrumb_match(&boundary.records[0], &map), Some(1));
+        }
+        let outside = log(
+            "T:20 AType:8 OBJID:999 POS:(5001.1,0,5000)\nT:20 AType:8 OBJID:999 POS(5000,0,5001.1)\nT:21 AType:12 NAME:Not TRACE 3\n",
+        );
         assert!(
             replay(&outside, &group, Some(&map))
                 .firings
@@ -1471,9 +1552,63 @@ mod tests {
         let mut ambiguous = map.clone();
         ambiguous.entries[1].pos = ambiguous.entries[0].pos;
         assert_eq!(
-            breadcrumb_match(&log("T:1 AType:8 POS:(5000,0,5000)").records[0], &ambiguous),
+            breadcrumb_match(
+                &log("T:1 AType:8 OBJID:101 POS(5000,0,5000)").records[0],
+                &ambiguous
+            ),
             None
         );
+
+        // Real spawn syntax: all carriers share one position and only NAME
+        // identifies TRACE 7. Runtime object IDs are independent of MCU indexes.
+        let mut spawn_map = TraceMap::default();
+        let mut spawn_group = Il2Entity::new("Group");
+        let mut next = 200;
+        for n in 0..8 {
+            spawn_group.children.extend(crate::trace::breadcrumb(
+                TraceCarrier::Spawn,
+                &mut spawn_map,
+                &mut next,
+                crate::trace::TraceSource {
+                    index: 90 + n,
+                    name: format!("Spawn source {n}"),
+                    block_type: "MCU_Timer".into(),
+                    event_type: None,
+                    group_path: vec!["Spawn probes".into()],
+                    expected_s: None,
+                },
+            ));
+        }
+        let spawns = log(
+            "T:50 AType:12 ID:136192 TYPE:WillysMB COUNTRY:0 NAME:TRACE 7 PID:-1 POS(400000.0000,42.0000,50000.0000)\n",
+        );
+        assert_eq!(
+            spawns.records[0].typed(),
+            TypedRecord::Spawn(SpawnRecord {
+                id: Some(136192),
+                object_type: Some("WillysMB"),
+                name: Some("TRACE 7"),
+                country: Some(0),
+                parent_id: Some(-1),
+                pos: Some((400000.0, 42.0, 50000.0)),
+            })
+        );
+        let result = replay(&spawns, &spawn_group, Some(&spawn_map));
+        let fired: Vec<_> = result
+            .firings
+            .iter()
+            .filter(|f| !f.times_s.is_empty())
+            .collect();
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].entry, spawn_map.entries[7]);
+        assert_eq!(fired[0].entry.spawn_name.as_deref(), Some("TRACE 7"));
+        assert_eq!(fired[0].times_s, [1.0]);
+        assert!(result.timeline.iter().any(|event| {
+            event.t_ticks == 50
+                && event
+                    .description
+                    .starts_with("Breadcrumb: Spawn probes / Spawn source 7")
+        }));
     }
 
     #[test]

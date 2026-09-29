@@ -119,11 +119,6 @@ pub(crate) fn p14_probe_locale(root: &crate::ast::Il2Entity) -> LocaleTable {
             table.insert(id, node.name().unwrap());
             let id = node.property("LCDesc").unwrap().parse().unwrap();
             table.insert(id, "");
-        } else if node.block_type == "MCU_TR_MissionObjective" {
-            let id = node.property("LCName").unwrap().parse().unwrap();
-            if id != 0 {
-                table.insert(id, "T-t T4: named objective");
-            }
         }
     });
     table
