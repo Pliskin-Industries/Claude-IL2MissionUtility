@@ -143,6 +143,12 @@ def main():
         return 1
 
     os.makedirs(a.out, exist_ok=True)
+    # MissionResaver keeps language files that already exist, so stale text
+    # from an earlier build would survive in .chs/.fra/... Start clean.
+    for ext in (".Mission", ".msnbin", ".list", ".eng", ".chs", ".fra", ".ger", ".rus", ".spa"):
+        stale = os.path.join(a.out, a.name + ext)
+        if os.path.exists(stale):
+            os.remove(stale)
     mission = os.path.join(a.out, a.name + ".Mission")
     body = options_block(a.game, (0, 1, 2)).replace("\n", "\r\n")
     for g in groups:
