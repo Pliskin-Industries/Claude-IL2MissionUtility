@@ -31,8 +31,13 @@ language files and the `.list`. Checked after the build: all indexes unique,
 every link resolves, all 51 breadcrumbs present, every text id in the table.
 
 ```
-python tools/p14/build_probe_mission.py --game "C:\Program Files\IL2Series\game" --probe target/p14/P14_Probe_0_traced.Group --ref "TemplateExamples/K14 AFB_mp.Group" --name P14_Probe_0_traced --title "P14 probe flight 0 (traced)" --out "<folder>"
+python tools/p14/build_probe_mission.py --game "C:\Program Files\IL2Series\game" --probe target/p14/P14_Probe_0_traced.Group --ref "TemplateExamples/K14 AFB_mp.Group" --name P14_Probe_0_traced --title "P14 probe flight 0 (traced)" --out "<folder>" --spawn-planes f80c10,f86a5
 ```
+
+`K14 AFB_mp.Group` has no `Planes` list (harvested airfields are stripped),
+so nobody can spawn. `--spawn-planes` gives every reference airfield without
+one the ground-start entries of the game's own dogfight test airfield of the
+same country (default `f80c10`; that NATO airfield has no ground-start `f51d`).
 
 Deploy: copy `P14_Probe_0_traced.msnbin`, `.list` and the six language
 files (`.eng` `.chs` `.fra` `.ger` `.rus` `.spa`) into the server's
