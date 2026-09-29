@@ -1,6 +1,6 @@
 #![allow(dead_code)] // P14: removed in step 9T
-//! Opt-in mission breadcrumbs. Flight 0 ruled out objectives for dogfight rounds;
-//! spawn logging on every firing remains UNVERIFIED.
+//! Opt-in mission breadcrumbs. Success 0 objectives log without ending the
+//! dogfight round; repeated and same-tick logging remain UNVERIFIED.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
@@ -56,30 +56,27 @@ impl TraceSelect {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ObjectiveStyle {
     pub coalition: i32,
     pub success: i32,
     pub lc_name: Option<i32>,
 }
 
-impl Default for ObjectiveStyle {
-    fn default() -> Self {
-        Self {
-            coalition: 0,
-            success: 1,
-            lc_name: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TraceCarrier {
     Objective(ObjectiveStyle),
-    // Flight 0 (2026-09-28): the first objective breadcrumb ended the Korea
-    // dogfight round (MissionType 2), so use the Spawn fallback (risk t3).
-    #[default]
     Spawn,
+}
+
+impl Default for TraceCarrier {
+    fn default() -> Self {
+        // Flight 0, 2026-09-28 (real_1/real_2, Korea dogfight): Success 1
+        // ends the round about 8.1 s later (coalitions 0/1). Success 0 logs
+        // without ending the round (coalitions 0/1/2). Spawned-and-deleted
+        // breadcrumb vehicles are silent in the log, so use Objective C0/S0.
+        Self::Objective(ObjectiveStyle::default())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1313,10 +1310,40 @@ mod tests {
     }
 
     #[test]
-    fn trace_spawn_carrier_deletes_its_object() {
-        assert_eq!(TraceCarrier::default(), TraceCarrier::Spawn);
+    fn trace_default_objective_is_silent_style() {
+        let style = ObjectiveStyle::default();
+        assert_eq!(
+            style,
+            ObjectiveStyle {
+                coalition: 0,
+                success: 0,
+                lc_name: None
+            }
+        );
+        assert_eq!(TraceCarrier::default(), TraceCarrier::Objective(style));
         let mut map = TraceMap::default();
         let blocks = breadcrumb(TraceCarrier::default(), &mut map, &mut 100, source(1));
+        assert_eq!(blocks.len(), 1);
+        let objective = &blocks[0];
+        assert_eq!(objective.block_type, "MCU_TR_MissionObjective");
+        for key in [
+            "Coalition",
+            "Success",
+            "TaskType",
+            "IconType",
+            "LCName",
+            "LCDesc",
+        ] {
+            assert_eq!(objective.property(key), Some("0"), "{key}");
+        }
+        assert_eq!(map.entries[0].carrier, TraceCarrier::Objective(style));
+        assert_eq!(map.entries[0].spawn_name, None);
+    }
+
+    #[test]
+    fn trace_spawn_carrier_deletes_its_object() {
+        let mut map = TraceMap::default();
+        let blocks = breadcrumb(TraceCarrier::Spawn, &mut map, &mut 100, source(1));
         assert_eq!(blocks.len(), 5);
         let [spawn, vehicle, entity, delay, delete] = blocks.as_slice() else {
             unreachable!()
