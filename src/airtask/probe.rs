@@ -11,7 +11,7 @@ use crate::serialize::serialize_group;
 use crate::template::{
     attach_event, checkzone, counter, mcu, modifier_set_val, timer, timer_random,
 };
-use crate::trace::{self, TraceCarrier, TraceMap, TraceSelect, TraceSource};
+use crate::trace::{self, ObjectiveStyle, TraceCarrier, TraceMap, TraceSelect, TraceSource};
 
 const HVAR: &str =
     include_str!("../../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group");
@@ -87,6 +87,12 @@ pub(crate) const RUN_SHEET_0: &[Cell] = &[
         arm_s: 600.0,
         close_s: 630.0,
     },
+    Cell {
+        key: "T-o",
+        centre_km: (0.0, 5.0),
+        arm_s: 660.0,
+        close_s: 770.0,
+    },
 ];
 pub(crate) const RUN_SHEET_1A: &[Cell] = &[
     Cell {
@@ -155,6 +161,11 @@ pub(crate) const CUES: &[Cue] = &[
     Cue {
         flight: Flight::Zero,
         time_s: 660.0,
+        text: "Flight 0 main cells done. Keep the mission running: objective tests until 12:50",
+    },
+    Cue {
+        flight: Flight::Zero,
+        time_s: 770.0,
         text: "Flight 0 done. End the mission normally",
     },
     Cue {
@@ -212,6 +223,13 @@ const E_PARTIAL_PULSES: [f64; 3] = [60.0, 62.0, 64.0];
 const E9_PULSES: [f64; 3] = [120.0, 120.05, 120.10];
 const T2_PULSES: [f64; 5] = [277.0, 279.0, 281.0, 283.0, 285.0];
 const T5_PULSES: [f64; 2] = [315.0, 320.0];
+const O_VARIANTS: [(&str, f64, i32, i32); 5] = [
+    ("O1", 670.0, 0, 0),
+    ("O2", 690.0, 1, 0),
+    ("O3", 710.0, 2, 0),
+    ("O4", 730.0, 1, 1),
+    ("O5", 750.0, 2, 1),
+];
 const G_EVENT_TYPES: [i32; 5] = [0, 2, 4, 5, 13];
 
 fn world(km: (f64, f64)) -> (f64, f64) {
@@ -887,6 +905,27 @@ fn build_tt(p: &mut Probe) {
     }
 }
 
+fn build_to(p: &mut Probe) {
+    // Objectives may end the round. Run each variant after all other cells,
+    // with its own trace position and subtitle to identify the last firing.
+    for (sub, time_s, coalition, success) in O_VARIANTS {
+        let name = format!("T-o {sub}");
+        let source = p.at(&name, time_s, &[]);
+        p.observe(source, &format!("{name} fired"));
+        p.hand_breadcrumb(
+            source,
+            &[source],
+            TraceCarrier::Objective(ObjectiveStyle {
+                coalition,
+                success,
+                lc_name: None,
+            }),
+            Some(time_s),
+        );
+        p.close_node(source);
+    }
+}
+
 fn build_j(p: &mut Probe) {
     let j1 = p.relay("J1", 10.0);
     p.link(p.arm, j1);
@@ -1067,6 +1106,7 @@ fn build(flight: Flight) -> Probe {
             "T-t" => build_tt(&mut p),
             "T-j" => build_j(&mut p),
             "T-z" => build_z(&mut p),
+            "T-o" => build_to(&mut p),
             "T-c" => build_c(&mut p),
             "T-n" => build_n(&mut p),
             "T-g" => build_g(&mut p),
@@ -1424,7 +1464,7 @@ fn probe_files_parse_and_links_resolve() {
         }
     }
     // All instrumented sources correspond to observations, including entity
-    // event types and the absolute cue times; hand-built T-t sources stay out.
+    // event types and the absolute cue times; hand-built T-t/T-o sources stay out.
     for flight in [Flight::Zero, Flight::OneA, Flight::OneB] {
         let p = build(flight);
         let subtitles: HashSet<_> = block_ids(&p.root, "MCU_TR_Subtitle").into_iter().collect();
@@ -1663,6 +1703,12 @@ fn probe_subtitles_are_unique() {
             ),
             flight == Flight::Zero
         );
+        for sub in 1..=5 {
+            assert_eq!(
+                locale.contains_text(&format!("T-o O{sub} fired")),
+                flight == Flight::Zero
+            );
+        }
         let bytes = crate::locale::encode_locale_utf16le(&crate::locale::serialize_locale(&locale));
         assert_eq!(&bytes[..2], &[0xff, 0xfe]);
         assert_eq!(
@@ -1674,7 +1720,12 @@ fn probe_subtitles_are_unique() {
 
 #[test]
 fn probe_cells_match_the_table() {
-    let zero = generate_probe_0();
+    let Probe {
+        root: zero,
+        map: zero_map,
+        hand_sources,
+        ..
+    } = build(Flight::Zero);
     let one_a = generate_probe_1a();
     let one_b = generate_probe_1b();
     assert_eq!(zero.count_block_type("Plane"), 4);
@@ -1885,6 +1936,92 @@ fn probe_cells_match_the_table() {
             .contains(&id(&zero, "Z1 AGAIN OUT"))
     );
 
+    let objective_variants = [
+        ("O1", 670.0, 0, 0),
+        ("O2", 690.0, 1, 0),
+        ("O3", 710.0, 2, 0),
+        ("O4", 730.0, 1, 1),
+        ("O5", 750.0, 2, 1),
+    ];
+    assert_eq!(O_VARIANTS, objective_variants);
+    let to = named(&zero, "T-o");
+    assert_eq!(to.count_block_type("MCU_TR_MissionObjective"), 5);
+    assert_eq!(zero.count_block_type("MCU_TR_MissionObjective"), 5);
+    assert_eq!(to.count_block_type("MCU_TR_Subtitle"), 5);
+    for root in [&one_a, &one_b] {
+        assert!(root.find_by_name("T-o").is_none());
+        assert_eq!(root.count_block_type("MCU_TR_MissionObjective"), 0);
+    }
+    let mut objective_sources = Vec::new();
+    for (n, (sub, time_s, coalition, success)) in objective_variants.into_iter().enumerate() {
+        let name = format!("T-o {sub}");
+        let source = named(to, &name);
+        let source_id = source.index.unwrap();
+        objective_sources.push(source_id);
+        assert!(hand_sources.contains(&source_id));
+        assert_eq!(source.pos_xz(), to.pos_xz());
+        let entries: Vec<_> = zero_map
+            .entries
+            .iter()
+            .filter(|entry| entry.source_index == source_id)
+            .collect();
+        assert_eq!(entries.len(), 1, "one registered breadcrumb for {name}");
+        let entry = entries[0];
+        assert_eq!(entry.source_name, name);
+        assert_eq!(entry.source_type, "MCU_Timer");
+        assert_eq!(entry.event_type, None);
+        assert_eq!(entry.group_path, ["P14_Probe_0", "T-o"]);
+        assert_eq!(entry.expected_s, Some(time_s));
+        assert_eq!(entry.spawn_name, None);
+        assert_eq!(
+            entry.carrier,
+            TraceCarrier::Objective(ObjectiveStyle {
+                coalition,
+                success,
+                lc_name: None,
+            })
+        );
+        // T-t occupies slots 0-5; T-o continues on the same trace grid.
+        assert_eq!(entry.pos, (5060.0 + 10.0 * n as f64, 5000.0));
+        let objective = by_id(to, entry.breadcrumb_index);
+        assert_eq!(objective.block_type, "MCU_TR_MissionObjective");
+        assert_eq!(objective.pos_xz(), Some(entry.pos));
+        assert_eq!(number(objective, "Coalition"), f64::from(coalition));
+        assert_eq!(number(objective, "Success"), f64::from(success));
+        for key in ["TaskType", "IconType", "LCName", "LCDesc"] {
+            assert_eq!(objective.property(key), Some("0"), "{name} {key}");
+        }
+        assert_eq!(objective.property("Enabled"), Some("1"));
+        assert!(objective.targets.is_empty());
+        assert!(objective.objects.is_empty());
+        let subtitle = format!("{name} fired");
+        assert_observation(&zero, source_id, &subtitle);
+        assert_at(
+            &zero,
+            &name,
+            time_s,
+            &[id(to, &subtitle), entry.breadcrumb_index],
+        );
+        let mut timer_inputs = Vec::new();
+        let mut objective_inputs = Vec::new();
+        zero.for_each(&mut |node| {
+            // Closing the timer changes its state and does not pulse it.
+            if node.block_type != "MCU_Deactivate" {
+                for &target in &node.targets {
+                    if target == source_id {
+                        timer_inputs.push(node.index.unwrap());
+                    }
+                    if target == entry.breadcrumb_index {
+                        objective_inputs.push(node.index.unwrap());
+                    }
+                }
+            }
+        });
+        assert_eq!(timer_inputs, [id(&zero, "Translator Mission Begin")]);
+        assert_eq!(objective_inputs, [source_id]);
+    }
+    assert_eq!(named(to, "T-o CLOSE OFF").targets, objective_sources);
+
     for n in 0..=5 {
         let name = format!("C{n}");
         assert_zone(
@@ -2074,6 +2211,7 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::Zero, "T-t", (0.0, 5.0), 270.0, 330.0),
         (Flight::Zero, "T-j", (0.0, 5.0), 540.0, 600.0),
         (Flight::Zero, "T-z", (-40.0, -40.0), 600.0, 630.0),
+        (Flight::Zero, "T-o", (0.0, 5.0), 660.0, 770.0),
         (Flight::OneA, "T-c", (40.0, -20.0), 600.0, 840.0),
         (Flight::OneA, "T-n", (42.0, 30.0), 840.0, 1560.0),
         (Flight::OneB, "T-g", (130.0, 50.0), 720.0, 1800.0),
@@ -2097,6 +2235,11 @@ fn probe_run_sheets_match_the_tables() {
         (
             Flight::Zero,
             660.0,
+            "Flight 0 main cells done. Keep the mission running: objective tests until 12:50",
+        ),
+        (
+            Flight::Zero,
+            770.0,
             "Flight 0 done. End the mission normally",
         ),
         (
@@ -2237,7 +2380,7 @@ fn probe_run_sheets_match_the_tables() {
 fn probe_tt_breadcrumbs_match_the_table() {
     let p = build(Flight::Zero);
     let root = &p.root;
-    assert_eq!(p.map.entries.len(), 6, "T1, T2, two T3s, T5, one T7");
+    assert_eq!(p.map.entries.len(), 11, "six T-t and five T-o breadcrumbs");
     let entry_for = |name: &str| {
         let entries: Vec<_> = p
             .map
@@ -2291,7 +2434,7 @@ fn probe_tt_breadcrumbs_match_the_table() {
         287.0,
         &[id(root, "T-t T3a"), id(root, "T-t T3b")],
     );
-    assert_eq!(root.count_block_type("MCU_TR_MissionObjective"), 0);
+    assert_eq!(root.count_block_type("MCU_TR_MissionObjective"), 5);
     let t5 = spawn("T-t T5", 4, None);
     assert!(named(root, "T-t T5").targets.contains(&t5));
     assert_pulses(root, "T-t T5", &[315.0, 320.0], id(root, "T-t T5"));
@@ -2316,7 +2459,7 @@ fn probe_tt_breadcrumbs_match_the_table() {
                 .filter(|e| e.source_index == entry.source_index)
                 .count(),
             1,
-            "T-t was instrumented twice"
+            "hand-built source was instrumented twice"
         );
         assert!(map.entries.contains(entry));
         assert_eq!(
@@ -2342,6 +2485,92 @@ fn probe_tt_breadcrumbs_match_the_table() {
 }
 
 #[test]
+fn probe_objective_variants_replay_by_position() {
+    use crate::missionlog::{TypedRecord, parse_log_dir, replay, report_markdown};
+
+    let (root, map) = build(Flight::Zero).traced(TraceCarrier::Spawn);
+    let logs = parse_log_dir(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src/testdata/missionlog/objective_variants"),
+    )
+    .unwrap();
+    assert!(logs.malformed_lines.is_empty());
+    assert_eq!(logs.unknown_records, 0);
+    assert_eq!(
+        logs.records.iter().map(|r| r.atype).collect::<Vec<_>>(),
+        [8, 8, 8, 8, 8, 7]
+    );
+    assert_eq!(logs.records[5].typed(), TypedRecord::MissionEnd);
+    assert_eq!(logs.records[5].t_ticks, 37_900);
+    for record in &logs.records[..5] {
+        let TypedRecord::MissionObjective(objective) = record.typed() else {
+            panic!("expected an objective record");
+        };
+        assert!(
+            map.entries
+                .iter()
+                .all(|entry| Some(i64::from(entry.breadcrumb_index)) != objective.id)
+        );
+    }
+
+    let expected = [
+        ("T-o O1", 670.0, (5060.0, 0.0, 5000.0)),
+        ("T-o O2", 690.0, (5070.0, 0.0, 5000.0)),
+        ("T-o O3", 710.0, (5080.0, 0.0, 5000.0)),
+        ("T-o O4", 730.0, (5090.0, 0.0, 5000.0)),
+        ("T-o O5", 750.0, (5100.0, 0.0, 5000.0)),
+    ];
+    // Test the complete fixture and a round ending eight seconds after any
+    // earlier variant. Only the positions can identify these runtime OBJIDs.
+    for count in 1..=expected.len() {
+        let mut partial = logs.clone();
+        partial.records.truncate(count);
+        let mut end = logs.records[5].clone();
+        end.t_ticks = partial.records.last().unwrap().t_ticks + 400;
+        partial.records.push(end);
+        let result = replay(&partial, &root, Some(&map));
+        let report = report_markdown(&result);
+        let fired: Vec<_> = result
+            .firings
+            .iter()
+            .filter(|f| !f.times_s.is_empty())
+            .collect();
+        assert_eq!(fired.len(), count);
+        for (firing, &(name, time_s, (x, _, z))) in fired.iter().zip(&expected) {
+            assert_eq!(firing.entry.source_name, name);
+            assert_eq!(firing.entry.source_index, id(&root, name));
+            assert_eq!(firing.entry.pos, (x, z));
+            assert_eq!(firing.times_s, [time_s]);
+        }
+        let objectives: Vec<_> = result
+            .timeline
+            .iter()
+            .filter(|event| event.description.starts_with("Objective:"))
+            .collect();
+        assert_eq!(objectives.len(), count);
+        for (event, &(name, time_s, pos)) in objectives.iter().zip(&expected) {
+            assert_eq!(event.seconds, time_s);
+            assert_eq!(event.pos, Some(pos));
+            assert!(
+                event
+                    .description
+                    .starts_with(&format!("Objective: {name} (OBJID "))
+            );
+            assert!(report.contains(&format!(
+                "| {time_s:.3} | {} | Objective: {name} (OBJID ",
+                event.t_ticks
+            )));
+        }
+        let end = result.timeline.last().unwrap();
+        assert_eq!(end.description, "Mission end");
+        assert_eq!(end.seconds, expected[count - 1].1 + 8.0);
+        assert!(report.contains(&format!(
+            "| {:.3} | {} | Mission end |",
+            end.seconds, end.t_ticks
+        )));
+    }
+}
+
+#[test]
 fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
     use std::collections::BTreeMap;
 
@@ -2360,15 +2589,18 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
         links
     }
 
-    for (flight, subtitle_count, source_count, entity_count, hand_count) in [
-        (Flight::Zero, 45, 46, 0, 6),
-        (Flight::OneA, 17, 17, 0, 0),
-        (Flight::OneB, 39, 15, 6, 0),
+    for (flight, subtitle_count, source_count, entity_count, hand_count, objective_count) in [
+        (Flight::Zero, 51, 52, 0, 11, 5),
+        (Flight::OneA, 17, 17, 0, 0, 0),
+        (Flight::OneB, 39, 15, 6, 0, 0),
     ] {
         let probe = build(flight);
         let plain = probe.root.clone();
         let hand_entries = probe.map.entries.clone();
         let hand_ids: HashSet<_> = hand_entries.iter().map(|e| e.breadcrumb_index).collect();
+        let objective_ids: HashSet<_> = block_ids(&plain, "MCU_TR_MissionObjective")
+            .into_iter()
+            .collect();
         let subtitles: HashSet<_> = block_ids(&plain, "MCU_TR_Subtitle").into_iter().collect();
         let mut seen_subtitles = HashSet::new();
         let mut sources = BTreeMap::<i32, BTreeSet<Option<i32>>>::new();
@@ -2387,35 +2619,48 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
         assert_eq!(subtitles.len(), subtitle_count, "{flight:?} subtitles");
         assert_eq!(seen_subtitles, subtitles, "{flight:?} orphan subtitle");
         assert_eq!(sources.len(), source_count, "{flight:?} subtitle sources");
-        assert_eq!(hand_entries.len(), hand_count, "{flight:?} T-t breadcrumbs");
+        assert_eq!(
+            hand_entries.len(),
+            hand_count,
+            "{flight:?} hand-built breadcrumbs"
+        );
 
-        let mut tt_ids = Vec::new();
+        let mut hand_cell_ids = Vec::new();
         if flight == Flight::Zero {
-            named(&plain, "T-t").collect_indexes(&mut tt_ids);
+            for cell in ["T-t", "T-o"] {
+                named(&plain, cell).collect_indexes(&mut hand_cell_ids);
+            }
         }
         let (traced, map) = probe.traced(TraceCarrier::default());
         super::testkit::assert_links_resolve(&traced);
-        assert_eq!(traced.count_block_type("MCU_TR_MissionObjective"), 0);
-        assert!(
-            map.entries
-                .iter()
-                .all(|entry| entry.carrier == TraceCarrier::Spawn)
+        assert_eq!(
+            traced.count_block_type("MCU_TR_MissionObjective"),
+            objective_count
         );
+        for entry in &map.entries {
+            if objective_ids.contains(&entry.breadcrumb_index) {
+                assert!(matches!(entry.carrier, TraceCarrier::Objective(_)));
+            } else {
+                assert_eq!(entry.carrier, TraceCarrier::Spawn);
+            }
+        }
         // Include T7's upstream timer and both inputs, not just mapped sources.
         assert_eq!(
             map.entries
                 .iter()
-                .filter(|e| tt_ids.contains(&e.source_index))
+                .filter(|e| hand_cell_ids.contains(&e.source_index))
                 .collect::<Vec<_>>(),
             hand_entries.iter().collect::<Vec<_>>(),
-            "{flight:?} T-t must retain only its hand-built entries"
+            "{flight:?} T-t/T-o must retain only their hand-built entries"
         );
         if flight == Flight::Zero {
-            assert_eq!(
-                named(&traced, "T-t"),
-                named(&plain, "T-t"),
-                "instrument changed T-t"
-            );
+            for cell in ["T-t", "T-o"] {
+                assert_eq!(
+                    named(&traced, cell),
+                    named(&plain, cell),
+                    "instrument changed {cell}"
+                );
+            }
         }
 
         let mut entity_sources = 0;
@@ -2424,7 +2669,7 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
             let source = by_id(&traced, source_id);
             let context = format!("{flight:?} {:?} ({source_id})", source.name());
             let mut expected_links = links(by_id(&plain, source_id));
-            if tt_ids.contains(&source_id) {
+            if hand_cell_ids.contains(&source_id) {
                 // T7's two subtitle inputs share the entry registered to its
                 // upstream timer; neither input gets an instrumented breadcrumb.
                 assert_eq!(
@@ -2511,6 +2756,7 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
                 })
                 .collect();
             assert_eq!(entries.len(), 1, "{flight:?} cue {:?}", cue.text);
+            assert_eq!(entries[0].carrier, TraceCarrier::Spawn);
             assert_eq!(
                 entries[0].expected_s,
                 Some(cue.time_s),
@@ -2537,13 +2783,13 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
                     .filter(|e| e.breadcrumb_index == entry.breadcrumb_index)
                     .collect::<Vec<_>>(),
                 [entry],
-                "{flight:?} sidecar lost or duplicated T-t breadcrumb {}",
+                "{flight:?} sidecar lost or duplicated hand-built breadcrumb {}",
                 entry.source_name
             );
         }
         assert_eq!(restored, map, "{flight:?} trace sidecar round trip");
         println!(
-            "{flight:?}: {} subtitles, {} source MCUs ({} source/event checks), {entity_sources} entity sources, cue expected_s {cue_times:?}, {hand_count} T-t breadcrumbs",
+            "{flight:?}: {} subtitles, {} source MCUs ({} source/event checks), {entity_sources} entity sources, cue expected_s {cue_times:?}, {hand_count} hand-built breadcrumbs",
             subtitles.len(),
             sources.len(),
             sources.values().map(BTreeSet::len).sum::<usize>()
