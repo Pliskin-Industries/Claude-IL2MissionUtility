@@ -8,7 +8,7 @@ Group
     Index = 2;
     Name = "Translator Mission Begin";
     Desc = "";
-    Targets = [3,6,8,53,57,59,88,90,91,92,93,95,97,98,99,100,101,102,103,105,106,107,108,109,110,111,113,115,119,122,123,124,125,127,129,138,140,159,161,163,165,166,175,176,177,178,179,199,202,203,209,219,221,224,228,240,242,247,249,256,258,261,263,264,267,270,273,276,280,282,284,286,288,290,292,294,296];
+    Targets = [3,6,8,53,57,59,88,90,91,92,93,95,97,98,99,100,101,102,103,105,106,107,108,109,110,111,113,115,119,122,123,124,125,127,129,138,140,159,161,163,165,166,171,172,173,174,175,183,186,187,193,199,201,204,208,220,222,227,229,236,238,241,243,245,247,249,251,253,255];
     Objects = [];
     XPos = 105934.000;
     YPos = 0.000;
@@ -43,7 +43,7 @@ Group
     Index = 4;
     Name = "PROBE INIT OFF";
     Desc = "";
-    Targets = [72,226,230,250,253];
+    Targets = [72,206,210,230,233];
     Objects = [];
     XPos = 105934.000;
     YPos = 0.000;
@@ -3080,7 +3080,7 @@ Group
       Index = 164;
       Name = "T-t CLOSE OFF";
       Desc = "";
-      Targets = [166,173,200,209];
+      Targets = [166,169,184,193];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3158,139 +3158,33 @@ Group
     }
 
     
-    MCU_Spawner
+    MCU_TR_MissionObjective
     {
       Index = 168;
-      Name = "TRACE 0";
-      Desc = "";
       Targets = [];
-      Objects = [170];
-      XPos = 400000.000;
+      Objects = [];
+      XPos = 5000.000;
       YPos = 0.000;
-      ZPos = 50000.000;
+      ZPos = 5000.000;
       XOri = 0;
       YOri = 0;
       ZOri = 0;
-      SpawnAtMe = 0;
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 0;
+      Success = 0;
+      IconType = 0;
     }
 
     
-    Vehicle
+    MCU_Timer
     {
-      Name = "TRACE 0";
       Index = 169;
-      LinkTrId = 170;
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-      Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-      Desc = "";
-      Country = 0;
-      NumberInFormation = 0;
-      Vulnerable = 0;
-      Engageable = 0;
-      LimitAmmo = 1;
-      AILevel = 2;
-      DamageReport = 50;
-      DamageThreshold = 1;
-      DeleteAfterDeath = 1;
-      CoopStart = 0;
-      Spotter = -1;
-      BeaconChannel = 0;
-      Callsign = 0;
-      PayloadId = 0;
-      ModMask = 10;
-      Fuel = 1;
-      Callnum = 0;
-      Skin = "";
-      BotSkin = "";
-      RepairTimeMultiplier = 0;
-      RehealTimeMultiplier = 0;
-      RearmTimeMultiplier = 0;
-      RefuelTimeMultiplier = 0;
-      MaintenanceRadius = 10;
-      TCode = "%20%20%20%20%20%20%20%20";
-      TCodeColor = "11111111";
-      TrailerAtStart = 1;
-      PinToTerrain = 1;
-    }
-
-    
-    MCU_TR_Entity
-    {
-      Index = 170;
-      Name = "TRACE 0 entity";
-      Desc = "";
-      Targets = [];
-      Objects = [];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 0;
-      MisObjID = 169;
-      OnReports
-      {
-        OnReport
-        {
-          Type = 0;
-          CmdId = 168;
-          TarId = 171;
-        }
-
-        
-      }
-
-      
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 171;
-      Name = "TRACE 0 DELETE DELAY";
-      Desc = "";
-      Targets = [172];
-      Objects = [];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 1;
-      Random = 100;
-    }
-
-    
-    MCU_Delete
-    {
-      Index = 172;
-      Name = "TRACE 0 DELETE";
-      Desc = "";
-      Targets = [];
-      Objects = [169];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 173;
       Name = "T-t T2";
       Desc = "";
-      Targets = [174,180];
+      Targets = [170,176];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3305,7 +3199,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 174;
+      Index = 170;
       Name = "T-t T2 fired";
       Desc = "";
       Targets = [];
@@ -3336,10 +3230,10 @@ Group
     
     MCU_Timer
     {
-      Index = 175;
+      Index = 171;
       Name = "T-t T2 PULSE 1";
       Desc = "";
-      Targets = [173];
+      Targets = [169];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3354,10 +3248,10 @@ Group
     
     MCU_Timer
     {
-      Index = 176;
+      Index = 172;
       Name = "T-t T2 PULSE 2";
       Desc = "";
-      Targets = [173];
+      Targets = [169];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3372,10 +3266,10 @@ Group
     
     MCU_Timer
     {
-      Index = 177;
+      Index = 173;
       Name = "T-t T2 PULSE 3";
       Desc = "";
-      Targets = [173];
+      Targets = [169];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3390,10 +3284,10 @@ Group
     
     MCU_Timer
     {
-      Index = 178;
+      Index = 174;
       Name = "T-t T2 PULSE 4";
       Desc = "";
-      Targets = [173];
+      Targets = [169];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3408,10 +3302,10 @@ Group
     
     MCU_Timer
     {
-      Index = 179;
+      Index = 175;
       Name = "T-t T2 PULSE 5";
       Desc = "";
-      Targets = [173];
+      Targets = [169];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3424,139 +3318,33 @@ Group
     }
 
     
-    MCU_Spawner
+    MCU_TR_MissionObjective
     {
-      Index = 180;
-      Name = "TRACE 1";
-      Desc = "";
-      Targets = [];
-      Objects = [182];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      SpawnAtMe = 0;
-    }
-
-    
-    Vehicle
-    {
-      Name = "TRACE 1";
-      Index = 181;
-      LinkTrId = 182;
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-      Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-      Desc = "";
-      Country = 0;
-      NumberInFormation = 0;
-      Vulnerable = 0;
-      Engageable = 0;
-      LimitAmmo = 1;
-      AILevel = 2;
-      DamageReport = 50;
-      DamageThreshold = 1;
-      DeleteAfterDeath = 1;
-      CoopStart = 0;
-      Spotter = -1;
-      BeaconChannel = 0;
-      Callsign = 0;
-      PayloadId = 0;
-      ModMask = 10;
-      Fuel = 1;
-      Callnum = 0;
-      Skin = "";
-      BotSkin = "";
-      RepairTimeMultiplier = 0;
-      RehealTimeMultiplier = 0;
-      RearmTimeMultiplier = 0;
-      RefuelTimeMultiplier = 0;
-      MaintenanceRadius = 10;
-      TCode = "%20%20%20%20%20%20%20%20";
-      TCodeColor = "11111111";
-      TrailerAtStart = 1;
-      PinToTerrain = 1;
-    }
-
-    
-    MCU_TR_Entity
-    {
-      Index = 182;
-      Name = "TRACE 1 entity";
-      Desc = "";
+      Index = 176;
       Targets = [];
       Objects = [];
-      XPos = 400000.000;
+      XPos = 5010.000;
       YPos = 0.000;
-      ZPos = 50000.000;
+      ZPos = 5000.000;
       XOri = 0;
       YOri = 0;
       ZOri = 0;
-      Enabled = 0;
-      MisObjID = 181;
-      OnReports
-      {
-        OnReport
-        {
-          Type = 0;
-          CmdId = 180;
-          TarId = 183;
-        }
-
-        
-      }
-
-      
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 0;
+      Success = 0;
+      IconType = 0;
     }
 
     
     MCU_Timer
     {
-      Index = 183;
-      Name = "TRACE 1 DELETE DELAY";
-      Desc = "";
-      Targets = [184];
-      Objects = [];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 1;
-      Random = 100;
-    }
-
-    
-    MCU_Delete
-    {
-      Index = 184;
-      Name = "TRACE 1 DELETE";
-      Desc = "";
-      Targets = [];
-      Objects = [181];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 185;
+      Index = 177;
       Name = "T-t T3a";
       Desc = "";
-      Targets = [186,187];
+      Targets = [178,179];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3571,7 +3359,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 186;
+      Index = 178;
       Name = "T-t T3a fired";
       Desc = "";
       Targets = [];
@@ -3600,139 +3388,33 @@ Group
     }
 
     
-    MCU_Spawner
+    MCU_TR_MissionObjective
     {
-      Index = 187;
-      Name = "TRACE 2";
-      Desc = "";
-      Targets = [];
-      Objects = [189];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      SpawnAtMe = 0;
-    }
-
-    
-    Vehicle
-    {
-      Name = "TRACE 2";
-      Index = 188;
-      LinkTrId = 189;
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-      Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-      Desc = "";
-      Country = 0;
-      NumberInFormation = 0;
-      Vulnerable = 0;
-      Engageable = 0;
-      LimitAmmo = 1;
-      AILevel = 2;
-      DamageReport = 50;
-      DamageThreshold = 1;
-      DeleteAfterDeath = 1;
-      CoopStart = 0;
-      Spotter = -1;
-      BeaconChannel = 0;
-      Callsign = 0;
-      PayloadId = 0;
-      ModMask = 10;
-      Fuel = 1;
-      Callnum = 0;
-      Skin = "";
-      BotSkin = "";
-      RepairTimeMultiplier = 0;
-      RehealTimeMultiplier = 0;
-      RearmTimeMultiplier = 0;
-      RefuelTimeMultiplier = 0;
-      MaintenanceRadius = 10;
-      TCode = "%20%20%20%20%20%20%20%20";
-      TCodeColor = "11111111";
-      TrailerAtStart = 1;
-      PinToTerrain = 1;
-    }
-
-    
-    MCU_TR_Entity
-    {
-      Index = 189;
-      Name = "TRACE 2 entity";
-      Desc = "";
+      Index = 179;
       Targets = [];
       Objects = [];
-      XPos = 400000.000;
+      XPos = 5020.000;
       YPos = 0.000;
-      ZPos = 50000.000;
+      ZPos = 5000.000;
       XOri = 0;
       YOri = 0;
       ZOri = 0;
-      Enabled = 0;
-      MisObjID = 188;
-      OnReports
-      {
-        OnReport
-        {
-          Type = 0;
-          CmdId = 187;
-          TarId = 190;
-        }
-
-        
-      }
-
-      
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 0;
+      Success = 0;
+      IconType = 0;
     }
 
     
     MCU_Timer
     {
-      Index = 190;
-      Name = "TRACE 2 DELETE DELAY";
-      Desc = "";
-      Targets = [191];
-      Objects = [];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 1;
-      Random = 100;
-    }
-
-    
-    MCU_Delete
-    {
-      Index = 191;
-      Name = "TRACE 2 DELETE";
-      Desc = "";
-      Targets = [];
-      Objects = [188];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 192;
+      Index = 180;
       Name = "T-t T3b";
       Desc = "";
-      Targets = [193,194];
+      Targets = [181,182];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3747,7 +3429,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 193;
+      Index = 181;
       Name = "T-t T3b fired";
       Desc = "";
       Targets = [];
@@ -3776,139 +3458,33 @@ Group
     }
 
     
-    MCU_Spawner
+    MCU_TR_MissionObjective
     {
-      Index = 194;
-      Name = "TRACE 3";
-      Desc = "";
-      Targets = [];
-      Objects = [196];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      SpawnAtMe = 0;
-    }
-
-    
-    Vehicle
-    {
-      Name = "TRACE 3";
-      Index = 195;
-      LinkTrId = 196;
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-      Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-      Desc = "";
-      Country = 0;
-      NumberInFormation = 0;
-      Vulnerable = 0;
-      Engageable = 0;
-      LimitAmmo = 1;
-      AILevel = 2;
-      DamageReport = 50;
-      DamageThreshold = 1;
-      DeleteAfterDeath = 1;
-      CoopStart = 0;
-      Spotter = -1;
-      BeaconChannel = 0;
-      Callsign = 0;
-      PayloadId = 0;
-      ModMask = 10;
-      Fuel = 1;
-      Callnum = 0;
-      Skin = "";
-      BotSkin = "";
-      RepairTimeMultiplier = 0;
-      RehealTimeMultiplier = 0;
-      RearmTimeMultiplier = 0;
-      RefuelTimeMultiplier = 0;
-      MaintenanceRadius = 10;
-      TCode = "%20%20%20%20%20%20%20%20";
-      TCodeColor = "11111111";
-      TrailerAtStart = 1;
-      PinToTerrain = 1;
-    }
-
-    
-    MCU_TR_Entity
-    {
-      Index = 196;
-      Name = "TRACE 3 entity";
-      Desc = "";
+      Index = 182;
       Targets = [];
       Objects = [];
-      XPos = 400000.000;
+      XPos = 5030.000;
       YPos = 0.000;
-      ZPos = 50000.000;
+      ZPos = 5000.000;
       XOri = 0;
       YOri = 0;
       ZOri = 0;
-      Enabled = 0;
-      MisObjID = 195;
-      OnReports
-      {
-        OnReport
-        {
-          Type = 0;
-          CmdId = 194;
-          TarId = 197;
-        }
-
-        
-      }
-
-      
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 0;
+      Success = 0;
+      IconType = 0;
     }
 
     
     MCU_Timer
     {
-      Index = 197;
-      Name = "TRACE 3 DELETE DELAY";
-      Desc = "";
-      Targets = [198];
-      Objects = [];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 1;
-      Random = 100;
-    }
-
-    
-    MCU_Delete
-    {
-      Index = 198;
-      Name = "TRACE 3 DELETE";
-      Desc = "";
-      Targets = [];
-      Objects = [195];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 199;
+      Index = 183;
       Name = "T-t T3 SAME TICK";
       Desc = "";
-      Targets = [185,192];
+      Targets = [177,180];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3923,10 +3499,10 @@ Group
     
     MCU_Timer
     {
-      Index = 200;
+      Index = 184;
       Name = "T-t T5";
       Desc = "";
-      Targets = [201,204];
+      Targets = [185,188];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3941,7 +3517,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 201;
+      Index = 185;
       Name = "T-t T5 fired";
       Desc = "";
       Targets = [];
@@ -3972,10 +3548,10 @@ Group
     
     MCU_Timer
     {
-      Index = 202;
+      Index = 186;
       Name = "T-t T5 PULSE 1";
       Desc = "";
-      Targets = [200];
+      Targets = [184];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -3990,10 +3566,10 @@ Group
     
     MCU_Timer
     {
-      Index = 203;
+      Index = 187;
       Name = "T-t T5 PULSE 2";
       Desc = "";
-      Targets = [200];
+      Targets = [184];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4008,11 +3584,11 @@ Group
     
     MCU_Spawner
     {
-      Index = 204;
+      Index = 188;
       Name = "TRACE 4";
       Desc = "";
       Targets = [];
-      Objects = [206];
+      Objects = [190];
       XPos = 400000.000;
       YPos = 0.000;
       ZPos = 50000.000;
@@ -4026,8 +3602,8 @@ Group
     Vehicle
     {
       Name = "TRACE 4";
-      Index = 205;
-      LinkTrId = 206;
+      Index = 189;
+      LinkTrId = 190;
       XPos = 400000.000;
       YPos = 0.000;
       ZPos = 50000.000;
@@ -4070,7 +3646,7 @@ Group
     
     MCU_TR_Entity
     {
-      Index = 206;
+      Index = 190;
       Name = "TRACE 4 entity";
       Desc = "";
       Targets = [];
@@ -4082,14 +3658,14 @@ Group
       YOri = 0;
       ZOri = 0;
       Enabled = 0;
-      MisObjID = 205;
+      MisObjID = 189;
       OnReports
       {
         OnReport
         {
           Type = 0;
-          CmdId = 204;
-          TarId = 207;
+          CmdId = 188;
+          TarId = 191;
         }
 
         
@@ -4101,10 +3677,10 @@ Group
     
     MCU_Timer
     {
-      Index = 207;
+      Index = 191;
       Name = "TRACE 4 DELETE DELAY";
       Desc = "";
-      Targets = [208];
+      Targets = [192];
       Objects = [];
       XPos = 400000.000;
       YPos = 0.000;
@@ -4119,11 +3695,11 @@ Group
     
     MCU_Delete
     {
-      Index = 208;
+      Index = 192;
       Name = "TRACE 4 DELETE";
       Desc = "";
       Targets = [];
-      Objects = [205];
+      Objects = [189];
       XPos = 400000.000;
       YPos = 0.000;
       ZPos = 50000.000;
@@ -4135,10 +3711,10 @@ Group
     
     MCU_Timer
     {
-      Index = 209;
+      Index = 193;
       Name = "T-t T7 SAME TICK";
       Desc = "";
-      Targets = [211,212];
+      Targets = [195,196];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4153,7 +3729,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 210;
+      Index = 194;
       Name = "T-t T7 fired";
       Desc = "";
       Targets = [];
@@ -4184,10 +3760,10 @@ Group
     
     MCU_Timer
     {
-      Index = 211;
+      Index = 195;
       Name = "T-t T7 INPUT 1";
       Desc = "";
-      Targets = [210,213];
+      Targets = [194,197];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4202,10 +3778,10 @@ Group
     
     MCU_Timer
     {
-      Index = 212;
+      Index = 196;
       Name = "T-t T7 INPUT 2";
       Desc = "";
-      Targets = [210,213];
+      Targets = [194,197];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4218,130 +3794,24 @@ Group
     }
 
     
-    MCU_Spawner
+    MCU_TR_MissionObjective
     {
-      Index = 213;
-      Name = "TRACE 5";
-      Desc = "";
-      Targets = [];
-      Objects = [215];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      SpawnAtMe = 0;
-    }
-
-    
-    Vehicle
-    {
-      Name = "TRACE 5";
-      Index = 214;
-      LinkTrId = 215;
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Script = "LuaScripts\WorldObjects\Vehicles\WillysMB.txt";
-      Model = "graphics\Vehicles\WillysMB\WillysMB.mgm";
-      Desc = "";
-      Country = 0;
-      NumberInFormation = 0;
-      Vulnerable = 0;
-      Engageable = 0;
-      LimitAmmo = 1;
-      AILevel = 2;
-      DamageReport = 50;
-      DamageThreshold = 1;
-      DeleteAfterDeath = 1;
-      CoopStart = 0;
-      Spotter = -1;
-      BeaconChannel = 0;
-      Callsign = 0;
-      PayloadId = 0;
-      ModMask = 10;
-      Fuel = 1;
-      Callnum = 0;
-      Skin = "";
-      BotSkin = "";
-      RepairTimeMultiplier = 0;
-      RehealTimeMultiplier = 0;
-      RearmTimeMultiplier = 0;
-      RefuelTimeMultiplier = 0;
-      MaintenanceRadius = 10;
-      TCode = "%20%20%20%20%20%20%20%20";
-      TCodeColor = "11111111";
-      TrailerAtStart = 1;
-      PinToTerrain = 1;
-    }
-
-    
-    MCU_TR_Entity
-    {
-      Index = 215;
-      Name = "TRACE 5 entity";
-      Desc = "";
+      Index = 197;
       Targets = [];
       Objects = [];
-      XPos = 400000.000;
+      XPos = 5050.000;
       YPos = 0.000;
-      ZPos = 50000.000;
+      ZPos = 5000.000;
       XOri = 0;
       YOri = 0;
       ZOri = 0;
-      Enabled = 0;
-      MisObjID = 214;
-      OnReports
-      {
-        OnReport
-        {
-          Type = 0;
-          CmdId = 213;
-          TarId = 216;
-        }
-
-        
-      }
-
-      
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 216;
-      Name = "TRACE 5 DELETE DELAY";
-      Desc = "";
-      Targets = [217];
-      Objects = [];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 1;
-      Random = 100;
-    }
-
-    
-    MCU_Delete
-    {
-      Index = 217;
-      Name = "TRACE 5 DELETE";
-      Desc = "";
-      Targets = [];
-      Objects = [214];
-      XPos = 400000.000;
-      YPos = 0.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
+      Enabled = 1;
+      LCName = 0;
+      LCDesc = 0;
+      TaskType = 0;
+      Coalition = 0;
+      Success = 0;
+      IconType = 0;
     }
 
     
@@ -4350,15 +3820,15 @@ Group
   
   Group
   {
-    Index = 218;
+    Index = 198;
     Name = "T-j";
     Desc = "";
     MCU_Timer
     {
-      Index = 219;
+      Index = 199;
       Name = "T-j ARM";
       Desc = "";
-      Targets = [222,226,231,230,241];
+      Targets = [202,206,211,210,221];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4373,10 +3843,10 @@ Group
     
     MCU_Deactivate
     {
-      Index = 220;
+      Index = 200;
       Name = "T-j CLOSE OFF";
       Desc = "";
-      Targets = [222,226,230,233,241];
+      Targets = [202,206,210,213,221];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4389,10 +3859,10 @@ Group
     
     MCU_Timer
     {
-      Index = 221;
+      Index = 201;
       Name = "T-j CLOSE";
       Desc = "";
-      Targets = [220];
+      Targets = [200];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4407,10 +3877,10 @@ Group
     
     MCU_Timer
     {
-      Index = 222;
+      Index = 202;
       Name = "J1";
       Desc = "";
-      Targets = [225];
+      Targets = [205];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4425,10 +3895,10 @@ Group
     
     MCU_Deactivate
     {
-      Index = 223;
+      Index = 203;
       Name = "J1 OFF";
       Desc = "";
-      Targets = [222];
+      Targets = [202];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4441,10 +3911,10 @@ Group
     
     MCU_Timer
     {
-      Index = 224;
+      Index = 204;
       Name = "J1 OFF AT";
       Desc = "";
-      Targets = [223];
+      Targets = [203];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4459,7 +3929,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 225;
+      Index = 205;
       Name = "J1 out";
       Desc = "";
       Targets = [];
@@ -4490,10 +3960,10 @@ Group
     
     MCU_Timer
     {
-      Index = 226;
+      Index = 206;
       Name = "J2";
       Desc = "";
-      Targets = [229];
+      Targets = [209];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4508,10 +3978,10 @@ Group
     
     MCU_Activate
     {
-      Index = 227;
+      Index = 207;
       Name = "J2 ON";
       Desc = "";
-      Targets = [226];
+      Targets = [206];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4524,10 +3994,10 @@ Group
     
     MCU_Timer
     {
-      Index = 228;
+      Index = 208;
       Name = "J2 ON AT";
       Desc = "";
-      Targets = [227];
+      Targets = [207];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4542,7 +4012,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 229;
+      Index = 209;
       Name = "J2 out";
       Desc = "";
       Targets = [];
@@ -4573,10 +4043,10 @@ Group
     
     MCU_Timer
     {
-      Index = 230;
+      Index = 210;
       Name = "J3";
       Desc = "";
-      Targets = [232];
+      Targets = [212];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4591,10 +4061,10 @@ Group
     
     MCU_Activate
     {
-      Index = 231;
+      Index = 211;
       Name = "J3 ON";
       Desc = "";
-      Targets = [230];
+      Targets = [210];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4607,7 +4077,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 232;
+      Index = 212;
       Name = "J3 out";
       Desc = "";
       Targets = [];
@@ -4638,10 +4108,10 @@ Group
     
     MCU_Timer
     {
-      Index = 233;
+      Index = 213;
       Name = "J4";
       Desc = "";
-      Targets = [234,235,236];
+      Targets = [214,215,216];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4656,10 +4126,10 @@ Group
     
     MCU_Deactivate
     {
-      Index = 234;
+      Index = 214;
       Name = "J4 LATCH OFF";
       Desc = "";
-      Targets = [233];
+      Targets = [213];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4672,7 +4142,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 235;
+      Index = 215;
       Name = "J4 out";
       Desc = "";
       Targets = [];
@@ -4703,10 +4173,10 @@ Group
     
     MCU_Counter
     {
-      Index = 236;
+      Index = 216;
       Name = "READ J4 out 2+";
       Desc = "";
-      Targets = [237];
+      Targets = [217];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4721,7 +4191,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 237;
+      Index = 217;
       Name = "J4 out 2+";
       Desc = "";
       Targets = [];
@@ -4752,10 +4222,10 @@ Group
     
     MCU_Timer
     {
-      Index = 238;
+      Index = 218;
       Name = "J4 INPUT 1";
       Desc = "";
-      Targets = [233];
+      Targets = [213];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4770,10 +4240,10 @@ Group
     
     MCU_Timer
     {
-      Index = 239;
+      Index = 219;
       Name = "J4 INPUT 2";
       Desc = "";
-      Targets = [233];
+      Targets = [213];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4788,10 +4258,10 @@ Group
     
     MCU_Timer
     {
-      Index = 240;
+      Index = 220;
       Name = "J4 SAME TICK";
       Desc = "";
-      Targets = [238,239];
+      Targets = [218,219];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4806,10 +4276,10 @@ Group
     
     MCU_Timer
     {
-      Index = 241;
+      Index = 221;
       Name = "J5";
       Desc = "";
-      Targets = [243,244];
+      Targets = [223,224];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4824,10 +4294,10 @@ Group
     
     MCU_Timer
     {
-      Index = 242;
+      Index = 222;
       Name = "J5 RETRIGGER";
       Desc = "";
-      Targets = [241];
+      Targets = [221];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4842,7 +4312,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 243;
+      Index = 223;
       Name = "J5 out";
       Desc = "";
       Targets = [];
@@ -4873,10 +4343,10 @@ Group
     
     MCU_Counter
     {
-      Index = 244;
+      Index = 224;
       Name = "READ J5 out 2+";
       Desc = "";
-      Targets = [245];
+      Targets = [225];
       Objects = [];
       XPos = 105934.000;
       YPos = 0.000;
@@ -4891,7 +4361,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 245;
+      Index = 225;
       Name = "J5 out 2+";
       Desc = "";
       Targets = [];
@@ -4925,15 +4395,15 @@ Group
   
   Group
   {
-    Index = 246;
+    Index = 226;
     Name = "T-z";
     Desc = "";
     MCU_Timer
     {
-      Index = 247;
+      Index = 227;
       Name = "T-z ARM";
       Desc = "";
-      Targets = [251,250];
+      Targets = [231,230];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -4948,10 +4418,10 @@ Group
     
     MCU_Deactivate
     {
-      Index = 248;
+      Index = 228;
       Name = "T-z CLOSE OFF";
       Desc = "";
-      Targets = [250,253];
+      Targets = [230,233];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -4964,10 +4434,10 @@ Group
     
     MCU_Timer
     {
-      Index = 249;
+      Index = 229;
       Name = "T-z CLOSE";
       Desc = "";
-      Targets = [248];
+      Targets = [228];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -4982,10 +4452,10 @@ Group
     
     MCU_CheckZone
     {
-      Index = 250;
+      Index = 230;
       Name = "Z1";
       Desc = "";
-      Targets = [252,253];
+      Targets = [232,233];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -5002,10 +4472,10 @@ Group
     
     MCU_Activate
     {
-      Index = 251;
+      Index = 231;
       Name = "Z1 ON";
       Desc = "";
-      Targets = [250];
+      Targets = [230];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -5018,7 +4488,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 252;
+      Index = 232;
       Name = "Z1 fired";
       Desc = "";
       Targets = [];
@@ -5049,10 +4519,10 @@ Group
     
     MCU_Timer
     {
-      Index = 253;
+      Index = 233;
       Name = "Z1 AGAIN OUT";
       Desc = "";
-      Targets = [254];
+      Targets = [234];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -5067,7 +4537,7 @@ Group
     
     MCU_TR_Subtitle
     {
-      Index = 254;
+      Index = 234;
       Name = "Z1 fired again";
       Desc = "";
       Targets = [];
@@ -5098,10 +4568,10 @@ Group
     
     MCU_Deactivate
     {
-      Index = 255;
+      Index = 235;
       Name = "Z1 RECHECK OFF";
       Desc = "";
-      Targets = [250];
+      Targets = [230];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -5114,10 +4584,10 @@ Group
     
     MCU_Timer
     {
-      Index = 256;
+      Index = 236;
       Name = "Z1 RECHECK OFF AT";
       Desc = "";
-      Targets = [255];
+      Targets = [235];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -5132,10 +4602,10 @@ Group
     
     MCU_Activate
     {
-      Index = 257;
+      Index = 237;
       Name = "Z1 RECHECK ON";
       Desc = "";
-      Targets = [250,253];
+      Targets = [230,233];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -5148,10 +4618,10 @@ Group
     
     MCU_Timer
     {
-      Index = 258;
+      Index = 238;
       Name = "Z1 RECHECK ON AT";
       Desc = "";
-      Targets = [257,250];
+      Targets = [237,230];
       Objects = [];
       XPos = 65934.000;
       YPos = 0.000;
@@ -5166,7 +4636,7 @@ Group
     
     MCU_Icon
     {
-      Index = 259;
+      Index = 239;
       Name = "T-z";
       Targets = [];
       Objects = [];
@@ -5191,420 +4661,255 @@ Group
   }
 
   
-  Group
+  MCU_TR_Subtitle
   {
-    Index = 260;
-    Name = "T-o";
+    Index = 240;
+    Name = "Flight 0: stay within 20 km of K14 until 11:00";
     Desc = "";
-    MCU_Timer
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
     {
-      Index = 261;
-      Name = "T-o ARM";
-      Desc = "";
-      Targets = [];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 660;
-      Random = 100;
-    }
-
-    
-    MCU_Deactivate
-    {
-      Index = 262;
-      Name = "T-o CLOSE OFF";
-      Desc = "";
-      Targets = [264,267,270,273,276];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 263;
-      Name = "T-o CLOSE";
-      Desc = "";
-      Targets = [262];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 770;
-      Random = 100;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 264;
-      Name = "T-o O1";
-      Desc = "";
-      Targets = [265,266];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 670;
-      Random = 100;
-    }
-
-    
-    MCU_TR_Subtitle
-    {
-      Index = 265;
-      Name = "T-o O1 fired";
-      Desc = "";
-      Targets = [];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      Coalitions = [0,1,2];
-      SubtitleInfo
-      {
-        Duration = 1;
-        FontSize = 20;
-        HAlign = 1;
-        VAlign = 2;
-        RColor = 0;
-        GColor = 100;
-        BColor = 0;
-        LCText = 43;
-      }
-
-      
-    }
-
-    
-    MCU_TR_MissionObjective
-    {
-      Index = 266;
-      Targets = [];
-      Objects = [];
-      XPos = 5060.000;
-      YPos = 0.000;
-      ZPos = 5000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      LCName = 0;
-      LCDesc = 0;
-      TaskType = 0;
-      Coalition = 0;
-      Success = 0;
-      IconType = 0;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 267;
-      Name = "T-o O2";
-      Desc = "";
-      Targets = [268,269];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 690;
-      Random = 100;
-    }
-
-    
-    MCU_TR_Subtitle
-    {
-      Index = 268;
-      Name = "T-o O2 fired";
-      Desc = "";
-      Targets = [];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      Coalitions = [0,1,2];
-      SubtitleInfo
-      {
-        Duration = 1;
-        FontSize = 20;
-        HAlign = 1;
-        VAlign = 2;
-        RColor = 0;
-        GColor = 100;
-        BColor = 0;
-        LCText = 44;
-      }
-
-      
-    }
-
-    
-    MCU_TR_MissionObjective
-    {
-      Index = 269;
-      Targets = [];
-      Objects = [];
-      XPos = 5070.000;
-      YPos = 0.000;
-      ZPos = 5000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      LCName = 0;
-      LCDesc = 0;
-      TaskType = 0;
-      Coalition = 1;
-      Success = 0;
-      IconType = 0;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 270;
-      Name = "T-o O3";
-      Desc = "";
-      Targets = [271,272];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 710;
-      Random = 100;
-    }
-
-    
-    MCU_TR_Subtitle
-    {
-      Index = 271;
-      Name = "T-o O3 fired";
-      Desc = "";
-      Targets = [];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      Coalitions = [0,1,2];
-      SubtitleInfo
-      {
-        Duration = 1;
-        FontSize = 20;
-        HAlign = 1;
-        VAlign = 2;
-        RColor = 0;
-        GColor = 100;
-        BColor = 0;
-        LCText = 45;
-      }
-
-      
-    }
-
-    
-    MCU_TR_MissionObjective
-    {
-      Index = 272;
-      Targets = [];
-      Objects = [];
-      XPos = 5080.000;
-      YPos = 0.000;
-      ZPos = 5000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      LCName = 0;
-      LCDesc = 0;
-      TaskType = 0;
-      Coalition = 2;
-      Success = 0;
-      IconType = 0;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 273;
-      Name = "T-o O4";
-      Desc = "";
-      Targets = [274,275];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 730;
-      Random = 100;
-    }
-
-    
-    MCU_TR_Subtitle
-    {
-      Index = 274;
-      Name = "T-o O4 fired";
-      Desc = "";
-      Targets = [];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      Coalitions = [0,1,2];
-      SubtitleInfo
-      {
-        Duration = 1;
-        FontSize = 20;
-        HAlign = 1;
-        VAlign = 2;
-        RColor = 0;
-        GColor = 100;
-        BColor = 0;
-        LCText = 46;
-      }
-
-      
-    }
-
-    
-    MCU_TR_MissionObjective
-    {
-      Index = 275;
-      Targets = [];
-      Objects = [];
-      XPos = 5090.000;
-      YPos = 0.000;
-      ZPos = 5000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      LCName = 0;
-      LCDesc = 0;
-      TaskType = 0;
-      Coalition = 1;
-      Success = 1;
-      IconType = 0;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 276;
-      Name = "T-o O5";
-      Desc = "";
-      Targets = [277,278];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 750;
-      Random = 100;
-    }
-
-    
-    MCU_TR_Subtitle
-    {
-      Index = 277;
-      Name = "T-o O5 fired";
-      Desc = "";
-      Targets = [];
-      Objects = [];
-      XPos = 105934.000;
-      YPos = 0.000;
-      ZPos = 274477.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      Coalitions = [0,1,2];
-      SubtitleInfo
-      {
-        Duration = 1;
-        FontSize = 20;
-        HAlign = 1;
-        VAlign = 2;
-        RColor = 0;
-        GColor = 100;
-        BColor = 0;
-        LCText = 47;
-      }
-
-      
-    }
-
-    
-    MCU_TR_MissionObjective
-    {
-      Index = 278;
-      Targets = [];
-      Objects = [];
-      XPos = 5100.000;
-      YPos = 0.000;
-      ZPos = 5000.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Enabled = 1;
-      LCName = 0;
-      LCDesc = 0;
-      TaskType = 0;
-      Coalition = 2;
-      Success = 1;
-      IconType = 0;
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 43;
     }
 
     
   }
 
   
+  MCU_Timer
+  {
+    Index = 241;
+    Name = "CUE 01";
+    Desc = "";
+    Targets = [240];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 0;
+    Random = 100;
+  }
+
+  
   MCU_TR_Subtitle
   {
-    Index = 279;
-    Name = "Flight 0: stay within 20 km of K14 until 11:00";
+    Index = 242;
+    Name = "T-e start";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 44;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 243;
+    Name = "CUE 02";
+    Desc = "";
+    Targets = [242];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 60;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 244;
+    Name = "T-f F1 start";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 45;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 245;
+    Name = "CUE 03";
+    Desc = "";
+    Targets = [244];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 150;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 246;
+    Name = "T-t start: note any objective message or map marker in the next 60 s";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 46;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 247;
+    Name = "CUE 04";
+    Desc = "";
+    Targets = [246];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 270;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 248;
+    Name = "T-f F2 start";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 47;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 249;
+    Name = "CUE 05";
+    Desc = "";
+    Targets = [248];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 330;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 250;
+    Name = "T-j start";
     Desc = "";
     Targets = [];
     Objects = [];
@@ -5634,10 +4939,10 @@ Group
   
   MCU_Timer
   {
-    Index = 280;
-    Name = "CUE 01";
+    Index = 251;
+    Name = "CUE 06";
     Desc = "";
-    Targets = [279];
+    Targets = [250];
     Objects = [];
     XPos = 105934.000;
     YPos = 0.000;
@@ -5645,15 +4950,15 @@ Group
     XOri = 0;
     YOri = 0;
     ZOri = 0;
-    Time = 0;
+    Time = 540;
     Random = 100;
   }
 
   
   MCU_TR_Subtitle
   {
-    Index = 281;
-    Name = "T-e start";
+    Index = 252;
+    Name = "T-z start";
     Desc = "";
     Targets = [];
     Objects = [];
@@ -5683,10 +4988,10 @@ Group
   
   MCU_Timer
   {
-    Index = 282;
-    Name = "CUE 02";
+    Index = 253;
+    Name = "CUE 07";
     Desc = "";
-    Targets = [281];
+    Targets = [252];
     Objects = [];
     XPos = 105934.000;
     YPos = 0.000;
@@ -5694,15 +4999,15 @@ Group
     XOri = 0;
     YOri = 0;
     ZOri = 0;
-    Time = 60;
+    Time = 600;
     Random = 100;
   }
 
   
   MCU_TR_Subtitle
   {
-    Index = 283;
-    Name = "T-f F1 start";
+    Index = 254;
+    Name = "Flight 0 done. End the mission normally";
     Desc = "";
     Targets = [];
     Objects = [];
@@ -5732,255 +5037,10 @@ Group
   
   MCU_Timer
   {
-    Index = 284;
-    Name = "CUE 03";
-    Desc = "";
-    Targets = [283];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 150;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 285;
-    Name = "T-t start: compare spawn log lines with subtitles in the next 60 s";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 51;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 286;
-    Name = "CUE 04";
-    Desc = "";
-    Targets = [285];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 270;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 287;
-    Name = "T-f F2 start";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 52;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 288;
-    Name = "CUE 05";
-    Desc = "";
-    Targets = [287];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 330;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 289;
-    Name = "T-j start";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 53;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 290;
-    Name = "CUE 06";
-    Desc = "";
-    Targets = [289];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 540;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 291;
-    Name = "T-z start";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 54;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 292;
-    Name = "CUE 07";
-    Desc = "";
-    Targets = [291];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 600;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 293;
-    Name = "Flight 0 main cells done. Keep the mission running: objective tests until 12:50";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 55;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 294;
+    Index = 255;
     Name = "CUE 08";
     Desc = "";
-    Targets = [293];
+    Targets = [254];
     Objects = [];
     XPos = 105934.000;
     YPos = 0.000;
@@ -5989,55 +5049,6 @@ Group
     YOri = 0;
     ZOri = 0;
     Time = 660;
-    Random = 100;
-  }
-
-  
-  MCU_TR_Subtitle
-  {
-    Index = 295;
-    Name = "Flight 0 done. End the mission normally";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    Coalitions = [0,1,2];
-    SubtitleInfo
-    {
-      Duration = 20;
-      FontSize = 20;
-      HAlign = 1;
-      VAlign = 2;
-      RColor = 0;
-      GColor = 100;
-      BColor = 0;
-      LCText = 56;
-    }
-
-    
-  }
-
-  
-  MCU_Timer
-  {
-    Index = 296;
-    Name = "CUE 09";
-    Desc = "";
-    Targets = [295];
-    Objects = [];
-    XPos = 105934.000;
-    YPos = 0.000;
-    ZPos = 269477.000;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Time = 770;
     Random = 100;
   }
 
