@@ -1,0 +1,55 @@
+﻿2:ZA1 fired
+3:ZA2 fired
+4:T-a1
+5:
+6:E1 fired
+7:E1 fired 2+
+8:E2 fired
+9:E2 fired 2+
+10:E3 fired
+11:E4 fired
+12:E5 fired
+13:E6 fired
+14:E6 fired 2+
+15:E7 fired
+16:E8 fired
+17:E8 fired 2+
+18:E9 fired
+19:F1 hit
+20:F1 reached 12
+21:F1 reached 29
+22:F2 out 1
+23:F2 out 2
+24:F2 out 3
+25:F2 out 4
+26:T-t T1 fired
+27:T-t T2 fired
+28:T-t T3a fired
+29:T-t T3b fired
+30:T-t T5 fired
+31:T-t T7 fired
+32:J1 out
+33:J2 out
+34:J3 out
+35:J4 out
+36:J4 out 2+
+37:J5 out
+38:J5 out 2+
+39:Z1 fired
+40:Z1 fired again
+41:T-z
+42:
+43:T-o O1 fired
+44:T-o O2 fired
+45:T-o O3 fired
+46:T-o O4 fired
+47:T-o O5 fired
+48:Flight 0: stay within 20 km of K14 until 11:00
+49:T-e start
+50:T-f F1 start
+51:T-t start: compare spawn log lines with subtitles in the next 60 s
+52:T-f F2 start
+53:T-j start
+54:T-z start
+55:Flight 0 main cells done. Keep the mission running: objective tests until 12:50
+56:Flight 0 done. End the mission normally
