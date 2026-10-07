@@ -1,0 +1,821 @@
+{
+ "offset_s": 45.5,
+ "rows": [
+  {
+   "mission_s": 60.0,
+   "video": "00:14.50",
+   "source": "CUE 02",
+   "subtitle": "T-o O2 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 64.0,
+   "video": "00:18.50",
+   "source": "E1",
+   "subtitle": "E1 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 64.0,
+   "video": "00:18.50",
+   "source": "E2",
+   "subtitle": "E2 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 64.0,
+   "video": "00:18.50",
+   "source": "E6",
+   "subtitle": "E6 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 66.0,
+   "video": "00:20.50",
+   "source": "E3",
+   "subtitle": "E3 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 70.0,
+   "video": "00:24.50",
+   "source": "E2",
+   "subtitle": "E2 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 70.0,
+   "video": "00:24.50",
+   "source": "E6",
+   "subtitle": "E6 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 70.0,
+   "video": "00:24.50",
+   "source": "READ E2 fired 2+",
+   "subtitle": "E2 fired 2+",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 70.0,
+   "video": "00:24.50",
+   "source": "READ E6 fired 2+",
+   "subtitle": "E6 fired 2+",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 100.0,
+   "video": "00:54.50",
+   "source": "E7",
+   "subtitle": "E7 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 110.0,
+   "video": "01:04.50",
+   "source": "E8",
+   "subtitle": "E8 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 117.4,
+   "video": "01:11.90",
+   "source": "ZA1",
+   "subtitle": "ZA1 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 120.1,
+   "video": "01:14.60",
+   "source": "E9",
+   "subtitle": "E9 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 150.0,
+   "video": "01:44.50",
+   "source": "CUE 03",
+   "subtitle": "T-o O3 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 156.0,
+   "video": "01:50.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 159.0,
+   "video": "01:53.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 162.0,
+   "video": "01:56.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 165.0,
+   "video": "01:59.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 168.0,
+   "video": "02:02.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 171.0,
+   "video": "02:05.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 174.0,
+   "video": "02:08.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 186.0,
+   "video": "02:20.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 201.0,
+   "video": "02:35.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 213.0,
+   "video": "02:47.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 216.0,
+   "video": "02:50.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 219.0,
+   "video": "02:53.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 219.0,
+   "video": "02:53.50",
+   "source": "READ F1 reached 12",
+   "subtitle": "F1 reached 12",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 225.0,
+   "video": "02:59.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 234.0,
+   "video": "03:08.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 243.0,
+   "video": "03:17.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 252.0,
+   "video": "03:26.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 255.0,
+   "video": "03:29.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [
+    "F1 hit"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 261.0,
+   "video": "03:35.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 264.0,
+   "video": "03:38.50",
+   "source": "F1",
+   "subtitle": "F1 hit",
+   "seen": [
+    "F1 hit"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 270.0,
+   "video": "03:44.50",
+   "source": "CUE 04",
+   "subtitle": "T-o O4 fired",
+   "seen": [
+    "E2 fired",
+    "E4 fired",
+    "T-o O4 fired",
+    "T-t T2 fired",
+    "Z1 fired"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 275.0,
+   "video": "03:49.50",
+   "source": "T-t T1",
+   "subtitle": "T-t T1 fired",
+   "seen": [
+    "E4 fired",
+    "T-t T2 fired"
+   ],
+   "match": false
+  },
+  {
+   "mission_s": 277.0,
+   "video": "03:51.50",
+   "source": "T-t T2",
+   "subtitle": "T-t T2 fired",
+   "seen": [
+    "T-t T2 fired"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 279.0,
+   "video": "03:53.50",
+   "source": "T-t T2",
+   "subtitle": "T-t T2 fired",
+   "seen": [
+    "T-t T2 fired"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 281.0,
+   "video": "03:55.50",
+   "source": "T-t T2",
+   "subtitle": "T-t T2 fired",
+   "seen": [
+    "E2 fired",
+    "T-t T2 fired"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 283.0,
+   "video": "03:57.50",
+   "source": "T-t T2",
+   "subtitle": "T-t T2 fired",
+   "seen": [
+    "T-t T2 fired",
+    "Z1 fired"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 285.0,
+   "video": "03:59.50",
+   "source": "T-t T2",
+   "subtitle": "T-t T2 fired",
+   "seen": [
+    "T-t T2 fired",
+    "Z1 fired"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 287.0,
+   "video": "04:01.50",
+   "source": "T-t T3a",
+   "subtitle": "T-t T3a fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 287.0,
+   "video": "04:01.50",
+   "source": "T-t T3b",
+   "subtitle": "T-t T3b fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 325.0,
+   "video": "04:39.50",
+   "source": "T-t T7 SAME TICK",
+   "subtitle": "T-t T7 fired",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 330.0,
+   "video": "04:44.50",
+   "source": "CUE 05",
+   "subtitle": "T-o O5 fired",
+   "seen": [
+    "E5 fired",
+    "F2 out 1",
+    "F2 out 3",
+    "T-o O5 fired"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 331.5,
+   "video": "04:46.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [
+    "F2 out 3",
+    "T-o O5 fired"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 335.5,
+   "video": "04:50.00",
+   "source": "F2 OUT 1",
+   "subtitle": "F2 out 1",
+   "seen": [
+    "F2 out 1"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 341.5,
+   "video": "04:56.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 346.0,
+   "video": "05:00.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 351.5,
+   "video": "05:06.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [
+    "F2 out 3"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 356.0,
+   "video": "05:10.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [
+    "F2 out 2"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 361.0,
+   "video": "05:15.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [
+    "F2 out 2"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 367.0,
+   "video": "05:21.50",
+   "source": "F2 OUT 4",
+   "subtitle": "F2 out 4",
+   "seen": [
+    "F2 out 4"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 371.0,
+   "video": "05:25.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [
+    "F2 out 2"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 375.5,
+   "video": "05:30.00",
+   "source": "F2 OUT 1",
+   "subtitle": "F2 out 1",
+   "seen": [
+    "F2 out 1"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 381.5,
+   "video": "05:36.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [
+    "F2 out 3"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 386.5,
+   "video": "05:41.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [
+    "F2 out 3"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 391.0,
+   "video": "05:45.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [
+    "F2 out 2"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 396.5,
+   "video": "05:51.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 400.5,
+   "video": "05:55.00",
+   "source": "F2 OUT 1",
+   "subtitle": "F2 out 1",
+   "seen": [
+    "F2 out 1",
+    "F2 out 2"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 406.5,
+   "video": "06:01.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [
+    "F2 out 3"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 412.0,
+   "video": "06:06.50",
+   "source": "F2 OUT 4",
+   "subtitle": "F2 out 4",
+   "seen": [
+    "F2 out 4"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 417.0,
+   "video": "06:11.50",
+   "source": "F2 OUT 4",
+   "subtitle": "F2 out 4",
+   "seen": [
+    "F2 out 4"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 421.5,
+   "video": "06:16.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 425.5,
+   "video": "06:20.00",
+   "source": "F2 OUT 1",
+   "subtitle": "F2 out 1",
+   "seen": [
+    "F2 out 1"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 430.5,
+   "video": "06:25.00",
+   "source": "F2 OUT 1",
+   "subtitle": "F2 out 1",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 435.5,
+   "video": "06:30.00",
+   "source": "F2 OUT 1",
+   "subtitle": "F2 out 1",
+   "seen": [
+    "F2 out 1"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 440.5,
+   "video": "06:35.00",
+   "source": "F2 OUT 1",
+   "subtitle": "F2 out 1",
+   "seen": [
+    "F2 out 1"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 447.0,
+   "video": "06:41.50",
+   "source": "F2 OUT 4",
+   "subtitle": "F2 out 4",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 452.0,
+   "video": "06:46.50",
+   "source": "F2 OUT 4",
+   "subtitle": "F2 out 4",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 456.0,
+   "video": "06:50.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [
+    "F2 out 2"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 462.0,
+   "video": "06:56.50",
+   "source": "F2 OUT 4",
+   "subtitle": "F2 out 4",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 466.5,
+   "video": "07:01.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 471.0,
+   "video": "07:05.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 476.0,
+   "video": "07:10.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [
+    "F2 out 2"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 482.0,
+   "video": "07:16.50",
+   "source": "F2 OUT 4",
+   "subtitle": "F2 out 4",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 486.0,
+   "video": "07:20.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 491.5,
+   "video": "07:26.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 495.5,
+   "video": "07:30.00",
+   "source": "F2 OUT 1",
+   "subtitle": "F2 out 1",
+   "seen": [
+    "F2 out 1"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 501.0,
+   "video": "07:35.50",
+   "source": "F2 OUT 2",
+   "subtitle": "F2 out 2",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 507.0,
+   "video": "07:41.50",
+   "source": "F2 OUT 4",
+   "subtitle": "F2 out 4",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 512.0,
+   "video": "07:46.50",
+   "source": "F2 OUT 4",
+   "subtitle": "F2 out 4",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 516.5,
+   "video": "07:51.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 521.5,
+   "video": "07:56.00",
+   "source": "F2 OUT 3",
+   "subtitle": "F2 out 3",
+   "seen": [
+    "F2 out 3"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 525.5,
+   "video": "08:00.00",
+   "source": "F2 OUT 1",
+   "subtitle": "F2 out 1",
+   "seen": [
+    "F2 out 1"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 540.0,
+   "video": "08:14.50",
+   "source": "CUE 06",
+   "subtitle": "Flight 0: stay within 20 km of K14 until 11:00",
+   "seen": [
+    "J4 out"
+   ],
+   "match": false
+  },
+  {
+   "mission_s": 540.0,
+   "video": "08:14.50",
+   "source": "J4",
+   "subtitle": "J4 out",
+   "seen": [
+    "J4 out"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 555.0,
+   "video": "08:29.50",
+   "source": "J5",
+   "subtitle": "J5 out",
+   "seen": [],
+   "match": false
+  },
+  {
+   "mission_s": 600.0,
+   "video": "09:14.50",
+   "source": "CUE 07",
+   "subtitle": "T-e start",
+   "seen": [
+    "T-e start"
+   ],
+   "match": true
+  },
+  {
+   "mission_s": 660.0,
+   "video": "10:14.50",
+   "source": "CUE 08",
+   "subtitle": "T-f F1 start",
+   "seen": [
+    "T-f F1 start"
+   ],
+   "match": true
+  }
+ ],
+ "unexplained": [
+  {
+   "v": 269.3,
+   "m": 314.8,
+   "label": "T-t T5 fired",
+   "raw": "T-tT5fired",
+   "sc": 1.0
+  }
+ ]
+}
