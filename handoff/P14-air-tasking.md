@@ -1751,6 +1751,12 @@ The repo does not prove any of these in game. The shipped files only show what t
     - **Revisit (go back to two zones) if:** C2 does not fire again in flight 1A; or in step 11 a straight pass makes an area HOT, or a loiter of at least D inside r_in does not.
 23. **Not applied, needs the user: a smaller Auto-fill.** "Auto-fill from objectives" adds one entry per date-valid sortie for each target. Adding one entry per target instead (rotating through the side's sorties) would cut the copies, and so the aircraft and MCUs, to a quarter on the NATO side.
 
+26. **To explore, not scheduled (user, 2026-10-08): the gate-switch view.** The design is already a circuit of IL-2's gate primitives, named in §3.0 (relay, latch, pair, cancel, once-gate, counter threshold, set-value reset). Explore making that explicit as a small cell library, `airtask/gates.rs`: one builder per idiom (`relay`, `latch`, `once_gate`, `threshold(n)`, `reset`, `pair`), each with its MCU count and start state pinned by a unit test, so the shell, budget, threshold, clock and zone builders stamp the same cells instead of each writing its own.
+    - **What it might buy.** Fewer MCUs where a builder hand-rolled a heavier idiom; one place for each probe fallback (the J4 once-gate swap would then apply to every latch at once); a walker that knows the cells and checks the re-arm rule per cell; §3 diagrams that read as cells.
+    - **Rules.** Output stays byte-identical where the behaviour is the same. The counts per copy, side, area and entry never go up. No MCU types beyond the probed ones. It is presentation of the same logic, not a new design.
+    - **Limits to keep in mind.** The game has no true AND (a `Counter = 2` means "two pulses before the reset", order-free and timing-bound), no compare and no edge detection; state is only active or inactive plus a counter's running value. Cells must say which of these they rely on.
+    - **When.** After step 3 lands: the shell and the budget are the first two builders that share idioms, so that is the first point where the repetition can be measured. Its own small step by Fable, off Astra's serial path, with a count table before and after.
+
 **Stop and report.** After each step, list what changed, the test count and the warnings. Say what needs the user in game. Do not start the next step until the user has seen the list if the user asked for that at session start.
 
 **Nothing is pushed or merged to `main` without the user.** No tags, since a `v*` tag triggers the release autobuild. Never `git add -A`. `.gitattributes * -text` stays.
@@ -1806,3 +1812,4 @@ The repo does not prove any of these in game. The shipped files only show what t
   - **Extension fallback (T14).** If the probe calls for a renewed order, it goes through `SNjj RENEW`, which `DONE HUB OFF` switches off.
   - **Stale text (T15).** Step 0b names its MCUs; risk v and D5 corrected.
   - **No further full review (U23).** These last changes are not reviewed by a second model. Fable re-reads each step's section when it scopes that step for Astra.
+- **Gate-switch view (2026-10-08, user).** §10 item 26 added: explore a cell library of the gate idioms (relay, latch, once-gate, threshold, reset, pair) shared by every builder, scoped after step 3. Not scheduled; no design, count or step changed.
