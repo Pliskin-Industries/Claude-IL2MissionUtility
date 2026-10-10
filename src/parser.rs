@@ -46,7 +46,6 @@
 //!
 //! Unit-tested with synthetic blocks and real `TemplateExamples/` fixtures.
 
-
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while1};
 use nom::character::complete::{char, digit1, multispace0, satisfy};
@@ -54,8 +53,8 @@ use nom::combinator::{map, opt, recognize};
 use nom::error::{Error, ErrorKind};
 use nom::multi::{many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated};
-use nom::{bytes::complete::take_while, combinator::map_res};
 use nom::{Err, IResult, Parser};
+use nom::{bytes::complete::take_while, combinator::map_res};
 
 use crate::ast::Il2Entity;
 
@@ -76,10 +75,9 @@ pub fn parse_identifier(input: &str) -> IResult<&str, &str> {
 
 /// Signed integer used by Index and MCU link arrays.
 pub fn parse_integer(input: &str) -> IResult<&str, i32> {
-    map_res(
-        recognize((opt(char('-')), digit1)),
-        |s: &str| s.parse::<i32>(),
-    )
+    map_res(recognize((opt(char('-')), digit1)), |s: &str| {
+        s.parse::<i32>()
+    })
     .parse(input)
 }
 
@@ -104,10 +102,7 @@ pub fn parse_integer_array(input: &str) -> IResult<&str, Vec<i32>> {
 fn quoted_string_inner(input: &str) -> IResult<&str, &str> {
     delimited(
         char('"'),
-        recognize(many0(alt((
-            tag("\"\""),
-            take_while1(|c: char| c != '"'),
-        )))),
+        recognize(many0(alt((tag("\"\""), take_while1(|c: char| c != '"'))))),
         char('"'),
     )
     .parse(input)
@@ -137,7 +132,9 @@ fn property_value(input: &str) -> IResult<&str, String> {
     alt((
         map(quoted_string_inner, |s: &str| format!("\"{s}\"")),
         map(recognize(parse_integer_array), |s: &str| s.to_string()),
-        map(take_while(|c: char| c != ';'), |s: &str| s.trim().to_string()),
+        map(take_while(|c: char| c != ';'), |s: &str| {
+            s.trim().to_string()
+        }),
     ))
     .parse(input)
 }
@@ -170,10 +167,7 @@ fn parse_nested_block(input: &str) -> IResult<&str, BodyItem> {
         preceded(multispace0, char('}')),
     )
     .parse(input)?;
-    Ok((
-        input,
-        BodyItem::Child(assemble(ident.to_string(), items)),
-    ))
+    Ok((input, BodyItem::Child(assemble(ident.to_string(), items))))
 }
 
 /// A property, nested block, or quoted list item. Fails without consuming
@@ -371,7 +365,8 @@ mod tests {
 
     #[test]
     fn quoted_value_keeps_doubled_quote() {
-        let src = "Plane\r\n{\r\n  Name = \"\";\r\n  Index = 1;\r\n  TCode = \"   \"\"&\";\r\n}\r\n";
+        let src =
+            "Plane\r\n{\r\n  Name = \"\";\r\n  Index = 1;\r\n  TCode = \"   \"\"&\";\r\n}\r\n";
         let entity = parse_group_file(src).expect("parse");
         assert_eq!(entity.property("TCode"), Some("\"   \"\"&\""));
         assert_eq!(crate::serialize::serialize_group(&entity), src);
@@ -592,7 +587,8 @@ mod tests {
 
     #[test]
     fn parse_real_artillery_template() {
-        let src = include_str!("../TemplateExamples/GroundUnits/DropIns/DPRK MM13 Rocket Arty.Group");
+        let src =
+            include_str!("../TemplateExamples/GroundUnits/DropIns/DPRK MM13 Rocket Arty.Group");
         let entity = parse_group_file(src).expect("parse artillery template");
         assert_eq!(entity.block_type, "Group");
         assert!(entity.index.is_some());

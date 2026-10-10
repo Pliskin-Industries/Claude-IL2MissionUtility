@@ -15,11 +15,11 @@ use eframe::egui::accesskit::{self as ak, Role};
 use eframe::egui::{self, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Vec2};
 
 use super::airfield::country_name;
-use super::builder::{skill_name, FIELD_LABEL_W};
+use super::builder::{FIELD_LABEL_W, skill_name};
 use super::map::{fighter_svg_north, rasterize_svg};
 use super::*;
 use crate::heightprobe;
-use crate::template::{append_seat, OrderKind, TemplateOptions};
+use crate::template::{OrderKind, TemplateOptions, append_seat};
 
 /// Test stand-in for `rfd::FileDialog`: every pick pops the next prepared
 /// answer. A dialog with no prepared answer is a test bug and panics.
@@ -40,7 +40,9 @@ pub mod dialog {
     }
 
     fn next() -> Vec<PathBuf> {
-        ANSWERS.with(|a| a.borrow_mut().pop_front()).expect("a file dialog opened with no prepared answer")
+        ANSWERS
+            .with(|a| a.borrow_mut().pop_front())
+            .expect("a file dialog opened with no prepared answer")
     }
 
     pub struct FileDialog;
@@ -71,7 +73,13 @@ pub mod dialog {
 }
 
 const SCREEN: Vec2 = Vec2::new(1400.0, 1280.0);
-const CTRL: Modifiers = Modifiers { alt: false, ctrl: true, shift: false, mac_cmd: false, command: true };
+const CTRL: Modifiers = Modifiers {
+    alt: false,
+    ctrl: true,
+    shift: false,
+    mac_cmd: false,
+    command: true,
+};
 
 #[derive(Clone, Debug)]
 struct Node {
@@ -112,7 +120,15 @@ impl Harness {
         app.harvest_missions_dir = dir.join("missions").display().to_string();
         app.mark_saved(AppMode::Template);
         app.mark_saved(AppMode::Map);
-        let mut h = Harness { ctx, app, nodes: Vec::new(), time: 0.0, mods: Modifiers::NONE, pointer: Pos2::ZERO, dir };
+        let mut h = Harness {
+            ctx,
+            app,
+            nodes: Vec::new(),
+            time: 0.0,
+            mods: Modifiers::NONE,
+            pointer: Pos2::ZERO,
+            dir,
+        };
         h.settle();
         h
     }
@@ -131,7 +147,11 @@ impl Harness {
         let app = &mut self.app;
         let out = self.ctx.run(raw, |ctx| app.ui(ctx));
         if let Some(update) = out.platform_output.accesskit_update {
-            self.nodes = update.nodes.iter().filter_map(|(_, n)| to_node(n)).collect();
+            self.nodes = update
+                .nodes
+                .iter()
+                .filter_map(|(_, n)| to_node(n))
+                .collect();
         }
     }
 
@@ -142,12 +162,20 @@ impl Harness {
     }
 
     fn all(&self, label: &str) -> Vec<Node> {
-        self.nodes.iter().filter(|n| n.label == label).cloned().collect()
+        self.nodes
+            .iter()
+            .filter(|n| n.label == label)
+            .cloned()
+            .collect()
     }
 
     fn find(&self, label: &str) -> Node {
         let hits = self.all(label);
-        assert!(!hits.is_empty(), "no widget labelled {label:?}. Labels: {:?}", self.labels());
+        assert!(
+            !hits.is_empty(),
+            "no widget labelled {label:?}. Labels: {:?}",
+            self.labels()
+        );
         hits[0].clone()
     }
 
@@ -164,7 +192,11 @@ impl Harness {
     }
 
     fn labels(&self) -> Vec<String> {
-        self.nodes.iter().map(|n| n.label.clone()).filter(|l| !l.is_empty()).collect()
+        self.nodes
+            .iter()
+            .map(|n| n.label.clone())
+            .filter(|l| !l.is_empty())
+            .collect()
     }
 
     fn move_to(&mut self, pos: Pos2) {
@@ -179,8 +211,18 @@ impl Harness {
     fn click_at_with(&mut self, pos: Pos2, button: PointerButton) {
         self.move_to(pos);
         let mods = self.mods;
-        self.step(vec![Event::PointerButton { pos, button, pressed: true, modifiers: mods }]);
-        self.step(vec![Event::PointerButton { pos, button, pressed: false, modifiers: mods }]);
+        self.step(vec![Event::PointerButton {
+            pos,
+            button,
+            pressed: true,
+            modifiers: mods,
+        }]);
+        self.step(vec![Event::PointerButton {
+            pos,
+            button,
+            pressed: false,
+            modifiers: mods,
+        }]);
         self.settle();
     }
 
@@ -193,20 +235,42 @@ impl Harness {
     fn drag(&mut self, from: Pos2, to: Pos2) {
         self.move_to(from);
         let mods = self.mods;
-        self.step(vec![Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: mods }]);
+        self.step(vec![Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: mods,
+        }]);
         for k in 1..=8 {
             let p = from + (to - from) * (k as f32 / 8.0);
             self.move_to(p);
         }
-        self.step(vec![Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: mods }]);
+        self.step(vec![Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: mods,
+        }]);
         self.settle();
     }
 
     fn key_with(&mut self, key: Key, modifiers: Modifiers) {
         let before = self.mods;
         self.mods = modifiers;
-        self.step(vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }]);
-        self.step(vec![Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers }]);
+        self.step(vec![Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }]);
+        self.step(vec![Event::Key {
+            key,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers,
+        }]);
         self.mods = before;
         self.settle();
     }
@@ -253,9 +317,16 @@ fn to_node(n: &ak::Node) -> Option<Node> {
     let r = n.bounds()?;
     Some(Node {
         // Buttons carry their text as the label; plain labels and links as the value.
-        label: n.label().or_else(|| n.value()).unwrap_or_default().to_string(),
+        label: n
+            .label()
+            .or_else(|| n.value())
+            .unwrap_or_default()
+            .to_string(),
         role: n.role(),
-        rect: Rect::from_min_max(Pos2::new(r.x0 as f32, r.y0 as f32), Pos2::new(r.x1 as f32, r.y1 as f32)),
+        rect: Rect::from_min_max(
+            Pos2::new(r.x0 as f32, r.y0 as f32),
+            Pos2::new(r.x1 as f32, r.y1 as f32),
+        ),
         disabled: n.is_disabled(),
         toggled: n.toggled().map(|t| t == ak::Toggled::True),
     })
@@ -264,7 +335,8 @@ fn to_node(n: &ak::Node) -> Option<Node> {
 fn assert_group_file(path: &Path) {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     assert!(text.len() > 100, "{} is nearly empty", path.display());
-    crate::parser::parse_group_file(&text).unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()));
+    crate::parser::parse_group_file(&text)
+        .unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()));
 }
 
 // ── Shell ─────────────────────────────────────────────────────────────────
@@ -276,7 +348,17 @@ fn rail_and_ctrl_numbers_switch_every_tab() {
         h.tab(label);
         assert!(h.app.mode == mode, "rail {label}");
     }
-    for (i, key) in [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6].into_iter().enumerate() {
+    for (i, key) in [
+        Key::Num1,
+        Key::Num2,
+        Key::Num3,
+        Key::Num4,
+        Key::Num5,
+        Key::Num6,
+    ]
+    .into_iter()
+    .enumerate()
+    {
         h.key_with(key, CTRL);
         assert!(h.app.mode == MODES[i].0, "Ctrl {}", i + 1);
     }
@@ -300,9 +382,17 @@ fn every_tab_has_a_primary_button_with_its_shortcut() {
     let mut h = Harness::new("primary");
     for (mode, label) in MODES {
         h.tab(label);
-        let primary = if mode == AppMode::Map { "Generate Base Map" } else { "Generate File" };
+        let primary = if mode == AppMode::Map {
+            "Generate Base Map"
+        } else {
+            "Generate File"
+        };
         let n = h.find(primary);
-        assert!(n.rect.height() >= 28.0, "{label}: primary button {} px tall", n.rect.height());
+        assert!(
+            n.rect.height() >= 28.0,
+            "{label}: primary button {} px tall",
+            n.rect.height()
+        );
     }
 }
 
@@ -353,7 +443,11 @@ fn template_add_select_remove_undo_reset_and_generate() {
     assert!(h.app.confirm.is_none());
     assert_eq!(h.app.tpl_seats.len(), 3);
     h.click("Reset");
-    let dialog_reset = h.all("Reset").into_iter().max_by(|a, b| a.rect.top().total_cmp(&b.rect.top())).unwrap();
+    let dialog_reset = h
+        .all("Reset")
+        .into_iter()
+        .max_by(|a, b| a.rect.top().total_cmp(&b.rect.top()))
+        .unwrap();
     h.click_at(dialog_reset.rect.center());
     assert!(h.app.tpl_seats.is_empty());
     h.key_with(Key::Z, CTRL);
@@ -364,8 +458,30 @@ fn template_add_select_remove_undo_reset_and_generate() {
     dialog::answer(vec![out.clone()]);
     h.key_with(Key::G, CTRL);
     assert_group_file(&out);
-    assert!(!h.app.is_dirty(AppMode::Template), "Generate marks the template saved");
+    assert!(
+        !h.app.is_dirty(AppMode::Template),
+        "Generate marks the template saved"
+    );
     assert_eq!(dialog::pending(), 0);
+}
+
+#[test]
+fn template_mission_menu_adds_a_cap() {
+    let mut h = Harness::new("mission");
+    h.tab("Template");
+    add_model(&mut h, "F-51D");
+    h.click("Unit card 1");
+    h.click("+ Mission ▾");
+    h.click("CAP");
+    assert!(
+        h.app.tpl_seats[0]
+            .orders
+            .iter()
+            .any(|o| o.kind == crate::template::OrderKind::GotoWaypoint && o.loop_to == Some(1)),
+        "CAP closes the diamond"
+    );
+    assert_eq!(h.app.tpl_seats[0].events.len(), 4);
+    assert!(h.status().contains("CAP"));
 }
 
 #[test]
@@ -388,10 +504,17 @@ fn template_load_over_edits_asks_first() {
     h.tab("Template");
     add_model(&mut h, "F-51D");
     h.click("Load…");
-    assert!(h.app.confirm == Some(Confirm::LoadTemplate), "unsaved edits ask before Load");
+    assert!(
+        h.app.confirm == Some(Confirm::LoadTemplate),
+        "unsaved edits ask before Load"
+    );
     let file = repo("TemplateExamples/Historical1950/1950_US_F51_ArmedRecon_2plus2.Group");
     dialog::answer(vec![file]);
-    let confirm = h.all("Load…").into_iter().max_by(|a, b| a.rect.top().total_cmp(&b.rect.top())).unwrap();
+    let confirm = h
+        .all("Load…")
+        .into_iter()
+        .max_by(|a, b| a.rect.top().total_cmp(&b.rect.top()))
+        .unwrap();
     h.click_at(confirm.rect.center());
     assert_eq!(h.app.tpl_seats.len(), 4, "{}", h.status());
     assert!(!h.app.is_dirty(AppMode::Template));
@@ -404,15 +527,32 @@ fn template_preview_shows_the_highlighted_model_before_add() {
     let mut h = Harness::new("tplpreview");
     h.tab("Template");
     assert!(h.app.tpl_seats.is_empty());
-    let pick = h.app.displayed_catalog()[h.app.tpl_add_pick].label().to_string();
-    assert!(h.has(&pick), "the highlighted model is named in the preview");
+    let pick = h.app.displayed_catalog()[h.app.tpl_add_pick]
+        .label()
+        .to_string();
+    assert!(
+        h.has(&pick),
+        "the highlighted model is named in the preview"
+    );
     let specs = h.find_prefix("Type: ");
     let formation = h.find("Formation view");
     let models = h.find("MODELS");
-    assert!(specs.rect.top() < models.rect.top(), "preview sits above Models");
-    assert!(specs.rect.right() < formation.rect.left(), "preview stays in the model panel");
-    assert!(formation.rect.width() > 400.0, "the formation view keeps the center");
-    assert!(h.has("Placement & Checkzones"), "place and spawn stay reachable before a unit is added");
+    assert!(
+        specs.rect.top() < models.rect.top(),
+        "preview sits above Models"
+    );
+    assert!(
+        specs.rect.right() < formation.rect.left(),
+        "preview stays in the model panel"
+    );
+    assert!(
+        formation.rect.width() > 400.0,
+        "the formation view keeps the center"
+    );
+    assert!(
+        h.has("Placement & Checkzones"),
+        "place and spawn stay reachable before a unit is added"
+    );
     assert!(h.has("Activate or Spawn"));
     let script = h.app.displayed_catalog()[h.app.tpl_add_pick].script.clone();
     let plain = super::builder::plain_class_line(crate::model_spec::class_for(&script));
@@ -427,10 +567,19 @@ fn template_preview_shows_the_highlighted_model_before_add() {
     );
     let about = h.find("A ground-attack aircraft. It strikes targets on the ground.");
     let models = h.find("MODELS");
-    assert!(about.rect.top() < models.rect.top(), "the description stays above Models");
-    assert!(about.rect.bottom() < h.find("Unit card 1").rect.top(), "the order of battle does not repeat it");
+    assert!(
+        about.rect.top() < models.rect.top(),
+        "the description stays above Models"
+    );
+    assert!(
+        about.rect.bottom() < h.find("Unit card 1").rect.top(),
+        "the order of battle does not repeat it"
+    );
     assert!(h.has("Change Model"));
-    assert!(h.has("Placement & Checkzones"), "selecting a unit does not hide place and spawn");
+    assert!(
+        h.has("Placement & Checkzones"),
+        "selecting a unit does not hide place and spawn"
+    );
     assert!(h.has("Activate or Spawn"));
 }
 
@@ -438,8 +587,14 @@ fn template_preview_shows_the_highlighted_model_before_add() {
 fn template_empty_view_names_the_first_step_and_adds_the_pick() {
     let mut h = Harness::new("tplempty");
     h.tab("Template");
-    assert!(h.has("Pick a model on the left, then + Add to begin."), "{:?}", h.labels());
-    let pick = h.app.displayed_catalog()[h.app.tpl_add_pick].label().to_string();
+    assert!(
+        h.has("Pick a model on the left, then + Add to begin."),
+        "{:?}",
+        h.labels()
+    );
+    let pick = h.app.displayed_catalog()[h.app.tpl_add_pick]
+        .label()
+        .to_string();
     h.click(&format!("+ Add {pick}"));
     assert_eq!(h.app.tpl_seats.len(), 1);
     assert_eq!(h.app.tpl_seats[0].unit.label(), pick);
@@ -447,10 +602,15 @@ fn template_empty_view_names_the_first_step_and_adds_the_pick() {
 
     // A kind with no models offers to show the list instead.
     h.app.tpl_seats.clear();
-    h.app.tpl_catalog.retain(|u| u.kind != CatalogKind::UserAdded);
+    h.app
+        .tpl_catalog
+        .retain(|u| u.kind != CatalogKind::UserAdded);
     h.click("User Added");
     h.click("Show model list");
-    assert!(!h.app.tpl_show_models, "the left panel consumed the request");
+    assert!(
+        !h.app.tpl_show_models,
+        "the left panel consumed the request"
+    );
     assert!(h.app.tpl_seats.is_empty());
 }
 
@@ -459,11 +619,22 @@ fn template_kind_cells_and_both_filters() {
     let mut h = Harness::new("tplkinds");
     h.tab("Template");
     // Two rows of equal cells: four, then three.
-    let row1: Vec<Node> = ["Planes", "Vehicles", "Infantry", "Trains"].iter().map(|l| h.find(l)).collect();
-    let row2: Vec<Node> = ["Ships", "Fixed Units", "User Added"].iter().map(|l| h.find(l)).collect();
+    let row1: Vec<Node> = ["Planes", "Vehicles", "Infantry", "Trains"]
+        .iter()
+        .map(|l| h.find(l))
+        .collect();
+    let row2: Vec<Node> = ["Ships", "Fixed Units", "User Added"]
+        .iter()
+        .map(|l| h.find(l))
+        .collect();
     for row in [&row1, &row2] {
         for n in row.iter() {
-            assert!((n.rect.width() - row[0].rect.width()).abs() < 1.0, "{} is {} px", n.label, n.rect.width());
+            assert!(
+                (n.rect.width() - row[0].rect.width()).abs() < 1.0,
+                "{} is {} px",
+                n.label,
+                n.rect.width()
+            );
             assert!((n.rect.top() - row[0].rect.top()).abs() < 0.5 && n.rect.height() >= 28.0);
         }
     }
@@ -476,8 +647,12 @@ fn template_kind_cells_and_both_filters() {
     let countries = h.app.countries_for_kind(CatalogKind::Plane);
     assert!(countries.len() > 1 && h.app.classes_for_kind(CatalogKind::Plane).len() > 1);
     let panel_right = h.find("Planes").rect.left() + 270.0;
-    let mut combos: Vec<Node> =
-        h.nodes.iter().filter(|n| n.role == Role::ComboBox && n.rect.left() < panel_right).cloned().collect();
+    let mut combos: Vec<Node> = h
+        .nodes
+        .iter()
+        .filter(|n| n.role == Role::ComboBox && n.rect.left() < panel_right)
+        .cloned()
+        .collect();
     combos.sort_by(|a, b| a.rect.left().total_cmp(&b.rect.left()));
     assert_eq!(combos.len(), 2, "class and country combos");
     h.click_at(combos[1].rect.center());
@@ -489,8 +664,17 @@ fn template_kind_cells_and_both_filters() {
     for u in &shown {
         assert!(h.has(&format!("Model {}", u.label())));
     }
-    let hidden = h.app.tpl_catalog.iter().find(|u| u.kind == CatalogKind::Plane && u.country() != country).unwrap();
-    assert!(!h.has(&format!("Model {}", hidden.label())), "{} is filtered out", hidden.label());
+    let hidden = h
+        .app
+        .tpl_catalog
+        .iter()
+        .find(|u| u.kind == CatalogKind::Plane && u.country() != country)
+        .unwrap();
+    assert!(
+        !h.has(&format!("Model {}", hidden.label())),
+        "{} is filtered out",
+        hidden.label()
+    );
 }
 
 #[test]
@@ -500,9 +684,16 @@ fn template_card_meta_tree_hint_and_selection_grid() {
     add_model(&mut h, "F-51D");
     let seat = &h.app.tpl_seats[0];
     let country = country_short(seat.country);
-    let country = country.split_once(' ').map_or(country.as_str(), |(_, n)| n.trim()).to_string();
+    let country = country
+        .split_once(' ')
+        .map_or(country.as_str(), |(_, n)| n.trim())
+        .to_string();
     let k = seat.orders.len();
-    let meta = format!("{country} · {} · {k} {}", skill_name(seat.skill), if k == 1 { "order" } else { "orders" });
+    let meta = format!(
+        "{country} · {} · {k} {}",
+        skill_name(seat.skill),
+        if k == 1 { "order" } else { "orders" }
+    );
     assert!(h.has(&meta), "{meta:?} in {:?}", h.labels());
     assert!(h.has("UNIT → OnSpawned → orders. ‹ › or drag a chip left and right."));
     assert!(h.has("Add to Template"));
@@ -511,14 +702,21 @@ fn template_card_meta_tree_hint_and_selection_grid() {
     h.app.tpl_select = None;
     h.settle();
     assert!(h.has("Placement & Checkzones"), "{:?}", h.labels());
-    assert!(h.has(&format!("{:.1} km", h.app.tpl_zone_in / 1000.0)), "{:?}", h.labels());
+    assert!(
+        h.has(&format!("{:.1} km", h.app.tpl_zone_in / 1000.0)),
+        "{:?}",
+        h.labels()
+    );
     assert!(h.app.tpl_zone_in > 1000.0);
     assert!(!h.has("Change Model"));
 
     // Seat fields: labels in a 96 px column, controls to the right of it.
     h.click("Unit card 1");
     assert!(h.has("Change Model"));
-    assert!(h.has("Placement & Checkzones"), "place and spawn stay open while a unit is selected");
+    assert!(
+        h.has("Placement & Checkzones"),
+        "place and spawn stay open while a unit is selected"
+    );
     assert!(h.has("Activate or Spawn"));
     let role = h.find("Role").rect;
     let country_label = h.find("Country").rect;
@@ -529,7 +727,10 @@ fn template_card_meta_tree_hint_and_selection_grid() {
         .find(|n| n.role == Role::ComboBox && (n.rect.center().y - role.center().y).abs() < 8.0)
         .expect("Role combo on the Role row")
         .clone();
-    assert!((role_combo.rect.left() - role.left() - FIELD_LABEL_W - 8.0).abs() < 1.0, "control column starts after 96 px");
+    assert!(
+        (role_combo.rect.left() - role.left() - FIELD_LABEL_W - 8.0).abs() < 1.0,
+        "control column starts after 96 px"
+    );
 }
 
 #[test]
@@ -542,12 +743,20 @@ fn template_remove_order_selects_its_unit() {
     h.click("+ Order ▾");
     h.click("AttackArea");
     let before = h.app.tpl_seats[0].orders.len();
-    let gi = h.app.tpl_seats[0].orders.iter().position(|o| o.kind == OrderKind::GotoWaypoint).unwrap();
+    let gi = h.app.tpl_seats[0]
+        .orders
+        .iter()
+        .position(|o| o.kind == OrderKind::GotoWaypoint)
+        .unwrap();
     assert!(gi + 1 < before, "an order follows Goto WP");
-    h.click_at(h.find(&format!("{} Goto WP", gi + 1)).rect.center());
+    let wp = h.app.tpl_seats[0].orders[gi].waypoint.max(1);
+    h.click_at(h.find(&format!("{} Goto WP {wp}", gi + 1)).rect.center());
     h.click("Remove order");
     assert_eq!(h.app.tpl_seats[0].orders.len(), before - 1);
-    assert!(matches!(h.app.tpl_select, Some(TplSelect::Seat(0))), "the unit is selected, not a neighbouring order");
+    assert!(
+        matches!(h.app.tpl_select, Some(TplSelect::Seat(0))),
+        "the unit is selected, not a neighbouring order"
+    );
     assert!(h.has("SELECTED · UNIT 1"));
     h.key_with(Key::Z, CTRL);
     assert_eq!(h.app.tpl_seats[0].orders.len(), before);
@@ -561,7 +770,10 @@ fn template_copy_attributes_needs_a_unit_and_undoes() {
     add_model(&mut h, "Il-10");
     h.app.tpl_select = None;
     h.settle();
-    assert!(!h.has("Copy attributes to all"), "copy belongs to the selected unit");
+    assert!(
+        !h.has("Copy attributes to all"),
+        "copy belongs to the selected unit"
+    );
     assert!(h.has("Placement & Checkzones"));
 
     h.app.tpl_seats[0].skill = 4;
@@ -579,11 +791,17 @@ fn template_unit_menu_duplicates_and_deletes() {
     let mut h = Harness::new("tplmenu");
     h.tab("Template");
     add_model(&mut h, "F-51D");
-    h.click_at_with(h.find("Unit card 1").rect.center(), PointerButton::Secondary);
+    h.click_at_with(
+        h.find("Unit card 1").rect.center(),
+        PointerButton::Secondary,
+    );
     h.click("Duplicate");
     assert_eq!(h.app.tpl_seats.len(), 2);
     assert_eq!(h.app.tpl_seats[1].unit.label(), "F-51D");
-    h.click_at_with(h.find("Unit card 2").rect.center(), PointerButton::Secondary);
+    h.click_at_with(
+        h.find("Unit card 2").rect.center(),
+        PointerButton::Secondary,
+    );
     h.click("Delete");
     assert_eq!(h.app.tpl_seats.len(), 1);
     h.key_with(Key::Z, CTRL);
@@ -630,7 +848,12 @@ fn army_add_retype_remove_undo_and_generate() {
         .all("Supply")
         .into_iter()
         .filter(|n| n.role == Role::Button)
-        .min_by(|a, b| a.rect.left().total_cmp(&b.rect.left()).then(a.rect.top().total_cmp(&b.rect.top())))
+        .min_by(|a, b| {
+            a.rect
+                .left()
+                .total_cmp(&b.rect.left())
+                .then(a.rect.top().total_cmp(&b.rect.top()))
+        })
         .expect("Supply type button");
     h.click_at(supply.rect.center());
     assert!(h.app.recon_slots[0].kind == UnitKind::Supply);
@@ -653,7 +876,9 @@ fn army_rework_detects_copies() {
     h.tab("Army Generator");
     h.click("Rework existing");
     assert!(h.app.recon_submode == ReconSubmode::Rework);
-    dialog::answer(vec![repo("TemplateExamples/Random_Ground_Units_22of72.Group")]);
+    dialog::answer(vec![repo(
+        "TemplateExamples/Random_Ground_Units_22of72.Group",
+    )]);
     h.click("Add packs…");
     assert!(!h.app.recon_rework.is_empty(), "{}", h.status());
     let detected: usize = h.app.recon_rework.iter().filter_map(|s| s.detected).sum();
@@ -682,47 +907,86 @@ fn army_cards_mix_block_import_row_and_settings() {
     // Type buttons are 36 × 28; the import picker is one row of six.
     let kinds = ["Ship", "Armor", "Supply", "Artillery", "Infantry", "Train"];
     for label in kinds {
-        let buttons: Vec<Node> = h.all(label).into_iter().filter(|n| n.role == Role::Button).collect();
+        let buttons: Vec<Node> = h
+            .all(label)
+            .into_iter()
+            .filter(|n| n.role == Role::Button)
+            .collect();
         assert_eq!(buttons.len(), 3, "{label}: two cards and the import picker");
         for n in &buttons {
-            assert!((n.rect.width() - 36.0).abs() < 0.5 && (n.rect.height() - 28.0).abs() < 0.5, "{label} is {:?}", n.rect.size());
+            assert!(
+                (n.rect.width() - 36.0).abs() < 0.5 && (n.rect.height() - 28.0).abs() < 0.5,
+                "{label} is {:?}",
+                n.rect.size()
+            );
         }
     }
     let picker = |h: &Harness, label: &str| {
-        h.all(label).into_iter().filter(|n| n.role == Role::Button).max_by(|a, b| a.rect.left().total_cmp(&b.rect.left())).unwrap()
+        h.all(label)
+            .into_iter()
+            .filter(|n| n.role == Role::Button)
+            .max_by(|a, b| a.rect.left().total_cmp(&b.rect.left()))
+            .unwrap()
     };
     let top = picker(&h, "Ship").rect.top();
-    assert!(kinds.iter().all(|k| (picker(&h, k).rect.top() - top).abs() < 0.5), "one row");
+    assert!(
+        kinds
+            .iter()
+            .all(|k| (picker(&h, k).rect.top() - top).abs() < 0.5),
+        "one row"
+    );
     h.click_at(picker(&h, "Train").rect.center());
     assert!(h.app.recon_import_kind == UnitKind::Train);
 
     // Card meta line: file and counts, zero counts left out.
     let info = &h.app.recon_slots[0].info;
     assert_eq!(info.ship_count + info.train_count + info.block_count, 0);
-    assert!(h.has(&format!("armor_a.Group · {} vehicles", info.vehicle_count)), "{:?}", h.labels());
+    assert!(
+        h.has(&format!("armor_a.Group · {} vehicles", info.vehicle_count)),
+        "{:?}",
+        h.labels()
+    );
     assert!(h.has("Zone In checkzones"));
-    assert!(!h.labels().iter().any(|l| l.contains("confirm the group is valid")));
+    assert!(
+        !h.labels()
+            .iter()
+            .any(|l| l.contains("confirm the group is valid"))
+    );
 
     // COPY MIX is its own block below the parking grid.
     let grid = h.find_prefix("PARKING GRID").rect;
     let mix = h.find("COPY MIX").rect;
-    assert!(mix.top() > grid.bottom() + 40.0, "COPY MIX sits at the bottom");
+    assert!(
+        mix.top() > grid.bottom() + 40.0,
+        "COPY MIX sits at the bottom"
+    );
 
     // Activate ratio shows a percent value.
     assert!(h.has("Activate ratio"));
-    assert!(h.has(&format!("{}%", h.app.recon_percent)), "{:?}", h.labels());
+    assert!(
+        h.has(&format!("{}%", h.app.recon_percent)),
+        "{:?}",
+        h.labels()
+    );
 
     // Timing stays visible with spawn-all on; its sliders are disabled.
     h.click("Timing");
     h.click("Spawn all copies (no randomizer)");
     assert!(h.app.recon_strip_randomizer);
-    assert!(h.has(&format!("Start {} s · {} ms apart", h.app.recon_start_delay_s, h.app.recon_group_delay_ms)));
+    assert!(h.has(&format!(
+        "Start {} s · {} ms apart",
+        h.app.recon_start_delay_s, h.app.recon_group_delay_ms
+    )));
     assert!(h.has("Timing applies only with the randomizer."));
     let timing = h.find("Timing").rect;
     let sliders: Vec<Node> = h
         .nodes
         .iter()
-        .filter(|n| n.role == Role::Slider && n.rect.top() > timing.top() && n.rect.left() >= timing.left() - 20.0)
+        .filter(|n| {
+            n.role == Role::Slider
+                && n.rect.top() > timing.top()
+                && n.rect.left() >= timing.left() - 20.0
+        })
         .cloned()
         .collect();
     assert_eq!(sliders.len(), 2, "start delay and group delay");
@@ -745,7 +1009,10 @@ fn recon_counts_line_omits_zero_counts() {
         wp_ahead: Vec::new(),
     };
     assert_eq!(recon_counts_line(&info(6, 0, 0, 0)), "6 vehicles");
-    assert_eq!(recon_counts_line(&info(3, 0, 1, 2)), "2 vehicles, 1 train, 2 blocks");
+    assert_eq!(
+        recon_counts_line(&info(3, 0, 1, 2)),
+        "2 vehicles, 1 train, 2 blocks"
+    );
     assert_eq!(recon_counts_line(&info(1, 0, 1, 0)), "1 train");
     assert_eq!(recon_counts_line(&info(2, 2, 0, 1)), "2 ships, 1 block");
     assert_eq!(recon_counts_line(&info(0, 0, 0, 0)), "no units");
@@ -757,15 +1024,25 @@ fn recon_counts_line_omits_zero_counts() {
 fn fighter_types_reset_confirm_and_generate() {
     let mut h = Harness::new("fighter");
     h.tab("Fighter Pack");
-    let yak = AIRCRAFT_TYPES.iter().position(|a| a.label == "Yak-9P").unwrap();
+    let yak = AIRCRAFT_TYPES
+        .iter()
+        .position(|a| a.label == "Yak-9P")
+        .unwrap();
     assert!(!h.app.type_enabled[yak]);
     h.click("Yak-9P");
     assert!(h.app.type_enabled[yak]);
-    assert!(h.has("3 of Group 1 flights") || h.has("GROUP 1 · FLIGHTS"), "preview renders");
+    assert!(
+        h.has("3 of Group 1 flights") || h.has("GROUP 1 · FLIGHTS"),
+        "preview renders"
+    );
 
     h.click("Reset");
     assert!(h.app.confirm == Some(Confirm::ResetFighter));
-    let dialog_reset = h.all("Reset").into_iter().max_by(|a, b| a.rect.top().total_cmp(&b.rect.top())).unwrap();
+    let dialog_reset = h
+        .all("Reset")
+        .into_iter()
+        .max_by(|a, b| a.rect.top().total_cmp(&b.rect.top()))
+        .unwrap();
     h.click_at(dialog_reset.rect.center());
     assert!(!h.app.type_enabled[yak], "Reset restores the default types");
 
@@ -800,13 +1077,20 @@ fn fighter_preview_sentence_table_and_empty_state() {
     let (low, high) = GroupGeneratorApp::flight_element_altitudes(&flights[0].seats);
     let high = high.expect("a complete 4-ship has a high pair");
     assert!(h.has(&format!("{} / {} m", group_digits(low), group_digits(high))));
-    assert_eq!(GroupGeneratorApp::flight_element_altitudes(&flights[2].seats).1, None);
+    assert_eq!(
+        GroupGeneratorApp::flight_element_altitudes(&flights[2].seats).1,
+        None
+    );
     assert!(h.has("Group 3 · 9 aircraft"));
 
     h.app.linked_groups = 1;
     h.app.custom_path = Some(PathBuf::from("My_Pack.Group"));
     h.settle();
-    assert!(h.has("Group logic from My_Pack.Group. One group, parked at 40000, 40000."), "{:?}", h.labels());
+    assert!(
+        h.has("Group logic from My_Pack.Group. One group, parked at 40000, 40000."),
+        "{:?}",
+        h.labels()
+    );
     h.app.custom_path = None;
 
     // No types: an empty state instead of the fallback type, and Generate is off.
@@ -820,7 +1104,9 @@ fn fighter_preview_sentence_table_and_empty_state() {
 
 #[test]
 fn fighter_flight_names_stay_unique_up_to_ten_flights() {
-    let names: Vec<String> = (0..10).map(|f| crate::aircraft::plane_display_name(f, 0)).collect();
+    let names: Vec<String> = (0..10)
+        .map(|f| crate::aircraft::plane_display_name(f, 0))
+        .collect();
     let unique: std::collections::HashSet<&String> = names.iter().collect();
     assert_eq!(unique.len(), names.len(), "{names:?}");
     assert_eq!(names[0], "Red 11");
@@ -829,13 +1115,27 @@ fn fighter_flight_names_stay_unique_up_to_ten_flights() {
 
 #[test]
 fn fighter_role_and_altitude_text() {
-    assert_eq!(GroupGeneratorApp::flight_role_text(&[(1.0, true)]), "AttackArea");
-    assert_eq!(GroupGeneratorApp::flight_role_text(&[(1.0, true), (1.0, false)]), "AttackArea + Cover");
     assert_eq!(
-        GroupGeneratorApp::flight_role_text(&[(1.0, true), (1.0, false), (3.0, true), (3.0, false)]),
+        GroupGeneratorApp::flight_role_text(&[(1.0, true)]),
+        "AttackArea"
+    );
+    assert_eq!(
+        GroupGeneratorApp::flight_role_text(&[(1.0, true), (1.0, false)]),
+        "AttackArea + Cover"
+    );
+    assert_eq!(
+        GroupGeneratorApp::flight_role_text(&[
+            (1.0, true),
+            (1.0, false),
+            (3.0, true),
+            (3.0, false)
+        ]),
         "2 AttackArea · 2 Cover"
     );
-    assert_eq!(GroupGeneratorApp::altitude_text(1800.0, Some(3800.0)), "1 800 / 3 800 m");
+    assert_eq!(
+        GroupGeneratorApp::altitude_text(1800.0, Some(3800.0)),
+        "1 800 / 3 800 m"
+    );
     assert_eq!(GroupGeneratorApp::altitude_text(5200.0, None), "5 200 m");
     assert_eq!(group_digits(227_880.4), "227 880");
     assert_eq!(group_digits(950.0), "950");
@@ -858,7 +1158,10 @@ fn fighter_nodegate_links_never_end_a_row() {
                 let n = row.len() as f32;
                 let links = if r == 0 { n - 1.0 } else { n };
                 let row_w = n * PACK_CARD_W + links * PACK_LINK_W;
-                assert!(row_w <= w || row.len() == 1, "{groups} groups at {w} px: row {r} is {row_w} px");
+                assert!(
+                    row_w <= w || row.len() == 1,
+                    "{groups} groups at {w} px: row {r} is {row_w} px"
+                );
             }
             assert_eq!(next, groups);
             w += 37.0;
@@ -871,7 +1174,11 @@ fn fighter_nodegate_links_never_end_a_row() {
     h.settle();
     for g in 1..=10 {
         let card = h.find_prefix(&format!("Group {g} · "));
-        assert!(card.rect.right() <= SCREEN.x, "Group {g} card off screen: {:?}", card.rect);
+        assert!(
+            card.rect.right() <= SCREEN.x,
+            "Group {g} card off screen: {:?}",
+            card.rect
+        );
     }
 }
 
@@ -881,13 +1188,22 @@ fn fighter_altitude_strip_skips_crowded_labels_but_every_tick_hovers() {
     let shown = strip_labels_shown(&[0.0, 20.0, 45.0, 100.0], &[40.0, 40.0, 40.0, 40.0], 6.0);
     assert_eq!(shown, vec![true, false, false, true]);
     let shown = strip_labels_shown(&[100.0, 0.0], &[40.0, 40.0], 6.0);
-    assert_eq!(shown, vec![true, true], "order follows position, not flight number");
+    assert_eq!(
+        shown,
+        vec![true, true],
+        "order follows position, not flight number"
+    );
 
     let mut h = Harness::new("fighter_strip");
     h.tab("Fighter Pack");
     h.app.flight_count = 10;
     h.settle();
-    let ticks: Vec<Node> = h.nodes.iter().filter(|n| n.label.starts_with("Altitude tick ")).cloned().collect();
+    let ticks: Vec<Node> = h
+        .nodes
+        .iter()
+        .filter(|n| n.label.starts_with("Altitude tick "))
+        .cloned()
+        .collect();
     assert_eq!(ticks.len(), 10, "one tick per flight: {:?}", h.labels());
     // Hovering a tick names its flight (whether or not its label was drawn).
     let tick = h.find("Altitude tick Green 11");
@@ -908,7 +1224,9 @@ fn fighter_altitude_strip_skips_crowded_labels_but_every_tick_hovers() {
 fn exclusive_plans_select_remove_undo_and_generate() {
     let mut h = Harness::new("exclusive");
     h.tab("Exclusive Activation");
-    dialog::answer(vec![repo("TemplateExamples/Exclusive_Activation_6plan.Group")]);
+    dialog::answer(vec![repo(
+        "TemplateExamples/Exclusive_Activation_6plan.Group",
+    )]);
     h.click("Add templates…");
     assert_eq!(h.app.bomber_slots.len(), 6, "{}", h.status());
     h.click("Plan card 3");
@@ -929,10 +1247,19 @@ fn exclusive_plans_select_remove_undo_and_generate() {
 fn exclusive_header_tags_kicker_and_idle_problem() {
     let mut h = Harness::new("exclusive_tags");
     h.tab("Exclusive Activation");
-    assert!(!h.labels().iter().any(|l| l.starts_with("Editing")), "no pack loaded yet");
-    dialog::answer(vec![repo("TemplateExamples/Exclusive_Activation_6plan.Group")]);
+    assert!(
+        !h.labels().iter().any(|l| l.starts_with("Editing")),
+        "no pack loaded yet"
+    );
+    dialog::answer(vec![repo(
+        "TemplateExamples/Exclusive_Activation_6plan.Group",
+    )]);
     h.click("Add templates…");
-    assert!(h.has("Editing Exclusive_Activation_6plan"), "{:?}", h.labels());
+    assert!(
+        h.has("Editing Exclusive_Activation_6plan"),
+        "{:?}",
+        h.labels()
+    );
     assert!(h.has("Plan 1"), "kicker in sentence case");
     assert!(!h.has("PLAN 1"));
 
@@ -940,18 +1267,27 @@ fn exclusive_header_tags_kicker_and_idle_problem() {
     h.app.bomber_slots[1].selected_completion = None;
     h.app.status = Status::Idle;
     h.settle();
-    assert_eq!(plan_tags(&h.app.bomber_slots[1]), vec![("⚠ End timer", false)]);
+    assert_eq!(
+        plan_tags(&h.app.bomber_slots[1]),
+        vec![("⚠ End timer", false)]
+    );
     assert!(h.has("Plan 2 has no end timer"), "{:?}", h.labels());
     h.app.bomber_slots[1].selected_triggers.clear();
     h.settle();
-    assert_eq!(plan_tags(&h.app.bomber_slots[1]), vec![("⚠ Checkzone", false), ("⚠ End timer", false)]);
+    assert_eq!(
+        plan_tags(&h.app.bomber_slots[1]),
+        vec![("⚠ Checkzone", false), ("⚠ End timer", false)]
+    );
     assert!(h.has("Plan 2 has no start checkzone"));
     assert!(h.find("Generate File").disabled);
 
     // A plan with a wiring warning is not Ready.
     let mut warned = h.app.bomber_slots[0].clone();
     let zone = warned.selected_triggers[0];
-    warned.info.trigger_warnings.insert(zone, "zone is not Closer".into());
+    warned
+        .info
+        .trigger_warnings
+        .insert(zone, "zone is not Closer".into());
     assert_eq!(plan_tags(&warned), vec![("⚠ Check", false)]);
 
     // A long name truncates and leaves room for the tag.
@@ -960,14 +1296,21 @@ fn exclusive_header_tags_kicker_and_idle_problem() {
     h.settle();
     let card = h.find("Plan card 1");
     let title = h.find(&format!("1 · {long}"));
-    assert!(title.rect.right() + 30.0 < card.rect.right(), "title {:?} leaves no room in {:?}", title.rect, card.rect);
+    assert!(
+        title.rect.right() + 30.0 < card.rect.right(),
+        "title {:?} leaves no room in {:?}",
+        title.rect,
+        card.rect
+    );
 }
 
 #[test]
 fn exclusive_editing_clears_on_generate_and_when_emptied() {
     let mut h = Harness::new("exclusive_editing");
     h.tab("Exclusive Activation");
-    dialog::answer(vec![repo("TemplateExamples/Exclusive_Activation_6plan.Group")]);
+    dialog::answer(vec![repo(
+        "TemplateExamples/Exclusive_Activation_6plan.Group",
+    )]);
     h.click("Add templates…");
     assert!(h.has("Editing Exclusive_Activation_6plan"));
     let out = h.out("exclusive.Group");
@@ -977,11 +1320,18 @@ fn exclusive_editing_clears_on_generate_and_when_emptied() {
     assert!(h.app.bomber_loaded_path.is_none());
     assert!(!h.has("Editing Exclusive_Activation_6plan"));
 
-    dialog::answer(vec![repo("TemplateExamples/Exclusive_Activation_6plan.Group")]);
+    dialog::answer(vec![repo(
+        "TemplateExamples/Exclusive_Activation_6plan.Group",
+    )]);
     h.click("Add templates…");
-    h.app.bomber_slots.retain(|s| s.path != repo("TemplateExamples/Exclusive_Activation_6plan.Group"));
+    h.app
+        .bomber_slots
+        .retain(|s| s.path != repo("TemplateExamples/Exclusive_Activation_6plan.Group"));
     h.settle();
-    assert!(!h.labels().iter().any(|l| l.starts_with("Editing")), "no plans from the pack, no Editing");
+    assert!(
+        !h.labels().iter().any(|l| l.starts_with("Editing")),
+        "no plans from the pack, no Editing"
+    );
 }
 
 // ── Airfield ──────────────────────────────────────────────────────────────
@@ -990,7 +1340,10 @@ fn exclusive_editing_clears_on_generate_and_when_emptied() {
 fn airfield_load_side_and_generate() {
     let mut h = Harness::new("airfield");
     h.tab("Airfield");
-    assert!(h.find("Generate File").disabled, "Generate waits for a file");
+    assert!(
+        h.find("Generate File").disabled,
+        "Generate waits for a file"
+    );
     dialog::answer(vec![repo("TemplateExamples/Airfield_Mess.Group")]);
     h.click("Load airfield…");
     assert!(h.app.airfield_info.is_some(), "{}", h.status());
@@ -1021,7 +1374,11 @@ fn airfield_harvest_file_and_watch() {
     std::fs::create_dir_all(&missions).unwrap();
     h.click("Watch for new airfields");
     assert!(h.app.harvest_watcher.is_some(), "{}", h.status());
-    std::fs::copy(repo("TemplateExamples/K13 AFB_mp.Group"), missions.join("_gen.mission")).unwrap();
+    std::fs::copy(
+        repo("TemplateExamples/K13 AFB_mp.Group"),
+        missions.join("_gen.mission"),
+    )
+    .unwrap();
     for _ in 0..400 {
         std::thread::sleep(std::time::Duration::from_millis(10));
         h.step(Vec::new());
@@ -1029,7 +1386,11 @@ fn airfield_harvest_file_and_watch() {
             break;
         }
     }
-    assert!(h.app.harvest_log.len() > logged, "watcher harvested the new file: {}", h.status());
+    assert!(
+        h.app.harvest_log.len() > logged,
+        "watcher harvested the new file: {}",
+        h.status()
+    );
     h.click("Watch for new airfields");
     assert!(h.app.harvest_watcher.is_none());
 }
@@ -1041,8 +1402,13 @@ fn airfield_panels_order_and_wording() {
     let get = h.find("GET THE FILE").rect.top();
     let side = h.find("FRIENDLY PLANE COALITION").rect.top();
     let harvest = h.find("HARVEST AUTOMATICALLY").rect.top();
-    assert!(get < side && side < harvest, "Get the file, coalition, then the harvester");
-    assert!(h.has("Load a Freeflight airfield from _gen.mission, then generate the cleaned group."));
+    assert!(
+        get < side && side < harvest,
+        "Get the file, coalition, then the harvester"
+    );
+    assert!(
+        h.has("Load a Freeflight airfield from _gen.mission, then generate the cleaned group.")
+    );
 
     dialog::answer(vec![repo("TemplateExamples/Airfield_Mess.Group")]);
     h.click("Load airfield…");
@@ -1052,12 +1418,25 @@ fn airfield_panels_order_and_wording() {
     for p in &info.player_planes {
         assert!(h.has(&country_name(p.country)), "{:?}", h.labels());
     }
-    assert!(!h.labels().iter().any(|l| COUNTRIES.iter().any(|(_, c)| l.contains(c))), "no raw country labels");
+    assert!(
+        !h.labels()
+            .iter()
+            .any(|l| COUNTRIES.iter().any(|(_, c)| l.contains(c))),
+        "no raw country labels"
+    );
     // Relinked: a short count beside the side.
     let n = info.unlink_zones.len();
-    assert!(h.has(&format!("{n} checkzone{}", if n == 1 { "" } else { "s" })), "{:?}", h.labels());
+    assert!(
+        h.has(&format!("{n} checkzone{}", if n == 1 { "" } else { "s" })),
+        "{:?}",
+        h.labels()
+    );
     // Right panel: sentence case layout, grouped origin.
-    assert!(h.has(if info.in_group { "Inside a Group" } else { "Blocks at the root" }));
+    assert!(h.has(if info.in_group {
+        "Inside a Group"
+    } else {
+        "Blocks at the root"
+    }));
     if let Some((x, z)) = info.origin_xz {
         assert!(h.has(&format!("{}, {}", group_digits(x), group_digits(z))));
     }
@@ -1085,7 +1464,10 @@ fn air_start_bank_reaches_the_map() {
         .expect("air start coalition");
     h.click_at(dprk.rect.center());
     assert!(!h.app.air_starts[0].nato);
-    assert!(h.app.field_spawn_nato, "the field spawn coalition stays NATO");
+    assert!(
+        h.app.field_spawn_nato,
+        "the field spawn coalition stays NATO"
+    );
     assert_eq!(h.app.air_starts[0].country(), 502);
     h.tab("Map");
     h.click("Forces");
@@ -1150,7 +1532,10 @@ fn a_second_identical_generate_marks_the_tab_saved() {
     dialog::answer(vec![out.clone()]);
     h.click("Generate File");
     assert_eq!(h.status(), first, "same message as the first Generate");
-    assert!(!h.app.is_dirty(AppMode::Template), "the second Generate counts as saved");
+    assert!(
+        !h.app.is_dirty(AppMode::Template),
+        "the second Generate counts as saved"
+    );
 
     // An edit retires the "Wrote …" message (age_status); a cancelled dialog
     // then reports nothing: the status stays and the edits stay unsaved.
@@ -1170,15 +1555,24 @@ fn status_messages_retire_after_the_next_edit() {
     h.tab("Fighter Pack");
     h.app.status = Status::Info("Fighter Pack reset to the default settings.".into());
     h.settle();
-    assert!(!h.status().is_empty(), "a fresh message stays while nothing changes");
+    assert!(
+        !h.status().is_empty(),
+        "a fresh message stays while nothing changes"
+    );
     h.app.flight_count += 1;
     h.settle();
     assert_eq!(h.status(), "", "an edit retires it");
-    h.app.status = Status::Warn { lead: "Placed with notes: ".into(), items: vec!["one".into()] };
+    h.app.status = Status::Warn {
+        lead: "Placed with notes: ".into(),
+        items: vec!["one".into()],
+    };
     h.settle();
     h.app.flight_count -= 1;
     h.settle();
-    assert!(h.status().starts_with("Placed with notes"), "warnings stay until replaced");
+    assert!(
+        h.status().starts_with("Placed with notes"),
+        "warnings stay until replaced"
+    );
 }
 
 /// Undoing a Remove on Exclusive Activation selects the plan that came back.
@@ -1186,7 +1580,9 @@ fn status_messages_retire_after_the_next_edit() {
 fn exclusive_undo_reselects_the_removed_plan() {
     let mut h = Harness::new("exundo");
     h.tab("Exclusive Activation");
-    dialog::answer(vec![repo("TemplateExamples/Exclusive_Activation_6plan.Group")]);
+    dialog::answer(vec![repo(
+        "TemplateExamples/Exclusive_Activation_6plan.Group",
+    )]);
     h.key_with(Key::O, CTRL);
     h.settle();
     assert_eq!(h.app.bomber_slots.len(), 6);
@@ -1194,10 +1590,18 @@ fn exclusive_undo_reselects_the_removed_plan() {
     h.settle();
     h.click("Remove");
     assert_eq!(h.app.bomber_slots.len(), 5);
-    assert_eq!(h.app.bomber_selected, Some(4), "the neighbour is selected after Remove");
+    assert_eq!(
+        h.app.bomber_selected,
+        Some(4),
+        "the neighbour is selected after Remove"
+    );
     h.key_with(Key::Z, CTRL);
     assert_eq!(h.app.bomber_slots.len(), 6);
-    assert_eq!(h.app.bomber_selected, Some(5), "Undo selects the restored plan");
+    assert_eq!(
+        h.app.bomber_selected,
+        Some(5),
+        "Undo selects the restored plan"
+    );
 }
 
 // ── Map ───────────────────────────────────────────────────────────────────
@@ -1208,7 +1612,17 @@ fn map_tools_keys_escape_one_shot_objectives_and_tab_reset() {
     h.tab("Map");
     h.wait_for_map();
     let map = h.find("Korea map").rect;
-    for (i, key) in [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6].into_iter().enumerate() {
+    for (i, key) in [
+        Key::Num1,
+        Key::Num2,
+        Key::Num3,
+        Key::Num4,
+        Key::Num5,
+        Key::Num6,
+    ]
+    .into_iter()
+    .enumerate()
+    {
         h.key(key);
         assert!(h.app.map_drawing_mode == MAP_TOOLS[i].0, "key {}", i + 1);
     }
@@ -1259,7 +1673,11 @@ fn map_arrow_undo_redo_and_clear_undo() {
     h.key(Key::Num5);
     h.click_at(map.center());
     h.click("Forces");
-    let clear = h.all("Clear DPRK").into_iter().find(|n| !n.disabled && n.rect.top() > h.find("OBJECTIVES").rect.top()).expect("objectives Clear DPRK");
+    let clear = h
+        .all("Clear DPRK")
+        .into_iter()
+        .find(|n| !n.disabled && n.rect.top() > h.find("OBJECTIVES").rect.top())
+        .expect("objectives Clear DPRK");
     h.click_at(clear.rect.center());
     assert!(h.app.east_objectives.is_empty());
     h.key_with(Key::Z, CTRL);
@@ -1292,7 +1710,10 @@ fn map_terrain_import_layers_and_export() {
     assert!(h.has_prefix("0 of "), "empty store: {:?}", h.labels());
 
     // A snapped probe file: nine land nodes of one tile at 100–108 m.
-    let nodes: Vec<(usize, usize)> = heightprobe::tile_probe_nodes(10, 10).into_iter().take(9).collect();
+    let nodes: Vec<(usize, usize)> = heightprobe::tile_probe_nodes(10, 10)
+        .into_iter()
+        .take(9)
+        .collect();
     let mut group = heightprobe::probe_group("snapped", &nodes);
     for (k, child) in group.children.iter_mut().enumerate() {
         child.set_property("YPos", format!("{:.3}", 100.0 + k as f64));
@@ -1301,7 +1722,12 @@ fn map_terrain_import_layers_and_export() {
     std::fs::write(&snapped, serialize_group(&group)).unwrap();
     dialog::answer(vec![snapped]);
     h.click("Import snapped…");
-    assert_eq!(h.app.terrain_store.as_ref().unwrap().measured_nodes(), 9, "{}", h.status());
+    assert_eq!(
+        h.app.terrain_store.as_ref().unwrap().measured_nodes(),
+        9,
+        "{}",
+        h.status()
+    );
     assert!(h.app.terrain_store_path.is_file(), "the store is saved");
     let (i, j) = nodes[4];
     let y = h.app.terrain_store.as_ref().unwrap().node(i, j).unwrap();
@@ -1309,7 +1735,11 @@ fn map_terrain_import_layers_and_export() {
 
     // An unsnapped file (all probes at 0 m) is refused.
     let raw = h.out("unsnapped.Group");
-    std::fs::write(&raw, serialize_group(&heightprobe::tile_probe_group(11, 4).expect("tile 11,4 has probes"))).unwrap();
+    std::fs::write(
+        &raw,
+        serialize_group(&heightprobe::tile_probe_group(11, 4).expect("tile 11,4 has probes")),
+    )
+    .unwrap();
     dialog::answer(vec![raw]);
     h.click("Import snapped…");
     assert!(h.status().contains("not merged"), "{}", h.status());
@@ -1318,7 +1748,11 @@ fn map_terrain_import_layers_and_export() {
     assert!(h.app.terrain_relief.is_some(), "relief texture built");
     h.click("Coverage");
     assert!(h.app.terrain_show_coverage);
-    assert_eq!(h.find("Coverage").toggled, Some(true), "the checkbox reports checked");
+    assert_eq!(
+        h.find("Coverage").toggled,
+        Some(true),
+        "the checkbox reports checked"
+    );
 
     // Export the tiles under a small AO in the middle of tile 10_10.
     let (i_lo, i_hi, j_lo, j_hi) = crate::terrain::tile_node_range(10, 10);
@@ -1332,14 +1766,23 @@ fn map_terrain_import_layers_and_export() {
     h.click_at(button.rect.center());
     let written: Vec<_> = std::fs::read_dir(&tiles).unwrap().collect();
     assert_eq!(written.len(), 1, "{}", h.status());
-    assert!(tiles.join(format!("{}.Group", heightprobe::tile_name(10, 10))).is_file());
+    assert!(
+        tiles
+            .join(format!("{}.Group", heightprobe::tile_name(10, 10)))
+            .is_file()
+    );
 }
 
 #[test]
 fn map_dock_tabs_all_render() {
     let mut h = Harness::new("dock");
     h.tab("Map");
-    for (tab, marker) in [("Forces", "FIGHTERS"), ("References 0", "Add reference groups…"), ("Terrain", "HEIGHT STORE"), ("Period", "DRAWN MARKS")] {
+    for (tab, marker) in [
+        ("Forces", "FIGHTERS"),
+        ("References 0", "Add reference groups…"),
+        ("Terrain", "HEIGHT STORE"),
+        ("Period", "DRAWN MARKS"),
+    ] {
         h.click(tab);
         assert!(h.has(marker), "{tab}: {:?}", h.labels());
     }
@@ -1355,17 +1798,32 @@ fn interactive_widgets_are_at_least_28_px_tall() {
     for (_, label) in MODES {
         h.tab(label);
         for n in &h.nodes {
-            let interactive = matches!(n.role, Role::Button | Role::CheckBox | Role::ComboBox | Role::Slider | Role::SpinButton);
+            let interactive = matches!(
+                n.role,
+                Role::Button | Role::CheckBox | Role::ComboBox | Role::Slider | Role::SpinButton
+            );
             checked += usize::from(interactive);
             if interactive && !n.disabled && n.rect.height() < 27.5 && n.rect.width() > 0.0 {
-                small.push(format!("{label}: {:?} {:?} {}px", n.label, n.role, n.rect.height()));
+                small.push(format!(
+                    "{label}: {:?} {:?} {}px",
+                    n.label,
+                    n.role,
+                    n.rect.height()
+                ));
             }
         }
     }
-    assert!(checked > 150, "only {checked} interactive widgets seen: the role filter is wrong");
+    assert!(
+        checked > 150,
+        "only {checked} interactive widgets seen: the role filter is wrong"
+    );
     small.sort();
     small.dedup();
-    assert!(small.is_empty(), "targets under 28 px:\n{}", small.join("\n"));
+    assert!(
+        small.is_empty(),
+        "targets under 28 px:\n{}",
+        small.join("\n")
+    );
 }
 
 impl Harness {
@@ -1383,14 +1841,28 @@ fn template_tree_chip_selects_and_moves() {
     h.click("Goto WP");
     h.click("+ Order ▾");
     h.click("AttackArea");
-    let kinds = |h: &Harness| h.app.tpl_seats[0].orders.iter().map(|o| o.kind).collect::<Vec<_>>();
+    let kinds = |h: &Harness| {
+        h.app.tpl_seats[0]
+            .orders
+            .iter()
+            .map(|o| o.kind)
+            .collect::<Vec<_>>()
+    };
     let before = kinds(&h);
-    // Select the Goto WP chip ("<n> Goto WP"), then move it right with its arrow.
-    let gi = before.iter().position(|k| *k == OrderKind::GotoWaypoint).expect("a Goto WP order");
+    // Select the Goto WP chip ("<n> Goto WP N"), then move it right with its arrow.
+    let gi = before
+        .iter()
+        .position(|k| *k == OrderKind::GotoWaypoint)
+        .expect("a Goto WP order");
     assert!(gi + 1 < before.len(), "Goto WP has an order after it");
-    let chip = h.find(&format!("{} Goto WP", gi + 1));
+    let wp = h.app.tpl_seats[0].orders[gi].waypoint.max(1);
+    let chip = h.find(&format!("{} Goto WP {wp}", gi + 1));
     h.click_at(chip.rect.center());
-    assert!(matches!(h.app.tpl_select, Some(TplSelect::Order { seat: 0, order }) if order == gi), "{:?}", h.app.tpl_select.is_some());
+    assert!(
+        matches!(h.app.tpl_select, Some(TplSelect::Order { seat: 0, order }) if order == gi),
+        "{:?}",
+        h.app.tpl_select.is_some()
+    );
     assert!(h.has(&format!("SELECTED · UNIT 1 · ORDER {}", gi + 1)));
     h.click("Move right");
     let after = kinds(&h);
@@ -1409,16 +1881,28 @@ fn template_report_arrow_leaves_its_command() {
     h.click("Formation");
     h.click("+ Order ▾");
     h.click("OnTookOff");
-    let kinds = |h: &Harness| h.app.tpl_seats[0].orders.iter().map(|o| o.kind).collect::<Vec<_>>();
+    let kinds = |h: &Harness| {
+        h.app.tpl_seats[0]
+            .orders
+            .iter()
+            .map(|o| o.kind)
+            .collect::<Vec<_>>()
+    };
     let before = kinds(&h);
-    let ri = before.iter().position(|k| *k == OrderKind::OnTookOff).expect("OnTookOff");
+    let ri = before
+        .iter()
+        .position(|k| *k == OrderKind::OnTookOff)
+        .expect("OnTookOff");
     let chip = h.find(&format!("{} OnTookOff", ri + 1));
     h.click_at(chip.rect.center());
     h.click("Move right");
     let after = kinds(&h);
     assert_ne!(after, before, "the report should leave the Take Off column");
     assert_eq!(after.last().copied(), Some(OrderKind::OnTookOff));
-    let ri = after.iter().position(|k| *k == OrderKind::OnTookOff).unwrap();
+    let ri = after
+        .iter()
+        .position(|k| *k == OrderKind::OnTookOff)
+        .unwrap();
     let chip = h.find(&format!("{} OnTookOff", ri + 1));
     let takeoff = after.iter().position(|k| *k == OrderKind::TakeOff).unwrap();
     let takeoff_chip = h.find(&format!("{} Take Off", takeoff + 1));
@@ -1460,6 +1944,35 @@ fn map_places_fighters_from_the_forces_dock() {
 }
 
 #[test]
+fn map_load_fighter_pack_uses_fighter_icons() {
+    let mut h = Harness::new("loadfighters");
+    h.tab("Map");
+    h.wait_for_map();
+    h.click("Forces");
+    h.app.fighter_waves = 2;
+    h.app.fighter_fill = false;
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("TemplateExamples/Eastern_Fighters_Random_5pack_V6.Group");
+    dialog::answer(vec![path]);
+    let fighters_top = h.find("FIGHTERS").rect.top();
+    let units = h.find("UNITS").rect.top();
+    let load = h
+        .all("Load DPRK…")
+        .into_iter()
+        .filter(|n| n.rect.top() > fighters_top && n.rect.top() < units)
+        .min_by(|a, b| a.rect.top().total_cmp(&b.rect.top()))
+        .expect("fighters Load DPRK");
+    h.click_at(load.rect.center());
+    let layout = h.app.map_fighters.as_ref().expect(&h.status());
+    assert!(layout.eastern);
+    let w1 = layout.spots.iter().filter(|s| s.wave == 1).count();
+    let w2 = layout.spots.iter().filter(|s| s.wave == 2).count();
+    assert_eq!((w1, w2), (5, 5), "{}", h.status());
+    assert_eq!(h.app.map_imported_fighters.len(), 2);
+    assert!(h.has_prefix("DPRK: "), "count line shows: {:?}", h.labels());
+}
+
+#[test]
 fn map_load_over_unsaved_changes_asks_first() {
     let mut h = Harness::new("mapdirty");
     h.tab("Map");
@@ -1485,7 +1998,10 @@ fn map_terrain_readout_under_the_pointer() {
     let map = h.find("Korea map").rect;
     h.move_to(map.center());
     h.settle();
-    assert_eq!(h.app.terrain_readout().as_deref(), Some("Ground not measured"));
+    assert_eq!(
+        h.app.terrain_readout().as_deref(),
+        Some("Ground not measured")
+    );
     // Measure the ground under the pointer, then the readout shows it.
     let (x, z) = h.app.map_hover_xz.expect("pointer over the map");
     let store = h.app.terrain_store.as_mut().expect("store loaded");
@@ -1494,7 +2010,10 @@ fn map_terrain_readout_under_the_pointer() {
         store.set_node(a, b, 321.0);
     }
     h.settle();
-    assert_eq!(h.app.terrain_readout().as_deref(), Some("Ground 321 m · 100 m grid"));
+    assert_eq!(
+        h.app.terrain_readout().as_deref(),
+        Some("Ground 321 m · 100 m grid")
+    );
 }
 
 impl Harness {
@@ -1502,7 +2021,12 @@ impl Harness {
     fn press_and_move(&mut self, from: Pos2, to: Pos2) {
         self.move_to(from);
         let mods = self.mods;
-        self.step(vec![Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: mods }]);
+        self.step(vec![Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: mods,
+        }]);
         for k in 1..=6 {
             self.move_to(from + (to - from) * (k as f32 / 6.0));
         }
@@ -1510,7 +2034,12 @@ impl Harness {
 
     fn release_at(&mut self, pos: Pos2) {
         let mods = self.mods;
-        self.step(vec![Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: mods }]);
+        self.step(vec![Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: mods,
+        }]);
         self.settle();
     }
 }
@@ -1525,7 +2054,9 @@ fn row_fill(img: &egui::ColorImage, y: usize) -> usize {
 
 /// The row holding the most of the icon; for a level fighter that is the wing.
 fn widest_row(img: &egui::ColorImage) -> usize {
-    (0..img.size[1]).max_by_key(|&y| row_fill(img, y)).unwrap_or(0)
+    (0..img.size[1])
+        .max_by_key(|&y| row_fill(img, y))
+        .unwrap_or(0)
 }
 
 /// Share of the icon's opaque pixels in the left half.
@@ -1551,20 +2082,41 @@ fn side_marker_fighters_point_north_before_facing() {
     // them: afterwards the wing is forward of the middle and the plane is
     // left-right symmetric.
     for (eastern, name, bytes) in [
-        (true, "EasternFighter", &include_bytes!("../assets/EasternFighter.svg")[..]),
-        (false, "NatoFighter", &include_bytes!("../assets/NatoFighter.svg")[..]),
+        (
+            true,
+            "EasternFighter",
+            &include_bytes!("../assets/EasternFighter.svg")[..],
+        ),
+        (
+            false,
+            "NatoFighter",
+            &include_bytes!("../assets/NatoFighter.svg")[..],
+        ),
     ] {
         // Turned level, the wing spans a row far wider than anything in the
         // diagonal original.
         let raw = rasterize_svg(bytes, 64);
         let img = fighter_svg_north(eastern, 64);
-        let (raw_w, img_w) = (row_fill(&raw, widest_row(&raw)), row_fill(&img, widest_row(&img)));
+        let (raw_w, img_w) = (
+            row_fill(&raw, widest_row(&raw)),
+            row_fill(&img, widest_row(&img)),
+        );
         eprintln!("{name}: widest row raw {raw_w}, turned {img_w}");
-        assert!(img_w as f32 >= raw_w as f32 * 1.15, "{name}: turning did not level the wing ({raw_w} → {img_w} px)");
+        assert!(
+            img_w as f32 >= raw_w as f32 * 1.15,
+            "{name}: turning did not level the wing ({raw_w} → {img_w} px)"
+        );
         let row = widest_row(&img);
-        assert!(row < img.size[1] / 2, "{name}: widest row {row} of {} is not in the top half", img.size[1]);
+        assert!(
+            row < img.size[1] / 2,
+            "{name}: widest row {row} of {} is not in the top half",
+            img.size[1]
+        );
         let share = left_share(&img);
-        assert!((share - 0.5).abs() < 0.03, "{name}: {share} of the icon is left of centre");
+        assert!(
+            (share - 0.5).abs() < 0.03,
+            "{name}: {share} of the icon is left of centre"
+        );
     }
     assert_eq!(shell::Side::Nato.facing_rad(), 0.0);
     assert!((shell::Side::Dprk.facing_rad() - std::f32::consts::PI).abs() < 1e-6);
@@ -1579,14 +2131,24 @@ fn map_tool_icons_are_painted_inside_their_box() {
         let paths = shell::tool_icon_paths(icon);
         assert!(!paths.is_empty(), "{icon:?} has no strokes");
         for (pts, _) in paths {
-            assert!(pts.len() >= 2, "{icon:?} has a stroke with {} points", pts.len());
+            assert!(
+                pts.len() >= 2,
+                "{icon:?} has a stroke with {} points",
+                pts.len()
+            );
             for p in pts {
-                assert!((1.0..=23.0).contains(&p.x) && (1.0..=23.0).contains(&p.y), "{icon:?} point {p:?} outside the box");
+                assert!(
+                    (1.0..=23.0).contains(&p.x) && (1.0..=23.0).contains(&p.y),
+                    "{icon:?} point {p:?} outside the box"
+                );
             }
         }
     }
     let icons: Vec<_> = MAP_TOOLS.iter().map(|t| t.1).collect();
-    assert_eq!(icons[4], icons[5], "both objective tools use the flag, tinted by side");
+    assert_eq!(
+        icons[4], icons[5],
+        "both objective tools use the flag, tinted by side"
+    );
 }
 
 #[test]
@@ -1617,7 +2179,11 @@ fn map_front_strokes_undo_redo_and_escape_mid_drag() {
     assert_eq!(h.app.custom_front_xz.len(), 2);
     assert_eq!(h.app.undo_label().as_deref(), Some("Drew front line"));
     h.key_with(Key::Z, CTRL);
-    assert_eq!(h.app.custom_front_xz.len(), 1, "Ctrl Z takes back the last click");
+    assert_eq!(
+        h.app.custom_front_xz.len(),
+        1,
+        "Ctrl Z takes back the last click"
+    );
     h.key_with(Key::Y, CTRL);
     assert_eq!(h.app.custom_front_xz.len(), 2, "Ctrl Y puts it back");
 
@@ -1626,7 +2192,11 @@ fn map_front_strokes_undo_redo_and_escape_mid_drag() {
     let after_drag = h.app.custom_front_xz.len();
     assert!(after_drag > 3, "the drag added points: {after_drag}");
     h.key_with(Key::Z, CTRL);
-    assert_eq!(h.app.custom_front_xz.len(), 2, "one Ctrl Z drops the whole drag");
+    assert_eq!(
+        h.app.custom_front_xz.len(),
+        2,
+        "one Ctrl Z drops the whole drag"
+    );
     h.key_with(Key::Y, CTRL);
     assert_eq!(h.app.custom_front_xz.len(), after_drag);
 
@@ -1634,14 +2204,24 @@ fn map_front_strokes_undo_redo_and_escape_mid_drag() {
     // rest of the drag moves nothing (not the AO either).
     let ao = h.app.front_aabb;
     h.press_and_move(at(0.0), at(60.0));
-    assert!(h.app.custom_front_xz.len() > after_drag, "points are being added");
+    assert!(
+        h.app.custom_front_xz.len() > after_drag,
+        "points are being added"
+    );
     h.key(Key::Escape);
-    assert_eq!(h.app.custom_front_xz.len(), after_drag, "Esc dropped the drag in progress");
+    assert_eq!(
+        h.app.custom_front_xz.len(),
+        after_drag,
+        "Esc dropped the drag in progress"
+    );
     assert!(h.app.map_drawing_mode == MapDrawingMode::None);
     h.move_to(at(120.0));
     h.release_at(at(120.0));
     assert_eq!(h.app.custom_front_xz.len(), after_drag);
-    assert!(h.app.front_aabb == ao, "the cancelled drag did not draw an AO");
+    assert!(
+        h.app.front_aabb == ao,
+        "the cancelled drag did not draw an AO"
+    );
 
     // Esc with no drag keeps the finished front.
     h.key(Key::Num2);
@@ -1666,7 +2246,10 @@ fn map_switching_tools_drops_a_half_drawn_mark() {
     h.click_at(map.center() + Vec2::new(30.0, 10.0));
     assert!(!h.app.current_salient.is_empty());
     h.key(Key::Num4);
-    assert!(h.app.current_salient.is_empty(), "key 4 dropped the salient");
+    assert!(
+        h.app.current_salient.is_empty(),
+        "key 4 dropped the salient"
+    );
     assert!(h.app.map_drawing_mode == MapDrawingMode::AttackArrow);
     // Arrow drag in progress, then key 3: the arrow is dropped and the rest
     // of that drag draws nothing with the new tool.
@@ -1677,13 +2260,19 @@ fn map_switching_tools_drops_a_half_drawn_mark() {
     h.move_to(map.center() + Vec2::new(120.0, -40.0));
     h.release_at(map.center() + Vec2::new(120.0, -40.0));
     assert!(h.app.attack_arrows.is_empty());
-    assert!(h.app.current_salient.is_empty(), "the old drag did not start a salient");
+    assert!(
+        h.app.current_salient.is_empty(),
+        "the old drag did not start a salient"
+    );
     // Salient in progress, then the palette's Attack arrow tool: dropped too.
     h.click_at(map.center());
     h.click_at(map.center() + Vec2::new(30.0, 10.0));
     assert!(!h.app.current_salient.is_empty());
     h.click("Attack arrow");
-    assert!(h.app.current_salient.is_empty(), "the palette dropped the salient");
+    assert!(
+        h.app.current_salient.is_empty(),
+        "the palette dropped the salient"
+    );
     assert!(h.app.map_drawing_mode == MapDrawingMode::AttackArrow);
 }
 
@@ -1695,7 +2284,10 @@ fn map_clear_lines_salients_and_arrows_undo() {
     let map = h.find("Korea map").rect;
     h.key(Key::Num4);
     h.drag(map.center(), map.center() + Vec2::new(120.0, -60.0));
-    h.drag(map.center() + Vec2::new(0.0, 40.0), map.center() + Vec2::new(120.0, -20.0));
+    h.drag(
+        map.center() + Vec2::new(0.0, 40.0),
+        map.center() + Vec2::new(120.0, -20.0),
+    );
     assert_eq!(h.app.attack_arrows.len(), 2);
     h.key(Key::Num2);
     h.click_at(map.center() + Vec2::new(-200.0, 0.0));
@@ -1712,7 +2304,10 @@ fn map_clear_lines_salients_and_arrows_undo() {
 
     h.click("Clear lines");
     assert!(h.app.attack_arrows.is_empty() && h.app.custom_front_xz.is_empty());
-    assert_eq!(h.app.undo_label().as_deref(), Some("Cleared the drawn front and 2 arrows"));
+    assert_eq!(
+        h.app.undo_label().as_deref(),
+        Some("Cleared the drawn front and 2 arrows")
+    );
     h.key_with(Key::Z, CTRL);
     assert_eq!(h.app.attack_arrows.len(), 2);
     assert_eq!(h.app.custom_front_xz.len(), 2);
@@ -1732,23 +2327,44 @@ fn map_undo_label_matches_what_ctrl_z_undoes() {
     h.drag(map.center(), map.center() + Vec2::new(120.0, -60.0));
     h.key(Key::Num5);
     h.click_at(map.center() + Vec2::new(-80.0, 0.0));
-    assert_eq!(h.app.map_tool_status(), None, "one-shot objective tool is back to Select");
+    assert_eq!(
+        h.app.map_tool_status(),
+        None,
+        "one-shot objective tool is back to Select"
+    );
     // Clear the objective, then draw: the drawing is undone first, then the Clear.
     h.click("Forces");
     let top = h.find("OBJECTIVES").rect.top();
-    let clear = h.all("Clear DPRK").into_iter().find(|n| !n.disabled && n.rect.top() > top).expect("objectives Clear DPRK");
+    let clear = h
+        .all("Clear DPRK")
+        .into_iter()
+        .find(|n| !n.disabled && n.rect.top() > top)
+        .expect("objectives Clear DPRK");
     h.click_at(clear.rect.center());
-    assert_eq!(h.app.undo_label().as_deref(), Some("Cleared 1 DPRK objectives"));
+    assert_eq!(
+        h.app.undo_label().as_deref(),
+        Some("Cleared 1 DPRK objectives")
+    );
     h.key(Key::Num4);
-    h.drag(map.center() + Vec2::new(0.0, 40.0), map.center() + Vec2::new(120.0, -20.0));
+    h.drag(
+        map.center() + Vec2::new(0.0, 40.0),
+        map.center() + Vec2::new(120.0, -20.0),
+    );
     assert_eq!(h.app.attack_arrows.len(), 2);
     assert_eq!(h.app.undo_label().as_deref(), Some("Drew an attack arrow"));
     h.key_with(Key::Z, CTRL);
     assert_eq!(h.app.attack_arrows.len(), 1);
-    assert_eq!(h.app.undo_label().as_deref(), Some("Cleared 1 DPRK objectives"));
+    assert_eq!(
+        h.app.undo_label().as_deref(),
+        Some("Cleared 1 DPRK objectives")
+    );
     h.key_with(Key::Z, CTRL);
     assert_eq!(h.app.east_objectives.len(), 1, "then the Clear");
-    assert_eq!(h.app.attack_arrows.len(), 1, "without touching the older arrow");
+    assert_eq!(
+        h.app.attack_arrows.len(),
+        1,
+        "without touching the older arrow"
+    );
     assert_eq!(h.app.undo_label().as_deref(), Some("Drew an attack arrow"));
 }
 
@@ -1757,31 +2373,58 @@ fn map_objective_tool_hint_is_short() {
     let mut h = Harness::new("objhint");
     h.tab("Map");
     h.key(Key::Num5);
-    assert_eq!(h.app.map_tool_status().as_deref(), Some("Tool: DPRK objective · Click to place · Shift for more"));
+    assert_eq!(
+        h.app.map_tool_status().as_deref(),
+        Some("Tool: DPRK objective · Click to place · Shift for more")
+    );
     h.key(Key::Num6);
-    assert_eq!(h.app.map_tool_status().as_deref(), Some("Tool: NATO objective · Click to place · Shift for more"));
+    assert_eq!(
+        h.app.map_tool_status().as_deref(),
+        Some("Tool: NATO objective · Click to place · Shift for more")
+    );
 }
 
 #[test]
 fn map_dock_tabs_fit_a_three_digit_reference_count() {
     let mut h = Harness::new("docktabs");
     h.tab("Map");
-    let group = crate::frontlines::MapRefGroup { path: PathBuf::from("K13 AFB_mp.Group"), entity: crate::ast::Il2Entity::new("Group") };
+    let group = crate::frontlines::MapRefGroup {
+        path: PathBuf::from("K13 AFB_mp.Group"),
+        entity: crate::ast::Il2Entity::new("Group"),
+    };
     h.app.map_refs = vec![group; 123];
     h.settle();
-    let tabs: Vec<Node> = ["Period", "Forces", "References 123", "Terrain"].iter().map(|l| h.find(l)).collect();
+    let tabs: Vec<Node> = ["Period", "Forces", "References 123", "Terrain"]
+        .iter()
+        .map(|l| h.find(l))
+        .collect();
     // One row of cells, left to right, filling the 288 px dock content.
     for pair in tabs.windows(2) {
-        assert!((pair[1].rect.top() - pair[0].rect.top()).abs() < 0.5, "{:?} is on another row", pair[1].label);
-        assert!((pair[1].rect.left() - pair[0].rect.right()).abs() < 0.5, "{:?} does not follow {:?}", pair[1].label, pair[0].label);
+        assert!(
+            (pair[1].rect.top() - pair[0].rect.top()).abs() < 0.5,
+            "{:?} is on another row",
+            pair[1].label
+        );
+        assert!(
+            (pair[1].rect.left() - pair[0].rect.right()).abs() < 0.5,
+            "{:?} does not follow {:?}",
+            pair[1].label,
+            pair[0].label
+        );
     }
     let span = tabs[3].rect.right() - tabs[0].rect.left();
-    assert!((287.0..=288.5).contains(&span), "tabs span {span} px, not the 288 px dock");
+    assert!(
+        (287.0..=288.5).contains(&span),
+        "tabs span {span} px, not the 288 px dock"
+    );
     // Each label (bold, as when selected) with its count fits its cell with padding.
     for ((_, label, count), node) in MapDock::tabs(123).into_iter().zip(&tabs) {
         let need = shell::dock_tab_needed_width(&h.ctx, label, count);
         let cell = node.rect.width();
-        assert!(need + 2.0 * shell::DOCK_TAB_PAD <= cell + 0.5, "{label} {count:?} needs {need} px of a {cell} px cell");
+        assert!(
+            need + 2.0 * shell::DOCK_TAB_PAD <= cell + 0.5,
+            "{label} {count:?} needs {need} px of a {cell} px cell"
+        );
     }
     h.click("References 123");
     assert!(h.app.map_dock == MapDock::References);
@@ -1808,7 +2451,10 @@ fn help_closes_on_escape_and_shortcuts_still_work() {
 fn every_ui_glyph_is_in_a_loaded_font() {
     let h = Harness::new("glyphs");
     // The check itself works: U+2713 (check mark) is in none of the fonts.
-    assert!(!h.ctx.fonts(|f| f.has_glyph(&egui::FontId::proportional(13.0), '\u{2713}')));
+    assert!(
+        !h.ctx
+            .fonts(|f| f.has_glyph(&egui::FontId::proportional(13.0), '\u{2713}'))
+    );
     let mut missing = std::collections::BTreeSet::new();
     let sources = [
         include_str!("ui.rs"),
@@ -1819,7 +2465,9 @@ fn every_ui_glyph_is_in_a_loaded_font() {
     for text in sources {
         for line in text.lines().filter(|l| !l.trim_start().starts_with("//")) {
             for ch in line.chars().filter(|c| !c.is_ascii()) {
-                let ok = h.ctx.fonts(|f| f.has_glyph(&egui::FontId::proportional(13.0), ch));
+                let ok = h
+                    .ctx
+                    .fonts(|f| f.has_glyph(&egui::FontId::proportional(13.0), ch));
                 if !ok {
                     missing.insert(ch);
                 }
@@ -1849,21 +2497,43 @@ fn side_panel_controls_stay_inside_their_panel() {
         let left = (shell::RAIL_W, shell::RAIL_W + left_w);
         let right = (SCREEN.x - right_w, SCREEN.x);
         for n in &h.nodes {
-            let control = matches!(n.role, Role::Button | Role::CheckBox | Role::ComboBox | Role::Slider | Role::SpinButton | Role::TextInput);
+            let control = matches!(
+                n.role,
+                Role::Button
+                    | Role::CheckBox
+                    | Role::ComboBox
+                    | Role::Slider
+                    | Role::SpinButton
+                    | Role::TextInput
+            );
             if !control || n.rect.width() <= 0.0 || n.rect.top() < shell::HEADER_H {
                 continue;
             }
             let x = n.rect.left();
             let inside = |(a, b): (f32, f32)| x >= a - 0.5 && x < b;
             if inside(left) && n.rect.right() > left.1 + 0.5 {
-                out.push(format!("{tab} left: {:?} {:?} ends at {}", n.label, n.role, n.rect.right()));
+                out.push(format!(
+                    "{tab} left: {:?} {:?} ends at {}",
+                    n.label,
+                    n.role,
+                    n.rect.right()
+                ));
             }
             if inside(right) && n.rect.right() > right.1 + 0.5 {
-                out.push(format!("{tab} right: {:?} {:?} ends at {}", n.label, n.role, n.rect.right()));
+                out.push(format!(
+                    "{tab} right: {:?} {:?} ends at {}",
+                    n.label,
+                    n.role,
+                    n.rect.right()
+                ));
             }
         }
     }
-    assert!(out.is_empty(), "controls overflow their panel:\n{}", out.join("\n"));
+    assert!(
+        out.is_empty(),
+        "controls overflow their panel:\n{}",
+        out.join("\n")
+    );
 }
 
 /// A button label never wraps onto a second line ("Clear arrows" did in a
@@ -1884,23 +2554,45 @@ fn button_labels_stay_on_one_line() {
     }
     tall.sort();
     tall.dedup();
-    assert!(tall.is_empty(), "buttons with wrapped labels:\n{}", tall.join("\n"));
+    assert!(
+        tall.is_empty(),
+        "buttons with wrapped labels:\n{}",
+        tall.join("\n")
+    );
 }
 
 fn collect_tall_buttons(h: &Harness, tab: &str, out: &mut Vec<String>) {
     for n in &h.nodes {
         // Tree chips are 36 px by design; the Map dock tabs (40 px, top row
         // of the dock) are skipped. A wrapped label makes a button 40 px.
-        let dock_tab = n.rect.top() < 100.0 && ["Period", "Forces", "References", "Terrain"].iter().any(|t| n.label.starts_with(t));
-        if n.role == Role::Button && !dock_tab && n.rect.height() > 36.5 && !n.label.is_empty() && n.rect.width() < 200.0 {
-            out.push(format!("{tab}: {:?} {}x{}", n.label, n.rect.width(), n.rect.height()));
+        let dock_tab = n.rect.top() < 100.0
+            && ["Period", "Forces", "References", "Terrain"]
+                .iter()
+                .any(|t| n.label.starts_with(t));
+        if n.role == Role::Button
+            && !dock_tab
+            && n.rect.height() > 36.5
+            && !n.label.is_empty()
+            && n.rect.width() < 200.0
+        {
+            out.push(format!(
+                "{tab}: {:?} {}x{}",
+                n.label,
+                n.rect.width(),
+                n.rect.height()
+            ));
         }
     }
 }
 
 impl Harness {
     fn click_prefix_if_present(&mut self, prefix: &str) {
-        if let Some(n) = self.nodes.iter().find(|n| n.role == Role::Button && n.label.starts_with(prefix)).cloned() {
+        if let Some(n) = self
+            .nodes
+            .iter()
+            .find(|n| n.role == Role::Button && n.label.starts_with(prefix))
+            .cloned()
+        {
             self.click_at(n.rect.center());
             self.settle();
         }
@@ -1926,13 +2618,19 @@ fn map_lock_ao_blocks_empty_drag_and_reset() {
     h.wait_for_map();
     let map = h.find("Korea map").rect;
     let full = h.app.front_aabb;
-    h.drag(map.center() + Vec2::new(-80.0, -40.0), map.center() + Vec2::new(80.0, 40.0));
+    h.drag(
+        map.center() + Vec2::new(-80.0, -40.0),
+        map.center() + Vec2::new(80.0, 40.0),
+    );
     assert_ne!(h.app.front_aabb, full, "unlocked drag sets the AO");
     let locked_box = h.app.front_aabb;
     h.click("Lock AO");
     assert!(h.app.ao_locked);
     assert!(h.find("Reset AO").disabled, "Reset AO is off while locked");
-    h.drag(map.center() + Vec2::new(-40.0, -20.0), map.center() + Vec2::new(40.0, 20.0));
+    h.drag(
+        map.center() + Vec2::new(-40.0, -20.0),
+        map.center() + Vec2::new(40.0, 20.0),
+    );
     assert_eq!(h.app.front_aabb, locked_box, "locked drag leaves the AO");
     h.click("Unlock AO");
     assert!(!h.app.ao_locked);

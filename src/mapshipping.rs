@@ -17,12 +17,14 @@
 
 use geo::{Contains, Point};
 
-use crate::frontlines::{densify, AOI_GAP};
+use crate::frontlines::{AOI_GAP, densify};
 use crate::geo::{MAP_MAX, MAP_MIN};
 use crate::mapclip::{
-    apply_salients, filter_front_band, influence_minus_salients, point_north_of_front, WorldAabb,
+    WorldAabb, apply_salients, filter_front_band, influence_minus_salients, point_north_of_front,
 };
-use crate::placement::{hashed_pick, heading_toward, subsample_spaced, PlaceOpts, UNIT_PLACE_SPACING};
+use crate::placement::{
+    PlaceOpts, UNIT_PLACE_SPACING, hashed_pick, heading_toward, subsample_spaced,
+};
 use crate::watermap::WaterMap;
 
 pub const MAX_SHIPS: usize = 64;
@@ -113,14 +115,14 @@ pub fn place_ships(
         UNIT_PLACE_SPACING,
         opts.occupied,
     )
-        .into_iter()
-        .map(|(x, z)| ShipSpot {
-            x,
-            z,
-            in_ao: true,
-            heading_deg: 0.0,
-        })
-        .collect();
+    .into_iter()
+    .map(|(x, z)| ShipSpot {
+        x,
+        z,
+        in_ao: true,
+        heading_deg: 0.0,
+    })
+    .collect();
 
     if spots.len() < count {
         let outside_box = WorldAabb::full_map();
@@ -170,7 +172,10 @@ pub fn place_ships(
 enum WaterSide {
     Any,
     Polygon(geo::MultiPolygon<f64>),
-    Front { eastern: bool, front: Vec<(f64, f64)> },
+    Front {
+        eastern: bool,
+        front: Vec<(f64, f64)>,
+    },
 }
 
 fn coalition_water(
@@ -205,12 +210,7 @@ fn allowed(side: &WaterSide, x: f64, z: f64) -> bool {
     }
 }
 
-fn sample_water(
-    water: &WaterMap,
-    aabb: WorldAabb,
-    step: f64,
-    side: &WaterSide,
-) -> Vec<(f64, f64)> {
+fn sample_water(water: &WaterMap, aabb: WorldAabb, step: f64, side: &WaterSide) -> Vec<(f64, f64)> {
     let step = step.max(250.0);
     let x0 = aabb.x_min.max(MAP_MIN) + step * 0.5;
     let z0 = aabb.z_min.max(MAP_MIN) + step * 0.5;
@@ -279,7 +279,17 @@ mod tests {
     fn grid_fills_ao_water() {
         let water = all_water();
         let aabb = WorldAabb::from_corners(100_000.0, 100_000.0, 180_000.0, 180_000.0);
-        let layout = place_ships(true, 4, &[], aabb, &[], true, &water, PlaceOpts::UNCONSTRAINED).unwrap();
+        let layout = place_ships(
+            true,
+            4,
+            &[],
+            aabb,
+            &[],
+            true,
+            &water,
+            PlaceOpts::UNCONSTRAINED,
+        )
+        .unwrap();
         assert_eq!(layout.spots.len(), 4);
         assert!(layout.spots.iter().all(|s| s.in_ao));
         for s in &layout.spots {
@@ -292,7 +302,17 @@ mod tests {
     fn landlocked_ao_overflows_to_water_outside() {
         let water = west_water_only();
         let aabb = WorldAabb::from_corners(200_000.0, 300_000.0, 280_000.0, 380_000.0);
-        let layout = place_ships(false, 3, &[], aabb, &[], true, &water, PlaceOpts::UNCONSTRAINED).unwrap();
+        let layout = place_ships(
+            false,
+            3,
+            &[],
+            aabb,
+            &[],
+            true,
+            &water,
+            PlaceOpts::UNCONSTRAINED,
+        )
+        .unwrap();
         assert_eq!(layout.spots.len(), 3);
         assert!(layout.spots.iter().all(|s| !s.in_ao));
         assert!(layout.spots.iter().all(|s| water.is_water_xz(s.x, s.z)));
@@ -303,7 +323,17 @@ mod tests {
         let water = all_water();
         let aabb = WorldAabb::from_corners(80_000.0, 80_000.0, 200_000.0, 200_000.0);
         let front = vec![(140_000.0, 80_000.0), (140_000.0, 200_000.0)];
-        let layout = place_ships(true, 6, &front, aabb, &[], true, &water, PlaceOpts::UNCONSTRAINED).unwrap();
+        let layout = place_ships(
+            true,
+            6,
+            &front,
+            aabb,
+            &[],
+            true,
+            &water,
+            PlaceOpts::UNCONSTRAINED,
+        )
+        .unwrap();
         for s in &layout.spots {
             if s.in_ao {
                 assert!(
@@ -319,7 +349,17 @@ mod tests {
     fn randomize_headings_is_deterministic_and_in_range() {
         let water = all_water();
         let aabb = WorldAabb::from_corners(100_000.0, 100_000.0, 180_000.0, 180_000.0);
-        let mut a = place_ships(true, 4, &[], aabb, &[], true, &water, PlaceOpts::UNCONSTRAINED).unwrap();
+        let mut a = place_ships(
+            true,
+            4,
+            &[],
+            aabb,
+            &[],
+            true,
+            &water,
+            PlaceOpts::UNCONSTRAINED,
+        )
+        .unwrap();
         let mut b = a.clone();
         a.randomize_headings(42);
         b.randomize_headings(42);
@@ -327,7 +367,11 @@ mod tests {
             a.spots.iter().map(|s| s.heading_deg).collect::<Vec<_>>(),
             b.spots.iter().map(|s| s.heading_deg).collect::<Vec<_>>()
         );
-        assert!(a.spots.iter().all(|s| (0.0..360.0).contains(&s.heading_deg)));
+        assert!(
+            a.spots
+                .iter()
+                .all(|s| (0.0..360.0).contains(&s.heading_deg))
+        );
         b.randomize_headings(43);
         assert_ne!(
             a.spots.iter().map(|s| s.heading_deg).collect::<Vec<_>>(),
@@ -339,8 +383,17 @@ mod tests {
     fn placed_ships_are_at_least_4500m_apart() {
         let water = all_water();
         let aabb = WorldAabb::from_corners(80_000.0, 80_000.0, 220_000.0, 220_000.0);
-        let layout =
-            place_ships(true, 8, &[], aabb, &[], true, &water, PlaceOpts::UNCONSTRAINED).unwrap();
+        let layout = place_ships(
+            true,
+            8,
+            &[],
+            aabb,
+            &[],
+            true,
+            &water,
+            PlaceOpts::UNCONSTRAINED,
+        )
+        .unwrap();
         assert_eq!(layout.spots.len(), 8);
         for (i, a) in layout.spots.iter().enumerate() {
             for b in &layout.spots[i + 1..] {

@@ -53,13 +53,13 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::airstart::{self, AirStartPlane};
 use crate::airfield::{
-    clean_airfield, node_link_ids, scrub_deleted, strip_ai_planes, CleanReport,
-    EASTERN_PLANE_COALITIONS, WESTERN_PLANE_COALITIONS,
+    CleanReport, EASTERN_PLANE_COALITIONS, WESTERN_PLANE_COALITIONS, clean_airfield, node_link_ids,
+    scrub_deleted, strip_ai_planes,
 };
+use crate::airstart::{self, AirStartPlane};
 use crate::ast::Il2Entity;
-use crate::locale::{merge_template_sidecars, write_sidecars, LocaleTable};
+use crate::locale::{LocaleTable, merge_template_sidecars, write_sidecars};
 use crate::parser::{parse_group_file, parse_il2_document};
 use crate::serialize::serialize_group;
 
@@ -79,10 +79,8 @@ const STABLE_FOR: Duration = Duration::from_millis(1500);
 /// Sidecars archived with the raw mission (`pol` is not in `LANG_EXTS`).
 const RAW_SIDECAR_EXTS: &[&str] = &["eng", "chs", "fra", "ger", "rus", "spa", "pol"];
 
-const STEAM_MISSIONS: &str =
-    r"C:\Program Files (x86)\Steam\steamapps\common\IL-2 Sturmovik Battle of Stalingrad\data\Missions";
-const STANDALONE_MISSIONS: &str =
-    r"C:\Program Files\IL-2 Sturmovik Great Battles\data\Missions";
+const STEAM_MISSIONS: &str = r"C:\Program Files (x86)\Steam\steamapps\common\IL-2 Sturmovik Battle of Stalingrad\data\Missions";
+const STANDALONE_MISSIONS: &str = r"C:\Program Files\IL-2 Sturmovik Great Battles\data\Missions";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HarvestConfig {
@@ -401,8 +399,7 @@ fn extract_site(
             if n.block_type == "Group" || is_world_object(n) || n.block_type == "MCU_TR_Entity" {
                 continue;
             }
-            if n
-                .pos_xz()
+            if n.pos_xz()
                 .is_some_and(|(x, z)| dist2(x, z, site.x, site.z) > reach2)
             {
                 continue;
@@ -444,7 +441,11 @@ fn extract_site(
     group.set_property("Desc", "\"\"");
     group.children = filter_children(&root.children, &keep, &|x, z| in_zone(x, z));
 
-    let dropped: HashSet<i32> = by_index.keys().copied().filter(|id| !keep.contains(id)).collect();
+    let dropped: HashSet<i32> = by_index
+        .keys()
+        .copied()
+        .filter(|id| !keep.contains(id))
+        .collect();
     scrub_deleted(&mut group, &dropped);
     (group, via_links)
 }
@@ -704,7 +705,9 @@ fn find_one_airfield(group: &Il2Entity) -> Result<AirRef, String> {
             return;
         }
         let Some(index) = e.index else { return };
-        let Some(entity_id) = int_prop(e, "LinkTrId") else { return };
+        let Some(entity_id) = int_prop(e, "LinkTrId") else {
+            return;
+        };
         found.push(AirRef { index, entity_id });
     });
     match found.len() {
@@ -764,7 +767,12 @@ fn collect_spawn_nodes(e: &Il2Entity, out: &mut Vec<TaxiNode>) {
 }
 
 fn threshold_indexes(nodes: &[TaxiNode]) -> Result<[usize; 2], String> {
-    let ends: Vec<usize> = nodes.iter().enumerate().filter(|(_, n)| n.end).map(|(i, _)| i).collect();
+    let ends: Vec<usize> = nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.end)
+        .map(|(i, _)| i)
+        .collect();
     if ends.len() != 2 {
         return Err(format!(
             "This airfield has {} runway ends; a spawn needs two.",
@@ -837,9 +845,8 @@ fn hold_short(nodes: &[TaxiNode], departure: &TaxiNode, far: &TaxiNode) -> Resul
             best = Some((d, i));
         }
     }
-    best.map(|(_, i)| i).ok_or_else(|| {
-        "No taxi node sits just short of the runway threshold.".into()
-    })
+    best.map(|(_, i)| i)
+        .ok_or_else(|| "No taxi node sits just short of the runway threshold.".into())
 }
 
 /// Heading from `spawn` toward the nearest point on the runway segment.
@@ -873,7 +880,10 @@ fn unit_toward(from: &TaxiNode, to: &TaxiNode) -> Result<(f64, f64), String> {
 }
 
 fn heading_between(from: &TaxiNode, to: &TaxiNode) -> f64 {
-    (to.z - from.z).atan2(to.x - from.x).to_degrees().rem_euclid(360.0)
+    (to.z - from.z)
+        .atan2(to.x - from.x)
+        .to_degrees()
+        .rem_euclid(360.0)
 }
 
 fn heading_delta(a: f64, b: f64) -> f64 {
@@ -1012,7 +1022,10 @@ pub fn harvest_file(
 fn archive_raw(source: &Path, bytes: &[u8], db: &Path, stamp: &str) -> Result<PathBuf, String> {
     let raw_dir = db.join(RAW_DIR);
     std::fs::create_dir_all(&raw_dir).map_err(|err| format!("{}: {err}", raw_dir.display()))?;
-    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("mission");
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mission");
     let dest = raw_dir.join(format!("{stamp}{stem}.Mission"));
     std::fs::write(&dest, bytes).map_err(|err| format!("{}: {err}", dest.display()))?;
     for ext in RAW_SIDECAR_EXTS {
@@ -1126,7 +1139,10 @@ fn upsert_catalog(path: &Path, fresh: &[AirfieldRecord]) -> Result<(), String> {
     records.sort_by(|a, b| a.name.cmp(&b.name).then(a.country.cmp(&b.country)));
     let mut root = Il2Entity::new("Group");
     root.set_name("AirfieldDB");
-    root.set_property("Desc", "\"Harvested by IL-2 Mission Utility; not an editor group\"");
+    root.set_property(
+        "Desc",
+        "\"Harvested by IL-2 Mission Utility; not an editor group\"",
+    );
     root.children = records.iter().map(record_entity).collect();
     std::fs::write(path, serialize_group(&root)).map_err(|err| format!("{}: {err}", path.display()))
 }
@@ -1176,7 +1192,10 @@ struct Stamp {
 }
 
 fn utc_stamp(t: SystemTime) -> Stamp {
-    let secs = t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+    let secs = t
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0) as i64;
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     let (y, m, d) = civil_from_days(days);
     let (hh, mm, ss) = (rem / 3600, rem % 3600 / 60, rem % 60);
@@ -1366,7 +1385,10 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
         assert_eq!(af.group.count_block_type("MCU_Timer"), before);
         assert_eq!(af.group.count_block_type("MCU_TR_TaxiGraph"), 1);
         assert_eq!(af.record.taxi_nodes, 205);
-        assert!(af.group.count_block_type("MCU_Icon") >= 30, "icons via links");
+        assert!(
+            af.group.count_block_type("MCU_Icon") >= 30,
+            "icons via links"
+        );
         let len = af.record.axis_length_m.unwrap();
         assert!((1500.0..4000.0).contains(&len), "axis length {len}");
         let text = serialize_group(&af.group);
@@ -1395,26 +1417,66 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
     fn nearest_field_split_and_player_picks_start_field() {
         let a = block("Airfield", 1, 0.0, 0.0, "  Country = 601;\r\n");
         let b = block("Airfield", 2, 3000.0, 0.0, "  Country = 501;\r\n");
-        let near_a = block("Block", 3, 1000.0, 0.0, "  Model = \"a.mgm\";\r\n  Script = \"a.txt\";\r\n");
-        let near_b = block("Block", 4, 2000.0, 0.0, "  Model = \"b.mgm\";\r\n  Script = \"b.txt\";\r\n");
-        let timer = block("MCU_Timer", 5, 100.0, 0.0, "  Targets = [4,6];\r\n  Objects = [];\r\n");
-        let far_icon = block("MCU_Icon", 6, 14000.0, 0.0, "  Targets = [];\r\n  Objects = [];\r\n");
+        let near_a = block(
+            "Block",
+            3,
+            1000.0,
+            0.0,
+            "  Model = \"a.mgm\";\r\n  Script = \"a.txt\";\r\n",
+        );
+        let near_b = block(
+            "Block",
+            4,
+            2000.0,
+            0.0,
+            "  Model = \"b.mgm\";\r\n  Script = \"b.txt\";\r\n",
+        );
+        let timer = block(
+            "MCU_Timer",
+            5,
+            100.0,
+            0.0,
+            "  Targets = [4,6];\r\n  Objects = [];\r\n",
+        );
+        let far_icon = block(
+            "MCU_Icon",
+            6,
+            14000.0,
+            0.0,
+            "  Targets = [];\r\n  Objects = [];\r\n",
+        );
         let body = [a, b, near_a, near_b, timer, far_icon].join("\r\n");
-        let root = parse_mission_with_header(&mission_text(&body)).map(|(r, _)| r).unwrap();
+        let root = parse_mission_with_header(&mission_text(&body))
+            .map(|(r, _)| r)
+            .unwrap();
 
         let all = harvest_root(&root, &HarvestConfig::default());
         assert_eq!(all.len(), 2, "no player: every field");
         let fa = all.iter().find(|h| h.record.country == 601).unwrap();
         assert!(fa.group.find_by_name("Block3").is_some());
-        assert!(fa.group.find_by_name("Block4").is_none(), "closer to field 2");
-        assert!(fa.group.find_by_name("MCU_Icon6").is_some(), "pulled in by link");
+        assert!(
+            fa.group.find_by_name("Block4").is_none(),
+            "closer to field 2"
+        );
+        assert!(
+            fa.group.find_by_name("MCU_Icon6").is_some(),
+            "pulled in by link"
+        );
         assert_eq!(fa.via_links, 1);
         let t = fa.group.find_by_name("MCU_Timer5").unwrap();
         assert_eq!(t.targets, vec![6], "link to the other field scrubbed");
 
-        let player = block("Plane", 7, 2900.0, 0.0, "  AILevel = 0;\r\n  Country = 501;\r\n  Model = \"p.mgm\";\r\n  Script = \"p.txt\";\r\n");
+        let player = block(
+            "Plane",
+            7,
+            2900.0,
+            0.0,
+            "  AILevel = 0;\r\n  Country = 501;\r\n  Model = \"p.mgm\";\r\n  Script = \"p.txt\";\r\n",
+        );
         let body = format!("{body}\r\n{player}");
-        let root = parse_mission_with_header(&mission_text(&body)).map(|(r, _)| r).unwrap();
+        let root = parse_mission_with_header(&mission_text(&body))
+            .map(|(r, _)| r)
+            .unwrap();
         let start = harvest_root(&root, &HarvestConfig::default());
         assert_eq!(start.len(), 1);
         assert_eq!(start[0].record.country, 501);
@@ -1424,10 +1486,24 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
     #[test]
     fn ai_planes_stripped_unless_kept() {
         let a = block("Airfield", 1, 0.0, 0.0, "  Country = 601;\r\n");
-        let ai = block("Plane", 2, 200.0, 0.0, "  AILevel = 2;\r\n  LinkTrId = 3;\r\n  Model = \"p.mgm\";\r\n  Script = \"p.txt\";\r\n");
-        let ent = block("MCU_TR_Entity", 3, 200.0, 0.0, "  Targets = [];\r\n  Objects = [];\r\n  MisObjID = 2;\r\n");
+        let ai = block(
+            "Plane",
+            2,
+            200.0,
+            0.0,
+            "  AILevel = 2;\r\n  LinkTrId = 3;\r\n  Model = \"p.mgm\";\r\n  Script = \"p.txt\";\r\n",
+        );
+        let ent = block(
+            "MCU_TR_Entity",
+            3,
+            200.0,
+            0.0,
+            "  Targets = [];\r\n  Objects = [];\r\n  MisObjID = 2;\r\n",
+        );
         let body = [a, ai, ent].join("\r\n");
-        let root = parse_mission_with_header(&mission_text(&body)).map(|(r, _)| r).unwrap();
+        let root = parse_mission_with_header(&mission_text(&body))
+            .map(|(r, _)| r)
+            .unwrap();
         let stripped = harvest_root(&root, &HarvestConfig::default());
         assert_eq!(stripped[0].ai_planes_removed, 1);
         assert_eq!(stripped[0].group.count_block_type("Plane"), 0);
@@ -1443,7 +1519,9 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
 
     #[test]
     fn principal_axis_of_a_line() {
-        let pts: Vec<(f64, f64)> = (0..=10).map(|i| (i as f64 * 100.0, i as f64 * 100.0)).collect();
+        let pts: Vec<(f64, f64)> = (0..=10)
+            .map(|i| (i as f64 * 100.0, i as f64 * 100.0))
+            .collect();
         let (h, l) = principal_axis(&pts).unwrap();
         assert!((h - 45.0).abs() < 1e-6, "heading {h}");
         assert!((l - 1000.0 * 2f64.sqrt()).abs() < 1e-6, "length {l}");
@@ -1482,7 +1560,11 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
 
         let again = harvest_file(&gen_path, &db, &HarvestConfig::default()).unwrap();
         assert_eq!(again.models_added, 0);
-        assert_eq!(read_catalog(&db.join(CATALOG_FILE)).unwrap().len(), 1, "upsert, not append");
+        assert_eq!(
+            read_catalog(&db.join(CATALOG_FILE)).unwrap().len(),
+            1,
+            "upsert, not append"
+        );
 
         let _ = std::fs::remove_dir_all(&game);
         let _ = std::fs::remove_dir_all(&db);
@@ -1499,7 +1581,11 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
 
         std::fs::write(&gen_path, "new mission text").unwrap();
         assert_eq!(w.poll(t0), None, "first sighting only arms");
-        assert_eq!(w.poll(t0 + Duration::from_millis(500)), None, "not stable yet");
+        assert_eq!(
+            w.poll(t0 + Duration::from_millis(500)),
+            None,
+            "not stable yet"
+        );
         assert_eq!(w.poll(t0 + STABLE_FOR), Some(gen_path.clone()));
         assert_eq!(w.poll(t0 + STABLE_FOR * 2), None, "reported once");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1530,7 +1616,10 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
         out
     }
 
-    fn find_block<'a>(e: &'a Il2Entity, pred: &impl Fn(&Il2Entity) -> bool) -> Option<&'a Il2Entity> {
+    fn find_block<'a>(
+        e: &'a Il2Entity,
+        pred: &impl Fn(&Il2Entity) -> bool,
+    ) -> Option<&'a Il2Entity> {
         if pred(e) {
             return Some(e);
         }
@@ -1540,12 +1629,18 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
     fn field_and_entity(root: &Il2Entity) -> (&Il2Entity, &Il2Entity) {
         let air = find_block(root, &|e| e.block_type == "Airfield").expect("airfield");
         let link = int_prop(air, "LinkTrId").unwrap();
-        let entity = find_block(root, &|e| e.block_type == "MCU_TR_Entity" && e.index == Some(link)).expect("entity");
+        let entity = find_block(root, &|e| {
+            e.block_type == "MCU_TR_Entity" && e.index == Some(link)
+        })
+        .expect("entity");
         (air, entity)
     }
 
     fn planes_of(air: &Il2Entity) -> &Il2Entity {
-        air.children.iter().find(|c| c.block_type == "Planes").expect("planes")
+        air.children
+            .iter()
+            .find(|c| c.block_type == "Planes")
+            .expect("planes")
     }
 
     #[test]
@@ -1566,7 +1661,11 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
             (spot.x - 72007.346).abs() < 0.001 && (spot.z - 287796.226).abs() < 0.001,
             "{spot:?}"
         );
-        assert!((spot.heading_deg - 234.0).abs() < 0.05, "heading {}", spot.heading_deg);
+        assert!(
+            (spot.heading_deg - 234.0).abs() < 0.05,
+            "heading {}",
+            spot.heading_deg
+        );
         assert!((heading_delta(spot.heading_deg, 144.0) - 90.0).abs() < 1.0);
         let (air, ent) = field_and_entity(&root);
         for obj in [air, ent] {
@@ -1602,8 +1701,14 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
         assert_eq!(air.property("Country"), Some("601"));
         let northwest = dist2(spot.x, spot.z, 71948.326, 287712.612).sqrt();
         let southeast = dist2(spot.x, spot.z, 69788.467, 289281.835).sqrt();
-        assert!(northwest < southeast, "spawn should be the northwest hold-short");
-        assert!(northwest < 120.0, "hold-short {northwest:.0} m from the threshold");
+        assert!(
+            northwest < southeast,
+            "spawn should be the northwest hold-short"
+        );
+        assert!(
+            northwest < 120.0,
+            "hold-short {northwest:.0} m from the threshold"
+        );
         let nose = spot.heading_deg.to_radians();
         let toward = nose.cos() * (71948.326 - spot.x) + nose.sin() * (287712.612 - spot.z);
         assert!(toward > 0.0, "nose faces the runway");
@@ -1616,11 +1721,21 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
         let mut wind = k13();
         let base_spot = place_field_spawn(&mut base, &planes, None, None).unwrap();
         let wind_spot = place_field_spawn(&mut wind, &planes, Some(324.0), None).unwrap();
-        assert!((heading_delta(wind_spot.heading_deg, 324.0) - 90.0).abs() < 15.0, "{}", wind_spot.heading_deg);
+        assert!(
+            (heading_delta(wind_spot.heading_deg, 324.0) - 90.0).abs() < 15.0,
+            "{}",
+            wind_spot.heading_deg
+        );
         let moved = dist2(base_spot.x, base_spot.z, wind_spot.x, wind_spot.z).sqrt();
-        assert!(moved > 1000.0, "into-wind end is the other threshold, moved {moved:.0} m");
+        assert!(
+            moved > 1000.0,
+            "into-wind end is the other threshold, moved {moved:.0} m"
+        );
         let to_se = dist2(wind_spot.x, wind_spot.z, 69788.467, 289281.835).sqrt();
-        assert!(to_se < 120.0, "wind spawn {to_se:.0} m from the southeast threshold");
+        assert!(
+            to_se < 120.0,
+            "wind spawn {to_se:.0} m from the southeast threshold"
+        );
     }
 
     #[test]
@@ -1633,11 +1748,21 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
             (spot.x - 106612.739).abs() < 0.001 && (spot.z - 268571.103).abs() < 0.001,
             "{spot:?}"
         );
-        assert!((heading_delta(spot.heading_deg, 135.0) - 90.0).abs() < 15.0, "{}", spot.heading_deg);
+        assert!(
+            (heading_delta(spot.heading_deg, 135.0) - 90.0).abs() < 15.0,
+            "{}",
+            spot.heading_deg
+        );
         let to_threshold = dist2(spot.x, spot.z, 106649.0, 268611.0).sqrt();
         let to_ramp = dist2(spot.x, spot.z, 106299.0, 269360.0).sqrt();
-        assert!(to_threshold < 80.0, "hold-short {to_threshold:.0} m from the northwest end");
-        assert!(to_ramp > 400.0, "engine running is {to_ramp:.0} m from the midfield ramp");
+        assert!(
+            to_threshold < 80.0,
+            "hold-short {to_threshold:.0} m from the northwest end"
+        );
+        assert!(
+            to_ramp > 400.0,
+            "engine running is {to_ramp:.0} m from the midfield ramp"
+        );
         assert_eq!(taxi_xz(&root), before);
         let (air, _) = field_and_entity(&root);
         assert_eq!(planes_of(air).children[0].property("StartType"), Some("1"));
@@ -1655,7 +1780,10 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
         let mut root = k13();
         let spot = place_field_spawn(&mut root, &parked, None, None).unwrap();
         assert!((spot.x - hold_spot.x).abs() < 0.001 && (spot.z - hold_spot.z).abs() < 0.001);
-        assert!((spot.x - 72007.346).abs() < 0.001 && (spot.z - 287796.226).abs() < 0.001, "{spot:?}");
+        assert!(
+            (spot.x - 72007.346).abs() < 0.001 && (spot.z - 287796.226).abs() < 0.001,
+            "{spot:?}"
+        );
         assert!((spot.heading_deg - hold_spot.heading_deg).abs() < 0.001);
         let (air, ent) = field_and_entity(&root);
         let x: f64 = air.property("XPos").unwrap().parse().unwrap();
@@ -1680,7 +1808,10 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
 Group\r\n{\r\nAirfield\r\n{\r\nIndex = 1;\r\nLinkTrId = 2;\r\nXPos = 0;\r\nYPos = 1;\r\nZPos = 0;\r\nModel = \"graphics\\\\airfields\\\\fakefield.mgm\";\r\n}\r\nMCU_TR_Entity\r\n{\r\nIndex = 2;\r\nMisObjID = 1;\r\nXPos = 0;\r\nYPos = 1.2;\r\nZPos = 0;\r\n}\r\nMCU_TR_TaxiGraph\r\n{\r\nIndex = 3;\r\nObjects = [2];\r\nXPos = 0;\r\nZPos = 0;\r\nShape\r\n{\r\nNode\r\n{\r\nX = 0;\r\nZ = 0;\r\nData\r\n{\r\nRunway = 0;\r\nRunwayEnd = 0;\r\n}\r\n}\r\nNode\r\n{\r\nX = 1000;\r\nZ = 0;\r\nData\r\n{\r\nRunway = 0;\r\nRunwayEnd = 0;\r\n}\r\n}\r\nNode\r\n{\r\nX = 4;\r\nZ = 16;\r\n}\r\n}\r\n}\r\nBlock\r\n{\r\nIndex = 4;\r\nXPos = 10;\r\nZPos = 10;\r\nModel = \"m\";\r\n}\r\n}\r\n";
         let mut bare = parse_group_file(bare).unwrap();
         let spot = place_field_spawn(&mut bare, &parked, None, None).unwrap();
-        assert!((spot.x - 4.0).abs() < 0.001 && (spot.z - 16.0).abs() < 0.001, "{spot:?}");
+        assert!(
+            (spot.x - 4.0).abs() < 0.001 && (spot.z - 16.0).abs() < 0.001,
+            "{spot:?}"
+        );
         let (air, _) = field_and_entity(&bare);
         assert_eq!(planes_of(air).children[0].property("SnapTo"), Some("2"));
         assert_eq!(planes_of(air).children[0].property("StartType"), Some("2"));
@@ -1702,7 +1833,10 @@ Group\r\n{\r\nAirfield\r\n{\r\nIndex = 1;\r\nLinkTrId = 2;\r\nXPos = 0;\r\nYPos 
         assert_eq!(field_spawn_name(1, 0, 0, 0.95), "At ramp - Long range");
         assert_eq!(field_spawn_name(1, 0, 0, 1.0), "At ramp - Long range");
         assert_eq!(field_spawn_name(2, 2, 0, 1.0), "Parked - Long range");
-        assert_eq!(field_spawn_name(1, 0, 2, 0.95), "At ramp - Strike 2 - Long range");
+        assert_eq!(
+            field_spawn_name(1, 0, 2, 0.95),
+            "At ramp - Strike 2 - Long range"
+        );
 
         let mut strike = crate::airstart::default_plane("f51d");
         strike.payload_id = 2;
@@ -1737,8 +1871,8 @@ Group\r\n{\r\nAirfield\r\n{\r\nIndex = 1;\r\nLinkTrId = 2;\r\nXPos = 0;\r\nYPos 
     fn real_mission_from_env() {
         let path = std::env::var("IL2_MISSION").expect("set IL2_MISSION");
         let bytes = std::fs::read(&path).unwrap();
-        let (root, _) =
-            parse_mission_with_header(&String::from_utf8_lossy(&bytes)).expect("parse real mission");
+        let (root, _) = parse_mission_with_header(&String::from_utf8_lossy(&bytes))
+            .expect("parse real mission");
         let got = harvest_root(&root, &HarvestConfig::default());
         for af in &got {
             eprintln!(

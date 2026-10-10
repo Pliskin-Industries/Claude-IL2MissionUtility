@@ -211,7 +211,7 @@ State field names are the existing ones in `GroupGeneratorApp`. Copy comes from 
     - Battle focus combo (unchanged grouping) and the battle note.
     - "Suggested aircraft" as outline tags.
   - **Forces:**
-    - **FIGHTERS** (note "from Fighter Pack"): Place DPRK / Place NATO; "Groups at once" (`fighter_waves`); "Fill AO (up to {MAX_PACKS} at once)"; the count line "{side}: {n} groups in {packs} packs" with a side marker; Clear.
+    - **FIGHTERS** (note "from Fighter Pack"): Place DPRK / Place NATO; Load DPRK… / Load NATO… (a saved linked fighter pack, placed with the fighter icons); "Groups at once" (`fighter_waves`); "Fill AO (up to {MAX_PACKS} at once)"; the count line "{side}: {n} groups in {packs} packs" (and "a + b" when two waves are placed) with a side marker; Clear.
     - **OBJECTIVES** (note "one click each · Shift for more"): DPRK · {n} / NATO · {n} buttons that pick tools 5 / 6; Clear.
     - **UNITS** (note "from Army Generator"): Place DPRK / Place NATO (disabled when `recon_keep_positions`), Load DPRK… / Load NATO…; counts; Clear.
   - **References {n}:** the list from "Loaded Reference Groups" (Add reference groups…, rows with X/Z and Remove). This is no longer a collapsing section.

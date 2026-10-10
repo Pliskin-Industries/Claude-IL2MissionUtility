@@ -44,18 +44,18 @@ use eframe::egui::{
 };
 
 use crate::aircraft::{
-    default_skill, fighter_pack_filename, linked_fighter_pack_name, AIRCRAFT_TYPES, COUNTRIES,
+    AIRCRAFT_TYPES, COUNTRIES, default_skill, fighter_pack_filename, linked_fighter_pack_name,
 };
 use crate::airfield::AirfieldInfo;
 use crate::airstart::{AirStartField, AirStartPlane, PlacedAirStart};
 use crate::bombers::{
-    extract_exclusive_plans, inspect_plan, link_bomber_plans_with, looks_like_exclusive_pack,
     BomberInput, BomberPlanInfo, SUGGESTED_END_NAMES, SUGGESTED_TRIGGER_NAMES,
+    extract_exclusive_plans, inspect_plan, link_bomber_plans_with, looks_like_exclusive_pack,
 };
 use crate::duplicate::apply_overrides;
 use crate::flights::FlightConfig;
-use crate::frontlines::{timeline_index, ImportedFighterPack, MapRefGroup, Season, BATTLES};
-use crate::harvest::{GenWatcher, HarvestConfig, DEFAULT_DB_DIR, DEFAULT_MISSIONS_DIR};
+use crate::frontlines::{BATTLES, ImportedFighterPack, MapRefGroup, Season, timeline_index};
+use crate::harvest::{DEFAULT_DB_DIR, DEFAULT_MISSIONS_DIR, GenWatcher, HarvestConfig};
 use crate::help::{self, HelpTopic};
 use crate::shell::{self, Severity};
 use crate::terrain::HeightStore;
@@ -82,25 +82,25 @@ use crate::model_spec::{self, ModelClass};
 use crate::pack::generate_pack;
 use crate::parser::{parse_group_file, parse_il2_document};
 use crate::recon::{
+    ReconBuild, ReconInput, RestoreKind, SUGGESTED_ZONE_NAMES, TypeMix, UnitPlanInfo,
     allocate_copies, allocate_mix, apply_randomizer_typed, combine_placed_packs, generate_recon_ex,
     inspect_placed_pack, inspect_unit, looks_like_placed_pack, restore_always_on, wanted_winners,
-    ReconBuild, ReconInput, RestoreKind, TypeMix, UnitPlanInfo, SUGGESTED_ZONE_NAMES,
 };
 use crate::serialize::serialize_group;
 use crate::template::{
-    bundled_catalog, AIR_ZONE_IN_M, AIR_ZONE_OUT_M, BringUp, CatalogUnit,
-    PlaceLayout, TemplateSeat, UnitKind as CatalogKind, WAYPOINT_SPACING_M, ZoneCoalition, ZoneMix,
+    AIR_ZONE_IN_M, AIR_ZONE_OUT_M, BringUp, CatalogUnit, PlaceLayout, TemplateSeat,
+    UnitKind as CatalogKind, WAYPOINT_SPACING_M, ZoneCoalition, ZoneMix, bundled_catalog,
 };
 use crate::weapon_range::ArmyUnitKind;
 
 /// Template Builder tab (`src/ui/builder.rs`). Map is `src/ui/map.rs`.
 /// Airfield is `src/ui/airfield.rs`.
 mod builder;
-use builder::{default_template_seats, TemplateSnapshot, TplSelect};
+use builder::{TemplateSnapshot, TplSelect, default_template_seats};
 mod map;
 use map::{
-    DrawnMark, GroundHit, KoreaMapLayer, MapAction, MapArmySlot, MapDock, MapDrawingMode,
-    MapForces, ShipHit, MAP_TOOLS,
+    DrawnMark, GroundHit, KoreaMapLayer, MAP_TOOLS, MapAction, MapArmySlot, MapDock,
+    MapDrawingMode, MapForces, ShipHit,
 };
 mod airfield;
 pub fn run() -> eframe::Result {
@@ -281,6 +281,8 @@ struct GroupGeneratorApp {
     altitude_max: f32,
     bomber_slots: Vec<BomberSlot>,
     bomber_keep_positions: bool,
+    /// What a new strike jumps to, and what Shift-drag snaps onto.
+    map_strike_focus: map::StrikeFocus,
     /// Plan shown in the Exclusive Activation center.
     bomber_selected: Option<usize>,
     /// The generated Exclusive Activation pack whose plans were added (header "Editing {stem}").
@@ -312,6 +314,17 @@ struct GroupGeneratorApp {
     air_start_place: Option<usize>,
     air_start_drag: Option<usize>,
     air_start_heading_drag: Option<usize>,
+    /// Strike groups loaded for the Forces **Missions** section.
+    map_mission_bank: Vec<map::MissionTemplate>,
+    /// Strikes dropped on the map. Each keeps its target, IP, and start.
+    map_missions: Vec<map::PlacedMission>,
+    /// Bank index while the map tool is placing a mission.
+    mission_place: Option<usize>,
+    mission_drag: Option<(usize, map::MissionHandle)>,
+    /// Snap targets for this drag. Filled on the first frame Shift is held.
+    mission_snap: Vec<map::StrikeObjective>,
+    /// Last Snap target scan for this AO. The next Add or Shift-drag reuses it.
+    map_target_cache: std::cell::RefCell<Option<map::TargetScan>>,
     air_start_tex_nato: Option<TextureHandle>,
     air_start_tex_east: Option<TextureHandle>,
     harvest_missions_dir: String,
@@ -361,7 +374,7 @@ struct GroupGeneratorApp {
     attack_arrows: Vec<((f64, f64), (f64, f64))>,
     attack_drag: Option<((f64, f64), (f64, f64))>,
     drawn_marks: Vec<DrawnMark>,
-	redo_marks: Vec<DrawnMark>,
+    redo_marks: Vec<DrawnMark>,
     redo_salients: Vec<Vec<(f64, f64)>>,
     redo_attack_arrows: Vec<((f64, f64), (f64, f64))>,
     /// Points a front-mark undo took off `custom_front_xz`, for Ctrl Y.
@@ -457,6 +470,8 @@ struct GroupGeneratorApp {
     tpl_per_group: u32,
     tpl_zone_in: f32,
     tpl_zone_out: f32,
+    /// False: Zone Out does not run MISSION END.
+    tpl_zone_out_enabled: bool,
     /// Last mix that wrote Zone IN / Out defaults. User edits stick until this changes.
     tpl_zone_mix: Option<ZoneMix>,
     tpl_wp_spacing: f32,
@@ -467,7 +482,6 @@ struct GroupGeneratorApp {
     tpl_view_zoom: f32,
     tpl_view_pan: Vec2,
 }
-
 
 /// DPRK for the 500-series countries, NATO for the 600-series, none otherwise.
 fn seat_side(country: i32) -> Option<shell::Side> {
@@ -482,7 +496,11 @@ fn paint_seat_marker(painter: &egui::Painter, center: Pos2, size: f32, country: 
     match seat_side(country) {
         Some(side) => shell::paint_side_marker(painter, center, size, side),
         None => {
-            painter.rect_filled(Rect::from_center_size(center, Vec2::splat(size * 0.7)), 1.0, c::NEUTRAL_500);
+            painter.rect_filled(
+                Rect::from_center_size(center, Vec2::splat(size * 0.7)),
+                1.0,
+                c::NEUTRAL_500,
+            );
         }
     }
 }
@@ -492,7 +510,6 @@ fn section_heading(text: &str) -> RichText {
     RichText::new(text.to_uppercase()).text_style(TextStyle::Name("section".into()))
 }
 
-
 fn country_short(country: i32) -> String {
     COUNTRIES
         .iter()
@@ -501,14 +518,16 @@ fn country_short(country: i32) -> String {
         .unwrap_or_else(|| country.to_string())
 }
 
-
 #[derive(Default)]
 enum Status {
     #[default]
     Idle,
     Info(String),
     /// Soft placement / reposition notes (orange bullets). Hard failures use [`Status::Error`].
-    Warn { lead: String, items: Vec<String> },
+    Warn {
+        lead: String,
+        items: Vec<String>,
+    },
     Error(String),
 }
 
@@ -537,6 +556,7 @@ impl Default for GroupGeneratorApp {
             altitude_max: 5500.0,
             bomber_slots: Vec::new(),
             bomber_keep_positions: false,
+            map_strike_focus: map::StrikeFocus::Tanks,
             bomber_selected: None,
             bomber_loaded_path: None,
             recon_submode: ReconSubmode::New,
@@ -566,6 +586,12 @@ impl Default for GroupGeneratorApp {
             air_start_place: None,
             air_start_drag: None,
             air_start_heading_drag: None,
+            map_mission_bank: Vec::new(),
+            map_missions: Vec::new(),
+            mission_place: None,
+            mission_drag: None,
+            mission_snap: Vec::new(),
+            map_target_cache: std::cell::RefCell::new(None),
             air_start_tex_nato: None,
             air_start_tex_east: None,
             harvest_missions_dir: DEFAULT_MISSIONS_DIR.to_string(),
@@ -587,7 +613,7 @@ impl Default for GroupGeneratorApp {
             map_refs: Vec::new(),
             drawing_custom_front: false,
             custom_front_xz: Vec::new(),
-			map_drawing_mode: MapDrawingMode::None,
+            map_drawing_mode: MapDrawingMode::None,
             map_dock: MapDock::Period,
             map_hover_xz: None,
             terrain_store_path: crate::terrain::default_store_path(),
@@ -605,7 +631,7 @@ impl Default for GroupGeneratorApp {
             attack_arrows: Vec::new(),
             attack_drag: None,
             drawn_marks: Vec::new(),
-			redo_marks: Vec::new(),
+            redo_marks: Vec::new(),
             redo_salients: Vec::new(),
             redo_attack_arrows: Vec::new(),
             redo_fronts: Vec::new(),
@@ -683,6 +709,7 @@ impl Default for GroupGeneratorApp {
             tpl_per_group: 4,
             tpl_zone_in: AIR_ZONE_IN_M,
             tpl_zone_out: AIR_ZONE_OUT_M,
+            tpl_zone_out_enabled: true,
             tpl_zone_mix: Some(ZoneMix::Air),
             tpl_wp_spacing: WAYPOINT_SPACING_M,
             tpl_wp_speed: 100.0,
@@ -732,7 +759,10 @@ impl GroupGeneratorApp {
         self.status_details(ctx);
         egui::TopBottomPanel::top("page_header")
             .exact_height(shell::HEADER_H)
-            .frame(egui::Frame::side_top_panel(&ctx.style()).inner_margin(egui::Margin::symmetric(18, 0)))
+            .frame(
+                egui::Frame::side_top_panel(&ctx.style())
+                    .inner_margin(egui::Margin::symmetric(18, 0)),
+            )
             .show(ctx, |ui| self.page_header_bar(ui));
         // Each page adds its own side and center panels; only panels scroll.
         match self.mode {
@@ -831,9 +861,13 @@ impl GroupGeneratorApp {
             AppMode::Template => vec![Check::new(!self.tpl_seats.is_empty(), "At least one unit")],
             AppMode::Recon => match self.recon_submode {
                 ReconSubmode::New => {
-                    let mut checks = vec![Check::new(!self.recon_slots.is_empty(), "At least one template")];
+                    let mut checks = vec![Check::new(
+                        !self.recon_slots.is_empty(),
+                        "At least one template",
+                    )];
                     if !self.recon_slots.is_empty() {
-                        let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
+                        let weights: Vec<u32> =
+                            self.recon_slots.iter().map(|s| s.influence).collect();
                         checks.push(Check::new(
                             weights.iter().any(|w| *w > 0),
                             "Influence above 0 on at least one template",
@@ -851,7 +885,10 @@ impl GroupGeneratorApp {
                     checks
                 }
                 ReconSubmode::Rework => {
-                    let mut checks = vec![Check::new(!self.recon_rework.is_empty(), "At least one placed pack")];
+                    let mut checks = vec![Check::new(
+                        !self.recon_rework.is_empty(),
+                        "At least one placed pack",
+                    )];
                     for slot in &self.recon_rework {
                         checks.push(if self.recon_strip_randomizer {
                             Check::new(
@@ -859,7 +896,10 @@ impl GroupGeneratorApp {
                                 format!("Start timer or checkzone for {}", slot.info.name),
                             )
                         } else {
-                            Check::new(!slot.selected_triggers.is_empty(), format!("Zone In for {}", slot.info.name))
+                            Check::new(
+                                !slot.selected_triggers.is_empty(),
+                                format!("Zone In for {}", slot.info.name),
+                            )
                         });
                     }
                     checks
@@ -870,7 +910,10 @@ impl GroupGeneratorApp {
                 "At least one aircraft type",
             )],
             AppMode::Exclusive => {
-                let mut checks = vec![Check::new(!self.bomber_slots.is_empty(), "At least one plan")];
+                let mut checks = vec![Check::new(
+                    !self.bomber_slots.is_empty(),
+                    "At least one plan",
+                )];
                 for (n, slot) in self.bomber_slots.iter().enumerate() {
                     checks.push(Check::new(
                         !slot.selected_triggers.is_empty(),
@@ -883,7 +926,10 @@ impl GroupGeneratorApp {
                 }
                 checks
             }
-            AppMode::Airfield => vec![Check::new(self.airfield_info.is_some(), "An airfield file loaded")],
+            AppMode::Airfield => vec![Check::new(
+                self.airfield_info.is_some(),
+                "An airfield file loaded",
+            )],
             AppMode::Map => Vec::new(),
         }
     }
@@ -911,9 +957,13 @@ impl GroupGeneratorApp {
     /// The header's first secondary button and Ctrl O. Fighter Pack has none.
     fn load_action(&mut self) {
         match self.mode {
-            AppMode::Template if self.is_dirty(AppMode::Template) => self.confirm = Some(Confirm::LoadTemplate),
+            AppMode::Template if self.is_dirty(AppMode::Template) => {
+                self.confirm = Some(Confirm::LoadTemplate)
+            }
             AppMode::Template => self.load_template_now(),
-            AppMode::Map if self.is_dirty(AppMode::Map) => self.confirm = Some(Confirm::LoadBaseMap),
+            AppMode::Map if self.is_dirty(AppMode::Map) => {
+                self.confirm = Some(Confirm::LoadBaseMap)
+            }
             AppMode::Map => self.run_io(AppMode::Map, |s| s.load_base_map()),
             AppMode::Recon => match self.recon_submode {
                 ReconSubmode::New => self.add_recon_template(),
@@ -928,7 +978,11 @@ impl GroupGeneratorApp {
     fn page_header_bar(&mut self, ui: &mut egui::Ui) {
         fn file_label(path: &Option<PathBuf>, stem_only: bool) -> Option<String> {
             let p = path.as_ref()?;
-            let name = if stem_only { p.file_stem() } else { p.file_name() };
+            let name = if stem_only {
+                p.file_stem()
+            } else {
+                p.file_name()
+            };
             name.and_then(|n| n.to_str()).map(str::to_owned)
         }
         let (title, file, primary) = match self.mode {
@@ -940,7 +994,9 @@ impl GroupGeneratorApp {
             AppMode::Recon => ("Army Generator", None, "Generate File"),
             AppMode::Fighter => (
                 "Fighter Pack",
-                Some(file_label(&self.custom_path, false).unwrap_or_else(|| "Built-in logic".into())),
+                Some(
+                    file_label(&self.custom_path, false).unwrap_or_else(|| "Built-in logic".into()),
+                ),
                 "Generate File",
             ),
             AppMode::Exclusive => (
@@ -964,7 +1020,11 @@ impl GroupGeneratorApp {
                     .front_focus
                     .and_then(|id| BATTLES.iter().find(|b| b.id == id))
                     .map_or("Entire front", |b| b.name);
-                let period = format!("{} {} · {battle}", self.front_season.label(), self.front_year);
+                let period = format!(
+                    "{} {} · {battle}",
+                    self.front_season.label(),
+                    self.front_year
+                );
                 ("Map", Some(period), "Generate Base Map")
             }
         };
@@ -1007,7 +1067,10 @@ impl GroupGeneratorApp {
                 AppMode::Recon => match submode {
                     ReconSubmode::New => {
                         add_folder = ui.button("Add folder…").clicked();
-                        load = ui.button("Add templates…").on_hover_text("Ctrl O").clicked();
+                        load = ui
+                            .button("Add templates…")
+                            .on_hover_text("Ctrl O")
+                            .clicked();
                     }
                     ReconSubmode::Rework => {
                         load = ui.button("Add packs…").on_hover_text("Ctrl O").clicked();
@@ -1022,11 +1085,16 @@ impl GroupGeneratorApp {
                 AppMode::Exclusive => {
                     load = ui
                         .button("Add templates…")
-                        .on_hover_text("Add templates or a generated Exclusive Activation pack.  (Ctrl O)")
+                        .on_hover_text(
+                            "Add templates or a generated Exclusive Activation pack.  (Ctrl O)",
+                        )
                         .clicked();
                 }
                 AppMode::Airfield => {
-                    load = ui.button("Load airfield…").on_hover_text("Ctrl O").clicked();
+                    load = ui
+                        .button("Load airfield…")
+                        .on_hover_text("Ctrl O")
+                        .clicked();
                 }
                 AppMode::Map => {
                     load = ui
@@ -1058,15 +1126,7 @@ impl GroupGeneratorApp {
         }
     }
 
-
     // ── Undo, confirmations, unsaved edits (README §6.3) ──────────────────
-
-
-
-
-
-
-
 
     /// Info and error messages describe the last action. Once the tab is
     /// edited after one appeared, it gives way to the tab's idle hint, so the
@@ -1080,7 +1140,8 @@ impl GroupGeneratorApp {
         if text != self.status_seen {
             self.status_seen = text;
             self.status_fp = fp;
-        } else if fp != self.status_fp && matches!(self.status, Status::Info(_) | Status::Error(_)) {
+        } else if fp != self.status_fp && matches!(self.status, Status::Info(_) | Status::Error(_))
+        {
             self.status = Status::Idle;
             self.status_seen = self.status_text();
             self.status_fp = fp;
@@ -1111,9 +1172,21 @@ impl GroupGeneratorApp {
                     self.recon_submode == ReconSubmode::New,
                     slots
                         .iter()
-                        .map(|s| (&s.path, s.kind, &s.selected_triggers, s.influence, &s.restore_start))
+                        .map(|s| (
+                            &s.path,
+                            s.kind,
+                            &s.selected_triggers,
+                            s.influence,
+                            &s.restore_start
+                        ))
                         .collect::<Vec<_>>(),
-                    (self.recon_total, self.recon_percent, self.recon_strip_randomizer, self.recon_keep_positions, self.recon_eastern)
+                    (
+                        self.recon_total,
+                        self.recon_percent,
+                        self.recon_strip_randomizer,
+                        self.recon_keep_positions,
+                        self.recon_eastern
+                    )
                 )
             }
             AppMode::Exclusive => format!(
@@ -1127,9 +1200,20 @@ impl GroupGeneratorApp {
             AppMode::Fighter => format!(
                 "{:?}",
                 (
-                    (self.linked_groups, self.flight_count, self.max_in_flight, self.country),
+                    (
+                        self.linked_groups,
+                        self.flight_count,
+                        self.max_in_flight,
+                        self.country
+                    ),
                     (&self.type_enabled, &self.type_skill, &self.custom_path),
-                    (self.cooldown, self.reinforcement, self.delete_orders, self.altitude_min, self.altitude_max),
+                    (
+                        self.cooldown,
+                        self.reinforcement,
+                        self.delete_orders,
+                        self.altitude_min,
+                        self.altitude_max
+                    ),
                 )
             ),
             AppMode::Airfield => format!("{:?}{}", self.airfield_path, self.airfield_western),
@@ -1160,7 +1244,13 @@ impl GroupGeneratorApp {
                     self.recon_submode == ReconSubmode::New,
                     slots
                         .iter()
-                        .map(|s| (&s.path, s.kind, &s.selected_triggers, s.influence, &s.restore_start))
+                        .map(|s| (
+                            &s.path,
+                            s.kind,
+                            &s.selected_triggers,
+                            s.influence,
+                            &s.restore_start
+                        ))
                         .collect::<Vec<_>>()
                 ));
                 self.recon_undo.settle(fp);
@@ -1182,11 +1272,25 @@ impl GroupGeneratorApp {
                 let fp = hash(format!(
                     "{:?}",
                     (
-                        (&self.map_ships, &self.map_ground_east, &self.map_ground_nato, &self.map_fighters),
-                        (&self.east_objectives, &self.nato_objectives, self.map_armies.len(), self.map_refs.len()),
+                        (
+                            &self.map_ships,
+                            &self.map_ground_east,
+                            &self.map_ground_nato,
+                            &self.map_fighters
+                        ),
+                        (
+                            &self.east_objectives,
+                            &self.nato_objectives,
+                            self.map_armies.len(),
+                            self.map_refs.len()
+                        ),
                         &self.placed_air_starts,
                         self.map_imported_fighters.len(),
-                        lines.then_some((&self.custom_front_xz, &self.salients, &self.attack_arrows)),
+                        lines.then_some((
+                            &self.custom_front_xz,
+                            &self.salients,
+                            &self.attack_arrows
+                        )),
                     )
                 ));
                 self.map_undo.settle(fp);
@@ -1194,7 +1298,6 @@ impl GroupGeneratorApp {
             AppMode::Fighter | AppMode::Airfield => {}
         }
     }
-
 
     /// The undo label shown in the status bar for the current tab.
     fn undo_label(&self) -> Option<&str> {
@@ -1250,8 +1353,6 @@ impl GroupGeneratorApp {
         }
     }
 
-
-
     /// The current state counts as saved (startup, Load, Generate, Reset).
     fn mark_saved(&mut self, mode: AppMode) {
         match mode {
@@ -1263,7 +1364,9 @@ impl GroupGeneratorApp {
 
     fn is_dirty(&self, mode: AppMode) -> bool {
         match mode {
-            AppMode::Template => !self.tpl_seats.is_empty() && self.tpl_fingerprint() != self.tpl_saved,
+            AppMode::Template => {
+                !self.tpl_seats.is_empty() && self.tpl_fingerprint() != self.tpl_saved
+            }
             AppMode::Map => self.map_fingerprint() != self.map_saved,
             _ => false,
         }
@@ -1329,36 +1432,34 @@ impl GroupGeneratorApp {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     // ── Army Generator (README §5.2) ───────────────────────────────────────
 
     fn recon_page(&mut self, ctx: &egui::Context) {
         self.ensure_map_assets(ctx);
-        side_panel(ctx, "recon_left", true, 330.0, |ui| self.recon_templates_panel(ui));
-        side_panel(ctx, "recon_right", false, 300.0, |ui| self.recon_settings_panel(ui));
+        side_panel(ctx, "recon_left", true, 330.0, |ui| {
+            self.recon_templates_panel(ui)
+        });
+        side_panel(ctx, "recon_right", false, 300.0, |ui| {
+            self.recon_settings_panel(ui)
+        });
         egui::CentralPanel::default().show(ctx, |ui| {
             let rework = self.recon_submode == ReconSubmode::Rework;
-            let empty = if rework { self.recon_rework.is_empty() } else { self.recon_slots.is_empty() };
+            let empty = if rework {
+                self.recon_rework.is_empty()
+            } else {
+                self.recon_slots.is_empty()
+            };
             if !empty {
                 // COPY MIX is its own block at the bottom, sized to its rows.
                 let max_h = (ui.available_height() * 0.45).max(120.0);
                 egui::TopBottomPanel::bottom("recon_mix")
                     .resizable(false)
-                    .frame(egui::Frame::new().inner_margin(egui::Margin { left: 0, right: 0, top: 8, bottom: 4 }))
+                    .frame(egui::Frame::new().inner_margin(egui::Margin {
+                        left: 0,
+                        right: 0,
+                        top: 8,
+                        bottom: 4,
+                    }))
                     .show_inside(ui, |ui| {
                         egui::ScrollArea::vertical()
                             .id_salt("recon_mix_scroll")
@@ -1382,7 +1483,11 @@ impl GroupGeneratorApp {
 
     fn recon_templates_panel(&mut self, ui: &mut egui::Ui) {
         let rework = self.recon_submode == ReconSubmode::Rework;
-        let n = if rework { self.recon_rework.len() } else { self.recon_slots.len() };
+        let n = if rework {
+            self.recon_rework.len()
+        } else {
+            self.recon_slots.len()
+        };
         shell::section_title(
             ui,
             &format!("Templates · {n}"),
@@ -1406,7 +1511,13 @@ impl GroupGeneratorApp {
             recon_slot_list(ui, &mut self.recon_rework, label, None, side)
         } else {
             let icons = self.type_icons(self.recon_eastern);
-            recon_slot_list(ui, &mut self.recon_slots, Some("Influence"), Some(icons), side)
+            recon_slot_list(
+                ui,
+                &mut self.recon_slots,
+                Some("Influence"),
+                Some(icons),
+                side,
+            )
         };
         if let Some(i) = removed {
             let (sub, slots) = if rework {
@@ -1414,7 +1525,10 @@ impl GroupGeneratorApp {
             } else {
                 (ReconSubmode::New, &mut self.recon_slots)
             };
-            self.recon_undo.record(format!("Removed {}", slots[i].info.name), (sub, slots.clone()));
+            self.recon_undo.record(
+                format!("Removed {}", slots[i].info.name),
+                (sub, slots.clone()),
+            );
             slots.remove(i);
         }
     }
@@ -1430,9 +1544,17 @@ impl GroupGeneratorApp {
             self.open_help(HelpTopic::Recon);
         }
         ui.add_space(8.0);
-        let empty = if rework { self.recon_rework.is_empty() } else { self.recon_slots.is_empty() };
+        let empty = if rework {
+            self.recon_rework.is_empty()
+        } else {
+            self.recon_slots.is_empty()
+        };
         if empty {
-            let label = if rework { "Add packs…" } else { "Add templates…" };
+            let label = if rework {
+                "Add packs…"
+            } else {
+                "Add templates…"
+            };
             if empty_state(ui, &format!("{label} to begin."), label) {
                 self.load_action();
             }
@@ -1448,7 +1570,11 @@ impl GroupGeneratorApp {
     fn recon_parking_grid(&mut self, ui: &mut egui::Ui) {
         shell::section_title(ui, "Parking grid · 10 km cells from 40000, 40000", None);
         if self.recon_keep_positions {
-            shell::hint(ui, "Keep loaded positions is on: copies stay where they were authored.", false);
+            shell::hint(
+                ui,
+                "Keep loaded positions is on: copies stay where they were authored.",
+                false,
+            );
             return;
         }
         let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
@@ -1479,13 +1605,21 @@ impl GroupGeneratorApp {
         for (bi, (name, copies)) in blocks.iter().enumerate() {
             let side_n = (*copies as f32).sqrt().ceil() as usize;
             let origin = rect.min
-                + Vec2::new((bi % per_row) as f32 * BLOCK_W, (bi / per_row) as f32 * row_h);
+                + Vec2::new(
+                    (bi % per_row) as f32 * BLOCK_W,
+                    (bi / per_row) as f32 * row_h,
+                );
             for k in 0..side_n * side_n {
                 let cell = Rect::from_min_size(
                     origin + Vec2::new((k % side_n) as f32 * CELL, (k / side_n) as f32 * CELL),
                     Vec2::splat(CELL),
                 );
-                p.rect_stroke(cell, 0.0, Stroke::new(1.0_f32, c::NEUTRAL_400), egui::StrokeKind::Inside);
+                p.rect_stroke(
+                    cell,
+                    0.0,
+                    Stroke::new(1.0_f32, c::NEUTRAL_400),
+                    egui::StrokeKind::Inside,
+                );
                 if k < *copies {
                     shell::paint_side_marker(&p, cell.center(), 10.0, side);
                 }
@@ -1523,7 +1657,10 @@ impl GroupGeneratorApp {
                     ui.label(RichText::new("Type").font(FontId::new(12.0, theme::bold_family())));
                     ui.label(RichText::new("Placed").font(FontId::new(12.0, theme::bold_family())));
                 }
-                ui.label(RichText::new(if strip { "Spawn" } else { "Activate" }).font(FontId::new(12.0, theme::bold_family())));
+                ui.label(
+                    RichText::new(if strip { "Spawn" } else { "Activate" })
+                        .font(FontId::new(12.0, theme::bold_family())),
+                );
                 ui.end_row();
                 if rework {
                     for slot in &self.recon_rework {
@@ -1575,8 +1712,16 @@ impl GroupGeneratorApp {
     fn recon_settings_panel(&mut self, ui: &mut egui::Ui) {
         let rework = self.recon_submode == ReconSubmode::Rework;
         shell::section_title(ui, "Army", None);
-        shell::segmented(ui, &mut self.recon_eastern, &[(true, "DPRK"), (false, "NATO")]);
-        shell::hint(ui, "Sets the icons on this page. Map › Place picks the side.", false);
+        shell::segmented(
+            ui,
+            &mut self.recon_eastern,
+            &[(true, "DPRK"), (false, "NATO")],
+        );
+        shell::hint(
+            ui,
+            "Sets the icons on this page. Map › Place picks the side.",
+            false,
+        );
         if !rework {
             ui.add_space(4.0);
             ui.label("Import new templates as");
@@ -1586,9 +1731,16 @@ impl GroupGeneratorApp {
         ui.separator();
         shell::section_title(ui, "Copies", None);
         if rework {
-            ui.checkbox(&mut self.recon_strip_randomizer, "Spawn all copies (no randomizer)");
+            ui.checkbox(
+                &mut self.recon_strip_randomizer,
+                "Spawn all copies (no randomizer)",
+            );
             if self.recon_strip_randomizer {
-                shell::hint(ui, "Every copy starts. Pick what Mission Begin fires for each pack below.", false);
+                shell::hint(
+                    ui,
+                    "Every copy starts. Pick what Mission Begin fires for each pack below.",
+                    false,
+                );
             }
             let detected_total: usize = self.recon_rework.iter().filter_map(|s| s.detected).sum();
             ui.label(format!("{detected_total} groups detected on the map"));
@@ -1596,10 +1748,19 @@ impl GroupGeneratorApp {
                 ui.label("Activate ratio");
                 ui.horizontal(|ui| {
                     let changed = ui
-                        .add(egui::Slider::new(&mut self.recon_percent, 1..=100).show_value(false).trailing_fill(true))
+                        .add(
+                            egui::Slider::new(&mut self.recon_percent, 1..=100)
+                                .show_value(false)
+                                .trailing_fill(true),
+                        )
                         .changed();
                     let typed = ui
-                        .add(egui::DragValue::new(&mut self.recon_percent).range(1..=100).speed(0.2).suffix("%"))
+                        .add(
+                            egui::DragValue::new(&mut self.recon_percent)
+                                .range(1..=100)
+                                .speed(0.2)
+                                .suffix("%"),
+                        )
                         .changed();
                     if changed || typed {
                         for slot in &mut self.recon_rework {
@@ -1607,13 +1768,24 @@ impl GroupGeneratorApp {
                         }
                     }
                 });
-                shell::hint(ui, "Sets every pack's Activate %. Adjust one pack on its card.", false);
+                shell::hint(
+                    ui,
+                    "Sets every pack's Activate %. Adjust one pack on its card.",
+                    false,
+                );
             }
         } else {
             labeled_slider(ui, "Templates to create", &mut self.recon_total, 1..=64);
-            ui.checkbox(&mut self.recon_strip_randomizer, "Spawn all copies (no randomizer)");
+            ui.checkbox(
+                &mut self.recon_strip_randomizer,
+                "Spawn all copies (no randomizer)",
+            );
             if self.recon_strip_randomizer {
-                shell::hint(ui, "Every copy keeps its Mission Begin chain and starts.", false);
+                shell::hint(
+                    ui,
+                    "Every copy keeps its Mission Begin chain and starts.",
+                    false,
+                );
             } else {
                 labeled_slider_suffix(ui, "Activate ratio", &mut self.recon_percent, 1..=100, "%");
                 if shell::hint(ui, "Share of each type's copies that start.", true) {
@@ -1647,7 +1819,9 @@ impl GroupGeneratorApp {
                     }
                 }
                 let selected = slot.restore_start.clone();
-                ui.label(RichText::new(&slot.info.name).font(FontId::new(13.0, theme::bold_family())));
+                ui.label(
+                    RichText::new(&slot.info.name).font(FontId::new(13.0, theme::bold_family())),
+                );
                 egui::ComboBox::from_id_salt(format!("restore_start_{i}"))
                     .selected_text(if selected.is_empty() {
                         "Select a timer or checkzone".to_string()
@@ -1661,38 +1835,74 @@ impl GroupGeneratorApp {
                                 RestoreKind::Timer => "Timer",
                                 RestoreKind::CheckZone => "CheckZone",
                             };
-                            let rec = if choice.recommended { "  (recommended)" } else { "" };
+                            let rec = if choice.recommended {
+                                "  (recommended)"
+                            } else {
+                                ""
+                            };
                             let label = format!("{}  [{kind}]{rec}", choice.name);
-                            if ui.selectable_label(slot.restore_start == choice.name, label).clicked() {
+                            if ui
+                                .selectable_label(slot.restore_start == choice.name, label)
+                                .clicked()
+                            {
                                 slot.restore_start = choice.name.clone();
                             }
                         }
                     });
-                if let Some(c) = slot.info.restore_starts.iter().find(|c| c.name == slot.restore_start) {
+                if let Some(c) = slot
+                    .info
+                    .restore_starts
+                    .iter()
+                    .find(|c| c.name == slot.restore_start)
+                {
                     ui.label(RichText::new(&c.hint).small().color(c::WARN_TEXT));
                 }
                 ui.add_space(4.0);
             }
             ui.label(
-                RichText::new(format!("All {detected_total} copies will start (no randomizer)."))
-                    .font(FontId::new(13.0, theme::bold_family()))
-                    .color(c::ACCENT_800),
+                RichText::new(format!(
+                    "All {detected_total} copies will start (no randomizer)."
+                ))
+                .font(FontId::new(13.0, theme::bold_family()))
+                .color(c::ACCENT_800),
             );
         }
     }
 
     fn recon_timing_sliders(&mut self, ui: &mut egui::Ui) {
-        labeled_slider(ui, "Start delay (s)", &mut self.recon_start_delay_s, 0..=180);
-        shell::hint(ui, "Wait after Mission Begin, so several Army Generator packs do not all fire at t=0.", false);
-        labeled_slider(ui, "Delay between groups (ms)", &mut self.recon_group_delay_ms, 0..=5000);
-        shell::hint(ui, "Each following type waits this long so MCU load does not spike.", false);
+        labeled_slider(
+            ui,
+            "Start delay (s)",
+            &mut self.recon_start_delay_s,
+            0..=180,
+        );
+        shell::hint(
+            ui,
+            "Wait after Mission Begin, so several Army Generator packs do not all fire at t=0.",
+            false,
+        );
+        labeled_slider(
+            ui,
+            "Delay between groups (ms)",
+            &mut self.recon_group_delay_ms,
+            0..=5000,
+        );
+        shell::hint(
+            ui,
+            "Each following type waits this long so MCU load does not spike.",
+            false,
+        );
     }
 
     // ── Fighter Pack (README §5.3) ─────────────────────────────────────────
 
     fn fighter_page(&mut self, ctx: &egui::Context) {
-        side_panel(ctx, "fighter_left", true, 270.0, |ui| self.fighter_types_panel(ui));
-        side_panel(ctx, "fighter_right", false, 304.0, |ui| self.fighter_settings_panel(ui));
+        side_panel(ctx, "fighter_left", true, 270.0, |ui| {
+            self.fighter_types_panel(ui)
+        });
+        side_panel(ctx, "fighter_right", false, 304.0, |ui| {
+            self.fighter_settings_panel(ui)
+        });
         egui::CentralPanel::default().show(ctx, |ui| {
             paint_blueprint_grid(ui.painter(), ui.max_rect());
             egui::ScrollArea::vertical()
@@ -1721,7 +1931,11 @@ impl GroupGeneratorApp {
     fn fighter_types_panel(&mut self, ui: &mut egui::Ui) {
         let n = self.type_enabled.iter().filter(|e| **e).count();
         shell::section_title(ui, &format!("Aircraft types · {n} selected"), None);
-        shell::hint(ui, "Flights cycle through the selected types. Lead skill ≥ wingman.", false);
+        shell::hint(
+            ui,
+            "Flights cycle through the selected types. Lead skill ≥ wingman.",
+            false,
+        );
         ui.add_space(4.0);
         ui.spacing_mut().slider_width = 90.0;
         for (i, ac) in AIRCRAFT_TYPES.iter().enumerate() {
@@ -1768,7 +1982,11 @@ impl GroupGeneratorApp {
         let flights = crate::flights::preview_flights(&self.fighter_flight_config());
         let total: usize = flights.iter().map(|f| f.seats.len()).sum();
         let groups = self.linked_groups.max(1) as usize;
-        let custom = self.custom_path.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str());
+        let custom = self
+            .custom_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str());
         ui.label(Self::fighter_pack_sentence(custom, groups));
         ui.add_space(12.0);
         Self::fighter_group_cards(ui, groups, total, self.country);
@@ -1806,7 +2024,8 @@ impl GroupGeneratorApp {
                                 Pos2::new(left - 2.0, top - row_gap / 2.0),
                                 Pos2::new(left + table_w, bottom + row_gap / 2.0),
                             );
-                            ui.painter().set(slot, egui::Shape::rect_filled(rect, 0.0, stripe));
+                            ui.painter()
+                                .set(slot, egui::Shape::rect_filled(rect, 0.0, stripe));
                         }
                     }
                 });
@@ -1816,7 +2035,13 @@ impl GroupGeneratorApp {
     }
 
     /// One row of the Group 1 flights table (ends the grid row).
-    fn fighter_flight_row(ui: &mut egui::Ui, f: usize, fl: &crate::flights::FlightPreview, low: f64, high: Option<f64>) {
+    fn fighter_flight_row(
+        ui: &mut egui::Ui,
+        f: usize,
+        fl: &crate::flights::FlightPreview,
+        low: f64,
+        high: Option<f64>,
+    ) {
         ui.label(crate::aircraft::plane_display_name(f, 0));
         ui.label(fl.type_label);
         ui.label(fl.seats.len().to_string());
@@ -1858,7 +2083,10 @@ impl GroupGeneratorApp {
                 ui.add_space(((width - row_w) / 2.0).max(0.0));
                 for g in row {
                     if g > 0 {
-                        let (rect, _) = ui.allocate_exact_size(Vec2::new(PACK_LINK_W, PACK_CARD_H), Sense::hover());
+                        let (rect, _) = ui.allocate_exact_size(
+                            Vec2::new(PACK_LINK_W, PACK_CARD_H),
+                            Sense::hover(),
+                        );
                         let y = rect.center().y;
                         let p = ui.painter();
                         p.line_segment(
@@ -1873,16 +2101,26 @@ impl GroupGeneratorApp {
                             c::NEUTRAL_700,
                         );
                     }
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::new(PACK_CARD_W, PACK_CARD_H), Sense::hover());
+                    let (rect, resp) =
+                        ui.allocate_exact_size(Vec2::new(PACK_CARD_W, PACK_CARD_H), Sense::hover());
                     let title = format!("Group {}", g + 1);
                     let note = format!("{total} aircraft");
                     resp.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{title} · {note}"))
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Label,
+                            true,
+                            format!("{title} · {note}"),
+                        )
                     });
                     let p = ui.painter();
                     let border = if g == 0 { c::ACCENT } else { c::DIVIDER };
                     p.rect_filled(rect, 0.0, c::BG);
-                    p.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, border), egui::StrokeKind::Inside);
+                    p.rect_stroke(
+                        rect,
+                        0.0,
+                        Stroke::new(1.0_f32, border),
+                        egui::StrokeKind::Inside,
+                    );
                     shell::corner_marks(p, rect, c::MARK);
                     let left = rect.left() + 10.0;
                     paint_seat_marker(p, Pos2::new(left + 6.0, rect.top() + 18.0), 12.0, country);
@@ -1959,24 +2197,52 @@ impl GroupGeneratorApp {
     /// The altitude band with one tick per flight (at its low element), the
     /// range at the ends and flight names below. A name that would touch the
     /// one drawn before it is skipped; its tick still names it on hover.
-    fn fighter_altitude_strip(ui: &mut egui::Ui, flights: &[crate::flights::FlightPreview], min: f32, max: f32) {
+    fn fighter_altitude_strip(
+        ui: &mut egui::Ui,
+        flights: &[crate::flights::FlightPreview],
+        min: f32,
+        max: f32,
+    ) {
         let lo = min.min(max) as f64;
         let hi = (min.max(max) as f64).max(lo + 1.0);
         let font = FontId::proportional(12.0);
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 42.0), Sense::hover());
+        let (rect, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 42.0), Sense::hover());
         let p = ui.painter().clone();
-        let lo_g = p.layout_no_wrap(format!("{} m", group_digits(lo)), font.clone(), c::NEUTRAL_700);
-        let hi_g = p.layout_no_wrap(format!("{} m", group_digits(hi)), font.clone(), c::NEUTRAL_700);
+        let lo_g = p.layout_no_wrap(
+            format!("{} m", group_digits(lo)),
+            font.clone(),
+            c::NEUTRAL_700,
+        );
+        let hi_g = p.layout_no_wrap(
+            format!("{} m", group_digits(hi)),
+            font.clone(),
+            c::NEUTRAL_700,
+        );
         let y = rect.top() + 10.0;
         let bar = Rect::from_min_max(
             Pos2::new(rect.left() + lo_g.size().x + 10.0, y - 4.0),
             Pos2::new(rect.right() - hi_g.size().x - 10.0, y + 4.0),
         );
-        p.galley(Pos2::new(rect.left(), y - lo_g.size().y / 2.0), lo_g, c::NEUTRAL_700);
-        p.galley(Pos2::new(rect.right() - hi_g.size().x, y - hi_g.size().y / 2.0), hi_g, c::NEUTRAL_700);
+        p.galley(
+            Pos2::new(rect.left(), y - lo_g.size().y / 2.0),
+            lo_g,
+            c::NEUTRAL_700,
+        );
+        p.galley(
+            Pos2::new(rect.right() - hi_g.size().x, y - hi_g.size().y / 2.0),
+            hi_g,
+            c::NEUTRAL_700,
+        );
         p.rect_filled(bar, 0.0, c::ACCENT_200);
-        p.rect_stroke(bar, 0.0, Stroke::new(1.0_f32, c::DIVIDER), egui::StrokeKind::Inside);
-        let x_of = |alt: f64| bar.left() + ((alt - lo) / (hi - lo)).clamp(0.0, 1.0) as f32 * bar.width();
+        p.rect_stroke(
+            bar,
+            0.0,
+            Stroke::new(1.0_f32, c::DIVIDER),
+            egui::StrokeKind::Inside,
+        );
+        let x_of =
+            |alt: f64| bar.left() + ((alt - lo) / (hi - lo)).clamp(0.0, 1.0) as f32 * bar.width();
 
         let ticks: Vec<(f32, String, String)> = flights
             .iter()
@@ -1984,7 +2250,11 @@ impl GroupGeneratorApp {
             .map(|(f, fl)| {
                 let (low, high) = Self::flight_element_altitudes(&fl.seats);
                 let name = crate::aircraft::plane_display_name(f, 0);
-                let hover = format!("{name} · {} · {}", fl.type_label, Self::altitude_text(low, high));
+                let hover = format!(
+                    "{name} · {} · {}",
+                    fl.type_label,
+                    Self::altitude_text(low, high)
+                );
                 (x_of(low), name, hover)
             })
             .collect();
@@ -1995,17 +2265,27 @@ impl GroupGeneratorApp {
         let lefts: Vec<f32> = ticks
             .iter()
             .zip(&galleys)
-            .map(|((x, _, _), g)| (x - g.size().x / 2.0).clamp(rect.left(), (rect.right() - g.size().x).max(rect.left())))
+            .map(|((x, _, _), g)| {
+                (x - g.size().x / 2.0)
+                    .clamp(rect.left(), (rect.right() - g.size().x).max(rect.left()))
+            })
             .collect();
         let widths: Vec<f32> = galleys.iter().map(|g| g.size().x).collect();
         let shown = strip_labels_shown(&lefts, &widths, 6.0);
         for (f, ((x, name, _), galley)) in ticks.iter().zip(galleys).enumerate() {
             p.line_segment(
-                [Pos2::new(*x, bar.top() - 3.0), Pos2::new(*x, bar.bottom() + 3.0)],
+                [
+                    Pos2::new(*x, bar.top() - 3.0),
+                    Pos2::new(*x, bar.bottom() + 3.0),
+                ],
                 Stroke::new(2.0_f32, c::ACCENT_800),
             );
             if shown[f] {
-                p.galley(Pos2::new(lefts[f], bar.bottom() + 6.0), galley, c::NEUTRAL_700);
+                p.galley(
+                    Pos2::new(lefts[f], bar.bottom() + 6.0),
+                    galley,
+                    c::NEUTRAL_700,
+                );
             }
             // Hover names every flight on this tick, so a skipped label is still identifiable.
             let hover: Vec<&str> = ticks
@@ -2015,7 +2295,13 @@ impl GroupGeneratorApp {
                 .collect();
             let hit = Rect::from_center_size(Pos2::new(*x, bar.center().y), Vec2::new(9.0, 22.0));
             let resp = ui.interact(hit, ui.id().with(("altitude_tick", f)), Sense::hover());
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, format!("Altitude tick {name}")));
+            resp.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Other,
+                    true,
+                    format!("Altitude tick {name}"),
+                )
+            });
             resp.on_hover_text(hover.join("\n"));
         }
     }
@@ -2067,9 +2353,19 @@ impl GroupGeneratorApp {
         shell::settings_section(ui, "fighter_alt", "Altitude range", &summary, true, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Min");
-                ui.add(egui::DragValue::new(&mut self.altitude_min).range(100.0..=9000.0).speed(25.0).suffix(" m"));
+                ui.add(
+                    egui::DragValue::new(&mut self.altitude_min)
+                        .range(100.0..=9000.0)
+                        .speed(25.0)
+                        .suffix(" m"),
+                );
                 ui.label("Max");
-                ui.add(egui::DragValue::new(&mut self.altitude_max).range(100.0..=9000.0).speed(25.0).suffix(" m"));
+                ui.add(
+                    egui::DragValue::new(&mut self.altitude_max)
+                        .range(100.0..=9000.0)
+                        .speed(25.0)
+                        .suffix(" m"),
+                );
             });
             help = shell::hint(ui, "Complete 4-ships split 2 low / 2 high.", true);
         });
@@ -2084,14 +2380,27 @@ impl GroupGeneratorApp {
             self.cooldown, self.delete_orders
         );
         shell::settings_section(ui, "fighter_timers", "Timers", &summary, false, |ui| {
-            egui::Grid::new("fighter_timer_grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-                ui.label("Cooldown");
-                ui.add(egui::DragValue::new(&mut self.cooldown).range(0.0..=1800.0).speed(1.0).suffix(" s"));
-                ui.end_row();
-                ui.label("Delete orders");
-                ui.add(egui::DragValue::new(&mut self.delete_orders).range(0.0..=600.0).speed(1.0).suffix(" s"));
-                ui.end_row();
-            });
+            egui::Grid::new("fighter_timer_grid")
+                .num_columns(2)
+                .spacing([8.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Cooldown");
+                    ui.add(
+                        egui::DragValue::new(&mut self.cooldown)
+                            .range(0.0..=1800.0)
+                            .speed(1.0)
+                            .suffix(" s"),
+                    );
+                    ui.end_row();
+                    ui.label("Delete orders");
+                    ui.add(
+                        egui::DragValue::new(&mut self.delete_orders)
+                            .range(0.0..=600.0)
+                            .speed(1.0)
+                            .suffix(" s"),
+                    );
+                    ui.end_row();
+                });
             shell::hint(
                 ui,
                 "Reinforcement timer is off, so a spawn cannot start another flight during cleanup.",
@@ -2104,20 +2413,37 @@ impl GroupGeneratorApp {
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
             .map(str::to_owned);
-        let summary = custom.clone().unwrap_or_else(|| "Built-in · experimental".into());
-        shell::settings_section(ui, "fighter_custom", "Custom pack template", &summary, false, |ui| {
-            shell::hint(ui, "Experimental. Leave unloaded to use the built-in logic.", false);
-            ui.horizontal(|ui| {
-                if ui.button("Load…").clicked() {
-                    self.pick_template();
-                }
-                if self.custom_path.is_some() && ui.button("Use built-in").clicked() {
-                    self.custom_path = None;
-                    self.status = Status::Info("Using built-in logic.".into());
-                }
-            });
-            ui.label(RichText::new(custom.as_deref().unwrap_or("Built-in")).italics().color(c::NEUTRAL_700));
-        });
+        let summary = custom
+            .clone()
+            .unwrap_or_else(|| "Built-in · experimental".into());
+        shell::settings_section(
+            ui,
+            "fighter_custom",
+            "Custom pack template",
+            &summary,
+            false,
+            |ui| {
+                shell::hint(
+                    ui,
+                    "Experimental. Leave unloaded to use the built-in logic.",
+                    false,
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Load…").clicked() {
+                        self.pick_template();
+                    }
+                    if self.custom_path.is_some() && ui.button("Use built-in").clicked() {
+                        self.custom_path = None;
+                        self.status = Status::Info("Using built-in logic.".into());
+                    }
+                });
+                ui.label(
+                    RichText::new(custom.as_deref().unwrap_or("Built-in"))
+                        .italics()
+                        .color(c::NEUTRAL_700),
+                );
+            },
+        );
     }
 
     /// Header Reset on Fighter Pack: back to the startup settings.
@@ -2148,8 +2474,12 @@ impl GroupGeneratorApp {
         } else if !self.bomber_slots.is_empty() {
             self.bomber_selected = Some(0);
         }
-        side_panel(ctx, "bomber_left", true, 290.0, |ui| self.bomber_plans_panel(ui));
-        side_panel(ctx, "bomber_right", false, 290.0, |ui| self.bomber_settings_panel(ui));
+        side_panel(ctx, "bomber_left", true, 290.0, |ui| {
+            self.bomber_plans_panel(ui)
+        });
+        side_panel(ctx, "bomber_right", false, 290.0, |ui| {
+            self.bomber_settings_panel(ui)
+        });
         center_panel(ctx, "bomber_center", |ui| self.bomber_center(ui));
     }
 
@@ -2163,14 +2493,21 @@ impl GroupGeneratorApp {
         let mut clicked = None;
         for i in 0..n {
             let slot = &self.bomber_slots[i];
-            let file = slot.path.file_name().and_then(|f| f.to_str()).unwrap_or("file").to_string();
+            let file = slot
+                .path
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or("file")
+                .to_string();
             let title = format!("{} · {}", i + 1, slot.info.name);
             let meta = format!("{file} · {} units", slot.info.unit_count);
             let tags = plan_tags(slot);
             let selected = self.bomber_selected == Some(i);
             let resp = ui
                 .scope_builder(
-                    egui::UiBuilder::new().id_salt(("bomber_card", i)).sense(Sense::click()),
+                    egui::UiBuilder::new()
+                        .id_salt(("bomber_card", i))
+                        .sense(Sense::click()),
                     |ui| {
                         let hovered = ui.response().hovered();
                         plan_card(ui, selected, hovered, |ui| {
@@ -2183,7 +2520,8 @@ impl GroupGeneratorApp {
                                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                                         ui.add(
                                             egui::Label::new(
-                                                RichText::new(title).font(FontId::new(13.0, theme::bold_family())),
+                                                RichText::new(title)
+                                                    .font(FontId::new(13.0, theme::bold_family())),
                                             )
                                             .truncate(),
                                         );
@@ -2195,7 +2533,14 @@ impl GroupGeneratorApp {
                     },
                 )
                 .response;
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, self.bomber_selected == Some(i), format!("Plan card {}", i + 1)));
+            resp.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Button,
+                    true,
+                    self.bomber_selected == Some(i),
+                    format!("Plan card {}", i + 1),
+                )
+            });
             if resp.clicked() {
                 clicked = Some(i);
             }
@@ -2213,16 +2558,31 @@ impl GroupGeneratorApp {
             }
             return;
         }
-        let i = self.bomber_selected.unwrap_or(0).min(self.bomber_slots.len() - 1);
+        let i = self
+            .bomber_selected
+            .unwrap_or(0)
+            .min(self.bomber_slots.len() - 1);
         let mut remove = false;
         let mut duplicate = false;
         {
             let slot = &self.bomber_slots[i];
-            let file = slot.path.file_name().and_then(|f| f.to_str()).unwrap_or("file").to_string();
+            let file = slot
+                .path
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or("file")
+                .to_string();
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(format!("Plan {}", i + 1)).small().color(c::NEUTRAL_700));
-                    ui.label(RichText::new(&slot.info.name).font(FontId::new(24.0, theme::heading_family())));
+                    ui.label(
+                        RichText::new(format!("Plan {}", i + 1))
+                            .small()
+                            .color(c::NEUTRAL_700),
+                    );
+                    ui.label(
+                        RichText::new(&slot.info.name)
+                            .font(FontId::new(24.0, theme::heading_family())),
+                    );
                     ui.label(
                         RichText::new(format!("{file} · {} units", slot.info.unit_count))
                             .small()
@@ -2231,7 +2591,10 @@ impl GroupGeneratorApp {
                 });
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                     remove = ui.button("Remove").clicked();
-                    duplicate = ui.button("Add again").on_hover_text("Add this template again as another plan").clicked();
+                    duplicate = ui
+                        .button("Add again")
+                        .on_hover_text("Add this template again as another plan")
+                        .clicked();
                 });
             });
             show_missing_locale_hint(ui, &slot.path);
@@ -2244,9 +2607,16 @@ impl GroupGeneratorApp {
         let timers = slot.info.timers.clone();
         let suggested_end = slot.info.suggested_completion;
         shell::blueprint(ui, c::DIVIDER, |ui| {
-            shell::section_title(ui, "Start checkzones", Some("opens this plan, closes the others"));
+            shell::section_title(
+                ui,
+                "Start checkzones",
+                Some("opens this plan, closes the others"),
+            );
             if zones.len() > 1 {
-                shell::warning(ui, "Several checkzones found. Pick the ones this plan enables and disables.");
+                shell::warning(
+                    ui,
+                    "Several checkzones found. Pick the ones this plan enables and disables.",
+                );
             }
             for zone in &zones {
                 let mut on = slot.selected_triggers.contains(&zone.index);
@@ -2262,7 +2632,9 @@ impl GroupGeneratorApp {
                     }
                     if suggested_triggers.contains(&zone.index) {
                         ui.label(RichText::new("(suggested)").small().color(c::NEUTRAL_700))
-                            .on_hover_text(format!("Picked because it is named {SUGGESTED_TRIGGER_NAMES}."));
+                            .on_hover_text(format!(
+                                "Picked because it is named {SUGGESTED_TRIGGER_NAMES}."
+                            ));
                     }
                 });
             }
@@ -2287,7 +2659,12 @@ impl GroupGeneratorApp {
             }
             let selected_label = slot
                 .selected_completion
-                .and_then(|id| timers.iter().find(|t| t.index == id).map(|t| t.name.clone()))
+                .and_then(|id| {
+                    timers
+                        .iter()
+                        .find(|t| t.index == id)
+                        .map(|t| t.name.clone())
+                })
                 .unwrap_or_else(|| "Select end timer…".into());
             egui::ComboBox::from_id_salt(format!("bomber-end-{i}"))
                 .selected_text(selected_label)
@@ -2303,7 +2680,9 @@ impl GroupGeneratorApp {
                     }
                 })
                 .response
-                .on_hover_text(format!("A timer named {SUGGESTED_END_NAMES} is picked automatically."));
+                .on_hover_text(format!(
+                    "A timer named {SUGGESTED_END_NAMES} is picked automatically."
+                ));
             if let Some(id) = slot.selected_completion {
                 if let Some(msg) = slot.info.cleanup_warnings.get(&id) {
                     shell::warning(ui, msg);
@@ -2315,9 +2694,17 @@ impl GroupGeneratorApp {
         shell::section_title(ui, "Sequence", None);
         let mut pick = None;
         for (j, s) in self.bomber_slots.iter().enumerate() {
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
+            let (rect, resp) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
             let sel = j == i;
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, format!("Sequence {}", j + 1)));
+            resp.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Button,
+                    true,
+                    sel,
+                    format!("Sequence {}", j + 1),
+                )
+            });
             let (fill, stroke) = if sel {
                 (c::ACCENT_100, Stroke::new(1.5_f32, c::ACCENT))
             } else {
@@ -2330,26 +2717,43 @@ impl GroupGeneratorApp {
                 rect.left_center() + Vec2::new(10.0, 0.0),
                 Align2::LEFT_CENTER,
                 format!("Plan {}", j + 1),
-                FontId::new(13.0, if sel { theme::bold_family() } else { FontFamily::Proportional }),
+                FontId::new(
+                    13.0,
+                    if sel {
+                        theme::bold_family()
+                    } else {
+                        FontFamily::Proportional
+                    },
+                ),
                 c::TEXT,
             );
-            if resp.on_hover_text(format!("{} · {}", j + 1, s.info.name)).clicked() {
+            if resp
+                .on_hover_text(format!("{} · {}", j + 1, s.info.name))
+                .clicked()
+            {
                 pick = Some(j);
             }
             ui.add_space(4.0);
         }
-        shell::hint(ui, "A start zone opens one plan and closes the rest until its end timer fires.", false);
+        shell::hint(
+            ui,
+            "A start zone opens one plan and closes the rest until its end timer fires.",
+            false,
+        );
         if let Some(j) = pick {
             self.bomber_selected = Some(j);
         }
         if remove {
-            self.bomber_undo
-                .record(
-                    format!("Removed plan {}", self.bomber_slots[i].info.name),
-                    (self.bomber_slots.clone(), self.bomber_selected),
-                );
+            self.bomber_undo.record(
+                format!("Removed plan {}", self.bomber_slots[i].info.name),
+                (self.bomber_slots.clone(), self.bomber_selected),
+            );
             self.bomber_slots.remove(i);
-            self.bomber_selected = if self.bomber_slots.is_empty() { None } else { Some(i.min(self.bomber_slots.len() - 1)) };
+            self.bomber_selected = if self.bomber_slots.is_empty() {
+                None
+            } else {
+                Some(i.min(self.bomber_slots.len() - 1))
+            };
         } else if duplicate {
             let s = &self.bomber_slots[i];
             let copy = BomberSlot {
@@ -2369,6 +2773,12 @@ impl GroupGeneratorApp {
         shell::hint(
             ui,
             "Off: new templates park on a 10 km grid from 40000, 40000. On: groups stay where they are.",
+            false,
+        );
+        ui.add_space(8.0);
+        shell::hint(
+            ui,
+            "For complex mission profiles designed outside this utility. A strike built in Template Builder is already exclusive when you place it on the map, and its target is chosen there.",
             false,
         );
         ui.add_space(4.0);
@@ -2413,7 +2823,6 @@ impl GroupGeneratorApp {
         }
     }
 
-
     /// "Import new templates as": one row of six 36 × 28 type buttons.
     fn unit_kind_picker(&mut self, ui: &mut egui::Ui) {
         let icons = self.type_icons(self.recon_eastern);
@@ -2432,43 +2841,6 @@ impl GroupGeneratorApp {
             }
         });
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     /// Returns true when the status bar's Undo is clicked.
     fn status_line(&self, ui: &mut egui::Ui) -> bool {
@@ -2532,7 +2904,9 @@ impl GroupGeneratorApp {
 
     fn idle_hint(&self) -> &'static str {
         match self.mode {
-            AppMode::Template => "Add units, choose Activate or Spawn, then generate a proximity-triggered group.",
+            AppMode::Template => {
+                "Add units, choose Activate or Spawn, then generate a proximity-triggered group."
+            }
             AppMode::Fighter => "Ready — no template file required.",
             AppMode::Exclusive => {
                 "Add templates or a generated Exclusive Activation pack, then generate."
@@ -2548,9 +2922,7 @@ impl GroupGeneratorApp {
             AppMode::Airfield => {
                 "Load a Freeflight airfield from _gen.mission, then generate the cleaned group."
             }
-            AppMode::Map => {
-                "Draw a box on the Korea map, then generate icons for that area."
-            },
+            AppMode::Map => "Draw a box on the Korea map, then generate icons for that area.",
         }
     }
 
@@ -2593,9 +2965,7 @@ impl GroupGeneratorApp {
                     }
                     self.status = Status::Info(format!(
                         "Using custom template {}.",
-                        path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("file")
+                        path.file_name().and_then(|n| n.to_str()).unwrap_or("file")
                     ));
                     self.custom_path = Some(path);
                     let _ = entity;
@@ -2653,8 +3023,8 @@ impl GroupGeneratorApp {
     }
 
     fn add_bomber_from_path(&mut self, path: PathBuf) -> Result<bool, String> {
-        let text = std::fs::read_to_string(&path)
-            .map_err(|err| format!("Could not read file: {err}"))?;
+        let text =
+            std::fs::read_to_string(&path).map_err(|err| format!("Could not read file: {err}"))?;
         let entity = parse_group_file(&text)
             .or_else(|_| parse_il2_document(&text))
             .map_err(|err| format!("Parse failed: {err}"))?;
@@ -2702,10 +3072,7 @@ impl GroupGeneratorApp {
                 return;
             }
             let Some(end_id) = slot.selected_completion else {
-                self.status = Status::Error(format!(
-                    "Plan {} needs an end timer selected.",
-                    n + 1
-                ));
+                self.status = Status::Error(format!("Plan {} needs an end timer selected.", n + 1));
                 return;
             };
             locale_paths.push(slot.path.clone());
@@ -2727,10 +3094,7 @@ impl GroupGeneratorApp {
         };
         let terrain_note = self.apply_terrain(&mut generated);
         let text = serialize_group(&generated);
-        let suggested = format!(
-            "Exclusive_Activation_{}plan.Group",
-            self.bomber_slots.len()
-        );
+        let suggested = format!("Exclusive_Activation_{}plan.Group", self.bomber_slots.len());
         let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
             .set_file_name(&suggested)
@@ -2760,8 +3124,8 @@ impl GroupGeneratorApp {
         if self.recon_slots.iter().any(|s| s.path == path) {
             return Ok(());
         }
-        let text = std::fs::read_to_string(&path)
-            .map_err(|err| format!("Could not read file: {err}"))?;
+        let text =
+            std::fs::read_to_string(&path).map_err(|err| format!("Could not read file: {err}"))?;
         let entity = parse_group_file(&text).map_err(|err| format!("Parse failed: {err}"))?;
         if looks_like_placed_pack(&entity) {
             return Err(
@@ -2862,10 +3226,7 @@ impl GroupGeneratorApp {
                 continue;
             }
             if slot.selected_triggers.is_empty() {
-                self.status = Status::Error(format!(
-                    "Select a Zone In for {}.",
-                    slot.info.name
-                ));
+                self.status = Status::Error(format!("Select a Zone In for {}.", slot.info.name));
                 return;
             }
             match std::fs::read_to_string(&slot.path) {
@@ -2914,10 +3275,7 @@ impl GroupGeneratorApp {
         let suggested = if self.recon_strip_randomizer {
             format!("Army_{}.Group", self.recon_total)
         } else {
-            format!(
-                "Random_Ground_Units_{}of{}.Group",
-                live, self.recon_total
-            )
+            format!("Random_Ground_Units_{}of{}.Group", live, self.recon_total)
         };
         let Some(save_path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
@@ -2928,7 +3286,10 @@ impl GroupGeneratorApp {
         };
         let delay_note = recon_delay_note(self.recon_start_delay_s, self.recon_group_delay_ms);
         let summary = if self.recon_strip_randomizer {
-            format!("Wrote {} placements (all spawn{delay_note})", self.recon_total)
+            format!(
+                "Wrote {} placements (all spawn{delay_note})",
+                self.recon_total
+            )
         } else {
             format!(
                 "Wrote {} placements (exactly {} live{delay_note})",
@@ -2985,10 +3346,7 @@ impl GroupGeneratorApp {
             match self.add_placed_from_path(path.clone()) {
                 Ok(()) => added += 1,
                 Err(err) => {
-                    let name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("file");
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
                     errors.push(format!("{name}: {err}"));
                 }
             }
@@ -3198,15 +3556,6 @@ impl GroupGeneratorApp {
     }
 }
 
-
-
-
-
-
-
-
-
-
 /// Army Generator type button (README §5.2): 36 × 28, the type texture in
 /// the middle, the type name on hover and in the accessibility label.
 fn unit_kind_icon_button(
@@ -3224,7 +3573,9 @@ fn unit_kind_icon_button(
             .clicked();
     };
     let (rect, resp) = ui.allocate_exact_size(SIZE, Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, fallback));
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, fallback)
+    });
     if ui.is_rect_visible(rect) {
         let (fill, border) = if selected {
             (c::ACCENT_200, c::ACCENT)
@@ -3235,25 +3586,17 @@ fn unit_kind_icon_button(
         };
         let p = ui.painter();
         p.rect_filled(rect, 2.0, fill);
-        p.rect_stroke(rect, 2.0, Stroke::new(1.0_f32, border), egui::StrokeKind::Inside);
-        egui::Image::new((tex.id(), Vec2::splat(20.0))).paint_at(ui, Rect::from_center_size(rect.center(), Vec2::splat(20.0)));
+        p.rect_stroke(
+            rect,
+            2.0,
+            Stroke::new(1.0_f32, border),
+            egui::StrokeKind::Inside,
+        );
+        egui::Image::new((tex.id(), Vec2::splat(20.0)))
+            .paint_at(ui, Rect::from_center_size(rect.center(), Vec2::splat(20.0)));
     }
     resp.on_hover_text(hover).clicked()
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 fn load_model_png(bytes: &[u8]) -> ColorImage {
     decode_png(bytes)
@@ -3269,32 +3612,6 @@ fn decode_png(bytes: &[u8]) -> Option<ColorImage> {
         img.as_raw(),
     ))
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 fn group_files_in_dir(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -3313,10 +3630,9 @@ fn group_files_in_dir(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
-
 fn load_group(path: &Path) -> Result<crate::ast::Il2Entity, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|err| format!("Could not read file: {err}"))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|err| format!("Could not read file: {err}"))?;
     parse_group_file(&text).map_err(|err| {
         // A flat "Save Selection to File" export has many root blocks and no Group.
         match parse_il2_document(&text) {
@@ -3391,11 +3707,18 @@ fn plan_tags(slot: &BomberSlot) -> Vec<(&'static str, bool)> {
         tags.push(("⚠ End timer", false));
     }
     if tags.is_empty() {
-        let warned = slot.selected_triggers.iter().any(|id| slot.info.trigger_warnings.contains_key(id))
+        let warned = slot
+            .selected_triggers
+            .iter()
+            .any(|id| slot.info.trigger_warnings.contains_key(id))
             || slot
                 .selected_completion
                 .is_some_and(|id| slot.info.cleanup_warnings.contains_key(&id));
-        tags.push(if warned { ("⚠ Check", false) } else { ("Ready", true) });
+        tags.push(if warned {
+            ("⚠ Check", false)
+        } else {
+            ("Ready", true)
+        });
     }
     tags
 }
@@ -3414,7 +3737,12 @@ fn exclusive_first_problem(slots: &[BomberSlot]) -> Option<String> {
 }
 
 /// A plan card: `shell::card` plus the hover state (ACCENT_100 fill, ACCENT border).
-fn plan_card<R>(ui: &mut egui::Ui, selected: bool, hovered: bool, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+fn plan_card<R>(
+    ui: &mut egui::Ui,
+    selected: bool,
+    hovered: bool,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     let (stroke, fill) = if selected || hovered {
         (Stroke::new(1.0_f32, c::ACCENT), c::ACCENT_100)
     } else {
@@ -3434,7 +3762,13 @@ fn plan_card<R>(ui: &mut egui::Ui, selected: bool, hovered: bool, add: impl FnOn
     inner.inner
 }
 
-fn side_panel(ctx: &egui::Context, id: &str, left: bool, width: f32, add: impl FnOnce(&mut egui::Ui)) {
+fn side_panel(
+    ctx: &egui::Context,
+    id: &str,
+    left: bool,
+    width: f32,
+    add: impl FnOnce(&mut egui::Ui),
+) {
     let panel = if left {
         egui::SidePanel::left(id.to_owned())
     } else {
@@ -3482,12 +3816,18 @@ fn paint_blueprint_grid(painter: &egui::Painter, rect: Rect) {
     let grid = Stroke::new(1.0_f32, c::NEUTRAL_200);
     let mut x = rect.left() + 32.0;
     while x < rect.right() {
-        painter.line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], grid);
+        painter.line_segment(
+            [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+            grid,
+        );
         x += 32.0;
     }
     let mut y = rect.top() + 32.0;
     while y < rect.bottom() {
-        painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], grid);
+        painter.line_segment(
+            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+            grid,
+        );
         y += 32.0;
     }
 }
@@ -3519,7 +3859,12 @@ fn recon_slot_list(
                     }
                 });
             });
-            let file = slots[i].path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+            let file = slots[i]
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("file")
+                .to_string();
             let file = if slots[i].sources.len() > 1 {
                 format!("{} + {} more", file, slots[i].sources.len() - 1)
             } else {
@@ -3589,7 +3934,9 @@ fn recon_slot_list(
 
 /// "6 vehicles", "1 train, 2 blocks": what a template holds, zero counts left out.
 fn recon_counts_line(info: &UnitPlanInfo) -> String {
-    let vehicles = info.vehicle_count.saturating_sub(info.ship_count + info.train_count);
+    let vehicles = info
+        .vehicle_count
+        .saturating_sub(info.ship_count + info.train_count);
     let parts: Vec<String> = [
         (vehicles, "vehicle", "vehicles"),
         (info.ship_count, "ship", "ships"),
@@ -3600,11 +3947,18 @@ fn recon_counts_line(info: &UnitPlanInfo) -> String {
     .filter(|(n, _, _)| *n > 0)
     .map(|(n, one, many)| format!("{n} {}", if n == 1 { one } else { many }))
     .collect();
-    if parts.is_empty() { "no units".to_string() } else { parts.join(", ") }
+    if parts.is_empty() {
+        "no units".to_string()
+    } else {
+        parts.join(", ")
+    }
 }
 
 fn recon_dserver_note(ui: &mut egui::Ui) {
-    shell::warning(ui, "DServer: keep under 30 random units per mission. Packs cap at 64 copies.");
+    shell::warning(
+        ui,
+        "DServer: keep under 30 random units per mission. Packs cap at 64 copies.",
+    );
 }
 
 fn recon_delay_note(start_s: u32, group_ms: u32) -> String {
@@ -3622,7 +3976,12 @@ fn recon_delay_note(start_s: u32, group_ms: u32) -> String {
     }
 }
 
-fn labeled_slider(ui: &mut egui::Ui, label: &str, value: &mut u32, range: std::ops::RangeInclusive<u32>) {
+fn labeled_slider(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut u32,
+    range: std::ops::RangeInclusive<u32>,
+) {
     labeled_slider_suffix(ui, label, value, range, "");
 }
 
@@ -3641,7 +4000,12 @@ fn labeled_slider_suffix(
                 .show_value(false)
                 .trailing_fill(true),
         );
-        ui.add(egui::DragValue::new(value).range(range).speed(0.2).suffix(suffix));
+        ui.add(
+            egui::DragValue::new(value)
+                .range(range)
+                .speed(0.2)
+                .suffix(suffix),
+        );
     });
 }
 

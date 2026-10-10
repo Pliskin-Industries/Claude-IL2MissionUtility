@@ -18,8 +18,12 @@
 //!   radius; defaults 19 km rail / 10 km road).
 //! * `place_route` — seeded, stochastic parking onto a line long enough and
 //!   overlapping the AO; keeps `NETWORK_SPACING` (2.5 km) from occupied
-//!   points and biases `lead_dist` toward vertices the `prefer` closure
-//!   likes (e.g. near the front).
+//!   points. Road columns bias `lead_dist` toward vertices the `prefer`
+//!   closure likes (e.g. near the front). A truck lead on one of those
+//!   vertices bisects the two road segments that meet there, along its
+//!   direction of travel. A train's waypoints stay on the segment midpoint.
+//!   The locomotive is then set on a rail node of that segment, and its
+//!   heading bisects the two segments that meet there the same way.
 //! * Interactive editing: `snap_lead_to_pointer` (left-drag a group),
 //!   `snap_waypoint_to_pointer` (place one WP on any branch, including
 //!   behind the column), `align_heading_to_path` (right-drag heading; picks
@@ -29,7 +33,9 @@
 //!   Zone IN circle (one hop near each rim) when the path is long enough.
 //! * `park_route_copy` — writes final world positions back into the group:
 //!   vehicles, their LinkTrId targets, and MCU_Waypoints (ascending Index),
-//!   preserving the original XPos/ZPos/YOri decimal precision.
+//!   preserving the original XPos/ZPos/YOri decimal precision. A train's
+//!   YPos is the ground placement height at that X/Z (same sample export
+//!   uses); road columns are left at their template Y.
 //! * `inspect_path_waypoints` / `park_path_waypoints` — off-road Goto WP hops
 //!   (not RTB) so `mapground` can aim them at an objective or the front.
 //! * `inspect_visual_heading` / `inspect_waypoint_xz` / `inspect_parked_network`
@@ -52,7 +58,6 @@
 //! * placement.rs — supplies `heading_toward`, `mix_index`, `move_anchor_to`.
 //!
 //! Unit-tested against the `TemplateExamples/` `.Group` fixtures.
-
 
 use std::sync::OnceLock;
 
@@ -303,12 +308,7 @@ fn flush_num(cur: &mut String, nums: &mut Vec<f64>) {
     cur.clear();
 }
 
-fn closest_on_segment(
-    x: f64,
-    z: f64,
-    a: (f64, f64),
-    b: (f64, f64),
-) -> (f64, f64, f64) {
+fn closest_on_segment(x: f64, z: f64, a: (f64, f64), b: (f64, f64)) -> (f64, f64, f64) {
     let dx = b.0 - a.0;
     let dz = b.1 - a.1;
     let len2 = dx * dx + dz * dz;
@@ -323,6 +323,74 @@ fn closest_on_segment(
 fn heading_diff(a: f64, b: f64) -> f64 {
     let d = (a - b).rem_euclid(360.0);
     if d > 180.0 { 360.0 - d } else { d }
+}
+
+/// Average the unit vectors of two headings, then `atan2`. Degree averages
+/// break across 0/360. A cancelled pair (a hairpin) keeps `a_deg`.
+fn bisect_headings(a_deg: f64, b_deg: f64) -> f64 {
+    let a = a_deg.to_radians();
+    let b = b_deg.to_radians();
+    let dx = a.cos() + b.cos();
+    let dz = a.sin() + b.sin();
+    if dx * dx + dz * dz < 1e-18 {
+        return a_deg.rem_euclid(360.0);
+    }
+    dz.atan2(dx).to_degrees().rem_euclid(360.0)
+}
+
+/// Index of the polyline vertex within `tol` metres of `dist`, if any.
+fn node_within(line: &PolyLine, dist: f64, tol: f64) -> Option<usize> {
+    let mut best_i = None;
+    let mut best_gap = tol;
+    for (i, &c) in line.cum.iter().enumerate() {
+        let gap = (dist - c).abs();
+        if gap <= best_gap {
+            best_gap = gap;
+            best_i = Some(i);
+        }
+    }
+    best_i
+}
+
+/// Heading the lead faces at `dist`.
+///
+/// A lead within 1 m of an interior node — a road vertex or a rail corner —
+/// bisects the incoming and outgoing travel headings (`bisect_headings`).
+/// Mid-segment, and an endpoint with only one segment, follow that one
+/// segment (`segment_heading` from `PolyLine::at` / `Network::nearest`).
+/// Reverse bisects the reversed pair, so the column still points along its
+/// direction of travel, halfway through the bend.
+///
+/// `_rail` is unused. Roads and trains share this rule; callers still pass
+/// the flag so each path says which network the lead came from.
+fn lead_heading(
+    line: &PolyLine,
+    dist: f64,
+    _rail: bool,
+    reverse: bool,
+    segment_heading: f64,
+) -> f64 {
+    if let Some(i) = node_within(line, dist, 1.0) {
+        if i > 0 && i + 1 < line.pts.len() {
+            let (into_travel, out_travel) = if reverse {
+                (
+                    heading_toward(line.pts[i + 1], line.pts[i]),
+                    heading_toward(line.pts[i], line.pts[i - 1]),
+                )
+            } else {
+                (
+                    heading_toward(line.pts[i - 1], line.pts[i]),
+                    heading_toward(line.pts[i], line.pts[i + 1]),
+                )
+            };
+            return bisect_headings(into_travel, out_travel);
+        }
+    }
+    if reverse {
+        (segment_heading + 180.0).rem_euclid(360.0)
+    } else {
+        segment_heading
+    }
 }
 
 fn is_rtb_waypoint(entity: &Il2Entity) -> bool {
@@ -556,9 +624,7 @@ fn is_perfect_column(units: &[RouteUnit]) -> bool {
     }
     let along_span = along_max - along_min;
     let across_lim = COLUMN_ACROSS_ABS.max(COLUMN_ACROSS_FRAC * along_span);
-    along_span >= COLUMN_MIN_ALONG
-        && along_span >= across_max * 4.0
-        && across_max <= across_lim
+    along_span >= COLUMN_MIN_ALONG && along_span >= across_max * 4.0 && across_max <= across_lim
 }
 
 fn column_gaps(units: &[RouteUnit]) -> (Vec<f64>, f64) {
@@ -662,10 +728,11 @@ pub fn column_waypoint_dists(
 
 /// Fill unit poses from a polyline. Existing waypoint world positions stay put
 /// so a WP can sit on another branch or behind the column.
-pub fn sample_network(
-    net: &Network,
-    pose: &mut NetworkSpot,
-) -> Option<(f64, f64, f64)> {
+///
+/// The returned heading is the lead's. Within 1 m of an interior node it is
+/// the corner bisector (`lead_heading`); mid-segment and endpoints keep the
+/// segment heading. Waypoint distances are not moved.
+pub fn sample_network(net: &Network, pose: &mut NetworkSpot) -> Option<(f64, f64, f64)> {
     let line = net.lines.get(pose.line)?;
     let behind_need = pose.behind.last().copied().unwrap_or(0.0);
     let pin_wps = !pose.waypoints.is_empty();
@@ -685,11 +752,7 @@ pub fn sample_network(
     }
     pose.lead_dist = pose.lead_dist.clamp(lo, hi);
     let lead = line.at(pose.lead_dist)?;
-    let heading = if pose.reverse {
-        (lead.2 + 180.0).rem_euclid(360.0)
-    } else {
-        lead.2
-    };
+    let heading = lead_heading(line, pose.lead_dist, pose.rail, pose.reverse, lead.2);
     let dist_at = |delta: f64| {
         if pose.reverse {
             pose.lead_dist + delta
@@ -729,6 +792,85 @@ pub fn place_route(
     prefer: impl Fn(f64, f64) -> bool,
 ) -> Option<((f64, f64, f64, bool), NetworkSpot)> {
     place_route_filtered(route, aabb, seed, index, occupied, &prefer)
+}
+
+/// Distance along `line` at the middle of each segment that falls in `(lo, hi)`.
+///
+/// Waypoints are measured from this midpoint. The locomotive is moved onto
+/// a node of the same segment afterwards; this anchor is not moved.
+fn segment_mid_dists(
+    line: &PolyLine,
+    lo: f64,
+    hi: f64,
+    prefer: &impl Fn(f64, f64) -> bool,
+) -> Vec<f64> {
+    let mut mids = Vec::new();
+    for i in 0..line.pts.len().saturating_sub(1) {
+        let a = line.cum[i];
+        let b = line.cum[i + 1];
+        let left = a.max(lo);
+        let right = b.min(hi);
+        if right - left < 2.0 {
+            continue;
+        }
+        let mid = (a + b) * 0.5;
+        let d = if mid > left && mid < right {
+            mid
+        } else {
+            (left + right) * 0.5
+        };
+        let Some((x, z, _)) = line.at(d) else {
+            continue;
+        };
+        if prefer(x, z) {
+            mids.push(d);
+        }
+    }
+    mids
+}
+
+/// Segment index `PolyLine::at` uses for `dist`.
+fn segment_index(line: &PolyLine, dist: f64) -> Option<usize> {
+    if line.len() < 1.0 || line.pts.len() < 2 {
+        return None;
+    }
+    let d = dist.clamp(0.0, line.len());
+    let mut i = 0usize;
+    while i + 1 < line.cum.len() && line.cum[i + 1] < d {
+        i += 1;
+    }
+    Some(i.min(line.pts.len().saturating_sub(2)))
+}
+
+/// Rail node of the segment that contains `mid`. Interior corners win, then
+/// a node inside `[lo, hi]`, then the one closer to `mid`.
+fn locomotive_node_dist(line: &PolyLine, mid: f64, lo: f64, hi: f64) -> Option<f64> {
+    let i = segment_index(line, mid)?;
+    let mut nodes = vec![i, i + 1];
+    let interior: Vec<usize> = nodes
+        .iter()
+        .copied()
+        .filter(|&n| n > 0 && n + 1 < line.pts.len())
+        .collect();
+    if !interior.is_empty() {
+        nodes = interior;
+    }
+    let in_window: Vec<usize> = nodes
+        .iter()
+        .copied()
+        .filter(|&n| line.cum[n] >= lo && line.cum[n] <= hi)
+        .collect();
+    if !in_window.is_empty() {
+        nodes = in_window;
+    }
+    let best = nodes.into_iter().min_by(|n1, n2| {
+        let d1 = (line.cum[*n1] - mid).abs();
+        let d2 = (line.cum[*n2] - mid).abs();
+        d1.partial_cmp(&d2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(n1.cmp(n2))
+    })?;
+    Some(line.cum[best])
 }
 
 fn place_route_filtered(
@@ -782,7 +924,13 @@ fn place_route_filtered(
         if hi <= lo {
             continue;
         }
-        let lead_dist = {
+        let lead_dist = if route.rail {
+            let mids = segment_mid_dists(line, lo, hi, prefer);
+            if mids.is_empty() {
+                continue;
+            }
+            mids[(mix as usize) % mids.len()]
+        } else {
             let verts: Vec<f64> = line
                 .pts
                 .iter()
@@ -814,9 +962,24 @@ fn place_route_filtered(
             unit_xz: Vec::new(),
             waypoints: Vec::new(),
         };
-        let Some((x, z, heading)) = sample_network(net, &mut pose) else {
+        let Some((mut x, mut z, mut heading)) = sample_network(net, &mut pose) else {
             continue;
         };
+        if route.rail {
+            let Some(node_d) = locomotive_node_dist(line, pose.lead_dist, lo, hi) else {
+                continue;
+            };
+            let Some((nx, nz, seg_h)) = line.at(node_d) else {
+                continue;
+            };
+            x = nx;
+            z = nz;
+            heading = lead_heading(line, node_d, true, pose.reverse, seg_h);
+            pose.lead_dist = node_d;
+            if let Some(lead) = pose.unit_xz.first_mut() {
+                *lead = (nx, nz);
+            }
+        }
         if !far(x, z) || !prefer(x, z) {
             continue;
         }
@@ -844,12 +1007,7 @@ pub fn snap_lead_to_pointer(
     sample_network(net, pose)
 }
 
-pub fn snap_waypoint_to_pointer(
-    pose: &mut NetworkSpot,
-    wp_i: usize,
-    x: f64,
-    z: f64,
-) -> bool {
+pub fn snap_waypoint_to_pointer(pose: &mut NetworkSpot, wp_i: usize, x: f64, z: f64) -> bool {
     let net = network_for(pose.rail);
     let Some(snap) = net.nearest(x, z) else {
         return false;
@@ -917,6 +1075,10 @@ pub fn park_path_waypoints(root: &mut Il2Entity, waypoints: &[(f64, f64)]) {
 
 /// Translate the group so the lead visual sits on the path, then snap each
 /// vehicle/train and MCU_Waypoint onto `unit_xz` / `waypoints`.
+///
+/// A train's `YPos`, and its linked entity (same delta, so the entity keeps
+/// its offset), come from the ground placement height at the parked X/Z.
+/// Waypoint X/Z and road-column Y are left as they were.
 pub fn park_route_copy(
     root: &mut Il2Entity,
     lead: (f64, f64),
@@ -981,6 +1143,79 @@ pub fn park_route_copy(
                 if let Some(pi) = wp_ids.iter().position(|&w| w == id) {
                     if let Some(&(x, z)) = waypoints.get(pi) {
                         set_xz(e, x, z);
+                    }
+                }
+            }
+        }
+    });
+    seat_parked_train_heights(root);
+}
+
+fn korea_height_store() -> Option<&'static crate::terrain::HeightStore> {
+    static STORE: OnceLock<Option<crate::terrain::HeightStore>> = OnceLock::new();
+    STORE
+        .get_or_init(|| crate::terrain::open_store(&crate::terrain::default_store_path()).ok())
+        .as_ref()
+}
+
+/// Trains keep the template altitude unless this writes the ground sample.
+/// Road columns have no `Train` block, so their Y is untouched.
+fn seat_parked_train_heights(root: &mut Il2Entity) {
+    if root.count_block_type("Train") == 0 {
+        return;
+    }
+    let Some(store) = korea_height_store() else {
+        return;
+    };
+    struct Hit {
+        index: Option<i32>,
+        old_y: f64,
+        new_y: f64,
+        link: Option<i32>,
+    }
+    let mut hits = Vec::new();
+    root.for_each(&mut |e| {
+        if e.block_type != "Train" {
+            return;
+        }
+        let Some((x, z)) = e.pos_xz() else { return };
+        let Some(new_y) = crate::terrain_apply::ground_placement_y(store, x, z) else {
+            return;
+        };
+        let old_y = e
+            .property("YPos")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(new_y);
+        let link = e
+            .property("LinkTrId")
+            .and_then(|v| v.trim().parse().ok())
+            .filter(|id: &i32| *id > 0);
+        hits.push(Hit {
+            index: e.index,
+            old_y,
+            new_y,
+            link,
+        });
+    });
+    if hits.is_empty() {
+        return;
+    }
+    root.for_each_mut(&mut |e| {
+        if e.block_type == "Train" {
+            if let Some(hit) = hits
+                .iter()
+                .find(|h| h.index.is_some() && h.index == e.index)
+            {
+                e.set_ypos(hit.new_y);
+            }
+        } else if e.block_type == "MCU_TR_Entity" {
+            if let Some(id) = e.index {
+                if let Some(hit) = hits.iter().find(|h| h.link == Some(id)) {
+                    if let Some(ey) = e
+                        .property("YPos")
+                        .and_then(|v| v.trim().parse::<f64>().ok())
+                    {
+                        e.set_ypos(ey + (hit.new_y - hit.old_y));
                     }
                 }
             }
@@ -1063,7 +1298,7 @@ mod tests {
             wp_ahead: vec![2_000.0],
             zone_in_m: 0.0,
         };
-        let ((x, z, _, in_ao), pose) =
+        let ((x, z, heading, in_ao), pose) =
             place_route(&route, aabb, 7, 0, &[], |x, z| aabb.contains(x, z)).expect("rail spot");
         assert!(pose.rail);
         assert_eq!(pose.unit_xz.len(), 1);
@@ -1071,8 +1306,59 @@ mod tests {
         assert!((pose.unit_xz[0].0 - x).abs() < 1.0);
         assert!((pose.unit_xz[0].1 - z).abs() < 1.0);
         let _ = in_ao;
-        let d = (pose.waypoints[0].0 - x).hypot(pose.waypoints[0].1 - z);
-        assert!((d - 2_000.0).abs() < 80.0);
+        let line = &railroads().lines[pose.line];
+        let (node_i, gap) = line
+            .cum
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| (i, (pose.lead_dist - c).abs()))
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+            .expect("rail line has nodes");
+        let anchored = [node_i.checked_sub(1), Some(node_i)]
+            .into_iter()
+            .flatten()
+            .filter(|&seg| seg + 1 < line.cum.len())
+            .any(|seg| {
+                let mid = (line.cum[seg] + line.cum[seg + 1]) * 0.5;
+                let Some((mx, mz, _)) = line.at(mid) else {
+                    return false;
+                };
+                let d = (pose.waypoints[0].0 - mx).hypot(pose.waypoints[0].1 - mz);
+                (d - 2_000.0).abs() < 80.0
+            });
+        assert!(
+            anchored,
+            "waypoint should stay about 2 km from the segment midpoint, not follow the locomotive"
+        );
+        assert!(
+            gap < 1.0,
+            "locomotive should sit on a rail node ({gap:.2} m from the nearest corner)"
+        );
+        assert!(
+            node_i > 0 && node_i + 1 < line.pts.len(),
+            "lead should sit on a corner where two segments meet"
+        );
+        let (into_travel, out_travel) = if pose.reverse {
+            (
+                heading_toward(line.pts[node_i + 1], line.pts[node_i]),
+                heading_toward(line.pts[node_i], line.pts[node_i - 1]),
+            )
+        } else {
+            (
+                heading_toward(line.pts[node_i - 1], line.pts[node_i]),
+                heading_toward(line.pts[node_i], line.pts[node_i + 1]),
+            )
+        };
+        let a = into_travel.to_radians();
+        let b = out_travel.to_radians();
+        let dx = a.cos() + b.cos();
+        let dz = a.sin() + b.sin();
+        let expected = dz.atan2(dx).to_degrees().rem_euclid(360.0);
+        let err = heading_diff(heading, expected);
+        assert!(
+            err < 1.0,
+            "heading {heading:.2} should bisect {into_travel:.2} and {out_travel:.2} (expected {expected:.2}, delta {err:.2})"
+        );
     }
 
     #[test]
@@ -1119,6 +1405,66 @@ mod tests {
     }
 
     #[test]
+    fn parked_train_ypos_comes_from_height_sample() {
+        let store = korea_height_store().expect("height store");
+        let aabb = WorldAabb::from_corners(80_000.0, 80_000.0, 300_000.0, 300_000.0);
+        let route = RouteLayout {
+            rail: true,
+            behind: Vec::new(),
+            wp_ahead: vec![2_000.0],
+            zone_in_m: 0.0,
+        };
+        let mut picked = None;
+        for seed in 0..40 {
+            let Some(((x, z, heading, _), pose)) =
+                place_route(&route, aabb, seed, 0, &[], |x, z| aabb.contains(x, z))
+            else {
+                continue;
+            };
+            if crate::terrain_apply::ground_placement_y(store, pose.unit_xz[0].0, pose.unit_xz[0].1)
+                .is_some()
+            {
+                picked = Some((x, z, heading, pose));
+                break;
+            }
+        }
+        let (x, z, heading, pose) = picked.expect("rail node on measured ground");
+        let (px, pz) = pose.unit_xz[0];
+        let mut root = parse_group_file(
+            "Group\r\n{\r\n  Name = \"Train group\";\r\n  Index = 1;\r\n  Train\r\n  {\r\n    Name = \"Train\";\r\n    Index = 2;\r\n    LinkTrId = 3;\r\n    XPos = 40000.000;\r\n    YPos = 137.730;\r\n    ZPos = 40000.000;\r\n    XOri = 0;\r\n    YOri = 0.000;\r\n    ZOri = 0;\r\n    Script = \"LuaScripts\\\\WorldObjects\\\\Trains\\\\type475-1.txt\";\r\n    Model = \"graphics\\\\trains\\\\type475-1\\\\type475-1.mgm\";\r\n  }\r\n  MCU_TR_Entity\r\n  {\r\n    Index = 3;\r\n    Name = \"Train entity\";\r\n    XPos = 40000.000;\r\n    YPos = 137.930;\r\n    ZPos = 40000.000;\r\n    XOri = 0;\r\n    YOri = 0.000;\r\n    ZOri = 0;\r\n    MisObjID = 2;\r\n  }\r\n  MCU_Waypoint\r\n  {\r\n    Index = 4;\r\n    Name = \"WP 1\";\r\n    Objects = [3];\r\n    XPos = 42000.000;\r\n    YPos = 137.730;\r\n    ZPos = 40000.000;\r\n  }\r\n}\r\n",
+        )
+        .unwrap();
+        park_route_copy(&mut root, (x, z), heading, &pose.unit_xz, &pose.waypoints);
+        let train = root.find_by_name("Train").unwrap();
+        let got: f64 = train.property("YPos").unwrap().parse().unwrap();
+        let expected = crate::terrain_apply::ground_placement_y(store, px, pz).unwrap();
+        let raw = store.height_at(px, pz).unwrap();
+        assert!(
+            (got - expected).abs() < 0.001,
+            "parked Y {got} should be the ground sample {expected} (raw {raw}) at {px:.3},{pz:.3}, not template 137.730"
+        );
+        assert!(
+            (got - 137.730).abs() > 0.05 || (expected - 137.730).abs() <= 0.05,
+            "template Y 137.730 was kept at {px:.3},{pz:.3} (sample {expected})"
+        );
+        let (tx, tz) = train.pos_xz().unwrap();
+        assert!((tx - px).abs() < 0.001 && (tz - pz).abs() < 0.001);
+        assert_eq!(train.property("XOri"), Some("0"));
+        assert_eq!(train.property("ZOri"), Some("0"));
+        let entity = root.find_by_name("Train entity").unwrap();
+        let ey: f64 = entity.property("YPos").unwrap().parse().unwrap();
+        assert!((ey - (137.930 + (expected - 137.730))).abs() < 0.001);
+        let wp = root.find_by_name("WP 1").unwrap();
+        assert_eq!(wp.property("YPos"), Some("137.730"));
+        let (wx, wz) = wp.pos_xz().unwrap();
+        assert!((wx - pose.waypoints[0].0).abs() < 0.001);
+        assert!((wz - pose.waypoints[0].1).abs() < 0.001);
+        eprintln!(
+            "TRAIN_HEIGHT x={px:.3} z={pz:.3} raw={raw:.3} placement={expected:.3} written={got:.3}"
+        );
+    }
+
+    #[test]
     fn waypoint_can_sit_behind_or_on_another_line() {
         let aabb = WorldAabb::from_corners(80_000.0, 80_000.0, 300_000.0, 300_000.0);
         let route = RouteLayout {
@@ -1157,7 +1503,9 @@ mod tests {
             .map(|(i, l)| (i, l.pts[l.pts.len() / 2]));
         if let Some((oi, (ox, oz))) = other {
             assert!(snap_waypoint_to_pointer(&mut pose, 0, ox, oz));
-            let snap = roads().nearest(pose.waypoints[0].0, pose.waypoints[0].1).unwrap();
+            let snap = roads()
+                .nearest(pose.waypoints[0].0, pose.waypoints[0].1)
+                .unwrap();
             assert_eq!(snap.line, oi);
             assert_eq!(pose.line, lead_line);
         }
@@ -1236,5 +1584,172 @@ mod tests {
             dists[0] > pose.lead_dist && dists[1] < pose.lead_dist,
             "straddle WPs should sit on opposite sides of the lead"
         );
+    }
+
+    #[test]
+    fn place_truck_column_bisects_road_corner() {
+        let unit_bisector = |a_deg: f64, b_deg: f64| {
+            let a = a_deg.to_radians();
+            let b = b_deg.to_radians();
+            (a.sin() + b.sin())
+                .atan2(a.cos() + b.cos())
+                .to_degrees()
+                .rem_euclid(360.0)
+        };
+
+        let net = roads();
+        let (line, i) = net
+            .lines
+            .iter()
+            .find_map(|line| {
+                (1..line.pts.len().saturating_sub(1)).find_map(|i| {
+                    let len_in = (line.pts[i].0 - line.pts[i - 1].0)
+                        .hypot(line.pts[i].1 - line.pts[i - 1].1);
+                    let len_out = (line.pts[i + 1].0 - line.pts[i].0)
+                        .hypot(line.pts[i + 1].1 - line.pts[i].1);
+                    let into_h = heading_toward(line.pts[i - 1], line.pts[i]);
+                    let out_h = heading_toward(line.pts[i], line.pts[i + 1]);
+                    if len_in > 2.0 && len_out > 2.0 && heading_diff(into_h, out_h) > 15.0 {
+                        Some((line, i))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .expect("a road corner where two segments meet");
+        let dist = line.cum[i];
+        let (_, _, seg_h) = line.at(dist).expect("vertex");
+        let into_h = heading_toward(line.pts[i - 1], line.pts[i]);
+        let out_h = heading_toward(line.pts[i], line.pts[i + 1]);
+        let expected = unit_bisector(into_h, out_h);
+        let heading = lead_heading(line, dist, false, false, seg_h);
+        let err = heading_diff(heading, expected);
+        assert!(
+            err < 1.0,
+            "heading {heading:.2} should bisect the road corner (expected {expected:.2}, delta {err:.2})"
+        );
+        assert!(
+            heading_diff(heading, seg_h) > 1.0,
+            "bisector {heading:.2} should leave the incoming segment heading {seg_h:.2}"
+        );
+
+        let expected_rev = unit_bisector(
+            heading_toward(line.pts[i + 1], line.pts[i]),
+            heading_toward(line.pts[i], line.pts[i - 1]),
+        );
+        let rev = lead_heading(line, dist, false, true, seg_h);
+        let rev_err = heading_diff(rev, expected_rev);
+        assert!(
+            rev_err < 1.0,
+            "reverse heading {rev:.2} should bisect the reversed pair (expected {expected_rev:.2}, delta {rev_err:.2})"
+        );
+
+        let (_, _, start_h) = line.at(0.0).unwrap();
+        assert!(heading_diff(lead_heading(line, 0.0, false, false, start_h), start_h) < 0.01);
+        let end_dist = line.len();
+        let (_, _, tail_h) = line.at(end_dist).unwrap();
+        assert!(heading_diff(lead_heading(line, end_dist, false, false, tail_h), tail_h) < 0.01);
+
+        let seg_len = line.cum[i + 1] - dist;
+        if seg_len > 20.0 {
+            let mid = dist + 5.0;
+            let (_, _, mid_h) = line.at(mid).unwrap();
+            let at_mid = lead_heading(line, mid, false, false, mid_h);
+            assert!(
+                heading_diff(at_mid, mid_h) < 0.01,
+                "a lead off the vertex should keep the segment heading"
+            );
+        }
+
+        // 350° then 20° straddles north. Averaging the degree numbers points
+        // south (185°). Averaging the unit vectors points about 5° north.
+        let h_in = 350.0_f64;
+        let h_out = 20.0_f64;
+        let step = 100.0;
+        let corner = PolyLine::from_pts(vec![
+            (
+                -step * h_in.to_radians().cos(),
+                -step * h_in.to_radians().sin(),
+            ),
+            (0.0, 0.0),
+            (
+                step * h_out.to_radians().cos(),
+                step * h_out.to_radians().sin(),
+            ),
+        ])
+        .expect("synthetic corner");
+        assert!(heading_diff(heading_toward(corner.pts[0], corner.pts[1]), h_in) < 0.01);
+        assert!(heading_diff(heading_toward(corner.pts[1], corner.pts[2]), h_out) < 0.01);
+        let wrap_dist = corner.cum[1];
+        let (_, _, wrap_seg) = corner.at(wrap_dist).unwrap();
+        let wrap_h = lead_heading(&corner, wrap_dist, false, false, wrap_seg);
+        let naive = (h_in + h_out) * 0.5;
+        assert!(heading_diff(wrap_h, unit_bisector(h_in, h_out)) < 1.0);
+        assert!(
+            heading_diff(wrap_h, naive) > 90.0,
+            "degree average {naive:.1} is not the bend bisector ({wrap_h:.1})"
+        );
+        let wrap_rev = lead_heading(&corner, wrap_dist, false, true, wrap_seg);
+        let expected_wrap_rev = unit_bisector(
+            heading_toward(corner.pts[2], corner.pts[1]),
+            heading_toward(corner.pts[1], corner.pts[0]),
+        );
+        assert!(heading_diff(wrap_rev, expected_wrap_rev) < 1.0);
+
+        let aabb = WorldAabb::from_corners(80_000.0, 80_000.0, 300_000.0, 300_000.0);
+        let route = RouteLayout {
+            rail: false,
+            behind: vec![40.0],
+            wp_ahead: vec![400.0],
+            zone_in_m: 0.0,
+        };
+        let ((x, z, placed_h, _), pose) =
+            place_route(&route, aabb, 3, 1, &[], |px, pz| aabb.contains(px, pz))
+                .expect("road column");
+        assert!(!pose.rail);
+        let placed_line = &roads().lines[pose.line];
+        let (lx, lz, placed_seg) = placed_line.at(pose.lead_dist).unwrap();
+        assert!((x - lx).abs() < 1.0 && (z - lz).abs() < 1.0);
+        let from_fn = lead_heading(placed_line, pose.lead_dist, false, pose.reverse, placed_seg);
+        assert!(
+            heading_diff(placed_h, from_fn) < 0.05,
+            "placed heading {placed_h:.2} should match lead_heading {from_fn:.2}"
+        );
+        if let Some(ni) = node_within(placed_line, pose.lead_dist, 1.0) {
+            if ni > 0 && ni + 1 < placed_line.pts.len() {
+                let (a_deg, b_deg) = if pose.reverse {
+                    (
+                        heading_toward(placed_line.pts[ni + 1], placed_line.pts[ni]),
+                        heading_toward(placed_line.pts[ni], placed_line.pts[ni - 1]),
+                    )
+                } else {
+                    (
+                        heading_toward(placed_line.pts[ni - 1], placed_line.pts[ni]),
+                        heading_toward(placed_line.pts[ni], placed_line.pts[ni + 1]),
+                    )
+                };
+                let bend = unit_bisector(a_deg, b_deg);
+                let bend_err = heading_diff(placed_h, bend);
+                assert!(
+                    bend_err < 1.0,
+                    "placed column on a road vertex should bisect ({placed_h:.2} vs {bend:.2}, delta {bend_err:.2})"
+                );
+            }
+        }
+        let dists = column_waypoint_dists(
+            pose.zone_in_m,
+            &pose.wp_ahead,
+            pose.lead_dist,
+            pose.reverse,
+            placed_line.len(),
+        );
+        assert_eq!(pose.waypoints.len(), dists.len());
+        for (wp, d) in pose.waypoints.iter().zip(dists) {
+            let (wx, wz, _) = placed_line.at(d).unwrap();
+            assert!(
+                (wp.0 - wx).hypot(wp.1 - wz) < 1.0,
+                "waypoint should stay on the authored offset"
+            );
+        }
     }
 }

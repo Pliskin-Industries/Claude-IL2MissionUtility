@@ -102,10 +102,7 @@ pub fn inspect_airfield(root: &Il2Entity) -> AirfieldInfo {
 }
 
 /// Remove the player and SP logic; retarget proximity checkzones to `plane_coalitions`.
-pub fn clean_airfield(
-    root: &mut Il2Entity,
-    plane_coalitions: &str,
-) -> Result<CleanReport, String> {
+pub fn clean_airfield(root: &mut Il2Entity, plane_coalitions: &str) -> Result<CleanReport, String> {
     let plan = plan_clean(root);
     apply_plan(root, plan, plane_coalitions)
 }
@@ -496,8 +493,10 @@ mod tests {
     use crate::serialize::serialize_group;
 
     fn seoul_grouped() -> Il2Entity {
-        parse_group_file(include_str!("../TemplateExamples/Seoul AFB no helper.Group"))
-            .expect("Seoul AFB no helper")
+        parse_group_file(include_str!(
+            "../TemplateExamples/Seoul AFB no helper.Group"
+        ))
+        .expect("Seoul AFB no helper")
     }
 
     fn seoul_flat() -> Il2Entity {
@@ -562,7 +561,11 @@ mod tests {
         let zones = leader_zones(&root);
         assert_eq!(zones.len(), 4);
         for z in &zones {
-            assert!(z.objects.is_empty(), "zone still object-linked: {:?}", z.objects);
+            assert!(
+                z.objects.is_empty(),
+                "zone still object-linked: {:?}",
+                z.objects
+            );
             assert_eq!(z.property("PlaneCoalitions"), Some("[2]"));
         }
 

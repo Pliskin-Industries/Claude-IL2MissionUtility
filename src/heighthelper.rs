@@ -134,7 +134,11 @@ enum KeyName {
 
 #[derive(Clone, Debug)]
 enum KeyKind {
-    Chord { alt: bool, ctrl: bool, key: KeyName },
+    Chord {
+        alt: bool,
+        ctrl: bool,
+        key: KeyName,
+    },
     Tap(KeyName),
     /// Put `text` on the clipboard and paste it with Ctrl+V.
     Text(String),
@@ -168,9 +172,14 @@ enum ActBody {
     Key(KeyKind),
     Wait,
     DeleteExport,
-    Poll { timeout: Duration },
+    Poll {
+        timeout: Duration,
+    },
     /// Dry run sleeps `Act::gap`. A live run waits until the editor reaches `kind`.
-    Settle { kind: SettleKind, timeout: Duration },
+    Settle {
+        kind: SettleKind,
+        timeout: Duration,
+    },
     /// Click the editor client area so the following keys reach the view.
     FocusView,
 }
@@ -1340,10 +1349,7 @@ fn editor_responds(hwnd: isize) -> bool {
 /// Properties is the same class and stays open for the whole session, so a
 /// title containing "Mission Properties" is not that dialog.
 fn counts_as_file_dialog(class: &str, title: &str) -> bool {
-    class == "#32770"
-        && !title
-            .to_ascii_lowercase()
-            .contains("mission properties")
+    class == "#32770" && !title.to_ascii_lowercase().contains("mission properties")
 }
 
 #[cfg(windows)]
@@ -1523,9 +1529,9 @@ fn parse_run(args: &[String]) -> Result<RunOpts, String> {
                 opts.max_batches = Some(v);
             }
             "--chunk" => {
-                opts.chunk = take_val("--chunk", &mut rest)?
-                    .parse()
-                    .map_err(|_| "--chunk needs a probe count, or 0 for one file per machine".to_string())?;
+                opts.chunk = take_val("--chunk", &mut rest)?.parse().map_err(|_| {
+                    "--chunk needs a probe count, or 0 for one file per machine".to_string()
+                })?;
             }
             "--limit-test" => opts.limit_test = true,
             other => return Err(format!("unknown option {other}\n\n{HELP}")),
@@ -1740,7 +1746,10 @@ fn cmd_run(args: &[String]) -> i32 {
 
 /// Path typed into the editor's file dialog. Absolute, without the `\\?\` prefix.
 fn typed_path(path: &Path) -> String {
-    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()).display().to_string()
+    std::path::absolute(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
 }
 
 fn write_plan(path: &Path, batches: &[Batch]) -> Result<(), String> {
@@ -1890,10 +1899,7 @@ mod tests {
     fn mission_properties_is_not_the_file_dialog() {
         assert!(!counts_as_file_dialog("#32770", "Mission Properties"));
         assert!(!counts_as_file_dialog("#32770", "mission properties"));
-        assert!(!counts_as_file_dialog(
-            "#32770",
-            "IL-2 Mission Properties"
-        ));
+        assert!(!counts_as_file_dialog("#32770", "IL-2 Mission Properties"));
         assert!(counts_as_file_dialog("#32770", "Open"));
         assert!(counts_as_file_dialog("#32770", ""));
         assert!(!counts_as_file_dialog("IL2Editor", "Open"));
@@ -1937,8 +1943,15 @@ mod tests {
             })
             .collect();
         assert_eq!(ids, vec![vec![0], vec![1], vec![2], vec![3]]);
-        assert_eq!(batches_from(&nodes, 4, 0, PROBE_CHUNK)[0].count, PROBE_CHUNK);
-        assert!(batches_from(&nodes, 4, 0, PROBE_CHUNK)[0].sector.contains("X "));
+        assert_eq!(
+            batches_from(&nodes, 4, 0, PROBE_CHUNK)[0].count,
+            PROBE_CHUNK
+        );
+        assert!(
+            batches_from(&nodes, 4, 0, PROBE_CHUNK)[0]
+                .sector
+                .contains("X ")
+        );
         let nodes: Vec<(usize, usize)> = (0..1000).map(|k| (k, 0)).collect();
         let one = batches_from(&nodes, 4, 0, 0);
         assert_eq!(one.len(), 1);
@@ -1956,7 +1969,10 @@ mod tests {
             right: 780,
             bottom: 560,
         };
-        assert_eq!(first_clear_point(&points, &[on_the_right]), Some((200, 300)));
+        assert_eq!(
+            first_clear_point(&points, &[on_the_right]),
+            Some((200, 300))
+        );
         let over_left_center = ScreenRect {
             left: 180,
             top: 280,
@@ -1966,13 +1982,18 @@ mod tests {
         let picked = first_clear_point(&points, &[over_left_center]).unwrap();
         assert_ne!(picked, (200, 300));
         assert!(!point_in_rect(picked.0, picked.1, &over_left_center));
-        assert!(first_clear_point(&points, &[ScreenRect {
-            left: -10,
-            top: -10,
-            right: 900,
-            bottom: 700,
-        }])
-        .is_none());
+        assert!(
+            first_clear_point(
+                &points,
+                &[ScreenRect {
+                    left: -10,
+                    top: -10,
+                    right: 900,
+                    bottom: 700,
+                }]
+            )
+            .is_none()
+        );
         assert!(editor_view_click_candidates(40, 40).is_empty());
     }
 

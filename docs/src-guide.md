@@ -181,8 +181,9 @@ warnings), detects already-generated packs (`looks_like_exclusive_pack`,
 suffixes), and `link_bomber_plans` / `link_bomber_plans_with` write a
 file where only one plan activates at a time (NodeGates mutex; optional
 in-place keep-positions). Multiple `Zone IN` MCUs in one template count
-as a single plan. `SUGGESTED_TRIGGER_NAMES` / `SUGGESTED_END_NAMES`.
-**Exclusive mode.**
+as a single plan. Map export calls the same linker, positions kept, when more
+than one strike is placed. `SUGGESTED_TRIGGER_NAMES` / `SUGGESTED_END_NAMES`.
+**Exclusive mode, Map.**
 
 ### `duplicate.rs` — duplication engine & country overrides
 Index reallocation and MCU pointer reconnection used by every cloner.
@@ -278,7 +279,9 @@ rules (`can_extend_salient`, `can_extend_west_east`).
 
 ### `mapfighters.rs` — fighter placement on the map
 `place_in_coalition` parks fighter groups in the side's influence
-polygon (checkerboard, waves × groups, optional AO fill, 8-pack cap).
+polygon (spread across the whole zone, including narrow parts; waves
+split the spots evenly; optional AO fill at Zone In spacing; 8-pack cap).
+`full_pack_spots` keeps complete copies of a loaded N-group pack.
 `MapFighterLayout` / `FighterSpot` (wave/pack/slot), `rtb_ao_point`
 (friendly-rear AO corner closer to the group), `country_for_coalition`
 (eastern keeps a 500-series setpoint or 501; NATO is always 601),
@@ -480,7 +483,7 @@ on a Vehicle breaks mission-editor parsing); `Orders` = command MCUs
 (one MCU shared across `shared_with` seats; ground AttackArea sits at
 the group origin); `Waypoints` = `WP n` hops along +X at 4 km (300 m
 area for planes, 100 m ground, unclamped speed, 0 m altitude for
-ground, per-hop altitude/priority override). Goto WP
+ground, per-hop altitude/priority override, optional north/east offset and a `loop_to` back to an earlier WP). `apply_mission_package` fills a CAP diamond or a strike (V-Form, 8 km IP, 3 km AttackArea for 2 min, home waypoint, Mission Complete). A new aircraft with no prototype height starts at 1500 m airstart; strike forces that height. `zone_out_enabled` false keeps Zone Out from running MISSION END. An event-owned Goto also pulses Force Complete; a report may still chain into that same Goto. Goto WP
 delays pulse only the WP MCU; on arrival the WP pulses Attack /
 AttackArea and Time on Target in parallel (list order doesn't matter),
 and TOT expiry continues the chain. Seat model + bookkeeping:

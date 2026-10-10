@@ -18,7 +18,7 @@
 //! * ui.rs (Airfield) — the bank and its export
 //! * ui/map.rs — place, move, turn, and stamp into the base map
 
-use crate::ast::{format_int_array, Il2Entity};
+use crate::ast::{Il2Entity, format_int_array};
 use crate::model_spec::{self, aircraft_specs};
 use crate::payloads;
 
@@ -80,11 +80,7 @@ impl AirStartField {
     }
 
     pub fn side_label(&self) -> &'static str {
-        if self.nato {
-            "NATO"
-        } else {
-            "DPRK"
-        }
+        if self.nato { "NATO" } else { "DPRK" }
     }
 }
 
@@ -206,7 +202,14 @@ fn named_group(name: &str, next_id: &mut i32) -> Il2Entity {
     g
 }
 
-fn append_field(parent: &mut Il2Entity, field: &AirStartField, x: f64, y: f64, z: f64, next_id: &mut i32) {
+fn append_field(
+    parent: &mut Il2Entity,
+    field: &AirStartField,
+    x: f64,
+    y: f64,
+    z: f64,
+    next_id: &mut i32,
+) {
     let air_id = *next_id;
     *next_id += 1;
     let ent_id = *next_id;
@@ -328,11 +331,7 @@ fn quoted(s: &str) -> String {
 }
 
 fn bit(on: bool) -> &'static str {
-    if on {
-        "1"
-    } else {
-        "0"
-    }
+    if on { "1" } else { "0" }
 }
 
 fn fmt_fuel(fuel: f64) -> String {
@@ -348,7 +347,9 @@ fn fmt_fuel(fuel: f64) -> String {
 }
 
 /// Flyable Korea aircraft. AI-only types (F-84, bombers, transports) stay off the field.
-const FLYABLE: &[&str] = &["f51d", "f80c10", "f86a5", "il10", "mig15bis", "la11", "yak9p"];
+const FLYABLE: &[&str] = &[
+    "f51d", "f80c10", "f86a5", "il10", "mig15bis", "la11", "yak9p",
+];
 
 /// Aircraft ids the bank can offer, in flyable order.
 pub fn aircraft_ids() -> Vec<&'static str> {
@@ -391,18 +392,33 @@ mod tests {
             .expect("airfield");
         assert_eq!(air.name(), Some("AirStart"));
         assert_eq!(air.property("Country"), Some("601"));
-        assert_eq!(air.property("Model"), Some(r#""graphics\airfields\fakefield.mgm""#));
-        assert_eq!(air.property("Script"), Some(r#""LuaScripts\WorldObjects\Airfields\fakefield.txt""#));
+        assert_eq!(
+            air.property("Model"),
+            Some(r#""graphics\airfields\fakefield.mgm""#)
+        );
+        assert_eq!(
+            air.property("Script"),
+            Some(r#""LuaScripts\WorldObjects\Airfields\fakefield.txt""#)
+        );
         assert_eq!(air.property("YOri"), Some("90.000"));
         assert_eq!(air.property("MaintenanceRadius"), Some("10"));
-        let planes = air.children.iter().find(|c| c.block_type == "Planes").expect("planes");
+        let planes = air
+            .children
+            .iter()
+            .find(|c| c.block_type == "Planes")
+            .expect("planes");
         assert_eq!(planes.children.len(), 2);
         assert_eq!(planes.children[0].property("Number"), Some("-1"));
         assert_eq!(planes.children[0].property("StartType"), Some("0"));
         assert_eq!(planes.children[0].property("Altitude"), Some("1500"));
         assert_eq!(planes.children[0].property("AILevel"), Some("2"));
         assert_eq!(planes.children[0].property("AIRTBDecision"), Some("1"));
-        assert!(planes.children[0].property("Script").unwrap().contains("f51d"));
+        assert!(
+            planes.children[0]
+                .property("Script")
+                .unwrap()
+                .contains("f51d")
+        );
         assert_eq!(planes.children[1].property("Altitude"), Some("2500"));
         assert_eq!(planes.children[1].property("Fuel"), Some("1"));
         let entity = root
@@ -423,14 +439,26 @@ mod tests {
         a.planes[0].renewable = false;
         let b = default_field("South", true);
         let placed = vec![
-            PlacedAirStart { field: a, x: 1000.0, z: 2000.0 },
-            PlacedAirStart { field: b, x: 3000.0, z: 4000.0 },
+            PlacedAirStart {
+                field: a,
+                x: 1000.0,
+                z: 2000.0,
+            },
+            PlacedAirStart {
+                field: b,
+                x: 3000.0,
+                z: 4000.0,
+            },
         ];
         let root = combined_group(&placed, &[10.0, 20.0]);
         assert_eq!(root.name(), Some("Air starts"));
         assert_eq!(root.count_block_type("Airfield"), 2);
         let north = root.find_by_name("North").unwrap();
-        let air = north.children.iter().find(|c| c.block_type == "Airfield").unwrap();
+        let air = north
+            .children
+            .iter()
+            .find(|c| c.block_type == "Airfield")
+            .unwrap();
         assert_eq!(air.property("Country"), Some("502"));
         let mig = air.children[0].children[0].property("Script").unwrap();
         assert!(mig.contains("mig15bis"), "{mig}");
@@ -444,7 +472,9 @@ mod tests {
     fn aircraft_list_is_flyable_only() {
         assert_eq!(
             aircraft_ids(),
-            vec!["f51d", "f80c10", "f86a5", "il10", "mig15bis", "la11", "yak9p"]
+            vec![
+                "f51d", "f80c10", "f86a5", "il10", "mig15bis", "la11", "yak9p"
+            ]
         );
     }
 
@@ -453,8 +483,17 @@ mod tests {
         let mut field = default_field("AirStart", true);
         field.planes[0].number = 6;
         let group = field_group(&field, 0.0, 0.0, 0.0);
-        let air = group.children.iter().find(|c| c.block_type == "Airfield").unwrap();
-        let plane = &air.children.iter().find(|c| c.block_type == "Planes").unwrap().children[0];
+        let air = group
+            .children
+            .iter()
+            .find(|c| c.block_type == "Airfield")
+            .unwrap();
+        let plane = &air
+            .children
+            .iter()
+            .find(|c| c.block_type == "Planes")
+            .unwrap()
+            .children[0];
         assert_eq!(plane.property("Number"), Some("6"));
     }
 
@@ -463,10 +502,22 @@ mod tests {
         let mut field = default_field("AirStart", true);
         field.planes[0].parking_snap = true;
         let group = field_group(&field, 0.0, 0.0, 0.0);
-        let air = group.children.iter().find(|c| c.block_type == "Airfield").unwrap();
-        assert_eq!(air.property("Model"), Some(r#""graphics\airfields\fakefield.mgm""#));
+        let air = group
+            .children
+            .iter()
+            .find(|c| c.block_type == "Airfield")
+            .unwrap();
+        assert_eq!(
+            air.property("Model"),
+            Some(r#""graphics\airfields\fakefield.mgm""#)
+        );
         assert!(!air.property("Model").unwrap().contains("rnwspawn"));
-        let plane = &air.children.iter().find(|c| c.block_type == "Planes").unwrap().children[0];
+        let plane = &air
+            .children
+            .iter()
+            .find(|c| c.block_type == "Planes")
+            .unwrap()
+            .children[0];
         assert_eq!(plane.property("StartType"), Some("0"));
         assert_eq!(plane.property("SnapTo"), Some("0"));
         assert_eq!(plane.property("Altitude"), Some("1500"));

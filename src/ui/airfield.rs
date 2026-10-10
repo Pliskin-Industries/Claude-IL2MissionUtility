@@ -20,16 +20,14 @@
 
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{
-    self, Align, Align2, FontId, Layout, RichText, Sense, Stroke, Vec2,
-};
+use eframe::egui::{self, Align, Align2, FontId, Layout, RichText, Sense, Stroke, Vec2};
 
 use crate::aircraft::COUNTRIES;
 use crate::airfield::{
-    clean_airfield, inspect_airfield, EASTERN_PLANE_COALITIONS, WESTERN_PLANE_COALITIONS,
+    EASTERN_PLANE_COALITIONS, WESTERN_PLANE_COALITIONS, clean_airfield, inspect_airfield,
 };
 use crate::airstart::{self, AirStartPlane};
-use crate::harvest::{find_gen_file, harvest_file, place_field_spawn, GenWatcher, HarvestOutcome};
+use crate::harvest::{GenWatcher, HarvestOutcome, find_gen_file, harvest_file, place_field_spawn};
 use crate::help::HelpTopic;
 use crate::parser::parse_il2_document;
 use crate::serialize::serialize_group;
@@ -37,22 +35,30 @@ use crate::shell;
 use crate::theme::{self, c};
 
 use super::{
-    builder, center_panel, country_short, dialog, empty_state, group_digits, labeled_slider_suffix,
-    mode_slot, save_with_sidecars, side_panel, AppMode, MapDrawingMode, Status,
+    AppMode, MapDrawingMode, Status, builder, center_panel, country_short, dialog, empty_state,
+    group_digits, labeled_slider_suffix, mode_slot, save_with_sidecars, side_panel,
 };
 
 impl super::GroupGeneratorApp {
     // ── Airfield (README §5.5) ─────────────────────────────────────────────
 
     pub(super) fn airfield_page(&mut self, ctx: &egui::Context) {
-        side_panel(ctx, "airfield_left", true, 290.0, |ui| self.airfield_left_panel(ui));
-        side_panel(ctx, "airfield_right", false, 270.0, |ui| self.airfield_right_panel(ui));
+        side_panel(ctx, "airfield_left", true, 290.0, |ui| {
+            self.airfield_left_panel(ui)
+        });
+        side_panel(ctx, "airfield_right", false, 270.0, |ui| {
+            self.airfield_right_panel(ui)
+        });
         center_panel(ctx, "airfield_center", |ui| self.airfield_center(ui));
     }
 
     fn airfield_left_panel(&mut self, ui: &mut egui::Ui) {
         shell::section_title(ui, "Get the file", None);
-        numbered_step(ui, 1, "In game, open a Freeflight mission and take off from the airfield.");
+        numbered_step(
+            ui,
+            1,
+            "In game, open a Freeflight mission and take off from the airfield.",
+        );
         numbered_step(
             ui,
             2,
@@ -65,7 +71,11 @@ impl super::GroupGeneratorApp {
         ui.add_space(6.0);
         ui.separator();
         shell::section_title(ui, "Friendly plane coalition", None);
-        shell::segmented(ui, &mut self.airfield_western, &[(true, "NATO [2]"), (false, "DPRK [1]")]);
+        shell::segmented(
+            ui,
+            &mut self.airfield_western,
+            &[(true, "NATO [2]"), (false, "DPRK [1]")],
+        );
         shell::hint(ui, "USA airfields use NATO.", false);
         ui.add_space(6.0);
         ui.separator();
@@ -90,23 +100,36 @@ impl super::GroupGeneratorApp {
         ui.add_space(6.0);
         ui.separator();
         shell::section_title(ui, "Air starts", Some("fake fields"));
-        shell::hint(ui, "A fake field and the aircraft that can launch from it.", false);
+        shell::hint(
+            ui,
+            "A fake field and the aircraft that can launch from it.",
+            false,
+        );
         if ui
-            .add_sized([ui.available_width(), 28.0], egui::Button::new("Add air start"))
+            .add_sized(
+                [ui.available_width(), 28.0],
+                egui::Button::new("Add air start"),
+            )
             .clicked()
         {
             self.add_air_start();
         }
         ui.add_enabled_ui(!self.air_starts.is_empty(), |ui| {
             if ui
-                .add_sized([ui.available_width(), 28.0], egui::Button::new("Export one group…"))
+                .add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::Button::new("Export one group…"),
+                )
                 .on_hover_text("One .Group file with every air start.")
                 .clicked()
             {
                 self.export_air_starts_one();
             }
             if ui
-                .add_sized([ui.available_width(), 28.0], egui::Button::new("Export each…"))
+                .add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::Button::new("Export each…"),
+                )
                 .on_hover_text("One .Group file per air start.")
                 .clicked()
             {
@@ -121,7 +144,11 @@ impl super::GroupGeneratorApp {
         ui.add_space(10.0);
         let loaded = self.airfield_info.clone();
         let Some(info) = loaded else {
-            if empty_state(ui, "Load an airfield group exported from _gen.mission.", "Load airfield…") {
+            if empty_state(
+                ui,
+                "Load an airfield group exported from _gen.mission.",
+                "Load airfield…",
+            ) {
                 self.load_airfield();
             }
             ui.add_space(16.0);
@@ -130,21 +157,36 @@ impl super::GroupGeneratorApp {
             self.harvest_log_panel(ui);
             return;
         };
-        let side = if self.airfield_western { "NATO [2]" } else { "DPRK [1]" };
+        let side = if self.airfield_western {
+            "NATO [2]"
+        } else {
+            "DPRK [1]"
+        };
         ui.columns(2, |cols| {
             shell::blueprint(&mut cols[0], c::DIVIDER, |ui| {
                 shell::section_title(ui, "Removed", None);
                 if info.player_planes.is_empty() {
-                    shell::warning(ui, "No player aircraft found; this file may already be cleaned.");
+                    shell::warning(
+                        ui,
+                        "No player aircraft found; this file may already be cleaned.",
+                    );
                 } else {
                     for p in &info.player_planes {
-                        fact_row(ui, &format!("Player · {}", p.name), &country_name(p.country));
+                        fact_row(
+                            ui,
+                            &format!("Player · {}", p.name),
+                            &country_name(p.country),
+                        );
                     }
                 }
                 if info.has_autoremove {
                     fact_row(ui, "AutoRemove subgroup", "");
                 }
-                fact_row(ui, "Player / SP graph objects", &info.strip_count.to_string());
+                fact_row(
+                    ui,
+                    "Player / SP graph objects",
+                    &info.strip_count.to_string(),
+                );
             });
             shell::blueprint(&mut cols[1], c::ACCENT, |ui| {
                 let n = info.unlink_zones.len();
@@ -168,13 +210,19 @@ impl super::GroupGeneratorApp {
                     (info.block_count, "blocks"),
                     (info.checkzone_count, "checkzones"),
                 ]) {
-                    col.label(RichText::new(n.to_string()).font(FontId::new(24.0, theme::heading_family())));
+                    col.label(
+                        RichText::new(n.to_string())
+                            .font(FontId::new(24.0, theme::heading_family())),
+                    );
                     col.label(RichText::new(label).small().color(c::NEUTRAL_700));
                 }
             });
         });
         ui.add_space(10.0);
-        shell::warning(ui, "Still required after export: add planes to fly and set the starting location.");
+        shell::warning(
+            ui,
+            "Still required after export: add planes to fly and set the starting location.",
+        );
         ui.add_space(16.0);
         self.field_spawn_panel(ui);
         self.air_starts_panel(ui);
@@ -182,13 +230,21 @@ impl super::GroupGeneratorApp {
     }
 
     fn field_spawn_panel(&mut self, ui: &mut egui::Ui) {
-        shell::section_title(ui, "Field spawn", Some(&format!("{}", self.field_planes.len())));
+        shell::section_title(
+            ui,
+            "Field spawn",
+            Some(&format!("{}", self.field_planes.len())),
+        );
         shell::hint(
             ui,
             "Add planes to the harvested airfield. This list is not an air start.",
             false,
         );
-        shell::segmented(ui, &mut self.field_spawn_nato, &[(true, "NATO"), (false, "DPRK")]);
+        shell::segmented(
+            ui,
+            &mut self.field_spawn_nato,
+            &[(true, "NATO"), (false, "DPRK")],
+        );
         ui.add_space(4.0);
         let mut add_plane = false;
         let mut remove_plane: Option<usize> = None;
@@ -201,7 +257,10 @@ impl super::GroupGeneratorApp {
                 .show(ui, |ui| {
                     plane_card(ui, &mut self.field_planes[pi], &format!("field_{pi}"), true);
                     if ui
-                        .add_sized([ui.available_width(), 28.0], egui::Button::new("Remove aircraft"))
+                        .add_sized(
+                            [ui.available_width(), 28.0],
+                            egui::Button::new("Remove aircraft"),
+                        )
                         .clicked()
                     {
                         remove = true;
@@ -212,7 +271,10 @@ impl super::GroupGeneratorApp {
             }
         }
         if ui
-            .add_sized([ui.available_width(), 28.0], egui::Button::new("Add aircraft"))
+            .add_sized(
+                [ui.available_width(), 28.0],
+                egui::Button::new("Add aircraft"),
+            )
             .clicked()
         {
             add_plane = true;
@@ -221,7 +283,8 @@ impl super::GroupGeneratorApp {
             self.field_planes.remove(pi);
         }
         if add_plane {
-            self.field_planes.push(new_field_plane(self.field_spawn_nato));
+            self.field_planes
+                .push(new_field_plane(self.field_spawn_nato));
         }
     }
 
@@ -279,11 +342,18 @@ impl super::GroupGeneratorApp {
             }
             written += 1;
         }
-        self.status = Status::Info(format!("Wrote {written} air start group(s) to {}.", dir.display()));
+        self.status = Status::Info(format!(
+            "Wrote {written} air start group(s) to {}.",
+            dir.display()
+        ));
     }
 
     fn air_starts_panel(&mut self, ui: &mut egui::Ui) {
-        shell::section_title(ui, "Air starts", Some(&format!("{}", self.air_starts.len())));
+        shell::section_title(
+            ui,
+            "Air starts",
+            Some(&format!("{}", self.air_starts.len())),
+        );
         shell::hint(ui, "Place and turn copies on the Map tab.", false);
         if self.air_starts.is_empty() {
             shell::hint(ui, "Add an air start on the left.", false);
@@ -326,9 +396,17 @@ impl super::GroupGeneratorApp {
                     .id_salt(("air_start_plane", edit, pi))
                     .default_open(false)
                     .show(ui, |ui| {
-                        plane_card(ui, &mut field.planes[pi], &format!("air_{edit}_{pi}"), false);
+                        plane_card(
+                            ui,
+                            &mut field.planes[pi],
+                            &format!("air_{edit}_{pi}"),
+                            false,
+                        );
                         if ui
-                            .add_sized([ui.available_width(), 28.0], egui::Button::new("Remove aircraft"))
+                            .add_sized(
+                                [ui.available_width(), 28.0],
+                                egui::Button::new("Remove aircraft"),
+                            )
                             .clicked()
                         {
                             remove = true;
@@ -339,14 +417,20 @@ impl super::GroupGeneratorApp {
                 }
             }
             if ui
-                .add_sized([ui.available_width(), 28.0], egui::Button::new("Add aircraft"))
+                .add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::Button::new("Add aircraft"),
+                )
                 .clicked()
             {
                 add_plane = true;
             }
             ui.add_space(6.0);
             if ui
-                .add_sized([ui.available_width(), 28.0], egui::Button::new("Remove air start"))
+                .add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::Button::new("Remove air start"),
+                )
                 .clicked()
             {
                 remove_field = true;
@@ -358,14 +442,19 @@ impl super::GroupGeneratorApp {
         if add_plane {
             let nato = self.air_starts[edit].nato;
             let id = if nato { "f51d" } else { "mig15bis" };
-            self.air_starts[edit].planes.push(airstart::default_plane(id));
+            self.air_starts[edit]
+                .planes
+                .push(airstart::default_plane(id));
         }
         if remove_field {
             self.air_starts.remove(edit);
             if self.air_start_edit >= self.air_starts.len() && !self.air_starts.is_empty() {
                 self.air_start_edit = self.air_starts.len() - 1;
             }
-            if self.air_start_place.is_some_and(|i| i == edit || i >= self.air_starts.len()) {
+            if self
+                .air_start_place
+                .is_some_and(|i| i == edit || i >= self.air_starts.len())
+            {
                 self.air_start_place = None;
                 if self.map_drawing_mode == MapDrawingMode::PlaceAirStart {
                     self.map_drawing_mode = MapDrawingMode::None;
@@ -374,31 +463,43 @@ impl super::GroupGeneratorApp {
         }
     }
 
-
     fn airfield_right_panel(&mut self, ui: &mut egui::Ui) {
         shell::section_title(ui, "Airfield", None);
         let Some(info) = &self.airfield_info else {
             shell::hint(ui, "Load an airfield to see it here.", false);
             return;
         };
-        egui::Grid::new("airfield_facts").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-            ui.label(RichText::new("Name").color(c::NEUTRAL_700));
-            ui.label(RichText::new(&info.name).font(FontId::new(13.0, theme::bold_family())));
-            ui.end_row();
-            ui.label(RichText::new("Layout").color(c::NEUTRAL_700));
-            ui.label(if info.in_group { "Inside a Group" } else { "Blocks at the root" });
-            ui.end_row();
-            if let Some((x, z)) = info.origin_xz {
-                ui.label(RichText::new("Origin").color(c::NEUTRAL_700));
-                ui.label(RichText::new(format!("{}, {}", group_digits(x), group_digits(z))).monospace());
+        egui::Grid::new("airfield_facts")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new("Name").color(c::NEUTRAL_700));
+                ui.label(RichText::new(&info.name).font(FontId::new(13.0, theme::bold_family())));
                 ui.end_row();
-            }
-        });
+                ui.label(RichText::new("Layout").color(c::NEUTRAL_700));
+                ui.label(if info.in_group {
+                    "Inside a Group"
+                } else {
+                    "Blocks at the root"
+                });
+                ui.end_row();
+                if let Some((x, z)) = info.origin_xz {
+                    ui.label(RichText::new("Origin").color(c::NEUTRAL_700));
+                    ui.label(
+                        RichText::new(format!("{}, {}", group_digits(x), group_digits(z)))
+                            .monospace(),
+                    );
+                    ui.end_row();
+                }
+            });
     }
 
     pub(super) fn load_airfield(&mut self) {
         let Some(path) = dialog::FileDialog::new()
-            .add_filter("IL-2 Group / mission", &["Group", "group", "Mission", "mission"])
+            .add_filter(
+                "IL-2 Group / mission",
+                &["Group", "group", "Mission", "mission"],
+            )
             .pick_file()
         else {
             return;
@@ -416,10 +517,7 @@ impl super::GroupGeneratorApp {
                 let players = info.player_planes.len();
                 let zones = info.unlink_zones.len();
                 self.status = if players == 0 {
-                    Status::Info(format!(
-                        "Loaded {} — no player aircraft found.",
-                        info.name
-                    ))
+                    Status::Info(format!("Loaded {} — no player aircraft found.", info.name))
                 } else {
                     Status::Info(format!(
                         "Loaded {}: {players} player aircraft, {zones} checkzones to unlink.",
@@ -459,13 +557,25 @@ impl super::GroupGeneratorApp {
             }
         }
         if let Some(w) = &self.harvest_watcher {
-            ui.label(RichText::new(format!("Watching {}", w.dir().display())).small().color(c::ACCENT_700));
+            ui.label(
+                RichText::new(format!("Watching {}", w.dir().display()))
+                    .small()
+                    .color(c::ACCENT_700),
+            );
         }
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Harvest current").on_hover_text("Harvest the _gen.mission in the Missions folder now").clicked() {
+            if ui
+                .button("Harvest current")
+                .on_hover_text("Harvest the _gen.mission in the Missions folder now")
+                .clicked()
+            {
                 self.harvest_current_gen();
             }
-            if ui.button("Harvest a file…").on_hover_text("Harvest any .Mission file").clicked() {
+            if ui
+                .button("Harvest a file…")
+                .on_hover_text("Harvest any .Mission file")
+                .clicked()
+            {
                 if let Some(path) = dialog::FileDialog::new()
                     .add_filter("IL-2 mission", &["Mission", "mission"])
                     .pick_file()
@@ -773,10 +883,16 @@ fn plane_card(ui: &mut egui::Ui, plane: &mut AirStartPlane, salt: &str, field_sp
             .selected_text(start)
             .width(ui.available_width())
             .show_ui(ui, |ui| {
-                if ui.selectable_label(!plane.parking_snap, "Engine running").clicked() {
+                if ui
+                    .selectable_label(!plane.parking_snap, "Engine running")
+                    .clicked()
+                {
                     plane.parking_snap = false;
                 }
-                if ui.selectable_label(plane.parking_snap, "Engine off, parking").clicked() {
+                if ui
+                    .selectable_label(plane.parking_snap, "Engine off, parking")
+                    .clicked()
+                {
                     plane.parking_snap = true;
                 }
             });
@@ -829,7 +945,10 @@ fn plane_card(ui: &mut egui::Ui, plane: &mut AirStartPlane, salt: &str, field_sp
                 if let Some(ac) = payloads::catalog().for_script(&script) {
                     for p in &ac.payloads {
                         let summary = format!("{}  {}", p.id, p.summary());
-                        if ui.selectable_label(plane.payload_id == p.id, summary).clicked() {
+                        if ui
+                            .selectable_label(plane.payload_id == p.id, summary)
+                            .clicked()
+                        {
                             plane.payload_id = p.id;
                         }
                     }
@@ -839,7 +958,11 @@ fn plane_card(ui: &mut egui::Ui, plane: &mut AirStartPlane, salt: &str, field_sp
     if loadout.is_some_and(|a| a.has_mods()) {
         ui.label("Modifications");
         let preview = payloads::mods_preview(&script, &plane.mod_mask);
-        let label = if preview == "—" { "Select…" } else { preview.as_str() };
+        let label = if preview == "—" {
+            "Select…"
+        } else {
+            preview.as_str()
+        };
         ui.menu_button(label, |ui| {
             ui.set_min_width(240.0);
             let Some(ac) = payloads::catalog().for_script(&script) else {
@@ -870,7 +993,10 @@ fn plane_card(ui: &mut egui::Ui, plane: &mut AirStartPlane, salt: &str, field_sp
                             changed = true;
                         }
                     }
-                } else if let Some(opt) = slot.options.iter().find(|o| payloads::extra_bits(&o.binary_id) != 0)
+                } else if let Some(opt) = slot
+                    .options
+                    .iter()
+                    .find(|o| payloads::extra_bits(&o.binary_id) != 0)
                 {
                     let mut on = payloads::option_selected(mask, opt);
                     if ui.checkbox(&mut on, &opt.description).changed() {
@@ -917,14 +1043,23 @@ fn fact_row(ui: &mut egui::Ui, label: &str, value: &str) {
         });
     });
     let r = resp.response.rect;
-    ui.painter().hline(r.x_range(), r.bottom() + 1.0, Stroke::new(1.0_f32, c::DIVIDER));
+    ui.painter().hline(
+        r.x_range(),
+        r.bottom() + 1.0,
+        Stroke::new(1.0_f32, c::DIVIDER),
+    );
 }
 
 /// "1  In game, …" with a 22 px boxed number.
 fn numbered_step(ui: &mut egui::Ui, n: u32, text: &str) {
     ui.horizontal_top(|ui| {
         let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
-        ui.painter().rect_stroke(r, 0.0, Stroke::new(1.0_f32, c::NEUTRAL_500), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(
+            r,
+            0.0,
+            Stroke::new(1.0_f32, c::NEUTRAL_500),
+            egui::StrokeKind::Inside,
+        );
         ui.painter().text(
             r.center(),
             Align2::CENTER_CENTER,
@@ -954,22 +1089,34 @@ fn harvest_log_lines(out: &HarvestOutcome) -> Vec<String> {
                 r.taxi_nodes
             );
             if af.cleaned.stripped > 0 {
-                line.push_str(&format!("; stripped {} player/SP objects", af.cleaned.stripped));
+                line.push_str(&format!(
+                    "; stripped {} player/SP objects",
+                    af.cleaned.stripped
+                ));
             }
             if af.ai_planes_removed > 0 {
                 line.push_str(&format!("; removed {} AI planes", af.ai_planes_removed));
             }
             if af.via_links > 0 {
-                line.push_str(&format!("; {} logic nodes beyond the radius kept via links", af.via_links));
+                line.push_str(&format!(
+                    "; {} logic nodes beyond the radius kept via links",
+                    af.via_links
+                ));
             }
             line
         })
         .collect();
     if out.models_added > 0 {
-        lines.push(format!("  {} new model(s) added to models.tsv", out.models_added));
+        lines.push(format!(
+            "  {} new model(s) added to models.tsv",
+            out.models_added
+        ));
     }
-    let raw = out.archived.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let raw = out
+        .archived
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
     lines.push(format!("  raw mission archived as raw/{raw}"));
     lines
 }
-

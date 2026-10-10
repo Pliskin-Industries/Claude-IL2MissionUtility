@@ -61,7 +61,8 @@ impl TerrainMap {
     pub fn builtin() -> Result<&'static Self, String> {
         use std::sync::OnceLock;
         static MAP: OnceLock<Result<TerrainMap, String>> = OnceLock::new();
-        match MAP.get_or_init(|| Self::from_bytes(include_bytes!("../assets/combined_terrain.bin"))) {
+        match MAP.get_or_init(|| Self::from_bytes(include_bytes!("../assets/combined_terrain.bin")))
+        {
             Ok(map) => Ok(map),
             Err(err) => Err(err.clone()),
         }
@@ -176,7 +177,9 @@ mod tests {
             "terrain mask should include water"
         );
         assert!(
-            map.grid.iter().any(|b| b & FLAG_OPEN != 0 && b & FLAG_WATER == 0),
+            map.grid
+                .iter()
+                .any(|b| b & FLAG_OPEN != 0 && b & FLAG_WATER == 0),
             "terrain mask should include dry open ground"
         );
     }

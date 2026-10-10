@@ -94,7 +94,11 @@ pub fn show_window(ctx: &egui::Context, open: &mut bool, topic: &mut HelpTopic) 
                             }
                         });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new("Esc closes").small().color(crate::theme::c::NEUTRAL_700));
+                        ui.label(
+                            RichText::new("Esc closes")
+                                .small()
+                                .color(crate::theme::c::NEUTRAL_700),
+                        );
                     });
                 });
                 ui.add_space(6.0);
@@ -127,23 +131,16 @@ pub fn section_for(topic: HelpTopic) -> &'static str {
 fn extract_section<'a>(md: &'a str, heading: &str) -> &'a str {
     // A whole `## heading` line: "### Map" or "## Map limits" must not match "## Map".
     let needle = format!("## {heading}");
-    let Some(start) = md
-        .match_indices(&needle)
-        .map(|(i, _)| i)
-        .find(|&i| {
-            let line_start = i == 0 || md.as_bytes()[i - 1] == b'\n';
-            let rest = &md[i + needle.len()..];
-            line_start && (rest.is_empty() || rest.starts_with('\n') || rest.starts_with("\r\n"))
-        })
-    else {
+    let Some(start) = md.match_indices(&needle).map(|(i, _)| i).find(|&i| {
+        let line_start = i == 0 || md.as_bytes()[i - 1] == b'\n';
+        let rest = &md[i + needle.len()..];
+        line_start && (rest.is_empty() || rest.starts_with('\n') || rest.starts_with("\r\n"))
+    }) else {
         return md;
     };
     let after = start + needle.len();
     let rest = &md[after..];
-    let end = rest
-        .find("\n## ")
-        .map(|i| after + i)
-        .unwrap_or(md.len());
+    let end = rest.find("\n## ").map(|i| after + i).unwrap_or(md.len());
     md[start..end].trim()
 }
 
@@ -265,7 +262,10 @@ fn show_table(ui: &mut egui::Ui, rows: &[&str]) {
 
 fn is_table_rule(row: &str) -> bool {
     let inner = row.trim().trim_matches('|');
-    !inner.is_empty() && inner.chars().all(|c| c == '-' || c == '|' || c == ':' || c == ' ')
+    !inner.is_empty()
+        && inner
+            .chars()
+            .all(|c| c == '-' || c == '|' || c == ':' || c == ' ')
 }
 
 fn show_inline(ui: &mut egui::Ui, text: &str) {
@@ -342,11 +342,7 @@ mod tests {
                 "{} missing from extracted section",
                 topic.title()
             );
-            assert!(
-                section.len() > 80,
-                "{} section looks empty",
-                topic.title()
-            );
+            assert!(section.len() > 80, "{} section looks empty", topic.title());
         }
     }
 
@@ -360,13 +356,26 @@ mod tests {
     fn shortcuts_section_lists_every_key() {
         let s = section_for(HelpTopic::Shortcuts);
         for key in [
-            "Ctrl G", "Ctrl O", "Ctrl Z", "Ctrl Y", "Ctrl 1–6", "F1", "Esc", "Enter", "1–6", "← →", "Shift",
+            "Ctrl G",
+            "Ctrl O",
+            "Ctrl Z",
+            "Ctrl Y",
+            "Ctrl 1–6",
+            "F1",
+            "Esc",
+            "Enter",
+            "1–6",
+            "← →",
+            "Shift",
         ] {
             assert!(s.contains(key), "Keyboard shortcuts misses {key}");
         }
         assert!(s.contains("Remove"), "Ctrl Z covers Remove / Clear / Reset");
         assert!(s.contains("Reset"));
-        assert!(s.contains("front drag"), "Esc on Map drops a front drag in progress");
+        assert!(
+            s.contains("front drag"),
+            "Esc on Map drops a front drag in progress"
+        );
     }
 
     #[test]

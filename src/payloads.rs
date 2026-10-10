@@ -169,6 +169,54 @@ impl AircraftLoadout {
     }
 }
 
+/// First payload that carries a bomb, or a rocket when the aircraft has no bombs.
+/// Fuel tanks, flares, and a clean jet are skipped.
+pub fn strike_payload_id(script: &str) -> Option<i32> {
+    let cat = catalog();
+    let ac = cat.for_script(script)?;
+    let class_of = |p: &PayloadOption| -> Option<&'static str> {
+        p.columns
+            .iter()
+            .find_map(|(_, value)| cell_ordnance(cat, value))
+    };
+    ac.payloads
+        .iter()
+        .find(|p| class_of(p) == Some("bomb"))
+        .or_else(|| ac.payloads.iter().find(|p| class_of(p) == Some("rocket")))
+        .map(|p| p.id)
+}
+
+fn cell_ordnance(cat: &PayloadCatalog, value: &str) -> Option<&'static str> {
+    if is_blank_ordnance(value) || is_none_word(value) {
+        return None;
+    }
+    if let Some(mun) = cat.munition_for_cell(value) {
+        return ordnance_class(&mun.kind);
+    }
+    let s = value.to_ascii_lowercase();
+    if s.contains("bomb") || s.contains("fab-") || s.contains("napalm") {
+        Some("bomb")
+    } else if s.contains("rocket") || s.contains("hvar") || s.contains("rs-") {
+        Some("rocket")
+    } else {
+        None
+    }
+}
+
+fn ordnance_class(kind: &str) -> Option<&'static str> {
+    let k = kind.to_ascii_lowercase();
+    if k.contains("fuel") || k.contains("illumination") || k.contains("flare") {
+        return None;
+    }
+    if k.contains("bomb") {
+        Some("bomb")
+    } else if k.contains("rocket") {
+        Some("rocket")
+    } else {
+        None
+    }
+}
+
 pub fn payload_preview(script: &str, payload_id: i32) -> String {
     match catalog().for_script(script) {
         Some(ac) if ac.has_payloads() => ac
@@ -202,9 +250,10 @@ fn script_path_contains(script: &str, needle: &str) -> bool {
 
 fn loadout_is_zero_base(ac: &AircraftLoadout) -> bool {
     ac.mod_slots.iter().any(|s| {
-        s.options
-            .iter()
-            .any(|o| o.binary_id.trim() == "0" || o.description.eq_ignore_ascii_case("none") && extra_bits(&o.binary_id) == 0)
+        s.options.iter().any(|o| {
+            o.binary_id.trim() == "0"
+                || o.description.eq_ignore_ascii_case("none") && extra_bits(&o.binary_id) == 0
+        })
     })
 }
 
@@ -213,7 +262,10 @@ pub fn empty_mod_mask(script: &str) -> u64 {
     if is_train_script(script) || is_vehicle_script(script) {
         return 0;
     }
-    if catalog().for_script(script).is_some_and(loadout_is_zero_base) {
+    if catalog()
+        .for_script(script)
+        .is_some_and(loadout_is_zero_base)
+    {
         0
     } else {
         1
@@ -347,12 +399,7 @@ pub fn select_exclusive(mask: u64, slot: &ModSlot, option: &ModOption) -> u64 {
     select_exclusive_empty(mask, slot, option, 1)
 }
 
-pub fn select_exclusive_for(
-    script: &str,
-    mask: u64,
-    slot: &ModSlot,
-    option: &ModOption,
-) -> u64 {
+pub fn select_exclusive_for(script: &str, mask: u64, slot: &ModSlot, option: &ModOption) -> u64 {
     select_exclusive_empty(mask, slot, option, empty_mod_mask(script))
 }
 
@@ -399,10 +446,7 @@ pub fn option_selected(mask: u64, option: &ModOption) -> bool {
 pub fn exclusive_selection<'a>(mask: u64, slot: &'a ModSlot) -> Option<&'a ModOption> {
     let current = mask & slot_bits(slot);
     if current == 0 {
-        return slot
-            .options
-            .iter()
-            .find(|o| extra_bits(&o.binary_id) == 0);
+        return slot.options.iter().find(|o| extra_bits(&o.binary_id) == 0);
     }
     slot.options
         .iter()
@@ -588,10 +632,7 @@ fn parse_payloads(src: &str) -> PayloadCatalog {
         }
         if matches!(mode, Mode::None) {
             if let Some(name) = pending_title.as_deref() {
-                if !name.is_empty()
-                    && !is_section_banner(name)
-                    && looks_like_mod_row(&fields)
-                {
+                if !name.is_empty() && !is_section_banner(name) && looks_like_mod_row(&fields) {
                     let name = pending_title.take().unwrap();
                     let idx = ensure_aircraft(&mut cat, &name);
                     mode = Mode::Mods(idx);
@@ -616,7 +657,9 @@ fn parse_payloads(src: &str) -> PayloadCatalog {
                         let value = fields.get(i + 1).cloned().unwrap_or_default();
                         columns.push((header.clone(), value));
                     }
-                    cat.aircraft[idx].payloads.push(PayloadOption { id, columns });
+                    cat.aircraft[idx]
+                        .payloads
+                        .push(PayloadOption { id, columns });
                 }
             }
             Mode::Mods(idx) => {
@@ -747,7 +790,9 @@ mod tests {
         assert!(summary.contains("Drop Tank 165"), "{summary}");
         assert!(summary.contains("AN-M64A1"), "{summary}");
 
-        let mig = cat.for_script(r"LuaScripts\WorldObjects\Planes\mig15bis.txt").unwrap();
+        let mig = cat
+            .for_script(r"LuaScripts\WorldObjects\Planes\mig15bis.txt")
+            .unwrap();
         assert_eq!(mig.payload(0).unwrap().summary(), "Clean");
         assert!(mig.payload(1).unwrap().summary().contains("250"));
 
@@ -755,13 +800,15 @@ mod tests {
         assert!(f51.payloads.len() > 20);
         assert!(f51.has_mods(), "F-51D mods merge with F-51 payloads");
         assert!(f51.mod_slots.len() >= 5);
-        assert!(f51
-            .mod_slots
-            .iter()
-            .any(|s| s.options.iter().any(|o| o.description.contains("Gunsite")
-                || o.description.contains("Gunsight"))));
+        assert!(f51.mod_slots.iter().any(|s| {
+            s.options
+                .iter()
+                .any(|o| o.description.contains("Gunsite") || o.description.contains("Gunsight"))
+        }));
 
-        let b29 = cat.for_script("simpleb29.txt").expect("B-29 matches simpleb29");
+        let b29 = cat
+            .for_script("simpleb29.txt")
+            .expect("B-29 matches simpleb29");
         assert!(b29.payload(1).unwrap().summary().contains("AN-M64A1"));
     }
 
@@ -769,6 +816,20 @@ mod tests {
     fn unknown_aircraft_has_no_table() {
         assert!(catalog().for_script("t34-85.txt").is_none());
         assert!(catalog().for_script("la11.txt").is_none());
+    }
+
+    #[test]
+    fn strike_payload_prefers_a_bomb() {
+        let script = r"LuaScripts\WorldObjects\Planes\f51d.txt";
+        let id = strike_payload_id(script).expect("F-51D has a bomb loadout");
+        let summary = payload_preview(script, id);
+        assert!(
+            summary.to_ascii_lowercase().contains("bomb")
+                || summary.contains("AN-M")
+                || summary.contains("500"),
+            "{summary}"
+        );
+        assert!(strike_payload_id("no-such-plane").is_none());
     }
 
     #[test]
@@ -814,7 +875,11 @@ mod tests {
         let slot = &ac.mod_slots[0];
         assert!(slot.options.iter().any(|o| o.description == "Cargo"));
         assert!(slot.options.iter().any(|o| o.description == "Ambulance"));
-        let cargo = slot.options.iter().find(|o| o.description == "Cargo").unwrap();
+        let cargo = slot
+            .options
+            .iter()
+            .find(|o| o.description == "Cargo")
+            .unwrap();
         let mask = select_exclusive(1, slot, cargo);
         assert_eq!(encode_mod_mask(mask), "11");
         assert_eq!(
@@ -859,7 +924,10 @@ mod tests {
         assert!(ac.payload(11).unwrap().summary().contains("HVAR"));
         let preview = mods_preview("f51d.txt", "10101");
         assert!(preview.contains("Radar"), "{preview}");
-        assert!(preview.contains("Fuel") || preview.contains("150"), "{preview}");
+        assert!(
+            preview.contains("Fuel") || preview.contains("150"),
+            "{preview}"
+        );
         assert_eq!(payload_preview("f51d.txt", 0), "Clean");
     }
 
@@ -878,10 +946,12 @@ mod tests {
             .iter()
             .find(|s| s.number == 4)
             .expect("platform slot");
-        assert!(platforms
-            .options
-            .iter()
-            .any(|o| o.description.contains("T-34-85")));
+        assert!(
+            platforms
+                .options
+                .iter()
+                .any(|o| o.description.contains("T-34-85"))
+        );
         assert_eq!(train_carriage_slot("carbox.txt"), Some(2));
         assert_eq!(train_carriage_slot("carplatform.txt"), Some(4));
         assert_eq!(train_carriage_slot("type475-1-tender.txt"), None);
@@ -929,14 +999,16 @@ mod tests {
             .for_script(r"LuaScripts\WorldObjects\vehicles\gaz63.txt")
             .expect("GAZ-63");
         assert!(gaz.has_mods());
-        assert!(gaz
-            .mod_slots
-            .iter()
-            .any(|s| s.options.iter().any(|o| o.description == "Canvas top")));
-        assert!(gaz
-            .mod_slots
-            .iter()
-            .any(|s| s.options.iter().any(|o| o.description.contains("Generator"))));
+        assert!(
+            gaz.mod_slots
+                .iter()
+                .any(|s| s.options.iter().any(|o| o.description == "Canvas top"))
+        );
+        assert!(gaz.mod_slots.iter().any(|s| {
+            s.options
+                .iter()
+                .any(|o| o.description.contains("Generator"))
+        }));
         let script = r"LuaScripts\WorldObjects\vehicles\gaz63.txt";
         assert_eq!(empty_mod_mask(script), 0);
         assert_eq!(default_mod_mask_str(script), "0");
@@ -958,39 +1030,51 @@ mod tests {
             .for_script(r"LuaScripts\WorldObjects\vehicles\gmc-cckw-refueler.txt")
             .expect("GMC-Refueler");
         assert_ne!(truck.name, tanker.name);
-        assert!(truck
-            .mod_slots
-            .iter()
-            .any(|s| s.options.iter().any(|o| o.description == "Canvas top")));
-        assert!(!tanker
-            .mod_slots
-            .iter()
-            .any(|s| s.options.iter().any(|o| o.description == "Canvas top")));
+        assert!(
+            truck
+                .mod_slots
+                .iter()
+                .any(|s| s.options.iter().any(|o| o.description == "Canvas top"))
+        );
+        assert!(
+            !tanker
+                .mod_slots
+                .iter()
+                .any(|s| s.options.iter().any(|o| o.description == "Canvas top"))
+        );
 
-        let jeep = catalog()
-            .for_script("willysmb.txt")
-            .expect("Willys MB");
+        let jeep = catalog().for_script("willysmb.txt").expect("Willys MB");
         assert!(jeep.has_mods());
-        let dodge = catalog()
-            .for_script("dodgewc52.txt")
-            .expect("Dodge WC52");
-        assert!(dodge
-            .mod_slots
-            .iter()
-            .any(|s| s.options.iter().any(|o| o.description.contains("Canvas Frame"))));
+        let dodge = catalog().for_script("dodgewc52.txt").expect("Dodge WC52");
+        assert!(dodge.mod_slots.iter().any(|s| {
+            s.options
+                .iter()
+                .any(|o| o.description.contains("Canvas Frame"))
+        }));
         assert!(catalog().for_script("u7144.txt").unwrap().has_mods());
         assert!(catalog().for_script("ba64b.txt").unwrap().has_mods());
-        assert!(catalog().for_script("m3a1-halftrack.txt").unwrap().has_mods());
+        assert!(
+            catalog()
+                .for_script("m3a1-halftrack.txt")
+                .unwrap()
+                .has_mods()
+        );
         let stude = catalog()
             .for_script(r"LuaScripts\WorldObjects\vehicles\studebakerus6.txt")
             .expect("StudebakerUS6");
         assert!(stude.has_mods());
-        assert!(stude.mod_slots.iter().any(|s| {
-            s.options.iter().any(|o| o.description.contains("ZPU"))
-        }));
-        assert!(stude.mod_slots.iter().any(|s| {
-            s.options.iter().any(|o| o.description.contains("P20"))
-        }));
+        assert!(
+            stude
+                .mod_slots
+                .iter()
+                .any(|s| { s.options.iter().any(|o| o.description.contains("ZPU")) })
+        );
+        assert!(
+            stude
+                .mod_slots
+                .iter()
+                .any(|s| { s.options.iter().any(|o| o.description.contains("P20")) })
+        );
         assert!(
             catalog()
                 .for_script(r"LuaScripts\WorldObjects\vehicles\studebakerus6-bm13.txt")
@@ -1002,7 +1086,10 @@ mod tests {
                 .for_script(r"LuaScripts\WorldObjects\vehicles\studebakerus6-refueler.txt")
                 .is_none()
         );
-        assert_eq!(empty_mod_mask(r"LuaScripts\WorldObjects\vehicles\studebakerus6.txt"), 0);
+        assert_eq!(
+            empty_mod_mask(r"LuaScripts\WorldObjects\vehicles\studebakerus6.txt"),
+            0
+        );
         assert_eq!(mod_slot_title(script, 2), "Cargo");
         assert_eq!(empty_mod_mask("gaz63.txt"), 0);
         assert_eq!(empty_mod_mask("f51d.txt"), 1);

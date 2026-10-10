@@ -98,7 +98,11 @@ pub fn move_to_grid_at(
 }
 
 /// Translate `entity` so `anchor` lands on `target`. Returns the (dx, dz) applied.
-pub fn move_anchor_to(entity: &mut Il2Entity, anchor: (f64, f64), target: (f64, f64)) -> (f64, f64) {
+pub fn move_anchor_to(
+    entity: &mut Il2Entity,
+    anchor: (f64, f64),
+    target: (f64, f64),
+) -> (f64, f64) {
     let dx = target.0 - anchor.0;
     let dz = target.1 - anchor.1;
     entity.translate_xz(dx, dz);
@@ -234,18 +238,12 @@ pub fn heading_toward(from: (f64, f64), to: (f64, f64)) -> f64 {
 /// Signed yaw from `from` to `to` in (-180, 180]. Positive is clockwise (toward +Z).
 pub fn heading_delta(from: f64, to: f64) -> f64 {
     let d = (to - from).rem_euclid(360.0);
-    if d > 180.0 {
-        d - 360.0
-    } else {
-        d
-    }
+    if d > 180.0 { d - 360.0 } else { d }
 }
 
 /// Mix `seed` and `index` into a 64-bit value.
 pub fn mix_index(seed: u64, index: u64) -> u64 {
-    let mut n = seed
-        ^ index.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        ^ index.rotate_left(17);
+    let mut n = seed ^ index.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ index.rotate_left(17);
     n ^= n >> 30;
     n = n.wrapping_mul(0xBF58_476D_1CE4_E5B9);
     n ^= n >> 27;
@@ -429,7 +427,10 @@ mod tests {
         assert_eq!(grid_xz(0, 9), (MAP_MIN, MAP_MIN));
         assert_eq!(grid_xz(2, 9), (MAP_MIN + 2.0 * GRID_STEP, MAP_MIN));
         assert_eq!(grid_xz(3, 9), (MAP_MIN, MAP_MIN + GRID_STEP));
-        assert_eq!(grid_xz(8, 9), (MAP_MIN + 2.0 * GRID_STEP, MAP_MIN + 2.0 * GRID_STEP));
+        assert_eq!(
+            grid_xz(8, 9),
+            (MAP_MIN + 2.0 * GRID_STEP, MAP_MIN + 2.0 * GRID_STEP)
+        );
         let (x, z) = grid_xz(8, 9);
         assert!(x < MAP_MAX);
         assert!(z < MAP_MAX);
@@ -557,7 +558,9 @@ mod tests {
                 "models should orbit their own centroid, not the distant command, got ({x}, {z})"
             );
         }
-        let cmd = root.find_by_name("rotate").unwrap().children[0].pos_xz().unwrap();
+        let cmd = root.find_by_name("rotate").unwrap().children[0]
+            .pos_xz()
+            .unwrap();
         assert!(
             (cmd.0 - 16_000.0).abs() < 0.02 && cmd.1.abs() < 0.02,
             "unlinked command MCU should stay put, got {cmd:?}"
@@ -582,8 +585,7 @@ mod tests {
             "ML20 guns should stay near Zone In after yaw (before {dist_before:.0} m, after {dist_after:.0} m)"
         );
         assert!(
-            (gun_after.0 - gun_before.0).abs() > 1.0
-                || (gun_after.1 - gun_before.1).abs() > 1.0,
+            (gun_after.0 - gun_before.0).abs() > 1.0 || (gun_after.1 - gun_before.1).abs() > 1.0,
             "guns should actually move on XZ, stayed at {gun_after:?}"
         );
     }

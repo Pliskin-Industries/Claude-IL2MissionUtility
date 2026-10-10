@@ -30,15 +30,15 @@
 //! * ui.rs (Map) — flight packs placed on the map.
 
 use crate::aircraft::{
-    aircraft_by_id, callsign_for, encode_tcode, encode_tcode_color, flight_color,
-    pair_skills, plane_display_name, AircraftType, AIRCRAFT_TYPES,
+    AIRCRAFT_TYPES, AircraftType, aircraft_by_id, callsign_for, encode_tcode, encode_tcode_color,
+    flight_color, pair_skills, plane_display_name,
 };
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;
 use crate::template::{
-    builtin_plane_catalog, finger_four_offset, generate_template, BringUp, CatalogUnit,
-    EntityEvent, EventHook, EventThen, FlightRole, OrderKind, OrderSpec, PlaceLayout, PlaneStart,
-    TemplateOptions, TemplateSeat, ZoneCoalition, AIR_ZONE_IN_M, AIR_ZONE_OUT_M, PLACEMENT_SPACING,
+    AIR_ZONE_IN_M, AIR_ZONE_OUT_M, BringUp, CatalogUnit, EntityEvent, EventHook, EventThen,
+    FlightRole, OrderKind, OrderSpec, PLACEMENT_SPACING, PlaceLayout, PlaneStart, TemplateOptions,
+    TemplateSeat, ZoneCoalition, builtin_plane_catalog, finger_four_offset, generate_template,
 };
 
 /// AttackArea radius from the original linked fighter pack (metres).
@@ -400,7 +400,13 @@ fn install_pack_logic(
         death_counts.push(death);
     }
 
-    let randomizer_nodes = build_randomizer(&proto_timer, &proto_deact, &proto_act, &spawners, &mut next_id)?;
+    let randomizer_nodes = build_randomizer(
+        &proto_timer,
+        &proto_deact,
+        &proto_act,
+        &spawners,
+        &mut next_id,
+    )?;
     let input_id = randomizer_nodes
         .iter()
         .find(|n| n.name() == Some("Randomizer:INPUT"))
@@ -413,7 +419,14 @@ fn install_pack_logic(
         }
     }
 
-    patch_plane_links(group, &flights, &spawners, &death_ids, old_spawn_id, old_death_id)?;
+    patch_plane_links(
+        group,
+        &flights,
+        &spawners,
+        &death_ids,
+        old_spawn_id,
+        old_death_id,
+    )?;
     install_plane_ends(
         group,
         &entity_ids,
@@ -675,7 +688,10 @@ fn apply_plane_identity(
     plane.set_property("Callnum", "0");
     plane.set_property("AILevel", ailevel.to_string());
     plane.set_property("TCode", format!("\"{}\"", encode_tcode(number)));
-    plane.set_property("TCodeColor", format!("\"{}\"", encode_tcode_color(color, number)));
+    plane.set_property(
+        "TCodeColor",
+        format!("\"{}\"", encode_tcode_color(color, number)),
+    );
     plane.set_property("VictoryCount", "0");
     plane.set_property("Emblem", "0");
     plane.set_existing_property("AiRTBDecision", "0");
@@ -690,7 +706,11 @@ fn flight_place_xz(origin: (f64, f64), flight: usize, seat: usize) -> (f64, f64)
     )
 }
 
-fn apply_identities(group: &mut Il2Entity, plans: &[SeatPlan], cfg: &FlightConfig) -> Result<(), String> {
+fn apply_identities(
+    group: &mut Il2Entity,
+    plans: &[SeatPlan],
+    cfg: &FlightConfig,
+) -> Result<(), String> {
     let origin = group
         .find_by_name("Zone IN")
         .and_then(|z| z.pos_xz())
@@ -710,10 +730,15 @@ fn apply_identities(group: &mut Il2Entity, plans: &[SeatPlan], cfg: &FlightConfi
             i += 1;
             continue;
         }
-        let plan = plans
-            .get(plane_i)
-            .ok_or("more planes than seat plans")?;
-        let y = plane_altitude(alt_min, alt_max, plan.flight, flight_count, plan.seat, plan.size);
+        let plan = plans.get(plane_i).ok_or("more planes than seat plans")?;
+        let y = plane_altitude(
+            alt_min,
+            alt_max,
+            plan.flight,
+            flight_count,
+            plan.seat,
+            plan.size,
+        );
         let xz = flight_place_xz(origin, plan.flight, plan.seat);
         apply_plane_identity(
             &mut units.children[i],
@@ -953,11 +978,7 @@ fn build_randomizer(
         outs.push(out);
 
         if i + 1 < n {
-            closers.push(clone_mcu(
-                proto_deact,
-                next_id,
-                "Close_Remaining_Output(s)",
-            ));
+            closers.push(clone_mcu(proto_deact, next_id, "Close_Remaining_Output(s)"));
         }
     }
 
@@ -1245,9 +1266,22 @@ mod tests {
         };
         let root = configured(cfg);
         let g1 = root.find_by_name("Group 1").unwrap();
-        assert_eq!(g1.find_by_name("Zone IN").unwrap().property("PlaneCoalitions"), Some("[1]"));
-        assert_eq!(g1.find_by_name("Zone OUT").unwrap().property("PlaneCoalitions"), Some("[1]"));
-        assert_eq!(g1.find_by_name("Red 11").unwrap().property("Country"), Some("601"));
+        assert_eq!(
+            g1.find_by_name("Zone IN")
+                .unwrap()
+                .property("PlaneCoalitions"),
+            Some("[1]")
+        );
+        assert_eq!(
+            g1.find_by_name("Zone OUT")
+                .unwrap()
+                .property("PlaneCoalitions"),
+            Some("[1]")
+        );
+        assert_eq!(
+            g1.find_by_name("Red 11").unwrap().property("Country"),
+            Some("601")
+        );
         assert_eq!(
             g1.find_by_name("Red 11").unwrap().property("Model"),
             Some("\"graphics\\planes\\f86a5\\f86a5.mgm\"")
@@ -1272,19 +1306,33 @@ mod tests {
         };
         let root = configured(cfg);
         let g1 = root.find_by_name("Group 1").unwrap();
-        assert_eq!(g1.find_by_name("COOLDOWN").unwrap().property("Time"), Some("90"));
+        assert_eq!(
+            g1.find_by_name("COOLDOWN").unwrap().property("Time"),
+            Some("90")
+        );
         assert!(g1.find_by_name("REENFORCEMENTS (33%)").is_none());
         assert_eq!(
             g1.find_by_name("SPAWN UNITS").unwrap().targets,
-            vec![g1
-                .find_by_name("Randomizer:INPUT")
-                .unwrap()
-                .index
-                .unwrap()]
+            vec![g1.find_by_name("Randomizer:INPUT").unwrap().index.unwrap()]
         );
-        assert_eq!(g1.find_by_name("Delay Delete").unwrap().property("Time"), Some("45"));
-        let y11: f64 = g1.find_by_name("Red 11").unwrap().property("YPos").unwrap().parse().unwrap();
-        let y21: f64 = g1.find_by_name("Blue 21").unwrap().property("YPos").unwrap().parse().unwrap();
+        assert_eq!(
+            g1.find_by_name("Delay Delete").unwrap().property("Time"),
+            Some("45")
+        );
+        let y11: f64 = g1
+            .find_by_name("Red 11")
+            .unwrap()
+            .property("YPos")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let y21: f64 = g1
+            .find_by_name("Blue 21")
+            .unwrap()
+            .property("YPos")
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!((y11 - 2000.0).abs() < 0.01);
         assert!((y21 - 4000.0).abs() < 0.01);
     }
@@ -1353,7 +1401,10 @@ mod tests {
         let delta = wing - lead;
         assert!((3000.0 - lead).abs() < 0.01);
         assert!(delta >= 25.0 && delta <= 50.0, "pair stack {delta}");
-        assert!(delta < 100.0, "2-ship must not use the 2000 m high-cover offset");
+        assert!(
+            delta < 100.0,
+            "2-ship must not use the 2000 m high-cover offset"
+        );
     }
 
     #[test]
@@ -1374,9 +1425,16 @@ mod tests {
         let y14 = ypos(g1, "Red 14");
         assert!(y11 >= 500.0 && y11 <= 1500.0, "low cover {y11}");
         assert!(((y12 - y11).abs() - pair_stack_m(0, 0)).abs() < 0.01);
-        assert!((y13 - y11 - 2000.0).abs() < 0.01, "high cover offset {}", y13 - y11);
+        assert!(
+            (y13 - y11 - 2000.0).abs() < 0.01,
+            "high cover offset {}",
+            y13 - y11
+        );
         let high_stack = y14 - y13;
-        assert!(high_stack >= 25.0 && high_stack <= 50.0, "high pair stack {high_stack}");
+        assert!(
+            high_stack >= 25.0 && high_stack <= 50.0,
+            "high pair stack {high_stack}"
+        );
     }
 
     #[test]
@@ -1393,9 +1451,18 @@ mod tests {
             altitude_max: 11000.0,
             ..low_max.clone()
         };
-        let y_low = ypos(configured(low_max).find_by_name("Group 1").unwrap(), "Red 11");
-        let y_high = ypos(configured(high_max).find_by_name("Group 1").unwrap(), "Red 11");
-        assert!(y_high > y_low + 100.0, "low cover should rise with max ({y_low} vs {y_high})");
+        let y_low = ypos(
+            configured(low_max).find_by_name("Group 1").unwrap(),
+            "Red 11",
+        );
+        let y_high = ypos(
+            configured(high_max).find_by_name("Group 1").unwrap(),
+            "Red 11",
+        );
+        assert!(
+            y_high > y_low + 100.0,
+            "low cover should rise with max ({y_low} vs {y_high})"
+        );
     }
 
     #[test]
@@ -1410,10 +1477,20 @@ mod tests {
         let mut root = configured(cfg);
         let out = generate_pack(&root, 2).expect("pack");
         assert_eq!(out.name(), Some("USSR Fighters 2pack - Linked"));
-        assert_eq!(out.find_by_name("Group 2").unwrap().count_block_type("Plane"), 5);
+        assert_eq!(
+            out.find_by_name("Group 2")
+                .unwrap()
+                .count_block_type("Plane"),
+            5
+        );
         let text = serialize_group(&out);
         parse_group_file(&text).expect("reparse");
-        assert!(out.find_by_name("Group 2").unwrap().find_by_name("Spawn 3").is_some());
+        assert!(
+            out.find_by_name("Group 2")
+                .unwrap()
+                .find_by_name("Spawn 3")
+                .is_some()
+        );
         let _ = &mut root;
     }
 
@@ -1421,7 +1498,12 @@ mod tests {
     fn ussr_keeps_eastern_checkzones() {
         let root = configured(FlightConfig::default());
         let g1 = root.find_by_name("Group 1").unwrap();
-        assert_eq!(g1.find_by_name("Zone IN").unwrap().property("PlaneCoalitions"), Some("[2]"));
+        assert_eq!(
+            g1.find_by_name("Zone IN")
+                .unwrap()
+                .property("PlaneCoalitions"),
+            Some("[2]")
+        );
     }
 
     #[test]
@@ -1435,8 +1517,14 @@ mod tests {
         };
         let root = configured(cfg);
         let g1 = root.find_by_name("Group 1").unwrap();
-        assert_eq!(g1.find_by_name("Zone IN").unwrap().property("Zone"), Some("16000"));
-        assert_eq!(g1.find_by_name("Zone OUT").unwrap().property("Zone"), Some("35000"));
+        assert_eq!(
+            g1.find_by_name("Zone IN").unwrap().property("Zone"),
+            Some("16000")
+        );
+        assert_eq!(
+            g1.find_by_name("Zone OUT").unwrap().property("Zone"),
+            Some("35000")
+        );
         let areas = attack_areas(g1);
         assert_eq!(areas.len(), 1);
         assert_eq!(areas[0].property("AttackArea"), Some("30000"));
@@ -1471,7 +1559,12 @@ mod tests {
         assert!(events.contains(&7), "OnBingoFuel");
         let gates = root.find_by_name("NodeGates").unwrap();
         let out_disable = gates.find_by_name("1OUT - DISABLE").unwrap().index.unwrap();
-        assert!(g1.find_by_name("Zone IN").unwrap().targets.contains(&out_disable));
+        assert!(
+            g1.find_by_name("Zone IN")
+                .unwrap()
+                .targets
+                .contains(&out_disable)
+        );
     }
 
     #[test]
@@ -1545,8 +1638,14 @@ mod tests {
         let mc1 = g1.find_by_name("Mission Complete 1").unwrap();
         let mc2 = g1.find_by_name("Mission Complete 2").unwrap();
         assert!(mc1.targets.contains(&end.index.unwrap()));
-        assert!(!mc1.targets.contains(&g1.find_by_name("CLEANUP 2").unwrap().index.unwrap()));
-        assert!(mc2.targets.contains(&g1.find_by_name("CLEANUP 2").unwrap().index.unwrap()));
+        assert!(
+            !mc1.targets
+                .contains(&g1.find_by_name("CLEANUP 2").unwrap().index.unwrap())
+        );
+        assert!(
+            mc2.targets
+                .contains(&g1.find_by_name("CLEANUP 2").unwrap().index.unwrap())
+        );
         let parked = {
             let mut pack = generate_pack(&root, 2).expect("pack");
             crate::pack::park_rtbs(&mut pack, &[(80_000.0, 210_000.0), (80_000.0, 230_000.0)]);
@@ -1576,7 +1675,11 @@ mod tests {
         let spawn = g1.find_by_name("SPAWN UNITS").unwrap().pos_xz().unwrap();
         let zone = g1.find_by_name("Zone IN").unwrap().pos_xz().unwrap();
         let end = g1.find_by_name("CLEANUP 1").unwrap().pos_xz().unwrap();
-        let force = g1.find_by_name("Force Complete 1").unwrap().pos_xz().unwrap();
+        let force = g1
+            .find_by_name("Force Complete 1")
+            .unwrap()
+            .pos_xz()
+            .unwrap();
         let delay = g1.find_by_name("Delay Delete 1").unwrap().pos_xz().unwrap();
         let deact = g1.find_by_name("Deactivate 1").unwrap().pos_xz().unwrap();
         let delete = g1.find_by_name("Trigger Delete").unwrap().pos_xz().unwrap();
@@ -1589,7 +1692,10 @@ mod tests {
         assert!(deact.0 <= delay.0, "deactivate at the bottom of the stack");
         assert!(delete.1 > zone.1, "group delete on the cleanup side");
         let end2 = g1.find_by_name("CLEANUP 2").unwrap().pos_xz().unwrap();
-        assert!(end2.1 > end.1, "second plane cleanup is its own column further east");
+        assert!(
+            end2.1 > end.1,
+            "second plane cleanup is its own column further east"
+        );
     }
 
     fn xz(g1: &Il2Entity, name: &str) -> (f64, f64) {
@@ -1621,7 +1727,10 @@ mod tests {
         assert!(!pair_is_high(0, 4) && pair_is_high(2, 4));
         assert!(!pair_is_high(2, 3), "3-ship leftover stays low");
         assert!(!pair_is_high(4, 5), "5-ship leftover stays low");
-        assert!(pair_is_high(2, 6) && !pair_is_high(4, 6), "6-ship is 4 down 2 up");
+        assert!(
+            pair_is_high(2, 6) && !pair_is_high(4, 6),
+            "6-ship is 4 down 2 up"
+        );
         assert!(pair_is_high(2, 8) && !pair_is_high(4, 8) && pair_is_high(6, 8));
 
         let three = FlightConfig {
@@ -1635,7 +1744,10 @@ mod tests {
         let g1 = configured(three).find_by_name("Group 1").unwrap().clone();
         let y11 = ypos(&g1, "Red 11");
         let y13 = ypos(&g1, "Red 13");
-        assert!((y13 - y11).abs() < 1.0, "3-ship leftover must not climb 2000 m ({y11} vs {y13})");
+        assert!(
+            (y13 - y11).abs() < 1.0,
+            "3-ship leftover must not climb 2000 m ({y11} vs {y13})"
+        );
 
         let six = FlightConfig {
             flight_count: 1,
@@ -1649,7 +1761,10 @@ mod tests {
         let y11 = ypos(&g1, "Red 11");
         let y13 = ypos(&g1, "Red 13");
         let y15 = ypos(&g1, "Red 15");
-        assert!((y13 - y11 - 2000.0).abs() < 0.01, "second pair of the 4-ship is high");
+        assert!(
+            (y13 - y11 - 2000.0).abs() < 0.01,
+            "second pair of the 4-ship is high"
+        );
         assert!((y15 - y11).abs() < 1.0, "trailing 6-ship pair stays low");
     }
 }
