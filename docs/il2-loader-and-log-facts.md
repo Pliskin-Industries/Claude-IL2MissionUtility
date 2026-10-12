@@ -32,6 +32,11 @@ Facts about the game that are not obvious from this repo's code. Each one cost a
 - Deactivating a running timer cancels it. Re-triggering a running timer restarts it.
 - Inputs to an inactive counter are not counted; the count survives Deactivate and Activate.
 
+- **An aircraft that dies raises OnEvent 13, then 0, then 2; it does not raise 4.** Seen for a gun kill and for a Damage command (flight 1G, 2026-10-12). 13 and 0 come within 0.1 s of the kill, 2 some seconds later when the wreck hits the ground, and not always.
+- **`MCU_Delete` raises no event** on the aircraft it removes; neither does the template's Deactivate then Delete chain.
+- **A Delete may leave a live aircraft behind** when another aircraft in its Objects list is already dead. Seen once (flight 1G, G1a); the cause is not confirmed.
+- A plane's `Country` can be changed on a copied flight, and the log reports the new country.
+
 Full evidence for the logic rows: `handoff/P14-probe-results.md`.
 
 ## The Complex Trigger

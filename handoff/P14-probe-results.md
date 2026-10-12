@@ -115,3 +115,50 @@ How it was flown: level-flight helper on, turns with the helper's turn keys, at 
 **For gate G1 (step 4):** the T-c answers the threshold design needs are in: c, the re-check and h are confirmed, and o is "fires once". **The user ruled on 2026-10-12 that this run counts as flight 1A and gate G1 is met** (`docs/decisions/0009`). Still open from flight 1A: risk n (cruise speed) and the country-filter cells.
 
 Seen on screen: the cues "T-c: fly east into C4 now" (12:00) and "Flight 1A done. End the mission normally" (26:00). Per-event subtitles last 1 s and were not caught in the samples.
+
+## Flight 1G (kill events, no pilot) — 2026-10-12, session `2026-10-12_19-05-42`
+
+Step 0e probe `P14_Probe_1G_traced` (`handoff/p14-probes/flight1g/`), built as `P14_Probe_1G_20261012`, hosted by the game client on the second PC (game `261002`). Claude sat on the ground at K14 from 03:31; the mission was finished from the menu at 26:54. Logs: `src/testdata/missionlog/real_6/` (66 files).
+
+| Flight | What was done to it | Observed (log) | Result |
+|---|---|---|---|
+| G4 (both planes) | `MCU_CMD_Damage`, Complete, at 04:00 | Kill records at 04:00.02 with attacker −1, for each plane and its pilot. Per plane: event **13** at 04:00.04, event **0** at 04:00.10. G4b also event **2** at 04:15.08 (15 s later); G4a's event 2 never logged. **Event 4 never.** | A Damage command kills at once and raises 13 and 0, once each |
+| G1b | shot down by the hunter wingman at 10:57.88 (9.5 min after the first Attack order) | event **13** and event **0** at 10:57.90, event **2** at 11:01.30. **Event 4 never.** | A gun kill raises the same events as the Damage command |
+| G1a | attacked, not shot down | no event | see the finding below |
+| G2 (`MCU_Delete` at 10:00) | deleted | no event of any type | **Delete raises no event** |
+| G3 (Deactivate, then Delete 0.5 s later) | deleted | no event of any type | **the template's Deactivate → Delete chain raises no event** |
+
+**Result g: not confirmed as written; the design needs event 13, not event 4.** The plan expected one type 4 per aircraft lost. No type 4 fired for any of the three aircraft that died. Type 13 fired exactly once for each of them, by gun and by Damage command, and never for a deleted aircraft. No "ev4 2+" readout fired, which says nothing, because no ev4 fired at all. Event 5 never fired; nothing landed.
+
+**Finding: one aircraft outlived its Delete.** G1a (log id 20480) still existed when the mission ended at 26:54, at 200 m, 5 km from K14, with 66 rounds fired. The cell close at 15:00 fired `G1 CLOSE DELETE`, whose Objects are G1a's and G1b's entities; G1b had been dead for four minutes. The hunters' own close Delete, with two live aircraft, worked: neither hunter is in the end-of-mission list. **Not known:** whether a Delete with a dead aircraft in its Objects list skips the live ones, or something else kept G1a. P14's budget counts an aircraft as gone when it is deleted (U22), so this needs its own probe cell before step 3 is settled.
+
+Other facts from this run:
+- AI told to attack with `MCU_CMD_AttackTarget` four times (01:30 to 06:00) took until 10:58 to get one kill, with ace skill, and never got the second. An AI gun kill is too slow and unsure to build a test on; the Damage command is exact.
+- A Damage-command kill logs `AType:3` with `AID:-1`.
+- The log names the hunter's country as 503 and its victim's as 601, so a `Country` changed on a copied flight takes effect.
+
+## Flight 1N (cruise leg and NATO country filter) — 2026-10-12, session `2026-10-12_19-37-02`
+
+Step 0e probe `P14_Probe_1N_traced` (`handoff/p14-probes/flight1n/`), built as `P14_Probe_1N_20261012` with `--spawns`. Flown by Claude from the `1N NATO` air start: spawned at 04:02.22 heading north at 3048 m, level-flight helper on, **throttle 100 % throughout**, 2990 m, 756 to 762 km/h indicated. Finished from the menu at 15:54.8. Logs: `src/testdata/missionlog/real_7/` (34 files). The air start faced north as the spawn list asked, and the track drifted 1.2 km east over 157 km.
+
+**Cell Y-N (country filter).** Times are mission time; each pair is two aircraft, so each trigger event comes twice, about 3 s apart.
+
+| Window | Who crossed | YN-CT (`Country = 601`) | YN-CT0 (no filter) | Plain zones `[2]` |
+|---|---|---|---|---|
+| A | AI pair, country **602** | **silent** | entered 02:17.68 and 02:20.66; left 03:55.88 and 03:56.20 | Z1 fired 02:17.68 |
+| B | AI pair, country **601** | entered 07:27.66 and 07:30.76; left 09:05.86 and 09:06.18 | the same four times | Z1 and Z2 fired 07:27.66 |
+| pilot | player, country 601 | entered 11:17.74; left 12:38.92 | the same | Z1, Z2 and Z3 fired 11:17.74 |
+
+**Result: the country filter works on the NATO side.** A Complex Trigger filtered to 601 ignores an aircraft of country 602 and fires for an aircraft of country 601, AI or player. This is option 4 of `docs/decisions/0008`. Also shown:
+- **A Complex Trigger sees AI aircraft,** and reports Object Entered and Object Left once per aircraft.
+- **Country 602 is usable.** A plane written with `Country = 602` loads, flies, and counts as NATO: the plain `[2]` zone fired for it.
+- **A plain check zone fires again for each new arrival.** Z1 was pulsed once, at 00:10, and fired three times, once per window. In flight 1A zone C5 fired once while one player stayed inside. So a pulsed Closer 1 zone fires once per entry into an empty zone, not once for ever.
+- The "entered 2+" and "entered 3+" readouts fired at the second and third entries, as wired.
+
+**Cell T-n2 (speed).** START fired at 06:52.14 and END at 08:30.62: 24 km in 98.48 s = **877 km/h** over the ground at 100 % throttle and 2990 m. The crossing of Y-N (a 19.9 km chord, 81.18 s) gives 883 km/h. The game's handbook chart shows about 890 km/h for the F-80C in combat mode at 3000 m, so **the handbook's speed charts are true speed and agree with the game within 2 %.**
+
+**The AI's own speed was measured too.** Both AI pairs took 98.2 s between entering and leaving the 20 km circle: **733 km/h** over the ground, flying the HVAR template's waypoint (`Speed = 660`, 3050 m). The plan's F-80 figure is 732 km/h.
+
+**Result n:** the plan's 732 km/h matches what AI F-80Cs flying the built-in template actually do, to within 1 km/h. A player at full throttle is 20 % faster (877 km/h); the handbook's "cruising speed" for a player is 348 km/h indicated. Which of these the threshold timing should use is a step 4 decision (U3 says "F-80 transit time at cruise"); risk n's fallback is not triggered by the AI figure.
+
+Not done: the cue at 20:00 was not waited for; the mission was ended at 15:54 once every cell had its answer.
