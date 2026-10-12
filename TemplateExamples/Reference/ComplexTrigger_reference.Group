@@ -1,0 +1,77 @@
+MCU_TR_ComplexTrigger
+{
+  Index = 3;
+  Name = "Translator Complex Trigger";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 25226.105;
+  YPos = 0.000;
+  ZPos = 25640.630;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  Enabled = 1;
+  Cylinder = 1;
+  Radius = 10000;
+  DamageThreshold = 1;
+  DamageReport = 50;
+  CheckVehicles = 0;
+  CheckPlanes = 1;
+  EventsFilterSpawned = 0;
+  EventsFilterEnteredSimple = 1;
+  EventsFilterEnteredAlive = 0;
+  EventsFilterLeftSimple = 1;
+  EventsFilterLeftAlive = 0;
+  EventsFilterFinishedSimple = 0;
+  EventsFilterFinishedAlive = 0;
+  EventsFilterStationaryAndAlive = 0;
+  EventsFilterFinishedStationaryAndAlive = 0;
+  EventsFilterTookOff = 0;
+  EventsFilterDamaged = 0;
+  EventsFilterCriticallyDamaged = 0;
+  EventsFilterRepaired = 0;
+  EventsFilterKilled = 0;
+  EventsFilterDropedBombs = 0;
+  EventsFilterFiredFlare = 0;
+  EventsFilterFiredRockets = 0;
+  EventsFilterDroppedCargoContainers = 0;
+  EventsFilterDeliveredCargo = 0;
+  EventsFilterParatrooperJumped = 0;
+  EventsFilterParatrooperLandedAlive = 0;
+  Country = 601;
+  ObjectScript = "luascripts\worldobjects\planes\f51d.txt";
+  ObjectName = "P14RefName";
+  OnEvents
+  {
+    OnEvent
+    {
+      Type = 58;
+      TarId = 4;
+    }
+    OnEvent
+    {
+      Type = 60;
+      TarId = 4;
+    }
+  }
+}
+
+MCU_Timer
+{
+  Index = 4;
+  Name = "Trigger Timer";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 26871.644;
+  YPos = 0.000;
+  ZPos = 22324.428;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Time = 0;
+  Random = 100;
+}
+
