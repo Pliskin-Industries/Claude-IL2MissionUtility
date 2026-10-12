@@ -62,6 +62,15 @@ What the flight taught:
 - The simulation kept real time for the whole 28 minutes. The frame rate was not measured (the counter is RCtrl+Backspace).
 - Leaving the server worked first time with: Leave Server, hold Enter twice; on the results screen Leave Server, hold Enter twice; then Back, Back with the mouse only.
 
+## Step 0e (same day)
+
+- Astra built it in three jobs (`20261012202902-ad183d72`, `20261012205208-e28920ae`, `20261012210822-e97094ac`), model `gpt-6-astra` confirmed in the first job's log. Commits `54138eb` and `49c6356` on `codex/p14-0e`, merged as `aa3b048`.
+- A two-axis review found no breach of the repo's rules and three spec problems, all fixed before any flight: the trigger breadcrumbs hung on a subtitle's outputs; the hunters' Attack order could be replaced by their template ground attack; G2 and G3 started on one point.
+- Style notes left for the user to rule on: duplicated airfield lookup in the builder (`spawn_airfields` and `planes_block`), raw tracebacks if the game's test mission changes shape, bare country and event numbers, flag arguments (`build_y(p, true)`).
+- Build commands for the three missions: as in `handoff/p14-probes/flight1a/README.md`, with `--spawns target/p14/P14_Probe_1N_traced.spawns.json` (or `1D`) in place of `--ref`; flight 1G uses `--ref "TemplateExamples/K14 AFB_mp.Group" --spawn-planes f80c10`.
+- **The game loses input whenever something else takes the foreground.** Astra's and the test runs' shell windows did it, and so did a RustDesk window the user opened on this PC. With no foreground window at all, the computer-use tool refuses keys ("no app is frontmost"). Fly only when nothing else is running and the user is not using the PC.
+- The handbook is reached from the in-flight Esc menu (HANDBOOK); the Museum (main menu) lists 12 aircraft and tabs for ground vehicles, armor, artillery, railroad, equipment, ships and theater of war. The country-name file `data\GUI\DefaultCountryNames.eng` names only 000, 501, 502, 503 and 601.
+
 ## For decision 0008 (country filter)
 
 The editor lists five countries: Neutral Country (Neutral), USSR, PRC, DPRK (Eastern Bloc) and USA (Western Bloc). **NATO has one named country.** The mission log header also lists 602 and 603 on the NATO side, but the editor gives them no name, so a Complex Trigger cannot pick them from its country list (writing `Country = 602;` by hand is untested). Cell Y1 as proposed on 2026-10-07 (NATO AI on country 602, players on 601) has no second NATO country to use. The DPRK side has three, so the test is possible there. Not tried: giving Neutral Country the Western Bloc coalition in the mission's Countries table.
