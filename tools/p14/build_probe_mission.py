@@ -7,8 +7,9 @@ Combines, without the mission editor:
     still matches objective breadcrumbs by index),
   * one or more reference groups (e.g. TemplateExamples/K14 AFB_mp.Group),
     renumbered past the probe's indexes, with their language tables merged,
+  * optional --spawns JSON entries, copied as air starts from the test mission,
 then runs IL-2's MissionResaver to write the .msnbin, language files and
-.list the dedicated server loads.
+.list the dedicated server loads. --no-resave writes only .Mission and .eng.
 
 usage:
   python tools/p14/build_probe_mission.py --game "C:\\Program Files\\IL2Series\\game"
@@ -17,11 +18,13 @@ usage:
       --name P14_Probe_0_traced --title "P14 probe flight 0 (traced)"
       --out "C:\\Machine Intelligence\\P14 Flight 0\\mission"
 
-Every group's .eng must sit next to it. Exit code 0 only if the resaver
-reports success. Checked 2026-09-28: the loader rejects a quoted value that
+Every group's .eng must sit next to it. Exit code 0 requires resaver success
+unless --no-resave is set. Checked 2026-09-28: the loader rejects a quoted value that
 holds ; = { } ' or a non-ASCII character (see probe_strings_are_loader_safe).
 """
 import argparse
+import json
+import math
 import os
 import re
 import shutil
@@ -100,6 +103,95 @@ def check_loader_safe(text, label):
 DOGFIGHT_TEST = r"data\Multiplayer\Dogfight\_test_dogfight_IL-3.Mission"
 
 
+def shipped_blocks(lines, kind, indent=""):
+    """Locate blocks in the shipped mission's exact, indentation-based shape."""
+    for start, line in enumerate(lines):
+        if line != indent + kind or lines[start + 1] != indent + "{":
+            continue
+        end = next(i for i in range(start + 2, len(lines)) if lines[i] == indent + "}")
+        yield start, end + 1
+
+
+def block_value(lines, key):
+    indent = lines[0][:len(lines[0]) - len(lines[0].lstrip())] + "  "
+    prefix = indent + key + " = "
+    return next(line[len(prefix):-1] for line in lines if line.startswith(prefix))
+
+
+def set_block_value(lines, key, value):
+    indent = lines[0][:len(lines[0]) - len(lines[0].lstrip())] + "  "
+    prefix = indent + key + " = "
+    index = next(i for i, line in enumerate(lines) if line.startswith(prefix))
+    lines[index] = prefix + str(value) + ";"
+
+
+def spawn_airfields(game, path, next_index):
+    """Copy each country's fakefield/entity and one matching air-start entry."""
+    try:
+        entries = json.loads(read_text(path))
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"{path}: cannot read spawn list: {error}") from error
+    if not isinstance(entries, list):
+        raise SystemExit(f"{path}: spawn list must be a JSON array")
+    lines = read_text(os.path.join(game, DOGFIGHT_TEST)).splitlines()
+    airfields = [lines[start:end] for start, end in shipped_blocks(lines, "Airfield")]
+    entities = [lines[start:end] for start, end in shipped_blocks(lines, "MCU_TR_Entity")]
+    groups = []
+    for number, entry in enumerate(entries, 1):
+        label = f"{path}: entry {number}"
+        required = ("name", "country", "x", "z", "heading_deg", "altitude_m", "script")
+        if not isinstance(entry, dict) or any(key not in entry for key in required):
+            raise SystemExit(f"{label}: expected {', '.join(required)}")
+        for key in ("name", "script"):
+            value = entry[key]
+            if not isinstance(value, str) or '"' in value or any(ord(c) < 32 for c in value):
+                raise SystemExit(f"{label}: loader-unsafe {key}")
+            problems = check_loader_safe(f'{key} = "{value}";', label)
+            if problems:
+                raise SystemExit("loader-unsafe strings:\n  " + "\n  ".join(problems))
+        if type(entry["country"]) is not int:
+            raise SystemExit(f"{label}: country must be an integer")
+        for key in ("x", "z", "heading_deg", "altitude_m"):
+            if type(entry[key]) not in (int, float) or not math.isfinite(entry[key]):
+                raise SystemExit(f"{label}: {key} must be a finite number")
+        country, script = entry["country"], entry["script"]
+        airfield = next((block.copy() for block in airfields
+                         if block_value(block, "Country") == str(country)), None)
+        if airfield is None:
+            raise SystemExit(f"{label}: no country {country} airfield in {DOGFIGHT_TEST}")
+        entity = next((block.copy() for block in entities
+                       if block_value(block, "Index") == block_value(airfield, "LinkTrId")
+                       and block_value(block, "MisObjID") == block_value(airfield, "Index")), None)
+        if entity is None:
+            raise SystemExit(f"{label}: no linked entity for country {country} in {DOGFIGHT_TEST}")
+        start, end = next(shipped_blocks(airfield, "Planes", "  "))
+        planes = airfield[start:end]
+        chosen = None
+        for first, last in shipped_blocks(planes, "Plane", "    "):
+            plane = planes[first:last]
+            if (block_value(plane, "StartType") == "0"
+                    and block_value(plane, "Script").strip('"').lower()
+                    == f"luascripts\\worldobjects\\planes\\{script}.txt".lower()):
+                chosen = plane
+                break
+        if chosen is None:
+            raise SystemExit(f"{label}: no StartType = 0 entry for {script} "
+                             f"and country {country} in {DOGFIGHT_TEST}")
+        set_block_value(chosen, "Altitude", entry["altitude_m"])
+        airfield[start:end] = ["  Planes", "  {"] + chosen + ["  }"]
+        set_block_value(airfield, "Name", f'"{entry["name"]}"')
+        for block in (airfield, entity):
+            for key, source in (("XPos", "x"), ("ZPos", "z"), ("YOri", "heading_deg")):
+                set_block_value(block, key, entry[source])
+        text = shift_group("\n".join(airfield + [""] + entity), next_index, 0)
+        problems = check_loader_safe(text, label)
+        if problems:
+            raise SystemExit("loader-unsafe strings:\n  " + "\n  ".join(problems))
+        groups.append(text)
+        next_index = max_index(text) + 1
+    return groups
+
+
 def planes_block(game, country, scripts):
     """A Planes block for an Airfield of `country`, copied entry by entry from
     the game's own dogfight test airfield of that country: the ground-start
@@ -159,6 +251,9 @@ def main():
     ap.add_argument("--game", required=True)
     ap.add_argument("--probe", required=True)
     ap.add_argument("--ref", action="append", default=[])
+    ap.add_argument("--spawns", help="JSON spawn list written by a probe writer")
+    ap.add_argument("--no-resave", action="store_true",
+                    help="write .Mission and .eng without running MissionResaver")
     ap.add_argument("--name", required=True)
     ap.add_argument("--title", required=True)
     ap.add_argument("--out", required=True)
@@ -188,6 +283,9 @@ def main():
         table.update({k + lc_offset: v for k, v in eng.items() if k})
         next_index = (max_index(groups[-1]) // 1000 + 1) * 1000 + 1000
 
+    if a.spawns:
+        groups.extend(spawn_airfields(a.game, a.spawns, next_index))
+
     if problems:
         print("loader-unsafe strings:\n  " + "\n  ".join(problems))
         return 1
@@ -207,6 +305,10 @@ def main():
     with open(mission, "w", encoding="utf-8", newline="") as f:
         f.write(body)
     write_eng(os.path.join(a.out, a.name + ".eng"), table)
+
+    if a.no_resave:
+        print(f"wrote {mission} and {a.name}.eng (--no-resave)")
+        return 0
 
     exe = os.path.join(a.game, r"bin\resaver\MissionResaver.exe")
     r = subprocess.run([exe, "-d", os.path.join(a.game, "data"), "-f", os.path.abspath(mission)],
