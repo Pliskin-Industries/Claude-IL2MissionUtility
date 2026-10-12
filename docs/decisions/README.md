@@ -45,5 +45,6 @@ What this makes easier, harder or necessary.
 | [0007](0007-trace-carrier-c0-s0-objectives.md) | Trace breadcrumbs are C0/S0 objectives | Accepted |
 | [0008](0008-ai-aircraft-trigger-check-zones.md) | What to do about AI aircraft triggering check zones | **Proposed** |
 | [0009](0009-flight-1a-of-2026-10-12-meets-gate-g1.md) | The 2026-10-12 flight counts as flight 1A; gate G1 is met | Accepted |
+| [0010](0010-reshape-the-remaining-probes-for-an-autopilot-pilot.md) | Reshape the remaining probes for an autopilot pilot | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

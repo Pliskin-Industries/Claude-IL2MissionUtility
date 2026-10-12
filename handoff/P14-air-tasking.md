@@ -1092,6 +1092,8 @@ The D30 AI-trigger check, the slot-window cap warning, the totals warning (D36) 
 | **1A** | `P14_Probe_1A.Group` | NATO, F-80C from K14 | T-c, T-n (with ZA4) | 26 min |
 | **1B** | `P14_Probe_1B.Group` | DPRK, from the `P14 DPRK SPAWN` icon | T-g | up to 30 min |
 
+**Flight 1B was retired on 2026-10-12** (decision 0010). Flights 1N, 1D and 1G in step 0e replace it; its rows below are kept as the record of the first design.
+
 **Order.** Flight 0 comes first. Its results choose the trace carrier (step 0T), and flights 1A and 1B are then written with that carrier. If no carrier logs, 1A and 1B are written plain and read from their subtitles.
 
 **0b. Probe generators.** `airtask/probe.rs` (`#[cfg(test)]`) with `generate_probe_0() -> Il2Entity`, `generate_probe_1a() -> Il2Entity` and `generate_probe_1b() -> Il2Entity`, plus their locale strings (`src/locale.rs` ≈89).
@@ -1193,6 +1195,55 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 - **A "build stops" row means: stop, write the result into `handoff/P14-probe-results.md`, and ask the user.** Do not invent a new fallback during the build.
 - **Gates (§10).** Step 3 starts after the flight 0 results are in. Step 4 starts after the flight 1A results are in. Step 2 has no engine assumptions and does not wait. Result g (flight 1B) only chooses the `LossesImpl` default; step 3 builds and tests both variants, so it does not wait for flight 1B.
 - **How many times did it fire? (second review R4-3, third review T12.)** A `Counter(2)` readout proves "fired twice in one tick" only if counters count same-tick pulses one by one (E7). So the J4 and E8 results are read like this: if E7 is confirmed, the `≥2` readouts decide. If E7 is not confirmed, the trace log decides, but only if T-t **T7** showed that **one** breadcrumb fired twice in one tick writes two lines. (T3 is not enough: it fires two different breadcrumbs.) If neither holds, q is recorded as **not settled**: the build keeps the relay latches, which are the pattern every shipped template uses, and the manual says that same-tick double pulses are unverified.
+
+### Step 0e. Probes reshaped for an autopilot pilot — S–M. Branch `codex/p14-0e`
+
+**Why (decisions 0009 and 0010, 2026-10-12).** Claude flies the probes on the second PC from an air start with the level-flight helper: straight legs, turns and orbits, no takeoff and no shooting. Flight 1A was flown that way and gate G1 is met. Three things are left: risk n (cruise speed), the country filter (decision 0008, option 4) and risk g (kill events). **Flight 1B is retired**; flights 1N, 1D and 1G replace it. Flights 0 and 1A do not change: their files were flown and their tests pin them.
+
+| Flight | File | Pilot | Cells | Length |
+|---|---|---|---|---|
+| **1N** | `P14_Probe_1N_traced.Group` | NATO, F-80C, air start at the `1N NATO` spawn | T-n2, Y-N | 20 min |
+| **1D** | `P14_Probe_1D_traced.Group` | DPRK side as USSR, MiG-15bis, air start at the `1D USSR` spawn | Y-D | 20 min |
+| **1G** | `P14_Probe_1G_traced.Group` | none; a player may sit on the ground at K14 | T-g2 | 16 min |
+
+**Spawn points.** Each probe has a spawn list, written next to its `.Group` as `<stem>.spawns.json` (the plain and the traced file get the same list): `name`, `country`, `x`, `z`, `heading_deg`, `altitude_m`, `script`. `tools/p14/build_probe_mission.py --spawns <file>` turns each entry into a spawn airfield copied from the game's own dogfight test mission (the `fakefield` airfield of that country with its `MCU_TR_Entity`), moved to `x`, `z`, turned to `heading_deg` (`YOri`), and holding one `Plane` entry: that airfield's `StartType = 0` entry for `script`, with `Altitude = altitude_m`. Flight 1G has an empty list and uses `--ref "TemplateExamples/K14 AFB_mp.Group"` as flight 0 does.
+
+**Run sheets.** Origin, offsets and times as in the sheets above.
+
+**Flight 1N** (spawn `1N NATO`: country 601, `f80c10`, at (−10, +30), heading 0, 3050 m):
+
+| Cell | Centre (N, E km) | Armed | Closed | Cues |
+|---|---|---|---|---|
+| T-n2 | START (+30, +30), END (+54, +30), icons "T-n START" and "T-n END" | 00:30 | 20:00 | 00:00 "1N: join NATO at the 1N NATO spawn at 04:00 or later. Level flight on at once, hold north at 3050 m, F-80C cruise setting" |
+| Y-N | (+100, +30), icon "Y-N" | 00:10 | 20:00 | 20:00 "Flight 1N done. End the mission normally" |
+
+**Flight 1D** (spawn `1D USSR`: country 501, `mig15bis`, at (+40, −30), heading 0, 3050 m):
+
+| Cell | Centre (N, E km) | Armed | Closed | Cues |
+|---|---|---|---|---|
+| Y-D | (+140, −30), icon "Y-D" | 00:10 | 20:00 | 00:00 "1D: join the 1D USSR spawn at 04:00 or later. Level flight on at once, hold north at 3050 m"; 20:00 "Flight 1D done. End the mission normally" |
+
+**Flight 1G** (no spawn list):
+
+| Cell | Centre (N, E km) | Armed | Closed | Cues |
+|---|---|---|---|---|
+| T-g2 | G2, G3: (+130, +50); G1: (+130, +80); G4: (+130, +110) | 01:00 | 15:00 | 00:00 "1G: no flying needed. Stay on the ground at K14 until 15:30"; 15:30 "Flight 1G done. End the mission normally" |
+
+**Cells (flights 1N, 1D, 1G):**
+
+| Cell | Flight | Tests | Setup and procedure | Observe | Confirmed if |
+|---|---|---|---|---|---|
+| T-n2 | 1N | F-80C cruise speed (n) | START and END: Closer 1, `[2]`, **radius 5 km**, 24 km apart on a north line, pulsed at 00:30, each self-deactivating (as T-n). The pilot spawns 40 km south of START on the line and holds north. On a straight track both zones fire the same distance before their point, so the radius cancels. No ZA4. | Log time between "T-n START" and "T-n END"; speed = 24 km / Δt. The results record the throttle figure and the height flown. | n confirmed if the speed is within ±10 % of 732 km/h; otherwise risk n's fallback. |
+| Y-N | 1N | Country filter, NATO side (decision 0008) | At the centre: Complex Trigger **YN-CT** (cylinder, 10 km, planes, `Country = 601`, Object Entered and Object Left on) and Complex Trigger **YN-CT0** (the same with no `Country` line). Each has `OnEvent` 58 → its "entered" subtitle and `OnEvent` 60 → its "left" subtitle, and a Counter(2) and a Counter(3) readout on "entered". Three plain check zones at the centre, Closer 1, `[2]`, 10 km: **YN-Z1** pulsed 00:10, **YN-Z2** pulsed 05:25, **YN-Z3** pulsed 10:40, each → its own subtitle. AI pair **YN-A** (`probe_flight`, 2 planes, both `Country = 602`) starts 00:20 at 30 km south of the centre, exit 30 km north, deleted 05:20. AI pair **YN-B** (the same with `Country = 601`) starts 05:30, deleted 10:30. The pilot arrives after 10:40. | Which triggers and zones fire in each window: A about 02:20 to 04:20, B about 07:30 to 09:30, the pilot after 10:40 | The filter works if YN-CT stays silent in window A and fires for B and for the pilot, while YN-CT0 and the Z zones fire in all three. If YN-CT0 is silent for AI, a Complex Trigger does not see AI at all, and that is the result to report instead. |
+| Y-D | 1D | Country filter, DPRK side | As Y-N, mirrored: **YD-CT** `Country = 501`, **YD-CT0** unfiltered, zones **YD-Z1** to **YD-Z3** `[1]`, pair **YD-A** `Country = 503`, pair **YD-B** `Country = 501`, same times. The AI pairs are the same F-80C `probe_flight` with the country changed; the aircraft type does not matter to the trigger. | as Y-N | as Y-N, with 501 for 601 |
+| T-g2 | 1G | Kill events (g) | Four 2-ship AI F-80C flights (`probe_flight`, 2 planes) start at 01:00, each 10 km south of its own centre. Each plane has OnEvents 0, 2, 4, 5, 13 → its own subtitle per type, and type 4 also → a Counter(2) readout (as T-g). **G1** is attacked: a hunter pair **G1 HUNTER** (`probe_flight`, 2 planes, `Country = 503`, `AILevel` raised to the highest value the Template Builder writes) starts at 01:00 5 km south of G1's start, and at 01:30 an `MCU_CMD_AttackTarget` (`AttackGroup = 1`, `Priority = 1`, Objects = the hunter lead's entity, Targets = G1a's entity; shape from `TemplateExamples/CorrectedFlightfromTemplate.Group`) fires. **G4** is destroyed at 04:00 by one `MCU_CMD_Damage` per plane (`Damage = 2`, `Type = 1`, Objects = that plane's entity; shape from `TemplateExamples/Reference/CommandDamage_reference.Group`). **G2:** probe `MCU_Delete` at 10:00. **G3:** the template's `Deactivate Units` at 10:00, then its `Trigger Delete` 0.5 s later. Everything still alive, the hunters included, is deleted at the 15:00 close. | Which types fire, how many per plane, and whether a gun kill, a Damage command and a Delete differ | g confirmed if each plane that dies (G1 by guns, G4 by Damage) shows its "ev4" and never its "ev4 2+", and no G2 or G3 "ev4" shows. If the hunters do not kill G1 in time, G4 alone decides, and the results say so. |
+
+**Step 0e acceptance (tests):**
+- The step 0 tests cover the three new files in place of flight 1B's: `probe_files_parse_and_links_resolve`, `probe_strings_are_loader_safe`, `probe_blocks_match_shipped_shapes`, `probe_subtitles_are_unique`, `probe_cells_match_the_table`, `probe_run_sheets_match_the_tables`, `probe_traced_every_subtitle_source_has_a_breadcrumb`.
+- `probe_blocks_match_shipped_shapes` checks `MCU_TR_ComplexTrigger` against `TemplateExamples/Reference/ComplexTrigger_reference.Group` (the same keys in the same order, `Enabled` twice), `MCU_CMD_Damage` against `CommandDamage_reference.Group` and `MCU_CMD_AttackTarget` against `CorrectedFlightfromTemplate.Group`.
+- `probe_spawn_lists_match_the_run_sheets`: each flight's spawn list has the entries in the run sheets above, at `K14_ORIGIN` + the offset (± 1 m).
+- Ignored writers `write_p14_probe_1n`, `write_p14_probe_1d`, `write_p14_probe_1g` write the plain file, the traced file, its `.trace.json`, the `.eng` files and the `.spawns.json` files into `target/p14/`. `write_p14_probe_1b` is removed.
+- Flights 0 and 1A generate byte-for-byte the same files as before.
 
 ### Step 0T. Trace builds and replay core (P10) — M. Branch `claude/p14-trace`
 
