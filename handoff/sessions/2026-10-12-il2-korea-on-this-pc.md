@@ -40,10 +40,27 @@ The user accepted the agreement and signed in (remote session, screen 1280x720).
 
 Hosted from the game client: Multiplayer, Create, Dogfight, "Available from internet" off, mission added with Add to rotation. Loading takes about 4 minutes. Result and comparison: `handoff/P14-probe-results.md`, last section. **This PC reproduces the 2026-10-03 dedicated-server results.**
 
-Left for next time:
-- Frame rate was not measured (no counter on screen). The cockpit view updated smoothly enough to read subtitles; nothing was flown.
-- Mouse-look and autopilot in the air are untested. Flight 0 needed no flying.
-- The mission rotation held the same mission three times, so it reloaded after the first ended.
+## Flying (checked 2026-10-12 on flight 1A)
+
+Claude can fly level legs, orbits and turns with the keyboard alone. It cannot take off, land or fight. Results of the flight: `handoff/P14-probe-results.md`, last section.
+
+| Key (hold about 1 s unless noted) | Effect |
+|---|---|
+| LShift+A | Level-flight helper on or off ("Helper enabled: Level flight"). It holds the height and heading it has when switched on, so switch it on **at once** after an air start. A quick tap does nothing. |
+| LAlt+Z / LAlt+X (keep held) | Banked turn left / right while held: about 1.8 deg/s at 700 km/h indicated, 3.5 deg/s at 350. |
+| LShift+Z / LShift+X (keep held) | Gentle turn, about 1 deg/s. |
+| `-` / `=` (keep held) | Throttle down / up, about 30 % per second. |
+| B | Airbrakes. |
+| M | Cycles the map: Around Me, Me and Target (about 22 km wide), Mission (whole map), off. |
+
+What the flight taught:
+- **The HUD speed is indicated airspeed.** At 4560 m the ground speed was about 20 % higher. Dead reckoning with the HUD figure put a turn 15 km off. Navigate by the map icons instead; they show only within about 11 km.
+- An orbit fits inside a 5 km zone at 350 km/h or less (turn radius about 1.6 km). At 700 km/h the radius is about 6 km.
+- Do not let the speed fall in a turn: at 54 % throttle it decayed to 211 km/h and the game warned "Your speed is too low".
+- A 12 km zone is easy to hit. A 2 km zone needs the icon on the map and a straight run-in of 10 km or more; both were hit, but one only by clipping it in a turn.
+- Each look at the screen costs 5 to 10 s. Plan in 30 s steps.
+- The simulation kept real time for the whole 28 minutes. The frame rate was not measured (the counter is RCtrl+Backspace).
+- Leaving the server worked first time with: Leave Server, hold Enter twice; on the results screen Leave Server, hold Enter twice; then Back, Back with the mouse only.
 
 ## For decision 0008 (country filter)
 
