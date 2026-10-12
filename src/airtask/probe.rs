@@ -300,6 +300,7 @@ const C4_KM: (f64, f64) = (40.0, -8.0);
 const N_START_KM: (f64, f64) = (30.0, 30.0);
 const N_END_KM: (f64, f64) = (54.0, 30.0);
 const G1_KM: (f64, f64) = (130.0, 80.0);
+const G3_KM: (f64, f64) = (130.0, 53.0);
 const G4_KM: (f64, f64) = (130.0, 110.0);
 const E_SIX_PULSES: [f64; 6] = [60.0, 62.0, 64.0, 66.0, 68.0, 70.0];
 const E3_PULSES: [f64; 3] = [60.0, 62.0, 66.0];
@@ -1165,19 +1166,15 @@ fn build_y(p: &mut Probe, nato: bool) {
         let trigger = p.add(node);
         // Live from Mission Begin: Activate on Complex Triggers is unverified.
         p.close_node(trigger);
-        for (event_type, verb) in [(58, "entered"), (60, "left")] {
+        for (event_type, verb, suffix) in [(58, "entered", "ENTERED"), (60, "left", "LEFT")] {
             let text = format!("{name} {verb}");
-            let subtitle = p.subtitle(&text, 1);
-            attach_event(by_id_mut(&mut p.root, trigger), event_type, subtitle);
-            // instrument handles OnEvents only on MCU_TR_Entity. Trace the
-            // subtitle itself so this trigger retains only OnEvent outputs.
-            p.sources.push(p.source(subtitle, None, None));
+            let relay = p.relay(&format!("{name} {suffix}"), 0.0);
+            attach_event(by_id_mut(&mut p.root, trigger), event_type, relay);
+            // The relay fans out to observations and the instrumented breadcrumb.
+            p.observe(relay, &text);
             if event_type == 58 {
                 for threshold in [2, 3] {
-                    let text = format!("{text} {threshold}+");
-                    let readout = p.count(&format!("READ {text}"), threshold, 0);
-                    attach_event(by_id_mut(&mut p.root, trigger), event_type, readout);
-                    p.observe(readout, &text);
+                    p.readout(relay, &format!("{text} {threshold}+"), threshold);
                 }
             }
         }
@@ -1208,7 +1205,7 @@ fn build_y(p: &mut Probe, nato: bool) {
 
 fn build_g(p: &mut Probe) {
     let centre = p.cell.unwrap().centre_km;
-    for (n, at) in [(1, G1_KM), (2, centre), (3, centre), (4, G4_KM)] {
+    for (n, at) in [(1, G1_KM), (2, centre), (3, G3_KM), (4, G4_KM)] {
         let name = format!("G{n}");
         let flight_id = p.ai(&name, 2, (at.0 - 10.0, at.1), at, 60.0);
         let entities = block_ids(by_id(&p.root, flight_id), "MCU_TR_Entity");
@@ -1260,9 +1257,13 @@ fn build_g(p: &mut Probe) {
     attack.set_objects(vec![block_ids(by_id(&p.root, hunter), "MCU_TR_Entity")[0]]);
     attack.set_targets(vec![id(&p.root, "G1a entity")]);
     let attack = p.add(attack);
-    p.at("G1 HUNTER ATTACK AT", 90.0, &[attack]);
+    // Reissue while retaining the copied template's waypoint/AttackArea orders.
+    for (n, time_s) in [(1, 90.0), (2, 180.0), (3, 270.0), (4, 360.0)] {
+        p.at(&format!("G1 HUNTER ATTACK AT {n}"), time_s, &[attack]);
+    }
     p.icon("T-g G1", G1_KM, "[1]");
-    p.icon("T-g G2/G3", centre, "[1]");
+    p.icon("T-g G2", centre, "[1]");
+    p.icon("T-g G3", G3_KM, "[1]");
     p.icon("T-g G4", G4_KM, "[1]");
 }
 
@@ -1710,10 +1711,9 @@ fn probe_files_parse_and_links_resolve() {
                 node.for_each(&mut |event| {
                     if event.block_type == "OnEvent" {
                         let target = number(event, "TarId") as i32;
-                        assert!(matches!(
-                            by_id(&p.root, target).block_type.as_str(),
-                            "MCU_TR_Subtitle" | "MCU_Counter"
-                        ));
+                        let relay = by_id(&p.root, target);
+                        assert_eq!(relay.block_type, "MCU_Timer");
+                        assert_eq!(number(relay, "Time"), 0.0);
                         assert!(
                             p.sources
                                 .iter()
@@ -2304,15 +2304,15 @@ fn probe_cells_match_the_table() {
     );
     assert_observation(&one_a, id(&one_a, "ZA4"), "ZA4 fired");
 
-    for (n, km) in [
-        (1, (130.0, 80.0)),
-        (2, (130.0, 50.0)),
-        (3, (130.0, 50.0)),
-        (4, (130.0, 110.0)),
+    for (n, start_km, centre_km) in [
+        (1, (120.0, 80.0), (130.0, 80.0)),
+        (2, (120.0, 50.0), (130.0, 50.0)),
+        (3, (120.0, 53.0), (130.0, 53.0)),
+        (4, (120.0, 110.0), (130.0, 110.0)),
     ] {
         let name = format!("G{n}");
         let flight = named(&one_g, &name);
-        assert_flight(flight, 2, world((km.0 - 10.0, km.1)), world(km));
+        assert_flight(flight, 2, world(start_km), world(centre_km));
         assert_at(
             &one_g,
             &format!("{name} START"),
@@ -2402,17 +2402,40 @@ fn probe_cells_match_the_table() {
     for plane in block_ids(hunters, "Plane") {
         assert_eq!(by_id(hunters, plane).property("AILevel"), Some("4"));
     }
+    assert_eq!(
+        named(hunters, "WP 1").targets,
+        [id(hunters, "AttackArea 1")]
+    );
+    let template_attack = named(hunters, "AttackArea 1");
+    assert_eq!(template_attack.block_type, "MCU_Timer");
+    assert_eq!(number(template_attack, "Time"), 0.5);
+    assert_eq!(
+        template_attack.targets,
+        [id(hunters, "AttackArea")]
+    );
+    assert_eq!(named(hunters, "AttackArea").property("AttackGTargets"), Some("1"));
     let attack = named(&one_g, "G1 HUNTER ATTACK");
     assert_eq!(attack.block_type, "MCU_CMD_AttackTarget");
     assert_eq!(attack.property("AttackGroup"), Some("1"));
     assert_eq!(attack.property("Priority"), Some("1"));
     assert_eq!(attack.objects, [block_ids(hunters, "MCU_TR_Entity")[0]]);
     assert_eq!(attack.targets, [id(&one_g, "G1a entity")]);
-    assert_at(
-        &one_g,
-        "G1 HUNTER ATTACK AT",
-        90.0,
-        &[attack.index.unwrap()],
+    let mut attack_timers = Vec::new();
+    for (name, time_s) in [
+        ("G1 HUNTER ATTACK AT 1", 90.0),
+        ("G1 HUNTER ATTACK AT 2", 180.0),
+        ("G1 HUNTER ATTACK AT 3", 270.0),
+        ("G1 HUNTER ATTACK AT 4", 360.0),
+    ] {
+        assert_at(&one_g, name, time_s, &[attack.index.unwrap()]);
+        attack_timers.push(id(&one_g, name));
+    }
+    assert_eq!(
+        block_ids(&one_g, "MCU_Timer")
+            .into_iter()
+            .filter(|&timer| by_id(&one_g, timer).targets.contains(&attack.index.unwrap()))
+            .collect::<Vec<_>>(),
+        attack_timers
     );
     assert_eq!(one_g.count_block_type("MCU_CMD_AttackTarget"), 1);
     assert_eq!(one_g.count_block_type("MCU_CMD_Damage"), 2);
@@ -2529,9 +2552,14 @@ fn probe_cells_match_the_table() {
             );
             let events = &trigger.children[0];
             assert_eq!(events.block_type, "OnEvents");
-            assert_eq!(events.children.len(), 4);
-            for (event_type, verb) in [(58, "entered"), (60, "left")] {
+            assert_eq!(events.children.len(), 2);
+            for (event_type, verb, suffix) in [(58, "entered", "ENTERED"), (60, "left", "LEFT")] {
                 let text = format!("{name} {verb}");
+                let relay = named(root, &format!("{name} {suffix}"));
+                let relay_id = relay.index.unwrap();
+                assert_eq!(relay.block_type, "MCU_Timer");
+                assert_eq!(number(relay, "Time"), 0.0);
+                assert_eq!(relay.property("Random"), Some("100"));
                 assert_eq!(
                     events
                         .children
@@ -2539,32 +2567,21 @@ fn probe_cells_match_the_table() {
                         .filter(|event| {
                             event.block_type == "OnEvent"
                                 && number(event, "Type") == f64::from(event_type)
-                                && number(event, "TarId") == f64::from(id(root, &text))
+                                && number(event, "TarId") == f64::from(relay_id)
                         })
                         .count(),
                     1
                 );
-                assert_eq!(named(root, &text).block_type, "MCU_TR_Subtitle");
+                assert_observation(root, relay_id, &text);
+                let mut targets = vec![id(root, &text)];
                 if event_type == 58 {
                     for threshold in [2, 3] {
                         let read_text = format!("{text} {threshold}+");
-                        let read_name = format!("READ {read_text}");
-                        assert_counter(root, &read_name, threshold, 0);
-                        assert_eq!(named(root, &read_name).targets, [id(root, &read_text)]);
-                        assert_eq!(
-                            events
-                                .children
-                                .iter()
-                                .filter(|event| {
-                                    event.block_type == "OnEvent"
-                                        && number(event, "Type") == 58.0
-                                        && number(event, "TarId") == f64::from(id(root, &read_name))
-                                })
-                                .count(),
-                            1
-                        );
+                        assert_readout(root, relay_id, &read_text, threshold);
+                        targets.push(id(root, &format!("READ {read_text}")));
                     }
                 }
+                assert_eq!(relay.targets, targets);
             }
         }
         for (n, time_s) in [(1, 10.0), (2, 325.0), (3, 640.0)] {
@@ -2807,7 +2824,8 @@ fn probe_run_sheets_match_the_tables() {
         (&one_n, "T-n END", (54.0, 30.0), "[2]"),
         (&one_n, "Y-N", (100.0, 30.0), "[2]"),
         (&one_d, "Y-D", (140.0, -30.0), "[1]"),
-        (&one_g, "T-g G2/G3", (130.0, 50.0), "[1]"),
+        (&one_g, "T-g G2", (130.0, 50.0), "[1]"),
+        (&one_g, "T-g G3", (130.0, 53.0), "[1]"),
         (&one_g, "T-g G4", (130.0, 110.0), "[1]"),
     ] {
         let mut found = 0;
@@ -3152,15 +3170,8 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
             for (event_type, target) in links(node) {
                 if subtitles.contains(&target) {
                     seen_subtitles.insert(target);
-                    let (source, event_type) = if node.block_type == "MCU_TR_ComplexTrigger" {
-                        // CT events are observed at their emitted subtitles;
-                        // instrument must never add Targets to a CT.
-                        (target, None)
-                    } else {
-                        (node.index.unwrap(), event_type)
-                    };
                     sources
-                        .entry(source)
+                        .entry(node.index.unwrap())
                         .or_default()
                         .insert(event_type);
                 }
@@ -3181,6 +3192,16 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
         }
         let (traced, map) = probe.traced(TraceCarrier::default());
         super::testkit::assert_links_resolve(&traced);
+        for root in [&plain, &traced] {
+            for subtitle in block_ids(root, "MCU_TR_Subtitle") {
+                let subtitle = by_id(root, subtitle);
+                assert!(
+                    subtitle.targets.is_empty(),
+                    "{flight:?} {:?}: subtitle must not forward to Targets",
+                    subtitle.name()
+                );
+            }
+        }
         for trigger in block_ids(&plain, "MCU_TR_ComplexTrigger") {
             assert_eq!(by_id(&plain, trigger), by_id(&traced, trigger));
         }
