@@ -17,7 +17,7 @@ Facts about the game that are not obvious from this repo's code. Each one cost a
 
 ## The text mission log
 
-- Turn it on with `mission_text_log` under `[KEY = system]` in `startup.cfg`. Logs are written to `data\logs\txt\`, a new file about every 33 s.
+- Turn it on with `mission_text_log` under `[KEY = system]` in `startup.cfg`. Logs are written to `data\logs\txt\`, a new file about every 33 s on a dedicated server and about every 11 s when the game client hosts.
 - **Log clock:** tick = 3 + 50 per second of mission time.
 - **`OBJID` is not the MCU index.** Match objectives by position, which is exact.
 - A Mission Objective with Success 1 **ends a dogfight round** about 8 s later. Success 0 logs `AType:8` and the round continues.
@@ -33,3 +33,13 @@ Facts about the game that are not obvious from this repo's code. Each one cost a
 - Inputs to an inactive counter are not counted; the count survives Deactivate and Activate.
 
 Full evidence for the logic rows: `handoff/P14-probe-results.md`.
+
+## The Complex Trigger
+
+Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateExamples/Reference/ComplexTrigger_reference.Group`, with a screenshot of its properties next to it. Copy the block shape from that file; do not write it from memory.
+
+- The block is `MCU_TR_ComplexTrigger`. The editor writes `Enabled = 1;` **twice**.
+- Filters are plain lines after the 21 `EventsFilter…` keys: `Country = 601;`, `ObjectScript = "luascripts\worldobjects\planes\f51d.txt";`, `ObjectName = "…";`. The sample has one of each; the shape for two or more is not known.
+- Outputs are an `OnEvents` block, not `Targets`. Event types seen: Object Entered = 58, Object Left = 60. The other 19 type numbers are not known.
+- One key is misspelled in the game and must be written that way: `EventsFilterDropedBombs`.
+- The editor offers five countries by name: Neutral Country, USSR, PRC, DPRK and USA (601). A mission built on the dogfight test Options block also carries 602 and 603 on the NATO side (log header `CNTRS:…601:2,602:2,603:2`), but the editor shows no name for them, so a trigger cannot pick them from its list.

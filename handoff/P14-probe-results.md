@@ -65,3 +65,31 @@ All times below are mission time from Mission Begin.
 Walker defaults to align with the game: `DeactivateRunningTimer::Cancels` (J1),
 `TimerRetrigger::Restart` (J5), `SameTickCounts::Each` (E7),
 `DropcountMeaning::ResetOn1` (E2), `SetValRefires::Yes` (E6).
+
+## Flight 0 calibration on the second PC — 2026-10-12, session `2026-10-12_14-08-36`
+
+Purpose: show that this PC (Lenovo, integrated graphics, game `261002`, mission hosted by the **game client**, Claude at the controls) gives the same answers as the user's dedicated server did on 2026-10-03. Same probe files, rebuilt as `P14_Probe_0_cal_20261012` with `tools/p14/build_probe_mission.py`. The player joined NATO at K14 in an F-80C at 03:16 and stayed on the ground. The mission was finished from the menu at 16:04 (`AType:7` logged). Logs: `src/testdata/missionlog/real_4/` (81 files, `[0]` included). Replay report: `target/p14/flight0_cal_report.md` (not committed; re-create it with `il2_mission_utility replay`).
+
+Both log sets were replayed with the same binary and the two reports compared line by line.
+
+| What | 2026-10-03 (dedicated server) | 2026-10-12 (this PC) | Verdict |
+|---|---|---|---|
+| Clock fit | T = 3 + 50·s, 11 cues | T = 3 + 50·s, 12 cues | same |
+| T-a1 ZA1 (AI in a `[2]` zone) | fired 01:57.40 | fired 01:57.42 | same, one tick apart |
+| T-a1 ZA2 (control) | never | never | same |
+| T-e E1 to E9 | as in the table above | identical times | same |
+| T-t T1, T2, T3a/b, T7 | 1, 5, 1+1, 1 lines | identical times | same |
+| T-j J1 to J5 | J1 to J3 never; J4 09:00; J5 09:15 | identical | same |
+| T-z Z1 | never | never | same |
+| T-f F1 (random 50 %) | 19 hits, "reached 12" at 03:39 | 19 hits, "reached 12" at 03:51 | random; both inside 12 to 28 |
+| T-f F2 outputs 1/2/3/4 | 9 / 10 / 12 / 9 | 7 / 13 / 11 / 9 | random; each at least 1 |
+| CUE 01 at 00:00 | not seen (`[0]` missing) | logged at tick 3 | t6 gap closed |
+| Mission end | not logged | `AType:7` at 16:04.5 | new |
+
+**Result: this PC reproduces the dedicated-server results.** Every cell with a fixed answer gave the same answer at the same time. Only the two random cells differ, as they should.
+
+Seen on screen (Claude, in the cockpit): the subtitles "F2 out 2", "T-z start" (10:00) and "Flight 0 done. End the mission normally" (11:00) all displayed. The briefing map shows the probe's own icons ("T-z", "T-a1") and no marker for any breadcrumb objective near K14; the breadcrumbs sit at x ≈ 5000 to 5400, z = 5000 in the far corner of the map, and that corner was not inspected.
+
+New log facts from this run:
+- A client-hosted mission writes a new log file about every 11 s (the dedicated server: about every 33 s).
+- The mission header lists countries `501:1,502:1,503:1,601:2,602:2,603:2`, so 602 and 603 exist as NATO-side countries in a mission built on the dogfight test Options block, although the editor names only USA.

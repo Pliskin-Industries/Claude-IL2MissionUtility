@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-10, from the repo at `86c5dbf` and the 2026-10-03 to 2026-10-08 sessions.
+> Last updated: 2026-10-12, with the commits that record the Complex Trigger sample and the flight 0 calibration.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -24,7 +24,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | `codex/p14-0b` | `Claude-IL2MissionUtility-0b` | Already merged. A leftover worktree. |
 | `claude/docs-layout-trial` | `Claude-IL2MissionUtility-docs` | This document layout. Merged 2026-10-10. A leftover worktree. |
 
-Last recorded test run on the active branch: 540 passed, 8 ignored; 69 build and 251 clippy warnings (2026-09-28). Not re-run since. Record each new run on this line.
+Last recorded test run on the active branch: 543 passed, 0 failed, 8 ignored (`cargo test --offline`, 2026-10-12). Warnings were last counted on 2026-09-28: 69 build, 251 clippy. Record each new run on this line.
 
 ## In progress: P14 Air Tasking (issues #28, #29)
 
@@ -33,20 +33,22 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 - **Flight 0 was flown on 2026-10-03 and gate G0 passed.** Results: `handoff/P14-probe-results.md`. Video check: `References/Recordings/flight0-harvest/README.md`.
 - **Step 3 is unblocked but not merged.** Its commit (`3224286`) reports 583 passed, 11 ignored. It still needs the lines marked `// P14 G0: default pending flight 0` settled, the probe fixes merged in (it is 24 commits behind), the shape and string guards extended to Probe 2, and a full review.
 - **Flights 1A and 1B are not flown.** Their generators exist (step 0b); their mission files have not been built. Step 4 waits for flight 1A (gate G1).
+- **Testing on this PC, with Claude flying (2026-10-12).** The game and editor run here on integrated graphics, and Claude can drive both. **Flight 0 was re-flown here as a calibration and matches the 2026-10-03 results** (`handoff/P14-probe-results.md`, last section), so this PC can fly the next probes. The Complex Trigger reference file is saved in `TemplateExamples/Reference/`. How to drive the game, and what is untested: `handoff/sessions/2026-10-12-il2-korea-on-this-pc.md`. Logs: `src/testdata/missionlog/real_4/`.
 
 ## Waiting on the user
 
-1. **Decision: AI aircraft trigger check zones.** Flight 0 showed it. Options and the recommendation are in `docs/decisions/0008-ai-aircraft-trigger-check-zones.md`. It is not needed before flight 1A.
-2. **A Complex Trigger reference file** saved from the editor to `TemplateExamples/Reference/ComplexTrigger_reference.Group`, with a screenshot of its properties. It is not in the repo yet. Flight 1A's country-filter cells need it.
-3. **Whether objective breadcrumbs show as map markers.** The flight 0 video shows nothing in the cockpit view, but the map was never opened.
+1. **Go-ahead to reshape flights 1A and 1B for an autopilot pilot** (air starts lined up on each zone, level legs, wide cue spacing). Proposed 2026-10-12, not approved.
+2. **Decision: AI aircraft trigger check zones.** Flight 0 showed it. Options and the recommendation are in `docs/decisions/0008-ai-aircraft-trigger-check-zones.md`. New on 2026-10-12: NATO has only one country (USA), so the country-filter test (cell Y1) cannot be built on the NATO side as proposed.
+3. **Whether objective breadcrumbs show as map markers.** Nothing shows near K14 on the briefing map (2026-10-12). The far map corner, where the breadcrumbs sit, was not inspected.
 4. **Go-ahead for the next steps below.** They were proposed on 2026-10-03 and not confirmed.
 5. **Older confirmations still listed in the plan:** §10 item 23 (a smaller Auto-fill) and the "For the user to confirm" list.
 
 ## Next steps (proposed order)
 
-1. Finish step 3 as listed above and merge it into `claude/p14-air-tasking`.
-2. Merge upstream. It is now 6 commits ahead, including v0.7.0 and the split of the UI into per-tab files. Trial result and the one expected baseline change: `handoff/sessions/2026-10-07-flight-0-follow-up.md`.
-3. Build flights 1A and 1B with the country-filter cells, each under a new mission name.
+1. Test flying on this PC: an air start, the autopilot, a level leg through a zone. Measure the frame rate.
+2. Finish step 3 as listed above and merge it into `claude/p14-air-tasking`.
+3. Merge upstream. It is now 6 commits ahead, including v0.7.0 and the split of the UI into per-tab files. Trial result and the one expected baseline change: `handoff/sessions/2026-10-07-flight-0-follow-up.md`.
+4. Build flights 1A and 1B with the country-filter cells, each under a new mission name.
 
 ## Traps
 
@@ -54,3 +56,4 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 - `.gitattributes` is `* -text` because `.Group` fixtures are line-ending sensitive. Do not remove it.
 - Do not push `v*` tags casually: they start the release build.
 - Nothing is pushed or merged to `main` without the user (`docs/decisions/0005`).
+- This PC's game is version `261002` since 2026-10-12. A mission built here needs a server on the same version.
