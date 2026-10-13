@@ -1,4 +1,4 @@
-//! Test-only generators for the P14 in-game probes (steps 0b/0e/0f).
+//! Test-only generators for the P14 in-game probes (steps 0b/0e/0f/0g).
 //! Flights 0, 1A, 1G, 1N and 1D were flown; their results are recorded in
 //! `handoff/P14-probe-results.md`. Committed copies of the flown files are in
 //! `handoff/p14-probes/`. Flight 1B was retired by decision 0010.
@@ -45,11 +45,12 @@ pub(crate) enum Flight {
     OneD,
     OneG,
     OneH,
+    OneJ,
 }
 
 impl Flight {
-    const ALL: [Self; 6] = [
-        Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG, Self::OneH,
+    const ALL: [Self; 7] = [
+        Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG, Self::OneH, Self::OneJ,
     ];
 
     fn stem(self) -> &'static str {
@@ -60,6 +61,7 @@ impl Flight {
             Self::OneD => "P14_Probe_1D",
             Self::OneG => "P14_Probe_1G",
             Self::OneH => "P14_Probe_1H",
+            Self::OneJ => "P14_Probe_1J",
         }
     }
 
@@ -71,6 +73,7 @@ impl Flight {
             Self::OneD => RUN_SHEET_1D,
             Self::OneG => RUN_SHEET_1G,
             Self::OneH => RUN_SHEET_1H,
+            Self::OneJ => RUN_SHEET_1J,
         }
     }
 
@@ -92,7 +95,7 @@ impl Flight {
                 altitude_m: 3050.0,
                 script: "mig15bis",
             }],
-            Self::Zero | Self::OneA | Self::OneG | Self::OneH => &[],
+            Self::Zero | Self::OneA | Self::OneG | Self::OneH | Self::OneJ => &[],
         }
     }
 }
@@ -215,8 +218,14 @@ pub(crate) const RUN_SHEET_1G: &[Cell] = &[Cell {
 pub(crate) const RUN_SHEET_1H: &[Cell] = &[Cell {
     key: "T-d",
     centre_km: (130.0, 20.0),
-    arm_s: 60.0,
-    close_s: 480.0,
+    arm_s: D_START_S,
+    close_s: D_CLOSE_S,
+}];
+pub(crate) const RUN_SHEET_1J: &[Cell] = &[Cell {
+    key: "T-d2",
+    centre_km: (130.0, 20.0),
+    arm_s: D_START_S,
+    close_s: D_CLOSE_S,
 }];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -329,8 +338,18 @@ pub(crate) const CUES: &[Cue] = &[
     },
     Cue {
         flight: Flight::OneH,
-        time_s: 330.0,
+        time_s: D_DONE_S,
         text: "Flight 1H done. End the mission normally",
+    },
+    Cue {
+        flight: Flight::OneJ,
+        time_s: 0.0,
+        text: "1J: no flying needed. Stay on the ground at K14 until 05:30",
+    },
+    Cue {
+        flight: Flight::OneJ,
+        time_s: D_DONE_S,
+        text: "Flight 1J done. End the mission normally",
     },
 ];
 
@@ -355,9 +374,13 @@ const G_START_S: f64 = 60.0; // 01:00.
 const G_DAMAGE_S: f64 = 240.0; // 04:00.
 const G_REMOVE_S: f64 = 600.0; // 10:00.
 const G_HUNTER_ATTACK_S: [f64; 4] = [90.0, 180.0, 270.0, 360.0]; // 01:30, 03:00, 04:30, 06:00.
+const D_START_S: f64 = 60.0;
 const D_KILL_S: f64 = 120.0;
 const D_REMOVE_S: f64 = 240.0;
 const D_DETECT_S: f64 = 270.0;
+const D_DONE_S: f64 = 330.0;
+const D_CLOSE_S: f64 = 480.0;
+const J_FLIGHT_OFFSET_KM: f64 = 1.0;
 const E_SIX_PULSES: [f64; 6] = [60.0, 62.0, 64.0, 66.0, 68.0, 70.0];
 const E3_PULSES: [f64; 3] = [60.0, 62.0, 66.0];
 const E_PARTIAL_PULSES: [f64; 3] = [60.0, 62.0, 64.0];
@@ -387,7 +410,7 @@ const G_EVENT_TYPES: [i32; 5] = [
     EVENT_PLANE_LANDED,
     EVENT_KILLED,
 ];
-const H_EVENT_TYPES: [i32; 1] = [EVENT_KILLED];
+const DELETE_EVENT_TYPES: [i32; 1] = [EVENT_KILLED];
 
 struct CounterProbeRow {
     name: &'static str,
@@ -592,6 +615,97 @@ const D_FLIGHTS: &[DeleteProbeRow] = &[
         centre_km: (114.0, 28.0),
         killed: None,
         removal: DeleteRemoval::DeactivateOnly,
+        detector: true,
+    },
+];
+
+#[derive(Clone, Copy)]
+enum PairAircraft {
+    X,
+    Y,
+}
+
+impl PairAircraft {
+    fn index(self) -> usize {
+        match self {
+            Self::X => 0,
+            Self::Y => 1,
+        }
+    }
+
+    fn suffix(self) -> char {
+        match self {
+            Self::X => 'x',
+            Self::Y => 'y',
+        }
+    }
+}
+
+// Each aircraft leads its own flight, so this cell has no lead/wingman removal.
+enum DeletePairRemoval {
+    Nothing,
+    DeleteBothEntities,
+    DeleteEachEntity,
+    DeleteXEntity,
+}
+
+struct DeletePairRow {
+    name: &'static str,
+    centre_km: (f64, f64),
+    killed: Option<PairAircraft>,
+    removal: DeletePairRemoval,
+    detector: bool,
+}
+
+// Step 0g: two independent 1-ship flights per pair, timed as step 0f.
+const J_PAIRS: &[DeletePairRow] = &[
+    DeletePairRow {
+        name: "J0",
+        centre_km: (130.0, 20.0),
+        killed: None,
+        removal: DeletePairRemoval::Nothing,
+        detector: false,
+    },
+    DeletePairRow {
+        name: "J1",
+        centre_km: (130.0, 28.0),
+        killed: None,
+        removal: DeletePairRemoval::DeleteBothEntities,
+        detector: true,
+    },
+    DeletePairRow {
+        name: "J2",
+        centre_km: (130.0, 36.0),
+        killed: Some(PairAircraft::Y),
+        removal: DeletePairRemoval::DeleteBothEntities,
+        detector: true,
+    },
+    DeletePairRow {
+        name: "J3",
+        centre_km: (130.0, 44.0),
+        killed: Some(PairAircraft::X),
+        removal: DeletePairRemoval::DeleteBothEntities,
+        detector: true,
+    },
+    DeletePairRow {
+        name: "J4",
+        centre_km: (130.0, 52.0),
+        killed: Some(PairAircraft::Y),
+        removal: DeletePairRemoval::DeleteEachEntity,
+        detector: true,
+    },
+    DeletePairRow {
+        name: "J5",
+        centre_km: (130.0, 60.0),
+        killed: Some(PairAircraft::Y),
+        removal: DeletePairRemoval::DeleteXEntity,
+        detector: true,
+    },
+    DeletePairRow {
+        name: "J6",
+        centre_km: (130.0, 68.0),
+        killed: Some(PairAircraft::Y),
+        removal: DeletePairRemoval::Nothing,
         detector: true,
     },
 ];
@@ -1763,6 +1877,67 @@ fn build_d(p: &mut Probe) {
     }
 }
 
+fn build_d2(p: &mut Probe) {
+    let cell = p.cell.unwrap();
+    let close = id(&p.root, &format!("{} CLOSE", cell.key));
+    for row in J_PAIRS {
+        let name = row.name;
+        let entities = [PairAircraft::X, PairAircraft::Y].map(|aircraft| {
+            let label = format!("{name}{}", aircraft.suffix());
+            let east_offset = match aircraft {
+                PairAircraft::X => -J_FLIGHT_OFFSET_KM,
+                PairAircraft::Y => J_FLIGHT_OFFSET_KM,
+            };
+            let centre = (row.centre_km.0, row.centre_km.1 + east_offset);
+            let flight_id = p.ai_without_close_delete(
+                &label,
+                1,
+                (centre.0 - START_SOUTH_KM, centre.1),
+                centre,
+                cell.arm_s,
+            );
+            let flight = by_id(&p.root, flight_id);
+            let plane = block_ids(flight, "Plane")[0];
+            let entity = block_ids(flight, "MCU_TR_Entity")[0];
+            by_id_mut(&mut p.root, plane).set_name(&label);
+            by_id_mut(&mut p.root, entity).set_name(&format!("{label} entity"));
+            let subtitle = p.subtitle(&format!("{label} ev{EVENT_KILLED}"), 1);
+            attach_event(by_id_mut(&mut p.root, entity), EVENT_KILLED, subtitle);
+            p.sources.push(p.source(entity, Some(EVENT_KILLED), None));
+
+            let delete = p.delete(&format!("{label} CLOSE DELETE"), &[entity]);
+            p.link(close, delete);
+            if row.detector {
+                p.damage_at(&format!("{label} DETECTOR"), D_DETECT_S, entity);
+            }
+            entity
+        });
+        if let Some(aircraft) = row.killed {
+            let label = format!("{name}{}", aircraft.suffix());
+            p.damage_at(&format!("{label} DAMAGE"), D_KILL_S, entities[aircraft.index()]);
+        }
+        match row.removal {
+            DeletePairRemoval::Nothing => {}
+            DeletePairRemoval::DeleteBothEntities => {
+                let delete = p.delete(&format!("{name} DELETE"), &entities);
+                p.at(&format!("{name} DELETE AT"), D_REMOVE_S, &[delete]);
+            }
+            DeletePairRemoval::DeleteEachEntity => {
+                let deletes = [PairAircraft::X, PairAircraft::Y].map(|aircraft| {
+                    let label = format!("{name}{}", aircraft.suffix());
+                    p.delete(&format!("{label} DELETE"), &[entities[aircraft.index()]])
+                });
+                p.at(&format!("{name} DELETE AT"), D_REMOVE_S, &deletes);
+            }
+            DeletePairRemoval::DeleteXEntity => {
+                let delete = p.delete(&format!("{name} DELETE"), &[entities[PairAircraft::X.index()]]);
+                p.at(&format!("{name} DELETE AT"), D_REMOVE_S, &[delete]);
+            }
+        }
+        p.icon(&format!("{} {name}", cell.key), row.centre_km, "[1]");
+    }
+}
+
 fn build(flight: Flight) -> Probe {
     let mut p = Probe::new(flight);
     for &cell in flight.sheet() {
@@ -1781,6 +1956,7 @@ fn build(flight: Flight) -> Probe {
             "Y-D" => build_y(&mut p, Side::Dprk),
             "T-g2" => build_g(&mut p),
             "T-d" => build_d(&mut p),
+            "T-d2" => build_d2(&mut p),
             _ => panic!("unknown probe cell {}", cell.key),
         }
     }
@@ -1805,6 +1981,9 @@ pub(crate) fn generate_probe_1g() -> Il2Entity {
 }
 pub(crate) fn generate_probe_1h() -> Il2Entity {
     build(Flight::OneH).root
+}
+pub(crate) fn generate_probe_1j() -> Il2Entity {
+    build(Flight::OneJ).root
 }
 
 fn serialize_probe(root: &Il2Entity) -> String {
@@ -1932,6 +2111,12 @@ fn write_p14_probe_1g() {
 #[ignore = "writes target/p14 probe files"]
 fn write_p14_probe_1h() {
     write_probe(Flight::OneH, TraceCarrier::default());
+}
+
+#[test]
+#[ignore = "writes target/p14 probe files"]
+fn write_p14_probe_1j() {
+    write_probe(Flight::OneJ, TraceCarrier::default());
 }
 
 fn number(node: &Il2Entity, property: &str) -> f64 {
@@ -2163,6 +2348,39 @@ fn assert_named_flight(
 }
 
 #[test]
+fn probe_one_plane_flight_has_no_removed_aircraft_links() {
+    let mut next_id = 10_000;
+    let flight = probe_flight(HVAR, 1, world((120.0, 19.0)), world((130.0, 19.0)), &mut next_id);
+    assert_flight(&flight, 1, world((120.0, 19.0)), world((130.0, 19.0)));
+    let plane = block_ids(&flight, "Plane")[0];
+    let entity = block_ids(&flight, "MCU_TR_Entity")[0];
+    assert_eq!(by_id(&flight, plane).property("NumberInFormation"), Some("0"));
+    assert!(by_id(&flight, entity).targets.is_empty());
+    assert!(by_id(&flight, entity).objects.is_empty());
+    assert_eq!(named(&flight, "Formation").property("FlightSize"), Some("1"));
+    for name in ["Activate Units", "Deactivate Units", "Force Complete - High", "Formation", "AttackArea", "WP 1"] {
+        assert_eq!(named(&flight, name).objects, [entity], "{name}");
+    }
+    assert_eq!(named(&flight, "Trigger Delete").objects, [plane]);
+    let parsed = parse_group_file(&serialize_probe(&flight)).unwrap();
+    assert_eq!(parsed, flight);
+    super::testkit::assert_links_resolve(&parsed);
+    let mut indexes = Vec::new();
+    parsed.collect_indexes(&mut indexes);
+    let unique: HashSet<_> = indexes.iter().copied().collect();
+    assert_eq!(unique.len(), indexes.len());
+    assert!(unique.iter().all(|&index| index >= 10_000));
+    parsed.for_each(&mut |node| {
+        for key in ["LinkTrId", "MisObjID", "TarId", "CmdId"] {
+            if let Some(value) = node.property(key) {
+                let target: i32 = value.parse().unwrap();
+                assert!(unique.contains(&target), "{:?}: dangling {key} {target}", node.name());
+            }
+        }
+    });
+}
+
+#[test]
 fn probe_files_parse_and_links_resolve() {
     use super::testkit::assert_links_resolve;
     for (flight, root) in [
@@ -2172,6 +2390,7 @@ fn probe_files_parse_and_links_resolve() {
         (Flight::OneD, generate_probe_1d()),
         (Flight::OneG, generate_probe_1g()),
         (Flight::OneH, generate_probe_1h()),
+        (Flight::OneJ, generate_probe_1j()),
     ] {
         let (traced, _) = build(flight).traced(TraceCarrier::default());
         for root in [root, traced] {
@@ -2698,6 +2917,181 @@ fn assert_delete_probe(root: &Il2Entity) {
     }
 }
 
+fn assert_single_delete_probe(root: &Il2Entity) {
+    use super::testkit::{TICKS_PER_SECOND, WalkerConfig, WalkerInput, walk};
+
+    let original = parse_group_file(HVAR).unwrap();
+    let cell = named(root, "T-d2");
+    assert_eq!(cell.children.iter().filter(|node| node.block_type == "Group").count(), 14);
+    assert_eq!(root.count_block_type("Plane"), 14);
+    assert_eq!(root.count_block_type("MCU_TR_Entity"), 14);
+    assert_eq!(root.count_block_type("OnEvent"), 14);
+    assert_eq!(root.count_block_type("MCU_Delete"), 34); // 14 template + 14 close + 6 removals.
+    assert_eq!(root.count_block_type("MCU_Icon"), 7);
+    let mut close_targets = vec![id(root, "T-d2 CLOSE OFF")];
+    let mut expected_deletes = Vec::new();
+    for (label, start, centre) in [
+        ("J0x", (120.0, 19.0), (130.0, 19.0)),
+        ("J0y", (120.0, 21.0), (130.0, 21.0)),
+        ("J1x", (120.0, 27.0), (130.0, 27.0)),
+        ("J1y", (120.0, 29.0), (130.0, 29.0)),
+        ("J2x", (120.0, 35.0), (130.0, 35.0)),
+        ("J2y", (120.0, 37.0), (130.0, 37.0)),
+        ("J3x", (120.0, 43.0), (130.0, 43.0)),
+        ("J3y", (120.0, 45.0), (130.0, 45.0)),
+        ("J4x", (120.0, 51.0), (130.0, 51.0)),
+        ("J4y", (120.0, 53.0), (130.0, 53.0)),
+        ("J5x", (120.0, 59.0), (130.0, 59.0)),
+        ("J5y", (120.0, 61.0), (130.0, 61.0)),
+        ("J6x", (120.0, 67.0), (130.0, 67.0)),
+        ("J6y", (120.0, 69.0), (130.0, 69.0)),
+    ] {
+        let flight = named(root, label);
+        assert_eq!(flight.block_type, "Group");
+        assert!(cell.children.contains(flight), "{label}: separate flight");
+        assert_named_flight(flight, &original, &[label], world(start), world(centre), COUNTRY_USA);
+        assert_at(root, &format!("{label} START"), 60.0, &[id(flight, "MISSION BEGIN")]);
+        let plane = by_id(flight, block_ids(flight, "Plane")[0]);
+        let entity = named(flight, &format!("{label} entity"));
+        let entity_id = entity.index.unwrap();
+        assert_eq!(plane.property("NumberInFormation"), Some("0"));
+        assert_eq!(plane.property("DeleteAfterDeath"), Some("1"));
+        assert_eq!(plane.property("Script"), Some("\"LuaScripts\\WorldObjects\\Planes\\f80c10.txt\""));
+        assert_eq!(number(plane, "LinkTrId"), f64::from(entity_id));
+        assert!(entity.targets.is_empty(), "{label}: no formation links");
+        // A command in one copied flight must never address another flight.
+        super::testkit::assert_links_resolve(flight);
+        assert_eq!(named(flight, "Formation").objects, [entity_id]);
+        assert_eq!(named(flight, "Activate Units").objects, [entity_id]);
+        assert_eq!(entity.children.len(), 1);
+        let events = &entity.children[0];
+        assert_eq!(events.block_type, "OnEvents");
+        assert_eq!(events.children.len(), 1);
+        let event = &events.children[0];
+        assert_eq!(event.block_type, "OnEvent");
+        assert_eq!(number(event, "Type"), 13.0);
+        let subtitle = named(root, &format!("{label} ev13"));
+        assert_eq!(subtitle.block_type, "MCU_TR_Subtitle");
+        assert_eq!(number(event, "TarId"), f64::from(subtitle.index.unwrap()));
+
+        let delete = named(root, &format!("{label} CLOSE DELETE"));
+        assert_eq!(delete.block_type, "MCU_Delete");
+        assert_eq!(delete.objects, [entity_id]);
+        assert!(delete.targets.is_empty());
+        close_targets.push(delete.index.unwrap());
+        expected_deletes.push((480 * TICKS_PER_SECOND, delete.index.unwrap()));
+    }
+    assert_at(root, "T-d2 CLOSE", 480.0, &close_targets);
+
+    let mut damage_commands = BTreeSet::new();
+    for (labels, suffix, time_s) in [
+        (&["J2y", "J3x", "J4y", "J5y", "J6y"][..], "DAMAGE", 120.0),
+        (
+            &[
+                "J1x", "J1y", "J2x", "J2y", "J3x", "J3y",
+                "J4x", "J4y", "J5x", "J5y", "J6x", "J6y",
+            ][..],
+            "DETECTOR",
+            270.0,
+        ),
+    ] {
+        for label in labels {
+            let name = format!("{label} {suffix}");
+            let damage = named(root, &name);
+            let damage_id = damage.index.unwrap();
+            assert_eq!(damage.block_type, "MCU_CMD_Damage");
+            assert_eq!(damage.property("Damage"), Some("2"));
+            assert_eq!(damage.property("Type"), Some("1"));
+            assert_eq!(damage.objects, [id(root, &format!("{label} entity"))]);
+            assert!(damage.targets.is_empty());
+            let timer_name = format!("{name} AT");
+            assert_at(root, &timer_name, time_s, &[damage_id]);
+            let mut inputs = Vec::new();
+            root.for_each(&mut |node| {
+                if node.targets.contains(&damage_id) {
+                    inputs.push(node.index.unwrap());
+                }
+            });
+            assert_eq!(inputs, [id(root, &timer_name)], "{name} fires only at {time_s}");
+            assert!(damage_commands.insert(damage_id));
+        }
+    }
+    assert_eq!(damage_commands.len(), 17);
+    assert_eq!(
+        damage_commands.iter()
+            .filter(|&&index| by_id(root, index).name().unwrap().ends_with(" DETECTOR"))
+            .count(),
+        12
+    );
+    assert_eq!(
+        block_ids(root, "MCU_CMD_Damage").into_iter().collect::<BTreeSet<_>>(),
+        damage_commands
+    );
+
+    let mut probe_deletes: BTreeSet<_> = close_targets[1..].iter().copied().collect();
+    for (name, labels) in [
+        ("J1", &["J1x", "J1y"][..]),
+        ("J2", &["J2x", "J2y"][..]),
+        ("J3", &["J3x", "J3y"][..]),
+        ("J5", &["J5x"][..]),
+    ] {
+        let delete = named(root, &format!("{name} DELETE"));
+        let delete_id = delete.index.unwrap();
+        assert_eq!(delete.block_type, "MCU_Delete");
+        assert_eq!(
+            delete.objects,
+            labels.iter().map(|label| id(root, &format!("{label} entity"))).collect::<Vec<_>>(),
+            "{name}: Delete Objects order"
+        );
+        assert!(delete.targets.is_empty());
+        assert_at(root, &format!("{name} DELETE AT"), 240.0, &[delete_id]);
+        assert!(probe_deletes.insert(delete_id));
+        expected_deletes.push((240 * TICKS_PER_SECOND, delete_id));
+    }
+    let mut j4_deletes = Vec::new();
+    for label in ["J4x", "J4y"] {
+        let delete = named(root, &format!("{label} DELETE"));
+        assert_eq!(delete.block_type, "MCU_Delete");
+        assert_eq!(delete.objects, [id(root, &format!("{label} entity"))]);
+        assert!(delete.targets.is_empty());
+        j4_deletes.push(delete.index.unwrap());
+        assert!(probe_deletes.insert(delete.index.unwrap()));
+        expected_deletes.push((240 * TICKS_PER_SECOND, delete.index.unwrap()));
+    }
+    assert_at(root, "J4 DELETE AT", 240.0, &j4_deletes);
+    assert_eq!(
+        cell.children.iter()
+            .filter(|node| node.block_type == "MCU_Delete")
+            .map(|node| node.index.unwrap())
+            .collect::<BTreeSet<_>>(),
+        probe_deletes,
+        "only the six removal Deletes and fourteen individual close Deletes"
+    );
+    for name in ["J0", "J6"] {
+        assert!(root.find_by_name(&format!("{name} DELETE AT")).is_none());
+    }
+    assert_eq!(
+        cell.children.iter()
+            .filter(|node| node.block_type == "MCU_Deactivate")
+            .map(|node| node.index.unwrap())
+            .collect::<Vec<_>>(),
+        [id(root, "T-d2 CLOSE OFF")]
+    );
+
+    // Include copied template timers: none may remove a control early or add
+    // another Delete to the experiment's scheduled removals and closes.
+    let log = walk(root, WalkerConfig::default(), &WalkerInput {
+        until: 480 * TICKS_PER_SECOND,
+        ..WalkerInput::default()
+    });
+    let mut actual_deletes: Vec<_> = log.pulses.iter().filter_map(|pulse| {
+        (by_id(root, pulse.index).block_type == "MCU_Delete").then_some((pulse.t, pulse.index))
+    }).collect();
+    actual_deletes.sort_unstable();
+    expected_deletes.sort_unstable();
+    assert_eq!(actual_deletes, expected_deletes);
+}
+
 #[test]
 fn probe_cells_match_the_table() {
     let zero = generate_probe_0();
@@ -2706,12 +3100,14 @@ fn probe_cells_match_the_table() {
     let one_n = generate_probe_1n();
     let one_d = generate_probe_1d();
     let one_h = generate_probe_1h();
+    let one_j = generate_probe_1j();
     assert_eq!(zero.count_block_type("Plane"), 4);
     assert_eq!(one_a.count_block_type("Plane"), 0);
     assert_eq!(one_g.count_block_type("Plane"), 10);
     assert_eq!(one_n.count_block_type("Plane"), 4);
     assert_eq!(one_d.count_block_type("Plane"), 4);
     assert_delete_probe(&one_h);
+    assert_single_delete_probe(&one_j);
 
     for (name, coalition) in [("ZA1", "[2]"), ("ZA2", "[1]")] {
         assert_zone(&zero, name, 12_000.0, true, coalition, (0.0, 60.0));
@@ -2918,11 +3314,11 @@ fn probe_cells_match_the_table() {
     );
 
     assert_eq!(zero.count_block_type("MCU_TR_MissionObjective"), 5);
-    for root in [&zero, &one_a, &one_n, &one_d, &one_g, &one_h] {
+    for root in [&zero, &one_a, &one_n, &one_d, &one_g, &one_h, &one_j] {
         assert!(root.find_by_name("T-o").is_none());
         assert!(root.find_by_name("P14 DPRK SPAWN").is_none());
     }
-    for root in [&one_a, &one_n, &one_d, &one_g, &one_h] {
+    for root in [&one_a, &one_n, &one_d, &one_g, &one_h, &one_j] {
         assert_eq!(root.count_block_type("MCU_TR_MissionObjective"), 0);
     }
 
@@ -3375,6 +3771,7 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::OneD, "Y-D", (140.0, -30.0), 10.0, 1200.0),
         (Flight::OneG, "T-g2", (130.0, 50.0), 60.0, 900.0),
         (Flight::OneH, "T-d", (130.0, 20.0), 60.0, 480.0),
+        (Flight::OneJ, "T-d2", (130.0, 20.0), 60.0, 480.0),
     ];
     let expected_cues = [
         (
@@ -3453,6 +3850,16 @@ fn probe_run_sheets_match_the_tables() {
             Flight::OneH,
             330.0,
             "Flight 1H done. End the mission normally",
+        ),
+        (
+            Flight::OneJ,
+            0.0,
+            "1J: no flying needed. Stay on the ground at K14 until 05:30",
+        ),
+        (
+            Flight::OneJ,
+            330.0,
+            "Flight 1J done. End the mission normally",
         ),
     ];
     assert_eq!(CUES.len(), expected_cues.len());
@@ -3552,6 +3959,7 @@ fn probe_run_sheets_match_the_tables() {
     let one_d = generate_probe_1d();
     let one_g = generate_probe_1g();
     let one_h = generate_probe_1h();
+    let one_j = generate_probe_1j();
     for (root, name, km, coalition) in [
         (&one_a, "T-c C", (40.0, -20.0), "[2]"),
         (&one_a, "T-c C4", (40.0, -8.0), "[2]"),
@@ -3575,6 +3983,13 @@ fn probe_run_sheets_match_the_tables() {
         (&one_h, "T-d D7", (130.0, 76.0), "[2]"),
         (&one_h, "T-d D8", (114.0, 20.0), "[2]"),
         (&one_h, "T-d D9", (114.0, 28.0), "[2]"),
+        (&one_j, "T-d2 J0", (130.0, 20.0), "[1]"),
+        (&one_j, "T-d2 J1", (130.0, 28.0), "[1]"),
+        (&one_j, "T-d2 J2", (130.0, 36.0), "[1]"),
+        (&one_j, "T-d2 J3", (130.0, 44.0), "[1]"),
+        (&one_j, "T-d2 J4", (130.0, 52.0), "[1]"),
+        (&one_j, "T-d2 J5", (130.0, 60.0), "[1]"),
+        (&one_j, "T-d2 J6", (130.0, 68.0), "[1]"),
     ] {
         let mut found = 0;
         root.for_each(&mut |node| {
@@ -3602,7 +4017,7 @@ fn probe_run_sheets_match_the_tables() {
 
 #[test]
 fn probe_spawn_lists_match_the_run_sheets() {
-    for flight in [Flight::Zero, Flight::OneA, Flight::OneG, Flight::OneH] {
+    for flight in [Flight::Zero, Flight::OneA, Flight::OneG, Flight::OneH, Flight::OneJ] {
         assert!(flight.spawns().is_empty());
         assert_eq!(spawn_json(flight), "[]\n");
     }
@@ -3901,6 +4316,7 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
         (Flight::OneD, 13, 13, 0, 0, 13),
         (Flight::OneG, 50, 18, 8, 0, 50),
         (Flight::OneH, 22, 22, 20, 0, 22),
+        (Flight::OneJ, 16, 16, 14, 0, 16),
     ] {
         let probe = build(flight);
         let plain = probe.root.clone();
@@ -4004,7 +4420,7 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
                     entity_sources += 1;
                     let expected_types: &[i32] = match flight {
                         Flight::OneG => &G_EVENT_TYPES,
-                        Flight::OneH => &H_EVENT_TYPES,
+                        Flight::OneH | Flight::OneJ => &DELETE_EVENT_TYPES,
                         _ => panic!("unexpected entity observation in {flight:?}"),
                     };
                     assert_eq!(
