@@ -45,3 +45,13 @@ None yet. Claude recommends option B, after one no-pilot probe flight that answe
 - B and C also need: `inspect_hooks` and the test walker to accept the new event (C: two events per aircraft), three tests in `template.rs`, and `USER_MANUAL.md` lines 98 and 114. An old template loaded into Template Builder is rewritten with the new event, because the loader ignores the type of a `DeathCount` event.
 - The 16 example files keep type 4 under every option. Editing them is a mechanical change with its own commit, and it changes the `exclusive.Group` baseline.
 - Not known: whether type 4 fired in an earlier game version. The evidence is one flight, three aircraft, one game version.
+
+## Evidence added 2026-10-13 (flight 1L)
+The unknowns listed under Consequences were tested (`handoff/P14-probe-results.md`, "Flight 1L"; logs `src/testdata/missionlog/real_15/`).
+
+- **The app's own respawn loop.** A repeat-spawn group from `generate_template`, as generated (event 4): the first wave was killed and `DeathCount` never fired; no second wave came. The same group with the event changed to 13: `DeathCount` fired at the kill, `COOLDOWN` ran, the next wave spawned, and the cycle repeated.
+- **Other ways to be lost.** Event 13 fired for a fuel-starved aircraft at the moment its pilot bailed out, and (flight 1K) for a mid-air collision and a crash during a fight. Event 4 fired for none of them.
+- **Events 1 and 3 on a kill:** both fire, 0.06 s after 13. Fighter Pack's own hooks on 1, 3, 7 and 8 are a separate matter: event 7 also fired three seconds after activation on aircraft with full tanks, which flight 1M looks at.
+
+Claude's recommendation is now option B without a further probe. The record stays `Proposed` until the user says so.
+
