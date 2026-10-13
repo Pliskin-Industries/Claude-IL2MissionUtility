@@ -226,6 +226,51 @@ Step 0g probe `P14_Probe_1J_traced` (`handoff/p14-probes/flight1j/`), built as `
 
 **So flight 1G's survivor has another cause.** What that case had and this flight did not: the two aircraft were one formation; the dead one was shot down by gunfire, not by a Damage command; the survivor had been in a fight (66 rounds fired) and ended the mission low and near K14, which looks like an aircraft that had decided to return to base. None of these has been tested on its own.
 
+## Flight 1K (what can keep an aircraft from being deleted, no pilot) — 2026-10-13, two runs
+
+Step 0h probe `P14_Probe_1K_traced` (`handoff/p14-probes/flight1k/`), built as `P14_Probe_1K_20261013` without the resaver, hosted by the game client on the second PC (game `261013`). Nobody spawned.
+
+| Run | Session | Left at | Logs |
+|---|---|---|---|
+| 1 | `2026-10-13_16-06-08` | 16:41, the full flight | `src/testdata/missionlog/real_13/` (46 files) |
+| 2 | `2026-10-13_16-25-52` | 05:02, after the 04:30 detector; rows K9 and K10 not reached | `real_14/` (17 files) |
+
+**Cell T-d3, one thing at a time.** "Removed" means no event at the 04:30 detector and not in the end-of-mission list. "Left" means the aircraft was still there afterwards.
+
+| Pair | Done to it | Run 1 | Run 2 | Result |
+|---|---|---|---|---|
+| K0 | nothing | both died at 03:06.4 in the same spot at 1,780 m, no attacker: a collision | both in the list | the control held in run 2 |
+| K1 | 04:00 Delete of the lead only | lead removed; wingman died to the detector | the same | **a Delete removes the aircraft it names, not the formation** |
+| K2 | 04:00 Delete of the wingman only | wingman removed; lead died to the detector | the same | the same |
+| K3 | 02:00 Delete of the wingman; 04:00 Delete of both | both removed | both removed | a formation that has lost a member, with a list that still names it, deletes cleanly |
+| K4 | 02:00 Damage level 1 on the lead; 04:00 Delete of both; 04:30 detector on both | **K4a left:** no kill record and no event at 04:30, in the list at 16:41 at 613 m, 3 km from K14. K4b removed | **K4b left:** no kill record and no event at 04:30, in the list at 05:02 at 4,000 m, flying south-west. K4a removed | **one aircraft of a damaged pair survived both the Delete and the kill command, a different one each run** |
+| K5 | the same at level 0 | both removed | both removed | level 0 did not stop the Delete at 04:00 |
+| K6 | 02:00 Damage level 1, nothing else | both in the list at 16:41, at 310 and 450 m, about 7 km from K14 | both in the list at 05:02 at 4,000 m, flying south-west, 12 km apart | level 1 does not kill. Both aircraft turn for home, and not together: 12 km apart on the same track in run 2, which is about a minute |
+| K7 | 02:00 Damage level 0, nothing else | both in the list at 16:41 at 4,000 m, 43 and 51 km south-west of their centre | both in the list at 05:02 at 1,200 m, at their centre | level 0 does not kill. They carried on, and turned for home some time after 05:00 |
+
+**Cell T-d4, the fight.**
+
+| Pair | Run 1 | Run 2 |
+|---|---|---|
+| K8 (Delete at 04:00 while under attack, detector at 04:30) | both removed. One hunter died at 04:14.6 at 108 m with no attacker | **K8b left:** no kill record, no event, in the list at 05:02. K8a removed |
+| K9 (one Delete for both at 15:00) | neither had died; both removed at 15:00 | not reached |
+| K10 (one Delete per aircraft at 15:00) | K10a died at 07:05.9 at 550 m with no attacker; K10b and the hunter lead shot each other down at 07:47 and 07:48; nothing was left to delete | not reached |
+
+**What this settles.**
+- A Delete acts on the aircraft it names. Naming the lead does not remove the wingman.
+- A formation that has lost a member deletes cleanly, so "one formation with a missing member" is not what kept flight 1G's aircraft.
+- **The flight 1G survivor is reproduced: four survivors in three runs** (G1a in flight 1G; K4a in run 1; K4b and K8b in run 2). Each time the aircraft answered neither the Delete nor, where one was sent, a Damage command at level 2.
+
+**The likely cause (a reading, not yet tested on its own).** Every survivor was an aircraft that had been damaged, or was in a fight where it could have been, and each sortie plane carries `AiRTBDecision = 1`. K6 shows that damaged aircraft turn for home one at a time, about a minute apart. K4's Delete came two minutes after the damage: the aircraft that left first survived, and in each run that was the one that dropped its stores first (`AType:26`: K4a at 02:56 in run 1, K4b at 02:58 in run 2). So the reading is: **once an AI aircraft has decided by itself to return to base, mission commands sent to it no longer reach it.** K5 fits: at level 0 nobody had turned for home by 04:00 and both were removed.
+
+**Not known.** Whether `AiRTBDecision = 0` prevents it. Whether such an aircraft is ever removed (each plane has `DeleteAfterLand = 1`; none had landed by 16:41). Whether it still raises event 13 if it is shot down. Whether a Deactivate reaches it.
+
+Other facts from these runs:
+- `Damage = 1` and `Damage = 0` on `MCU_CMD_Damage` are the editor's two lower levels. Neither kills an F-80C. As with level 2, the whole formation gets it.
+- `AType:26` (with a new `TID`) is written when an aircraft drops or fires its stores: 47 to 64 s after level 1 damage, and when a fight starts. That it is a drop is a reading: the survivor's end-of-mission record shows no rockets left.
+- `AType:24`, `25`, `27` and `31` appeared for the first time; they were not read.
+- AI against AI with ace hunters: in run 1 one pair was untouched for 15 minutes and one pair was destroyed in 8. It is no way to set up a test.
+
 ## Step 0 after the flights of 2026-10-12 and 2026-10-13
 
 | Risk | Answer | From |
@@ -235,7 +280,8 @@ Step 0g probe `P14_Probe_1J_traced` (`handoff/p14-probes/flight1j/`), built as `
 | g | **changed:** a lost aircraft raises event 13 (and 0, 2), never 4; Delete raises none | flight 1G |
 | n | AI F-80Cs on the built-in template: 733 km/h, against the plan's 732 | flights 1N, 1D |
 | country filter (decision 0008, option 4) | works on both sides, for AI and players; country 602 is usable for NATO AI | flights 1N, 1D |
-| new | one aircraft outlived its Delete in flight 1G; the dead aircraft in that Delete's list is **not** the cause (a Delete with a dead aircraft in its list removes the live ones); the cause is not found | flights 1G, 1J |
+| new | **an aircraft can outlive its Delete, and a Damage command too**: seen four times, always an aircraft that was damaged or under fire. Likely cause: an AI aircraft that has decided by itself to return to base no longer takes mission commands. Not yet tested on its own | flights 1G, 1K |
+| new | a dead aircraft in a Delete's list is harmless; a Delete removes the aircraft it names, not the formation | flights 1J, 1K |
 | new | a Delete that lists Plane indexes (as Template Builder and the built-in sorties write it) removes nothing; a Delete that lists entities works | flight 1H |
 | new | a Damage command aimed at one aircraft kills its whole formation | flight 1H |
 

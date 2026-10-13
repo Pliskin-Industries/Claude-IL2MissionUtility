@@ -1348,7 +1348,7 @@ Every pair in both cells is **one 2-ship formation** of AI F-80Cs (`probe_flight
 
 `Damage = 2` is "Complete" in the editor (the reference file). The editor's other two levels are 0 and 1 by position ("Minor" is the default); which name goes with 1 was not read. `Type = 1` as in the reference file.
 
-**Cell T-d4: the fight.** Each pair has two DPRK-country (503) MiG-15bis hunters at ace skill, written as in flight 1G: they start 5 km behind the pair's start, and an `MCU_CMD_AttackTarget` (hunter lead → the pair's lead) is issued at 01:30 and every 90 s after it until the pair's Delete. Hunter plane `Name`s are `K8Ha`, `K8Hb`, and so on, with OnEvent 13 → a traced subtitle each. The cells are 40 km apart and 70 km from T-d3 so that no fight spills over.
+**Cell T-d4: the fight.** Each pair has two DPRK-country (503) MiG-15bis hunters at ace skill, written as in flight 1G: they start 5 km behind the pair's start, and an `MCU_CMD_AttackTarget` (hunter lead → the pair's lead) is issued at 01:30 and every 90 s after it (K8: to 03:00; K9 and K10: to 13:30), and K9 and K10 get one more at 14:30. The 14:30 order is off the 90 s step: the build prompt asked for it and the flight was flown with it. Hunter plane `Name`s are `K8Ha`, `K8Hb`, and so on, with OnEvent 13 → a traced subtitle each. The cells are 40 km apart and 70 km from T-d3 so that no fight spills over.
 
 | Pair | Delete | Detector | Asks |
 |---|---|---|---|

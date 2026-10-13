@@ -68,4 +68,8 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **The game's main menu goes to a hangar fly-by after about a minute idle** and hides the menu. One click on empty space brings it back.
 - **A Delete may list a dead aircraft** (flight 1J): the live aircraft in the same list are removed, in either order.
 - **Leaving a client-hosted server:** on the results screen, press Leave Server and confirm within about 15 s. On 2026-10-13 a leave confirmed as the next load began left the game on "0 % please wait" for minutes.
+- **A Delete acts on the aircraft it names** (flight 1K): naming a formation's lead leaves the wingman, and the other way round.
+- **A damaged AI aircraft can stop taking commands** (flights 1G, 1K): neither a Delete nor a level 2 Damage command reached it. Likely tied to `AiRTBDecision = 1`; see the flight 1K results before relying on a Delete for an aircraft that may have been hit.
+- **`MCU_CMD_Damage` levels:** `Damage = 2` kills; 1 and 0 do not kill an F-80C. After level 1 both aircraft drop their stores within about a minute (`AType:26`) and fly home separately.
+- **The log session name is when the server started loading,** not when the mission clock started: the gap was between 10 and 90 s on 2026-10-13. Read the clock from the log's last `T:` before leaving.
 
