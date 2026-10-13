@@ -4,7 +4,8 @@
 //! `Logic` (Zone IN / Zone Out checkzones, `ENABLE / PULSE IN` pulse,
 //! Activate or Spawn bring-up with optional `DeathCount` → `COOLDOWN`
 //! repeat, and the `MISSION END` cleanup hub — `Force Complete - High`,
-//! optional `RTB DELAY` → `RTB East/West n`, then deactivate → delete),
+//! optional `RTB DELAY` → `RTB East/West n`, then deactivate, plus delete
+//! in Spawn mode),
 //! `Units` (cloned object + `MCU_TR_Entity` pairs, wingmen target-linked
 //! to their lead), `Orders` (command MCUs), and `Waypoints` (`WP n` path
 //! hops). Owns the seat model and its bookkeeping — catalog loading
@@ -57,7 +58,7 @@
 //!   tree, zones, waypoints). Load group → `load_template`; Generate →
 //!   `serialize_group`.
 //! * bombers.rs (Exclusive mode) — `inspect_plan` / cleanup validation
-//!   reads the generated `MISSION END` / `Trigger Delete` graph.
+//!   reads the generated `MISSION END` cleanup graph.
 
 
 use std::collections::{HashMap, HashSet};
@@ -598,11 +599,9 @@ impl EntityEvent {
         }
     }
 
-    pub fn default_for(kind: UnitKind) -> Self {
-        match kind {
-            UnitKind::Plane => EntityEvent::OnPlaneDestroyed,
-            _ => EntityEvent::OnKilled,
-        }
+    pub fn default_for(_kind: UnitKind) -> Self {
+        // Decision 0012: aircraft losses raise OnKilled too (flight 1L).
+        EntityEvent::OnKilled
     }
 }
 
@@ -2534,7 +2533,6 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     };
 
     let entity_ids: Vec<i32> = placed.iter().map(|p| p.entity_id).collect();
-    let object_ids: Vec<i32> = placed.iter().map(|p| p.object_id).collect();
     let lead_indexes = order_seat_indexes(&opts.seats);
     let lead_entity_ids: Vec<i32> = lead_indexes.iter().map(|&i| placed[i].entity_id).collect();
 
@@ -2667,14 +2665,21 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     );
     deactivate_units.set_objects(entity_ids.clone());
 
-    let mut delete = mcu(
-        "MCU_Delete",
-        "Trigger Delete",
-        &mut next_id,
-        del_ox,
-        del_oz,
-    );
-    delete.set_objects(object_ids.clone());
+    // Decisions 0013/0014: delete spawned waves by entity; activated units
+    // must remain in the mission so the re-armed zone can activate them again.
+    let delete = if bring_up == BringUp::Spawn {
+        let mut delete = mcu(
+            "MCU_Delete",
+            "Trigger Delete",
+            &mut next_id,
+            del_ox,
+            del_oz,
+        );
+        delete.set_objects(entity_ids.clone());
+        Some(delete)
+    } else {
+        None
+    };
 
     let mut mission_end = timer("MISSION END", MISSION_END_TIME, &mut next_id, end_tx, end_tz);
     let (meo_tx, meo_tz) = right_timer(0, 1);
@@ -2693,7 +2698,11 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     let (del_tx, del_tz) = right_timer(0, 2);
     let mut delayed_end = timer("DELAYED END ORDERS", delayed_time, &mut next_id, del_tx, del_tz);
     let (dwait_tx, dwait_tz) = right_timer(0, 3);
-    let mut delete_wait = timer("DELETE DELAY", DELETE_WAIT, &mut next_id, dwait_tx, dwait_tz);
+    let delete_wait = delete.as_ref().map(|delete| {
+        let mut wait = timer("DELETE DELAY", DELETE_WAIT, &mut next_id, dwait_tx, dwait_tz);
+        wait.set_targets(vec![delete.index.expect("Trigger Delete missing Index")]);
+        wait
+    });
 
     let mut rtb_wait = None;
     let mut rtb_waypoints: Vec<Il2Entity> = Vec::new();
@@ -2946,12 +2955,10 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     let pulse_out_id = pulse_out.index.unwrap();
     let force_id = force.index.unwrap();
     let deactivate_id = deactivate_units.index.unwrap();
-    let delete_id = delete.index.unwrap();
     let mission_end_id = mission_end.index.unwrap();
     let mission_end_orders_id = mission_end_orders.index.unwrap();
     let delayed_end_id = delayed_end.index.unwrap();
     let rtb_wait_id = rtb_wait.as_ref().and_then(|t| t.index);
-    let delete_wait_id = delete_wait.index.unwrap();
     let bring_up_timer_id = bring_up_timer.index.unwrap();
     let after_bring_up_id = after_bring_up.index.unwrap();
     let deact_in_id = deact_in.index.unwrap();
@@ -3088,8 +3095,11 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     if let Some(wait) = rtb_wait.as_mut() {
         wait.set_targets(rtb_waypoints.iter().filter_map(|w| w.index).collect());
     }
-    delayed_end.set_targets(vec![deactivate_id, delete_wait_id]);
-    delete_wait.set_targets(vec![delete_id]);
+    let mut cleanup_targets = vec![deactivate_id];
+    if let Some(wait) = &delete_wait {
+        cleanup_targets.push(wait.index.expect("DELETE DELAY missing Index"));
+    }
+    delayed_end.set_targets(cleanup_targets);
 
     for (si, steps) in emitted.iter().enumerate() {
         if !receives_orders(&opts.seats, si) {
@@ -3160,14 +3170,15 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
         cooldown,
         force,
         deactivate_units,
-        delete,
+    ]);
+    logic.children.extend(delete);
+    logic.children.extend([
         mission_end,
         mission_end_orders,
         delayed_end,
-        delete_wait,
-        bring_up_timer,
-        after_bring_up,
     ]);
+    logic.children.extend(delete_wait);
+    logic.children.extend([bring_up_timer, after_bring_up]);
     if let Some(wait) = rtb_wait {
         logic.children.push(wait);
     }
@@ -3217,7 +3228,6 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
 }
 
 struct PlacedUnit {
-    object_id: i32,
     entity_id: i32,
     object: Il2Entity,
     entity: Il2Entity,
@@ -3528,7 +3538,6 @@ fn place_unit(
     entity.set_objects(Vec::new());
 
     Ok(PlacedUnit {
-        object_id,
         entity_id,
         object,
         entity,
@@ -4367,6 +4376,7 @@ fn read_zones(
         "MISSION END",
         "MISSION END ORDERS",
         "DELAYED END ORDERS",
+        // Spawn cleanup names are also consumed in legacy Activate files.
         "DELETE DELAY",
         "Trigger Delete",
         "Deactivate Units",
@@ -4993,6 +5003,13 @@ fn read_events(
                 let typ = prop_i32(ev, "Type", -1);
                 let tar = prop_i32(ev, "TarId", -1);
                 if death_id == Some(tar) {
+                    if opts.seats[si].unit.kind == UnitKind::Plane
+                        && typ == EntityEvent::OnPlaneDestroyed.type_id()
+                    {
+                        warnings.push(format!(
+                            "OnPlaneDestroyed (4) on {unit_name} targeting DeathCount will be regenerated as OnKilled (13) (decision 0012)."
+                        ));
+                    }
                     continue;
                 }
                 let Some(kind) = EntityEvent::from_type_id(typ) else {
@@ -5735,8 +5752,8 @@ mod tests {
     #[test]
     fn mission_end_is_cleanup_hub() {
         let pack = generate_template(&four_migs()).unwrap();
-        let delete = pack.find_by_name("Trigger Delete").unwrap();
-        assert_eq!(delete.objects.len(), 4);
+        let deactivate = pack.find_by_name("Deactivate Units").unwrap();
+        assert_eq!(deactivate.objects.len(), 4);
         let hub = pack.find_by_name("MISSION END").unwrap();
         let end_orders = pack.find_by_name("MISSION END ORDERS").unwrap();
         let delayed = pack.find_by_name("DELAYED END ORDERS").unwrap();
@@ -5748,15 +5765,59 @@ mod tests {
         assert!(pack.find_by_name("RTB").is_none());
         assert!(pack.find_by_name("RTB DELAY").is_none());
         assert!(!end_orders.targets.contains(&pack.find_by_name("Deactivate Units").unwrap().index.unwrap()));
-        assert!(delayed.targets.contains(&pack.find_by_name("DELETE DELAY").unwrap().index.unwrap()));
-        assert!(pack.find_by_name("Deactivate Units").is_some());
+        assert_eq!(delayed.targets, [deactivate.index.unwrap()]);
         let info = crate::bombers::inspect_plan(&pack).unwrap();
         assert_eq!(info.suggested_completion, hub.index);
         assert!(
             info.cleanup_warnings.get(&hub.index.unwrap()).is_none(),
-            "MISSION END should reach Delete covering every unit, got {:?}",
+            "MISSION END should reach Deactivate covering every unit, got {:?}",
             info.cleanup_warnings.get(&hub.index.unwrap())
         );
+    }
+
+    #[test]
+    fn spawn_cleanup_deletes_entities_in_one_shot_and_repeat_modes() {
+        for allow_multiple_spawns in [false, true] {
+            let mut opts = one_mig();
+            opts.seats.push(opts.seats[0].clone());
+            opts.bring_up = BringUp::Spawn;
+            opts.allow_multiple_spawns = allow_multiple_spawns;
+            let pack = generate_template(&opts).unwrap();
+            let mut entities = Vec::new();
+            collect_block(&pack, "MCU_TR_Entity", &mut entities);
+            let entity_ids: Vec<_> = entities.iter().map(|e| e.index.unwrap()).collect();
+            assert_eq!(entity_ids, [7, 9]);
+            let delete = pack.find_by_name("Trigger Delete").expect("missing Trigger Delete");
+            assert_eq!(delete.objects, entity_ids, "repeat = {allow_multiple_spawns}");
+            let wait = pack.find_by_name("DELETE DELAY").expect("missing DELETE DELAY");
+            assert_eq!(wait.property("Time"), Some("0.50"));
+            assert_eq!(wait.targets, [delete.index.unwrap()]);
+            let deactivate = pack.find_by_name("Deactivate Units").unwrap();
+            assert_eq!(deactivate.objects, entity_ids);
+            let delayed = pack.find_by_name("DELAYED END ORDERS").unwrap();
+            assert_eq!(delayed.targets, [deactivate.index.unwrap(), wait.index.unwrap()]);
+        }
+    }
+
+    #[test]
+    fn activate_cleanup_preserves_units_for_reactivation() {
+        for allow_multiple_spawns in [false, true] {
+            let mut opts = four_migs();
+            opts.bring_up = BringUp::Activate;
+            opts.allow_multiple_spawns = allow_multiple_spawns;
+            let pack = generate_template(&opts).unwrap();
+            assert!(pack.find_by_name("Trigger Delete").is_none());
+            assert!(pack.find_by_name("DELETE DELAY").is_none());
+            assert_eq!(pack.count_block_type("MCU_Delete"), 0);
+            let deactivate = pack.find_by_name("Deactivate Units").unwrap();
+            assert_eq!(deactivate.objects, [7, 9, 11, 13]);
+            let delayed = pack.find_by_name("DELAYED END ORDERS").unwrap();
+            assert_eq!(delayed.targets, [deactivate.index.unwrap()]);
+            let cooldown = pack.find_by_name("COOLDOWN").unwrap();
+            let rearm = pack.find_by_name("Zone In ReActivate").unwrap();
+            assert!(cooldown.targets.contains(&rearm.index.unwrap()));
+            assert_eq!(rearm.targets, [pack.find_by_name("Zone IN").unwrap().index.unwrap()]);
+        }
     }
 
     #[test]
@@ -5849,11 +5910,21 @@ mod tests {
         assert_repeat_spawn_graph(&root);
         let death = root.find_by_name("DeathCount").unwrap();
         let events = entity_events(&root);
+        // This shipped example keeps its historical event 4; decision 0012
+        // changes generated files, not the examples.
         let hits = events
             .iter()
             .filter(|(t, tar)| *t == 4 && *tar == death.index.unwrap())
             .count();
         assert_eq!(hits, 4);
+    }
+
+    #[test]
+    fn default_death_event_is_on_killed_for_every_unit_kind() {
+        for kind in UnitKind::ALL {
+            assert_eq!(EntityEvent::default_for(kind).type_id(), 13, "{kind:?}");
+            assert_eq!(EventHook::default_for(kind).kind.type_id(), 13, "{kind:?}");
+        }
     }
 
     #[test]
@@ -5883,17 +5954,11 @@ mod tests {
         assert_eq!(death.property("Counter"), Some("1"));
         assert_repeat_spawn_graph(&pack);
         let delete = pack.find_by_name("Trigger Delete").unwrap();
-        let mut planes = Vec::new();
-        pack.for_each(&mut |e| {
-            if e.block_type == "Plane" {
-                planes.push(e.index.unwrap());
-            }
-        });
-        assert_eq!(delete.objects, planes);
+        assert_eq!(delete.objects, entities);
         let events = entity_events(&pack);
         assert!(
-            events.iter().any(|(t, tar)| *t == 4 && *tar == death.index.unwrap()),
-            "aircraft OnPlaneDestroyed should pulse DeathCount, got {events:?}"
+            events.iter().any(|(t, tar)| *t == 13 && *tar == death.index.unwrap()),
+            "aircraft OnKilled (13) should pulse DeathCount, got {events:?}"
         );
         let text = serialize_group(&pack);
         assert!(text.contains("MCU_ModifierSetVal"));
@@ -5923,13 +5988,25 @@ mod tests {
         assert_eq!(death.property("Counter"), Some("3"));
         let death_id = death.index.unwrap();
         let events = entity_events(&pack);
-        let hits = events.iter().filter(|(t, tar)| *t == 4 && *tar == death_id).count();
+        let hits = events.iter().filter(|(t, tar)| *t == 13 && *tar == death_id).count();
         assert_eq!(hits, 3);
         assert_repeat_spawn_graph(&pack);
         let zone_out = pack.find_by_name("Zone Out").unwrap();
         let mission_end = pack.find_by_name("MISSION END").unwrap();
         assert!(zone_out.targets.contains(&mission_end.index.unwrap()));
         assert!(!death.targets.contains(&mission_end.index.unwrap()));
+    }
+
+    #[test]
+    fn repeat_spawn_counts_aircraft_and_ground_on_killed() {
+        let mut opts = one_mig();
+        opts.bring_up = BringUp::Spawn;
+        opts.allow_multiple_spawns = true;
+        opts.seats.push(TemplateSeat::new(catalog_vehicle()));
+        let pack = generate_template(&opts).unwrap();
+        let death = pack.find_by_name("DeathCount").unwrap();
+        assert_eq!(death.property("Counter"), Some("2"));
+        assert_eq!(entity_events(&pack), vec![(13, death.index.unwrap()); 2]);
     }
 
     #[test]
@@ -5959,6 +6036,8 @@ mod tests {
         let pack = generate_template(&opts).unwrap();
         assert_eq!(pack.count_block_type("MCU_Spawner"), 0);
         assert!(pack.find_by_name("Activate Units").is_some());
+        assert!(pack.find_by_name("Trigger Delete").is_none());
+        assert!(pack.find_by_name("DELETE DELAY").is_none());
     }
 
     #[test]
@@ -6719,8 +6798,11 @@ mod tests {
         let rtb_wait = pack.find_by_name("RTB DELAY").unwrap();
         assert!(end_orders.targets.contains(&rtb_wait.index.unwrap()));
         assert!(!end_orders.targets.contains(&pack.find_by_name("RTB East 1").unwrap().index.unwrap()));
-        let delete = pack.find_by_name("Trigger Delete").unwrap();
-        assert_eq!(delete.objects.len(), 2);
+        let deactivate = pack.find_by_name("Deactivate Units").unwrap();
+        assert_eq!(deactivate.objects.len(), 2);
+        assert_eq!(delayed.targets, [deactivate.index.unwrap()]);
+        assert!(pack.find_by_name("Trigger Delete").is_none());
+        assert!(pack.find_by_name("DELETE DELAY").is_none());
     }
 
     #[test]
@@ -6759,7 +6841,12 @@ mod tests {
         assert!((activate.1 - (ORIGIN_Z - 300.0)).abs() < 0.1);
         let force = pack.find_by_name("Force Complete - High").unwrap().pos_xz().unwrap();
         assert!((force.1 - (ORIGIN_Z + 300.0)).abs() < 0.1);
-        let delete = pack.find_by_name("Trigger Delete").unwrap().pos_xz().unwrap();
+        let deactivate = pack.find_by_name("Deactivate Units").unwrap().pos_xz().unwrap();
+        assert!((deactivate.1 - (ORIGIN_Z + 300.0)).abs() < 0.1);
+        let mut spawn_opts = one_mig();
+        spawn_opts.bring_up = BringUp::Spawn;
+        let spawned = generate_template(&spawn_opts).unwrap();
+        let delete = spawned.find_by_name("Trigger Delete").unwrap().pos_xz().unwrap();
         assert!((delete.1 - (ORIGIN_Z + 300.0)).abs() < 0.1);
         let form = pack.find_by_name("Formation").unwrap().pos_xz().unwrap();
         let form_tm = pack.find_by_name("Formation 1").unwrap().pos_xz().unwrap();
@@ -6931,10 +7018,7 @@ mod tests {
             },
         ];
         opts.seats[0].events = vec![
-            EventHook {
-                kind: EntityEvent::OnPlaneDestroyed,
-                then: EventThen::ForceComplete,
-            },
+            EventHook::default_for(UnitKind::Plane),
             EventHook {
                 kind: EntityEvent::OnPilotKilled,
                 then: EventThen::Order(2),
@@ -6953,7 +7037,7 @@ mod tests {
         let force = pack.find_by_name("Force Complete - High").unwrap();
         let form_tm = pack.find_by_name("Formation 1").unwrap();
         let events = entity_events(&pack);
-        assert!(events.contains(&(4, force.index.unwrap())));
+        assert!(events.contains(&(13, force.index.unwrap())));
         assert!(events.contains(&(0, form_tm.index.unwrap())));
     }
 
@@ -7878,6 +7962,62 @@ mod tests {
     }
 
     #[test]
+    fn activate_templates_with_or_without_legacy_delete_load_and_link() {
+        let legacy = parse_group_file(include_str!(
+            "../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group"
+        )).unwrap();
+        assert!(legacy.find_by_name("Trigger Delete").is_some());
+        assert!(legacy.find_by_name("DELETE DELAY").is_some());
+        let catalog = builtin_plane_catalog();
+        let opts = load_template(&legacy, &catalog).unwrap().options;
+        let current = generate_template(&opts).unwrap();
+        assert!(current.find_by_name("Trigger Delete").is_none());
+        assert!(current.find_by_name("DELETE DELAY").is_none());
+        for pack in [legacy, current] {
+            let loaded = load_template(&pack, &catalog).unwrap();
+            assert!(loaded.native_format);
+            assert_eq!(loaded.options.bring_up, BringUp::Activate);
+            assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+            let regenerated = generate_template(&loaded.options).unwrap();
+            assert!(regenerated.find_by_name("Trigger Delete").is_none());
+            assert!(regenerated.find_by_name("DELETE DELAY").is_none());
+
+            let info = crate::bombers::inspect_plan(&pack).unwrap();
+            let end = pack.find_by_name("MISSION END").unwrap().index.unwrap();
+            assert_eq!(info.suggested_completion, Some(end));
+            assert!(!info.cleanup_warnings.contains_key(&end));
+            let input = crate::bombers::BomberInput {
+                label: info.name,
+                source_key: "cleanup compatibility".into(),
+                root: pack.clone(),
+                trigger_zone_ids: info.suggested_triggers,
+                completion_timer_id: end,
+            };
+            let exclusive = crate::bombers::link_bomber_plans(&[input.clone(), input]).unwrap();
+            assert_eq!(exclusive.count_block_type("MCU_Delete"), 2 * pack.count_block_type("MCU_Delete"));
+
+            let info = crate::recon::inspect_unit(&pack).unwrap();
+            let recon = crate::recon::generate_recon_ex(&[crate::recon::ReconInput {
+                label: info.name,
+                root: pack.clone(),
+                trigger_zone_ids: info.suggested_triggers,
+                copies: 2,
+            }], crate::recon::ReconBuild::default()).unwrap();
+            assert_eq!(recon.count_block_type("MCU_Delete"), 2 * pack.count_block_type("MCU_Delete") + 2);
+            assert!(recon.find_by_name("Dump unused 1").is_some());
+            assert!(recon.find_by_name("Dump unused 2").is_some());
+            for linked in [&exclusive, &recon] {
+                let indexed = collect_by_index(linked);
+                linked.for_each(&mut |node| {
+                    for target in node.targets.iter().chain(&node.objects) {
+                        assert!(indexed.contains_key(target), "missing link target {target}");
+                    }
+                });
+            }
+        }
+    }
+
+    #[test]
     fn load_round_trips_generated_four_migs() {
         let src = four_migs();
         let pack = generate_template(&src).unwrap();
@@ -7961,6 +8101,44 @@ mod tests {
         assert!(got.seats[0].events.iter().any(|e| {
             e.kind == EntityEvent::OnPlaneDestroyed && e.then == EventThen::ForceComplete
         }));
+    }
+
+    #[test]
+    fn load_legacy_aircraft_death_event_regenerates_on_killed() {
+        let mut opts = one_mig();
+        opts.bring_up = BringUp::Spawn;
+        opts.allow_multiple_spawns = true;
+        let mut pack = generate_template(&opts).unwrap();
+        let death_id = pack
+            .find_by_name("DeathCount")
+            .unwrap()
+            .index
+            .unwrap()
+            .to_string();
+        let mut changed = 0;
+        pack.for_each_mut(&mut |node| {
+            if node.block_type == "OnEvent" && node.property("TarId") == Some(death_id.as_str()) {
+                node.set_property("Type", "4");
+                changed += 1;
+            }
+        });
+        assert_eq!(changed, 1);
+        let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
+        assert!(loaded.options.allow_multiple_spawns);
+        assert!(loaded.options.seats[0].events.is_empty());
+        assert!(
+            loaded.warnings.iter().any(|warning| {
+                warning.contains("OnPlaneDestroyed (4)") && warning.contains("OnKilled (13)")
+            }),
+            "missing legacy death-event correction: {:?}",
+            loaded.warnings
+        );
+        let rebuilt = generate_template(&loaded.options).unwrap();
+        let death = rebuilt.find_by_name("DeathCount").unwrap();
+        assert_eq!(entity_events(&rebuilt), vec![(13, death.index.unwrap())]);
+        let reloaded = load_template(&rebuilt, &builtin_plane_catalog()).unwrap();
+        assert!(reloaded.warnings.is_empty(), "{:?}", reloaded.warnings);
+        assert!(reloaded.options.seats[0].events.is_empty());
     }
 
     #[test]

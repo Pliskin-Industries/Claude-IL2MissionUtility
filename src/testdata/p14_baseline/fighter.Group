@@ -247,7 +247,7 @@ Group
         Name = "Trigger Delete";
         Desc = "";
         Targets = [];
-        Objects = [6909,6911,6913,6915,6917,6919,6921,6923,6925];
+        Objects = [6910,6912,6914,6916,6918,6920,6922,6924,6926];
         XPos = 39400.000;
         YPos = 0.000;
         ZPos = 40300.000;
@@ -1930,7 +1930,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 6902;
           }
 
@@ -2045,7 +2045,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 6902;
           }
 
@@ -2160,7 +2160,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 6902;
           }
 
@@ -2275,7 +2275,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 6902;
           }
 
@@ -2390,7 +2390,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 6903;
           }
 
@@ -2505,7 +2505,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 6903;
           }
 
@@ -2620,7 +2620,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 6903;
           }
 
@@ -2735,7 +2735,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 6904;
           }
 
@@ -2850,7 +2850,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 6904;
           }
 
@@ -3747,7 +3747,7 @@ Group
         Name = "Trigger Delete";
         Desc = "";
         Targets = [];
-        Objects = [7068,7070,7072,7074,7076,7078,7080,7082,7084];
+        Objects = [7069,7071,7073,7075,7077,7079,7081,7083,7085];
         XPos = 49400.000;
         YPos = 0.000;
         ZPos = 40300.000;
@@ -5430,7 +5430,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7061;
           }
 
@@ -5545,7 +5545,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7061;
           }
 
@@ -5660,7 +5660,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7061;
           }
 
@@ -5775,7 +5775,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7061;
           }
 
@@ -5890,7 +5890,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7062;
           }
 
@@ -6005,7 +6005,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7062;
           }
 
@@ -6120,7 +6120,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7062;
           }
 
@@ -6235,7 +6235,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7063;
           }
 
@@ -6350,7 +6350,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7063;
           }
 
@@ -7247,7 +7247,7 @@ Group
         Name = "Trigger Delete";
         Desc = "";
         Targets = [];
-        Objects = [7227,7229,7231,7233,7235,7237,7239,7241,7243];
+        Objects = [7228,7230,7232,7234,7236,7238,7240,7242,7244];
         XPos = 39400.000;
         YPos = 0.000;
         ZPos = 50300.000;
@@ -8930,7 +8930,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7220;
           }
 
@@ -9045,7 +9045,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7220;
           }
 
@@ -9160,7 +9160,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7220;
           }
 
@@ -9275,7 +9275,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7220;
           }
 
@@ -9390,7 +9390,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7221;
           }
 
@@ -9505,7 +9505,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7221;
           }
 
@@ -9620,7 +9620,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7221;
           }
 
@@ -9735,7 +9735,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7222;
           }
 
@@ -9850,7 +9850,7 @@ Group
           
           OnEvent
           {
-            Type = 4;
+            Type = 13;
             TarId = 7222;
           }
 

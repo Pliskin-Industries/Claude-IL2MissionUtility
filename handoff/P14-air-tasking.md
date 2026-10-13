@@ -225,6 +225,8 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
 pub struct PlacedSortie { pub spawn: (f64, f64), pub leads: Vec<i32>, pub wp_speed_kmh: f64, pub attack_time_s: f64, pub planes: Vec<i32>, pub warnings: Vec<String> }
 ```
 
+Every placed `Plane` is written with `AiRTBDecision = 0`, leaving the source template unchanged and rejecting a copy missing that key (decision 0015).
+
 Steps, in this order:
 1. **Find the leads.** A lead is a `Plane` whose linked `MCU_TR_Entity` has **empty Targets**, meaning it does not target another plane's entity. A wingman's entity targets its lead's entity (`template.rs` `generate_template` sets the follower's targets to `[lead_eid]`). Expected: HVAR leads = [7]; Il-10 = [7, 15]; Armed Recon = [7, 11]. The **first lead** is the one first in file order. The **navigation lead** is the first lead, in file order, that has a path waypoint (D39); in all six built-ins it is the first lead. Pivot = navigation lead XZ. Template bearing β = `heading_toward(navigation lead, its non-RTB MCU_Waypoint)`; a waypoint belongs to a lead when its Objects contain that lead's entity. `library::inspect_sortie` (§3.2) has already found the leads and refused a template that cannot be placed.
    - Reject a template in which no lead has a waypoint, or in which a lead has more than one non-RTB waypoint (D26). A lead with no waypoint (an escort) is allowed.

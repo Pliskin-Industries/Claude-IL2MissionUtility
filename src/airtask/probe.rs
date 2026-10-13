@@ -19,6 +19,7 @@ use crate::trace::{self, ObjectiveStyle, TraceCarrier, TraceMap, TraceSelect, Tr
 
 const HVAR: &str =
     include_str!("../../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group");
+const W_INPUT_DIR: &str = "src/testdata/p14_probe_inputs/flight1l";
 const COMPLEX_TRIGGER: &str =
     include_str!("../../TemplateExamples/Reference/ComplexTrigger_reference.Group");
 const DAMAGE: &str = include_str!("../../TemplateExamples/Reference/CommandDamage_reference.Group");
@@ -1093,8 +1094,8 @@ struct TemplateProbeRow {
     schedule: TemplateSchedule,
 }
 
-// Step 0i, T-w: options first; event/Delete/cooldown edits are applied only
-// after generate_template, preserving every generated node and other link.
+// Step 0i, T-w: frozen generate_template output first; event/Delete/cooldown
+// edits are applied only after loading, preserving every generated node and other link.
 // W1 leaves its generated OnPlaneDestroyed event untouched.
 const W_GROUPS: &[TemplateProbeRow] = &[
     TemplateProbeRow {
@@ -2689,27 +2690,12 @@ fn build_v(p: &mut Probe) {
 
 fn generated_w_group(row: &TemplateProbeRow, next_id: &mut i32) -> Il2Entity {
     let name = row.name;
-    let unit = builtin_plane_catalog().into_iter()
-        .find(|unit| crate::model_spec::script_id(&unit.script) == "f80c10")
-        .expect("flight 1L T-w: built-in catalog missing F-80C f80c10");
-    let seats = (0..2).map(|_| {
-        let mut seat = TemplateSeat::new(unit.clone());
-        seat.role = FlightRole::Independent;
-        seat.country = COUNTRY_USA;
-        seat.altitude = W_ALTITUDE_M;
-        // TemplateSeat::new supplies empty orders/events. Keep its other
-        // aircraft defaults and TemplateOptions' placement defaults.
-        seat
-    }).collect();
-    let options = TemplateOptions {
-        name: name.into(),
-        seats,
-        bring_up: row.bring_up,
-        allow_multiple_spawns: row.allow_multiple_spawns,
-        ..TemplateOptions::default()
-    };
-    let generated = generate_template(&options)
-        .unwrap_or_else(|error| panic!("flight 1L {name}: generate_template failed: {error}"));
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(W_INPUT_DIR)
+        .join(format!("{name}.Group"));
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("flight 1L {name}: cannot read frozen input {}: {error}", path.display()));
+    let generated = parse_group_file(&source)
+        .unwrap_or_else(|error| panic!("flight 1L {name}: cannot parse frozen input {}: {error}", path.display()));
     let anchor = named(&generated, "Zone IN").pos_xz()
         .unwrap_or_else(|| panic!("flight 1L {name}: Zone IN missing position"));
     let (mut copy, _) = crate::duplicate::duplicate_template(&generated, next_id);
@@ -2946,6 +2932,51 @@ fn write_probe(flight: Flight, carrier: TraceCarrier) {
         .unwrap();
     }
     std::io::Write::write_all(&mut std::io::stdout().lock(), report.as_bytes()).unwrap();
+}
+
+#[test]
+#[ignore = "freezes flight 1L inputs once; never regenerate"]
+fn freeze_flight1l_w_inputs() {
+    use std::io::Write;
+
+    // Do not re-run after generate_template changes: that would replace the
+    // flown flight's frozen inputs with different bytes. Refuse existing files.
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(W_INPUT_DIR);
+    for row in W_GROUPS {
+        let path = dir.join(format!("{}.Group", row.name));
+        assert!(!path.exists(), "refusing to overwrite frozen flight 1L input {}", path.display());
+    }
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|error| panic!("cannot create flight 1L input directory {}: {error}", dir.display()));
+    for row in W_GROUPS {
+        let name = row.name;
+        let unit = builtin_plane_catalog().into_iter()
+            .find(|unit| crate::model_spec::script_id(&unit.script) == "f80c10")
+            .expect("flight 1L T-w: built-in catalog missing F-80C f80c10");
+        let seats = (0..2).map(|_| {
+            let mut seat = TemplateSeat::new(unit.clone());
+            seat.role = FlightRole::Independent;
+            seat.country = COUNTRY_USA;
+            seat.altitude = W_ALTITUDE_M;
+            // TemplateSeat::new supplies empty orders/events. Keep its other
+            // aircraft defaults and TemplateOptions' placement defaults.
+            seat
+        }).collect();
+        let options = TemplateOptions {
+            name: name.into(),
+            seats,
+            bring_up: row.bring_up,
+            allow_multiple_spawns: row.allow_multiple_spawns,
+            ..TemplateOptions::default()
+        };
+        let generated = generate_template(&options)
+            .unwrap_or_else(|error| panic!("flight 1L {name}: generate_template failed: {error}"));
+        let path = dir.join(format!("{name}.Group"));
+        let mut file = std::fs::File::create_new(&path)
+            .unwrap_or_else(|error| panic!("cannot create frozen flight 1L input {} (never overwrite): {error}", path.display()));
+        file.write_all(serialize_group(&generated).as_bytes())
+            .unwrap_or_else(|error| panic!("cannot write frozen flight 1L input {}: {error}", path.display()));
+    }
 }
 
 #[test]

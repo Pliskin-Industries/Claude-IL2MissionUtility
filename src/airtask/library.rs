@@ -5,6 +5,7 @@ use std::path::Path;
 
 use super::{AirRole, AirSide, AirSortie, SortieSource};
 use crate::ast::Il2Entity;
+use crate::template::EntityEvent;
 use crate::{in_theatre, model_spec, parser, weapon_range};
 
 pub(crate) const BUILTINS: [(&str, &str); 6] = [
@@ -107,7 +108,7 @@ pub struct SortieShape {
     pub delayed_end_timer: i32,
     pub delete_timer: i32,
     pub mission_complete_timers: Vec<i32>,
-    /// (plane entity, DeathCount) pairs, all OnEvent Type 4.
+    /// (plane entity, DeathCount) pairs, all OnKilled (OnEvent Type 13).
     pub repeat_kill_events: Vec<(i32, i32)>,
     pub rtb_waypoints: BTreeMap<i32, i32>,
     pub rtb_timer: Option<i32>,
@@ -125,6 +126,8 @@ pub(crate) const MULTIPLE_WAYPOINTS: &str =
 const LAST_ATTACK: &str =
     "Air Tasking needs the attack order to be the last order before Mission Complete";
 const HOOKS: &str = "Air Tasking does not support event or report hooks yet";
+// Decision 0012, flight 1L: legacy event 4 never advances the repeat counter.
+const LEGACY_REPEAT_DEATH: &str = "Air Tasking Repeat needs OnKilled (13) into DeathCount; OnPlaneDestroyed (4) does not count aircraft deaths (decision 0012)";
 const PLANES_ONLY: &str = "Air Tasking supports plane units only";
 const UNTESTED: &str = "Air Tasking supports only tested sortie shapes S1-S7";
 
@@ -335,6 +338,11 @@ impl<'a> Graph<'a> {
 
 /// Identify and validate the complete supported graph. No Name property is
 /// read here, including for RTB: those waypoints are reached from end orders.
+/// The tested sortie contract still requires one Delete and its timer chain,
+/// as retained in the six shipped files. Decision 0014's new Activate output
+/// has no Delete and is outside this contract. Complete entity lists (0013)
+/// and the shipped files' legacy Plane-index lists are both recognized; accepting
+/// a legacy list does not mean that it removes aircraft in the game.
 pub fn inspect_sortie(root: &Il2Entity) -> Result<SortieShape, Vec<String>> {
     inspect(root).map_err(|error| vec![error])
 }
@@ -433,8 +441,16 @@ fn inspect_hooks(
             }
             for event in &wrapper.children {
                 let target = event.property("TarId").and_then(|v| v.parse::<i32>().ok());
+                let event_type = event.property("Type").and_then(|v| v.parse::<i32>().ok());
+                if event.block_type == "OnEvent"
+                    && death.is_some()
+                    && target == death
+                    && event_type == Some(EntityEvent::OnPlaneDestroyed.type_id())
+                {
+                    return Err(LEGACY_REPEAT_DEATH.into());
+                }
                 if event.block_type != "OnEvent"
-                    || !is(event, "Type", "4")
+                    || event_type != Some(EntityEvent::OnKilled.type_id())
                     || target.is_none()
                     || target != death
                 {
@@ -462,7 +478,9 @@ fn inspect_hooks(
                 .len()
                 != planes.len())
     {
-        return Err("Air Tasking needs one repeat-mode kill event per plane".into());
+        return Err(
+            "Air Tasking Repeat needs one OnKilled (13) event into DeathCount per plane".into()
+        );
     }
     Ok(events)
 }
@@ -583,13 +601,13 @@ fn inspect_lifecycle(
     g.check(p.delayed_end, &[id(p.deactivate), id(p.delete_timer)], &[])?;
     g.check(p.deactivate, &[], planes)?;
     g.check(p.delete_timer, &[id(p.delete)], &[])?;
+    // Accept exactly one complete representation, never a partial or mixed list.
+    // The immutable built-ins retain Plane indexes; new Spawn groups use entities.
+    let legacy_objects: Vec<_> = planes.iter().map(|entity| plane_objects[entity]).collect();
     g.check(
         p.delete,
         &[],
-        &planes
-            .iter()
-            .map(|entity| plane_objects[entity])
-            .collect::<Vec<_>>(),
+        if same_ids(&p.delete.objects, planes) { planes } else { &legacy_objects },
     )
 }
 
@@ -706,7 +724,9 @@ fn inspect(root: &Il2Entity) -> Result<SortieShape, String> {
         "end Force Complete",
         g.targets(end_orders, "MCU_CMD_ForceComplete"),
     )?;
-    let delete = one("Delete command", g.kind("MCU_Delete"))?;
+    let delete = one("Delete command", g.kind("MCU_Delete")).map_err(|error| {
+        format!("{error}; the tested sortie cleanup chain requires Delete and its delay timer, as in the shipped sorties; new Activate templates omit Delete (decision 0014)")
+    })?;
     let delete_timer = one("delete timer", g.incoming(id(delete), "MCU_Timer"))?;
     let delayed_end = one(
         "delayed end-orders timer",
@@ -1107,7 +1127,26 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn generate(opts: &TemplateOptions) -> Il2Entity {
-        let generated = template::generate_template(opts).unwrap();
+        let mut generated = template::generate_template(opts).unwrap();
+        if generated.find_by_name("Activate Units").is_some() {
+            // S1-S4/S7 test the historical sortie contract. Since decision 0014,
+            // live Activate output omits this chain (tested separately below).
+            // Copy the old nodes from a shipped file without changing that file.
+            let legacy = builtin(1);
+            let delete_id = generated.max_index() + 1;
+            let wait_id = delete_id + 1;
+            let mut delete = legacy.find_by_name("Trigger Delete").expect("missing legacy Trigger Delete").clone();
+            delete.index = Some(delete_id);
+            delete.set_property("Index", delete_id.to_string());
+            delete.set_objects(nodes(&generated).into_iter()
+                .filter(|node| node.block_type == "Plane").map(id).collect());
+            let mut wait = legacy.find_by_name("DELETE DELAY").expect("missing legacy DELETE DELAY").clone();
+            wait.index = Some(wait_id);
+            wait.set_property("Index", wait_id.to_string());
+            wait.set_targets(vec![delete_id]);
+            generated.find_by_name_mut("DELAYED END ORDERS").unwrap().append_target(wait_id);
+            generated.find_by_name_mut("Logic").unwrap().children.extend([delete, wait]);
+        }
         parser::parse_group_file(&crate::serialize::serialize_group(&generated)).unwrap()
     }
 
@@ -1253,6 +1292,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn inspect_sortie_delete_contract_requires_the_legacy_cleanup_chain() {
+        let generated = template::generate_template(&options(TestedShape::S1)).unwrap();
+        assert!(generated.find_by_name("Trigger Delete").is_none());
+        let errors = inspect_sortie(&generated).unwrap_err();
+        assert!(errors[0].contains("exactly one Delete command (found 0)"), "{errors:?}");
+        assert!(errors[0].contains("tested sortie cleanup chain"), "{errors:?}");
+        assert!(errors[0].contains("Activate templates omit Delete"), "{errors:?}");
+    }
+
+    #[test]
+    fn inspect_sortie_delete_contract_accepts_complete_entity_or_legacy_plane_lists() {
+        let legacy = builtin(1);
+        let shape = inspect_sortie(&legacy).unwrap();
+        let mut corrected = legacy.clone();
+        corrected.find_by_name_mut("Trigger Delete").unwrap().set_objects(shape.planes.clone());
+        assert_eq!(inspect_sortie(&corrected).unwrap(), shape);
+
+        for objects in [
+            vec![],
+            vec![shape.planes[0]],
+            vec![shape.planes[0]; shape.planes.len()],
+            shape.planes.iter().enumerate().map(|(i, entity)| {
+                if i == 0 { *entity } else { shape.plane_objects[entity] }
+            }).collect(),
+        ] {
+            let mut invalid = legacy.clone();
+            invalid.find_by_name_mut("Trigger Delete").unwrap().set_objects(objects);
+            assert!(inspect_sortie(&invalid).is_err());
+        }
+        for kind in [TestedShape::S5, TestedShape::S6] {
+            let generated = template::generate_template(&options(kind)).unwrap();
+            assert_eq!(inspect_sortie(&generated).unwrap().kind, kind);
+        }
+    }
+
+    #[test]
     fn inspect_sortie_finds_the_parts_by_wiring() {
         for i in 0..6 {
             let root = builtin(i);
@@ -1303,6 +1378,44 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn inspect_sortie_accepts_on_killed_repeat_events() {
+        let mut opts = options(TestedShape::S6);
+        opts.seats.push(opts.seats[0].clone());
+        let mut root = generate(&opts);
+        let mut events = 0;
+        root.for_each_mut(&mut |node| {
+            if node.block_type == "OnEvent" {
+                node.set_property("Type", "13");
+                events += 1;
+            }
+        });
+        assert_eq!(events, 2);
+        let shape = inspect_sortie(&root).unwrap();
+        assert_eq!(shape.mode, SortieMode::Repeat);
+        let death = root.find_by_name("DeathCount").unwrap().index.unwrap();
+        assert_eq!(
+            shape.repeat_kill_events,
+            shape.planes.iter().map(|&entity| (entity, death)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn inspect_sortie_refuses_legacy_on_plane_destroyed_repeat_events() {
+        let mut root = generate(&options(TestedShape::S6));
+        let mut events = 0;
+        root.for_each_mut(&mut |node| {
+            if node.block_type == "OnEvent" {
+                node.set_property("Type", "4");
+                events += 1;
+            }
+        });
+        assert_eq!(events, 1);
+        assert_eq!(inspect_sortie(&root).unwrap_err(), [
+            "Air Tasking Repeat needs OnKilled (13) into DeathCount; OnPlaneDestroyed (4) does not count aircraft deaths (decision 0012)"
+        ]);
+    }
+
+    #[test]
     fn inspect_sortie_accepts_each_tested_shape() {
         for (kind, cases) in shape_cases() {
             assert!(!cases.is_empty());
@@ -1325,6 +1438,18 @@ pub(crate) mod tests {
                         0
                     }
                 );
+                for &(entity, target) in &shape.repeat_kill_events {
+                    let events: Vec<_> = nodes(by_id(&root, entity))
+                        .into_iter()
+                        .filter(|node| node.block_type == "OnEvent")
+                        .collect();
+                    assert_eq!(events.len(), 1);
+                    assert_eq!(events[0].property("Type"), Some("13"));
+                    assert_eq!(
+                        events[0].property("TarId").unwrap().parse::<i32>().unwrap(),
+                        target
+                    );
+                }
             }
         }
     }
