@@ -1,8 +1,11 @@
-//! P14 steps 0b/0e: five solo, test-only probes. Engine outcomes remain unverified.
-//! Run the ignored writers after merging 0T to get working trace sidecars.
+//! Test-only generators for the P14 in-game probes (steps 0b/0e).
+//! Flights 0, 1A, 1G, 1N and 1D were flown; their results are recorded in
+//! `handoff/P14-probe-results.md`. Committed copies of the flown files are in
+//! `handoff/p14-probes/`. Flight 1B was retired by decision 0010.
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::ast::Il2Entity;
 use crate::locale::{P14_PROBE_LC_START, p14_probe_locale};
@@ -21,6 +24,18 @@ const DAMAGE: &str = include_str!("../../TemplateExamples/Reference/CommandDamag
 const ATTACK_TARGET: &str =
     include_str!("../../TemplateExamples/CorrectedFlightfromTemplate.Group");
 pub(crate) const K14_ORIGIN: (f64, f64) = (105_934.0, 269_477.0);
+
+const COUNTRY_USA: i32 = 601; // NATO players and the built-in HVAR template.
+const COUNTRY_NATO_AI: i32 = 602;
+const COUNTRY_USSR: i32 = 501; // DPRK-side players.
+const COUNTRY_DPRK: i32 = 503; // DPRK-side AI.
+const EVENT_OBJECT_ENTERED: i32 = 58;
+const EVENT_OBJECT_LEFT: i32 = 60;
+const EVENT_PILOT_KILLED: i32 = 0;
+const EVENT_PLANE_CRASHED: i32 = 2;
+const EVENT_PLANE_DESTROYED: i32 = 4;
+const EVENT_PLANE_LANDED: i32 = 5;
+const EVENT_KILLED: i32 = 13;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Flight {
@@ -58,7 +73,7 @@ impl Flight {
         match self {
             Self::OneN => &[Spawn {
                 name: "1N NATO",
-                country: 601,
+                country: COUNTRY_USA,
                 km: (-10.0, 30.0),
                 heading_deg: 0.0,
                 altitude_m: 3050.0,
@@ -66,7 +81,7 @@ impl Flight {
             }],
             Self::OneD => &[Spawn {
                 name: "1D USSR",
-                country: 501,
+                country: COUNTRY_USSR,
                 km: (40.0, -30.0),
                 heading_deg: 0.0,
                 altitude_m: 3050.0,
@@ -89,9 +104,13 @@ struct Spawn {
 
 fn spawn_json(flight: Flight) -> String {
     let entries = flight.spawns().iter().map(|spawn| {
-        // These are fixed ASCII names and script ids, not user-supplied strings.
+        // Hand-written JSON is safe only for ASCII names/script ids without
+        // quotes, backslashes or control characters, which would need escaping.
         for text in [spawn.name, spawn.script] {
-            assert!(text.is_ascii() && !text.contains(['"', '\\', '\n', '\r']));
+            assert!(
+                text.is_ascii() && !text.contains(['"', '\\'])
+                    && !text.bytes().any(|byte| byte.is_ascii_control())
+            );
         }
         let (x, z) = world(spawn.km);
         format!(
@@ -308,7 +327,13 @@ const E_PARTIAL_PULSES: [f64; 3] = [60.0, 62.0, 64.0];
 const E9_PULSES: [f64; 3] = [120.0, 120.05, 120.10];
 const T2_PULSES: [f64; 5] = [277.0, 279.0, 281.0, 283.0, 285.0];
 const T5_PULSES: [f64; 2] = [315.0, 320.0];
-const G_EVENT_TYPES: [i32; 5] = [0, 2, 4, 5, 13];
+const G_EVENT_TYPES: [i32; 5] = [
+    EVENT_PILOT_KILLED,
+    EVENT_PLANE_CRASHED,
+    EVENT_PLANE_DESTROYED,
+    EVENT_PLANE_LANDED,
+    EVENT_KILLED,
+];
 
 fn world(km: (f64, f64)) -> (f64, f64) {
     (K14_ORIGIN.0 + km.0 * 1000.0, K14_ORIGIN.1 + km.1 * 1000.0)
@@ -363,6 +388,29 @@ fn block_ids(root: &Il2Entity, block: &str) -> Vec<i32> {
         }
     });
     ids
+}
+
+/// Parse each MCU reference once, retaining its original ordered properties.
+fn reference_block(block: &str) -> &'static Il2Entity {
+    static COMPLEX_TRIGGER_NODE: OnceLock<Il2Entity> = OnceLock::new();
+    static DAMAGE_NODE: OnceLock<Il2Entity> = OnceLock::new();
+    static ATTACK_TARGET_NODE: OnceLock<Il2Entity> = OnceLock::new();
+    let (src, cached) = match block {
+        "MCU_TR_ComplexTrigger" => (COMPLEX_TRIGGER, &COMPLEX_TRIGGER_NODE),
+        "MCU_CMD_Damage" => (DAMAGE, &DAMAGE_NODE),
+        "MCU_CMD_AttackTarget" => (ATTACK_TARGET, &ATTACK_TARGET_NODE),
+        _ => panic!("unknown probe reference {block}"),
+    };
+    cached.get_or_init(|| {
+        let reference = crate::parser::parse_il2_document(src).expect("probe MCU reference parses");
+        let ids = block_ids(&reference, block);
+        assert_eq!(ids.len(), 1, "one reference {block}");
+        by_id(&reference, ids[0]).clone()
+    })
+}
+
+fn wingman_letter(index: usize) -> char {
+    if index == 0 { 'a' } else { 'b' }
 }
 
 /// Remove nodes and their links, including event/report links if a future HVAR
@@ -530,11 +578,8 @@ impl Probe {
         id
     }
 
-    fn reference_mcu(&mut self, src: &str, block: &str, name: &str) -> Il2Entity {
-        let reference = crate::parser::parse_il2_document(src).expect("probe MCU reference parses");
-        let ids = block_ids(&reference, block);
-        assert_eq!(ids.len(), 1, "one reference {block}");
-        let mut node = by_id(&reference, ids[0]).clone();
+    fn reference_mcu(&mut self, block: &str, name: &str) -> Il2Entity {
+        let mut node = reference_block(block).clone();
         node.index = Some(self.next_id);
         node.set_property("Index", self.next_id.to_string());
         self.next_id += 1;
@@ -780,12 +825,21 @@ impl Probe {
         flight_id
     }
 
-    fn ai_country(&mut self, flight_id: i32, country: i32) {
-        by_id_mut(&mut self.root, flight_id).for_each_mut(&mut |node| {
-            if node.property("Country") == Some("601") {
+    /// Set every plane's country in a copied flight. The built-in HVAR
+    /// template's planes are all USA; fail if that source assumption changes.
+    fn set_flight_plane_country(&mut self, flight_id: i32, country: i32) {
+        let flight = by_id_mut(&mut self.root, flight_id);
+        let plane_count = flight.count_block_type("Plane");
+        let template_country = COUNTRY_USA.to_string();
+        let mut changed = 0;
+        flight.for_each_mut(&mut |node| {
+            if node.block_type == "Plane" {
+                assert_eq!(node.property("Country"), Some(template_country.as_str()));
                 node.set_property("Country", country.to_string());
+                changed += 1;
             }
         });
+        assert_eq!(changed, plane_count, "set every copied flight plane's Country");
     }
 
     fn ai_delete_at(&mut self, name: &str, time_s: f64) {
@@ -1053,8 +1107,9 @@ fn build_j(p: &mut Probe) {
     }
 }
 
-/// A second-use observation is gated by the clock, not Counter(2): a zone
-/// might repeat while occupied (C5), which is exactly what these flights test.
+/// Gate a second-use observation by the clock, independently of repeat firings.
+/// Flight 1A's C5 fired once while occupied; flight 1N showed a pulsed Closer 1
+/// zone fires again for each new entry into an empty zone.
 fn again(p: &mut Probe, zone: i32, name: &str, off_s: f64, on_s: f64, pulse_s: f64) {
     let out = p.relay(&format!("{name} AGAIN OUT"), 0.0);
     p.link(p.init_off, out);
@@ -1128,7 +1183,16 @@ fn build_c(p: &mut Probe) {
     p.icon("T-c C4", C4_KM, "[2]");
 }
 
-fn build_n(p: &mut Probe, radius: f64, with_za4: bool) {
+enum NVariant {
+    Tn,
+    Tn2,
+}
+
+fn build_n(p: &mut Probe, variant: NVariant) {
+    let radius = match variant {
+        NVariant::Tn => 2000.0,
+        NVariant::Tn2 => 5000.0,
+    };
     for (name, km) in [("T-n START", N_START_KM), ("T-n END", N_END_KM)] {
         let zone = p.zone(&format!("{name} ZONE"), radius, true, "[2]", km);
         let off = p.control("MCU_Deactivate", &format!("{name} OFF"), &[zone]);
@@ -1140,39 +1204,49 @@ fn build_n(p: &mut Probe, radius: f64, with_za4: bool) {
         let icon = p.root.find_by_name_mut(&format!("{name} ICON")).unwrap();
         icon.set_name(name);
     }
-    if with_za4 {
+    if matches!(variant, NVariant::Tn) {
         let za4 = p.zone("ZA4", 12_000.0, true, "[2]", p.cell.unwrap().centre_km);
         p.link(p.arm, za4);
         p.observe(za4, "ZA4 fired");
     }
 }
 
-fn build_y(p: &mut Probe, nato: bool) {
-    let (prefix, country, other_country, coalition) = if nato {
-        ("YN", 601, 602, "[2]")
-    } else {
-        ("YD", 501, 503, "[1]")
+enum Side {
+    Nato,
+    Dprk,
+}
+
+fn build_y(p: &mut Probe, side: Side) {
+    let (prefix, player_country, ai_country, coalition) = match side {
+        Side::Nato => ("YN", COUNTRY_USA, COUNTRY_NATO_AI, "[2]"),
+        Side::Dprk => ("YD", COUNTRY_USSR, COUNTRY_DPRK, "[1]"),
     };
     let centre = p.cell.unwrap().centre_km;
     for (suffix, filtered) in [("CT", true), ("CT0", false)] {
         let name = format!("{prefix}-{suffix}");
-        let mut node = p.reference_mcu(COMPLEX_TRIGGER, "MCU_TR_ComplexTrigger", &name);
+        let mut node = p.reference_mcu("MCU_TR_ComplexTrigger", &name);
+        // These country-only and unfiltered shapes were not saved from the
+        // editor. Both load in MissionResaver and worked in flights 1N and 1D
+        // on 2026-10-12; see handoff/P14-probe-results.md.
         node.properties.retain(|(key, _)| {
             !matches!(key.as_str(), "ObjectScript" | "ObjectName") && (filtered || key != "Country")
         });
         if filtered {
-            node.set_property("Country", country.to_string());
+            node.set_property("Country", player_country.to_string());
         }
         let trigger = p.add(node);
         // Live from Mission Begin: Activate on Complex Triggers is unverified.
         p.close_node(trigger);
-        for (event_type, verb, suffix) in [(58, "entered", "ENTERED"), (60, "left", "LEFT")] {
+        for (event_type, verb, suffix) in [
+            (EVENT_OBJECT_ENTERED, "entered", "ENTERED"),
+            (EVENT_OBJECT_LEFT, "left", "LEFT"),
+        ] {
             let text = format!("{name} {verb}");
             let relay = p.relay(&format!("{name} {suffix}"), 0.0);
             attach_event(by_id_mut(&mut p.root, trigger), event_type, relay);
             // The relay fans out to observations and the instrumented breadcrumb.
             p.observe(relay, &text);
-            if event_type == 58 {
+            if event_type == EVENT_OBJECT_ENTERED {
                 for threshold in [2, 3] {
                     p.readout(relay, &format!("{text} {threshold}+"), threshold);
                 }
@@ -1185,9 +1259,9 @@ fn build_y(p: &mut Probe, nato: bool) {
         p.at(&format!("{name} PULSE"), time_s, &[zone]);
         p.observe(zone, &format!("{name} fired"));
     }
-    for (suffix, country, start_s, delete_s) in [
-        ("A", other_country, 20.0, 320.0),
-        ("B", country, 330.0, 630.0),
+    for (suffix, flight_country, start_s, delete_s) in [
+        ("A", ai_country, 20.0, 320.0),
+        ("B", player_country, 330.0, 630.0),
     ] {
         let name = format!("{prefix}-{suffix}");
         let flight = p.ai(
@@ -1197,7 +1271,7 @@ fn build_y(p: &mut Probe, nato: bool) {
             (centre.0 + 30.0, centre.1),
             start_s,
         );
-        p.ai_country(flight, country);
+        p.set_flight_plane_country(flight, flight_country);
         p.ai_delete_at(&name, delete_s);
     }
     p.icon(p.cell.unwrap().key, centre, coalition);
@@ -1210,14 +1284,14 @@ fn build_g(p: &mut Probe) {
         let flight_id = p.ai(&name, 2, (at.0 - 10.0, at.1), at, 60.0);
         let entities = block_ids(by_id(&p.root, flight_id), "MCU_TR_Entity");
         for (i, &entity) in entities.iter().enumerate() {
-            let label = format!("G{n}{}", if i == 0 { 'a' } else { 'b' });
+            let label = format!("G{n}{}", wingman_letter(i));
             by_id_mut(&mut p.root, entity).set_name(&format!("{label} entity"));
             for event_type in G_EVENT_TYPES {
                 let text = format!("{label} ev{event_type}");
                 let subtitle = p.subtitle(&text, 1);
                 attach_event(by_id_mut(&mut p.root, entity), event_type, subtitle);
                 p.sources.push(p.source(entity, Some(event_type), None));
-                if event_type == 4 {
+                if event_type == EVENT_PLANE_DESTROYED {
                     let readout = p.count(&format!("READ {text} 2+"), 2, 0);
                     attach_event(by_id_mut(&mut p.root, entity), event_type, readout);
                     p.observe(readout, &format!("{text} 2+"));
@@ -1237,8 +1311,8 @@ fn build_g(p: &mut Probe) {
             p.at("G3 DEACTIVATE AT", 600.0, &[deactivate, delay]);
         } else if n == 4 {
             for (i, entity) in entities.into_iter().enumerate() {
-                let name = format!("G4{} DAMAGE", if i == 0 { 'a' } else { 'b' });
-                let mut damage = p.reference_mcu(DAMAGE, "MCU_CMD_Damage", &name);
+                let name = format!("G4{} DAMAGE", wingman_letter(i));
+                let mut damage = p.reference_mcu("MCU_CMD_Damage", &name);
                 damage.set_objects(vec![entity]);
                 let damage = p.add(damage);
                 p.at(&format!("{name} AT"), 240.0, &[damage]);
@@ -1246,14 +1320,14 @@ fn build_g(p: &mut Probe) {
         }
     }
     let hunter = p.ai("G1 HUNTER", 2, (115.0, 80.0), G1_KM, 60.0);
-    p.ai_country(hunter, 503);
+    p.set_flight_plane_country(hunter, COUNTRY_DPRK);
     by_id_mut(&mut p.root, hunter).for_each_mut(&mut |node| {
         if node.block_type == "Plane" {
             // Template Builder writes seat.skill.clamp(0, 4).
             node.set_property("AILevel", "4");
         }
     });
-    let mut attack = p.reference_mcu(ATTACK_TARGET, "MCU_CMD_AttackTarget", "G1 HUNTER ATTACK");
+    let mut attack = p.reference_mcu("MCU_CMD_AttackTarget", "G1 HUNTER ATTACK");
     attack.set_objects(vec![block_ids(by_id(&p.root, hunter), "MCU_TR_Entity")[0]]);
     attack.set_targets(vec![id(&p.root, "G1a entity")]);
     let attack = p.add(attack);
@@ -1279,10 +1353,10 @@ fn build(flight: Flight) -> Probe {
             "T-j" => build_j(&mut p),
             "T-z" => build_z(&mut p),
             "T-c" => build_c(&mut p),
-            "T-n" => build_n(&mut p, 2000.0, true),
-            "T-n2" => build_n(&mut p, 5000.0, false),
-            "Y-N" => build_y(&mut p, true),
-            "Y-D" => build_y(&mut p, false),
+            "T-n" => build_n(&mut p, NVariant::Tn),
+            "T-n2" => build_n(&mut p, NVariant::Tn2),
+            "Y-N" => build_y(&mut p, Side::Nato),
+            "Y-D" => build_y(&mut p, Side::Dprk),
             "T-g2" => build_g(&mut p),
             _ => unreachable!("unknown probe cell"),
         }
@@ -1340,7 +1414,7 @@ fn write_probe(flight: Flight, carrier: TraceCarrier) {
     let sidecar = traced.with_extension("trace.json");
     if let Err(error) = trace::write_trace_sidecar(&sidecar, &map) {
         // libtest captures println/eprintln on passing tests. Write directly so
-        // the required --ignored command reports the stub even without --nocapture.
+        // the required --ignored command reports sidecar errors without --nocapture.
         use std::io::Write;
         writeln!(
             std::io::stderr().lock(),
@@ -1574,7 +1648,7 @@ fn assert_fan(root: &Il2Entity, source_name: &str, time: f64, count: usize, targ
 }
 
 fn assert_flight(flight: &Il2Entity, count: usize, start: (f64, f64), exit: (f64, f64)) {
-    assert_flight_country(flight, count, start, exit, "601");
+    assert_flight_country(flight, count, start, exit, COUNTRY_USA);
 }
 
 fn assert_flight_country(
@@ -1582,8 +1656,9 @@ fn assert_flight_country(
     count: usize,
     start: (f64, f64),
     exit: (f64, f64),
-    country: &str,
+    country: i32,
 ) {
+    let country = country.to_string();
     let planes = block_ids(flight, "Plane");
     let entities = block_ids(flight, "MCU_TR_Entity");
     assert_eq!(planes.len(), count);
@@ -1603,7 +1678,7 @@ fn assert_flight_country(
         let position = plane.pos_xz().unwrap();
         assert_near(position.0, start.0 + source_pos.0 - original_lead.0);
         assert_near(position.1, start.1 + source_pos.1 - original_lead.1);
-        assert_eq!(plane.property("Country"), Some(country));
+        assert_eq!(plane.property("Country"), Some(country.as_str()));
         assert_eq!(plane.property("Script"), source.property("Script"));
         assert_eq!(number(plane, "YPos"), 3050.0);
         assert_eq!(number(plane, "YOri"), 0.0);
@@ -1638,7 +1713,7 @@ fn assert_flight_country(
     assert_eq!(begin.property("Enabled"), Some("0"));
     flight.for_each(&mut |node| {
         if let Some(value) = node.property("Country") {
-            assert_eq!(value, country);
+            assert_eq!(value, country.as_str());
         }
     });
 }
@@ -1781,15 +1856,12 @@ fn probe_blocks_match_shipped_shapes() {
     }
 
     let references: Vec<_> = [
-        ("MCU_TR_ComplexTrigger", COMPLEX_TRIGGER),
-        ("MCU_CMD_Damage", DAMAGE),
-        ("MCU_CMD_AttackTarget", ATTACK_TARGET),
+        "MCU_TR_ComplexTrigger",
+        "MCU_CMD_Damage",
+        "MCU_CMD_AttackTarget",
     ]
     .into_iter()
-    .map(|(block, text)| {
-        let root = crate::parser::parse_il2_document(text).unwrap();
-        (block, by_id(&root, block_ids(&root, block)[0]).clone())
-    })
+    .map(|block| (block, reference_block(block)))
     .collect();
 
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -2326,7 +2398,7 @@ fn probe_cells_match_the_table() {
         );
         for (i, entity_id) in entities.into_iter().enumerate() {
             let entity = by_id(&one_g, entity_id);
-            let label = format!("G{n}{}", if i == 0 { 'a' } else { 'b' });
+            let label = format!("G{n}{}", wingman_letter(i));
             let events = entity
                 .children
                 .iter()
@@ -2337,7 +2409,7 @@ fn probe_cells_match_the_table() {
                 6,
                 "five per-type observations + ev4 readout"
             );
-            for event_type in [0, 2, 4, 5, 13] {
+            for event_type in G_EVENT_TYPES {
                 let text = format!("{label} ev{event_type}");
                 assert!(
                     events
@@ -2347,12 +2419,17 @@ fn probe_cells_match_the_table() {
                             && number(e, "TarId") == f64::from(id(&one_g, &text)))
                 );
             }
-            let read_name = format!("READ {label} ev4 2+");
+            let read_name = format!("READ {label} ev{EVENT_PLANE_DESTROYED} 2+");
             assert_counter(&one_g, &read_name, 2, 0);
             let read = named(&one_g, &read_name);
-            assert_eq!(read.targets, [id(&one_g, &format!("{label} ev4 2+"))]);
-            assert!(events.children.iter().any(|e| number(e, "Type") == 4.0
-                && number(e, "TarId") == f64::from(read.index.unwrap())));
+            assert_eq!(
+                read.targets,
+                [id(&one_g, &format!("{label} ev{EVENT_PLANE_DESTROYED} 2+"))]
+            );
+            assert!(events.children.iter().any(|e| {
+                number(e, "Type") == f64::from(EVENT_PLANE_DESTROYED)
+                    && number(e, "TarId") == f64::from(read.index.unwrap())
+            }));
         }
     }
     let g1_pos = named(named(&one_g, "G1"), "WP 1").pos_xz().unwrap();
@@ -2391,7 +2468,7 @@ fn probe_cells_match_the_table() {
         2,
         world((115.0, 80.0)),
         world((130.0, 80.0)),
-        "503",
+        COUNTRY_DPRK,
     );
     assert_at(
         &one_g,
@@ -2473,24 +2550,23 @@ fn probe_cells_match_the_table() {
     assert_near(end.0 - start.0, 24_000.0);
     assert_near(end.1 - start.1, 0.0);
 
-    for (root, prefix, cell, centre, country, other_country, coalition) in [
-        (&one_n, "YN", "Y-N", (100.0, 30.0), "601", "602", "[2]"),
-        (&one_d, "YD", "Y-D", (140.0, -30.0), "501", "503", "[1]"),
+    let reference = reference_block("MCU_TR_ComplexTrigger");
+    for (root, prefix, cell, centre, player_country, ai_country, coalition) in [
+        (&one_n, "YN", "Y-N", (100.0, 30.0), COUNTRY_USA, COUNTRY_NATO_AI, "[2]"),
+        (&one_d, "YD", "Y-D", (140.0, -30.0), COUNTRY_USSR, COUNTRY_DPRK, "[1]"),
     ] {
         assert_eq!(root.count_block_type("MCU_TR_ComplexTrigger"), 2);
         let group = named(root, cell);
-        let reference = crate::parser::parse_il2_document(COMPLEX_TRIGGER).unwrap();
-        let reference = by_id(
-            &reference,
-            block_ids(&reference, "MCU_TR_ComplexTrigger")[0],
-        );
         assert_eq!(group.count_block_type("MCU_CheckZone"), 5); // three controls + two AI Zone Outs
-        for (suffix, filter) in [("CT", Some(country)), ("CT0", None)] {
+        for (suffix, filter) in [("CT", Some(player_country)), ("CT0", None)] {
             let name = format!("{prefix}-{suffix}");
             let trigger = named(root, &name);
             assert_eq!(trigger.block_type, "MCU_TR_ComplexTrigger");
             assert_eq!(trigger.pos_xz(), Some(world(centre)));
-            assert_eq!(trigger.property("Country"), filter);
+            assert_eq!(
+                trigger.property("Country"),
+                filter.map(|value| value.to_string()).as_deref()
+            );
             assert!(trigger.property("ObjectName").is_none());
             assert!(trigger.property("ObjectScript").is_none());
             assert!(trigger.targets.is_empty());
@@ -2553,7 +2629,10 @@ fn probe_cells_match_the_table() {
             let events = &trigger.children[0];
             assert_eq!(events.block_type, "OnEvents");
             assert_eq!(events.children.len(), 2);
-            for (event_type, verb, suffix) in [(58, "entered", "ENTERED"), (60, "left", "LEFT")] {
+            for (event_type, verb, suffix) in [
+                (EVENT_OBJECT_ENTERED, "entered", "ENTERED"),
+                (EVENT_OBJECT_LEFT, "left", "LEFT"),
+            ] {
                 let text = format!("{name} {verb}");
                 let relay = named(root, &format!("{name} {suffix}"));
                 let relay_id = relay.index.unwrap();
@@ -2574,7 +2653,7 @@ fn probe_cells_match_the_table() {
                 );
                 assert_observation(root, relay_id, &text);
                 let mut targets = vec![id(root, &text)];
-                if event_type == 58 {
+                if event_type == EVENT_OBJECT_ENTERED {
                     for threshold in [2, 3] {
                         let read_text = format!("{text} {threshold}+");
                         assert_readout(root, relay_id, &read_text, threshold);
@@ -2590,9 +2669,9 @@ fn probe_cells_match_the_table() {
             assert_at(root, &format!("{name} PULSE"), time_s, &[id(root, &name)]);
             assert_observation(root, id(root, &name), &format!("{name} fired"));
         }
-        for (suffix, country, start_s, delete_s) in [
-            ("A", other_country, 20.0, 320.0),
-            ("B", country, 330.0, 630.0),
+        for (suffix, flight_country, start_s, delete_s) in [
+            ("A", ai_country, 20.0, 320.0),
+            ("B", player_country, 330.0, 630.0),
         ] {
             let name = format!("{prefix}-{suffix}");
             let flight = named(root, &name);
@@ -2601,7 +2680,7 @@ fn probe_cells_match_the_table() {
                 2,
                 world((centre.0 - 30.0, centre.1)),
                 world((centre.0 + 30.0, centre.1)),
-                country,
+                flight_country,
             );
             assert_at(
                 root,
@@ -2862,18 +2941,18 @@ fn probe_spawn_lists_match_the_run_sheets() {
         (
             Flight::OneN,
             "1N NATO",
-            601,
+            COUNTRY_USA,
             (-10.0, 30.0),
             "f80c10",
-            "[{\"name\":\"1N NATO\",\"country\":601,\"x\":95934,\"z\":299477,\"heading_deg\":0,\"altitude_m\":3050,\"script\":\"f80c10\"}]\n",
+            format!("[{{\"name\":\"1N NATO\",\"country\":{COUNTRY_USA},\"x\":95934,\"z\":299477,\"heading_deg\":0,\"altitude_m\":3050,\"script\":\"f80c10\"}}]\n"),
         ),
         (
             Flight::OneD,
             "1D USSR",
-            501,
+            COUNTRY_USSR,
             (40.0, -30.0),
             "mig15bis",
-            "[{\"name\":\"1D USSR\",\"country\":501,\"x\":145934,\"z\":239477,\"heading_deg\":0,\"altitude_m\":3050,\"script\":\"mig15bis\"}]\n",
+            format!("[{{\"name\":\"1D USSR\",\"country\":{COUNTRY_USSR},\"x\":145934,\"z\":239477,\"heading_deg\":0,\"altitude_m\":3050,\"script\":\"mig15bis\"}}]\n"),
         ),
     ] {
         assert_eq!(
@@ -3255,7 +3334,7 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
                     entity_sources += 1;
                     assert_eq!(
                         event_types.iter().copied().collect::<Vec<_>>(),
-                        [Some(0), Some(2), Some(4), Some(5), Some(13)],
+                        G_EVENT_TYPES.map(Some),
                         "{context}: T-g event types"
                     );
                 } else {

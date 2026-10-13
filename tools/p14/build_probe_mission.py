@@ -27,7 +27,6 @@ import json
 import math
 import os
 import re
-import shutil
 import subprocess
 import sys
 
@@ -36,6 +35,8 @@ ARRAY_KEYS = ("Targets", "Objects")
 LC_KEYS = ("LCName", "LCDesc", "LCText")
 LC_PROBE_OFFSET = 100      # Options uses 0, 1, 2
 LC_REF_OFFSET = 1000       # then 1000 per reference group
+START_TYPE_AIR = 0
+START_TYPE_GROUND = 1
 
 
 def read_text(path):
@@ -100,32 +101,142 @@ def check_loader_safe(text, label):
     return bad
 
 
+def loader_unsafe_message(problems):
+    return "loader-unsafe strings:\n  " + "\n  ".join(problems)
+
+
+def reject_loader_unsafe(problems):
+    if problems:
+        raise SystemExit(loader_unsafe_message(problems))
+
+
 DOGFIGHT_TEST = r"data\Multiplayer\Dogfight\_test_dogfight_IL-3.Mission"
 
 
-def shipped_blocks(lines, kind, indent=""):
+def shipped_blocks(lines, kind, path, indent=""):
     """Locate blocks in the shipped mission's exact, indentation-based shape."""
     for start, line in enumerate(lines):
-        if line != indent + kind or lines[start + 1] != indent + "{":
+        if line != indent + kind:
             continue
-        end = next(i for i in range(start + 2, len(lines)) if lines[i] == indent + "}")
-        yield start, end + 1
+        if start + 1 >= len(lines) or lines[start + 1] != indent + "{":
+            raise SystemExit(f"{path}: {kind} block: missing opening '{{'")
+        for end in range(start + 2, len(lines)):
+            if lines[end] == indent + "}":
+                yield start, end + 1
+                break
+            if lines[end].strip() and not lines[end].startswith(indent + "  "):
+                raise SystemExit(f"{path}: {kind} block: missing closing '}}'")
+        else:
+            raise SystemExit(f"{path}: {kind} block: missing closing '}}'")
 
 
-def block_value(lines, key):
+def required_block(lines, kind, path, indent="", parent="mission"):
+    block = next(shipped_blocks(lines, kind, path, indent), None)
+    if block is None:
+        raise SystemExit(f"{path}: {parent} block: missing {kind} block")
+    return block
+
+
+def property_line(lines, key, path):
+    if not lines:
+        raise SystemExit(f"{path}: empty block: missing {key} key")
     indent = lines[0][:len(lines[0]) - len(lines[0].lstrip())] + "  "
     prefix = indent + key + " = "
-    return next(line[len(prefix):-1] for line in lines if line.startswith(prefix))
+    for index, line in enumerate(lines):
+        if line.startswith(prefix):
+            if not line.endswith(";"):
+                raise SystemExit(f"{path}: {lines[0].strip()} block: {key} key lacks ';'")
+            return index, prefix
+    raise SystemExit(f"{path}: {lines[0].strip()} block: missing {key} key")
 
 
-def set_block_value(lines, key, value):
-    indent = lines[0][:len(lines[0]) - len(lines[0].lstrip())] + "  "
-    prefix = indent + key + " = "
-    index = next(i for i, line in enumerate(lines) if line.startswith(prefix))
+def block_value(lines, key, path):
+    index, prefix = property_line(lines, key, path)
+    return lines[index][len(prefix):-1]
+
+
+def set_block_value(lines, key, value, path):
+    index, prefix = property_line(lines, key, path)
     lines[index] = prefix + str(value) + ";"
 
 
-def spawn_airfields(game, path, next_index):
+class ShippedMission:
+    """Read the test mission once for Options and both kinds of spawn points."""
+
+    def __init__(self, game):
+        self.path = os.path.join(game, DOGFIGHT_TEST)
+        self.lines = read_text(self.path).splitlines()
+        self.airfields = [self.lines[start:end] for start, end
+                          in shipped_blocks(self.lines, "Airfield", self.path)]
+        self.entities = [self.lines[start:end] for start, end
+                         in shipped_blocks(self.lines, "MCU_TR_Entity", self.path)]
+
+    def airfield(self, country):
+        for block in self.airfields:
+            if block_value(block, "Country", self.path) == str(country):
+                return block.copy()
+        raise SystemExit(f"{self.path}: Airfield block: no Country = {country} entry")
+
+    def linked_entity(self, airfield):
+        link = block_value(airfield, "LinkTrId", self.path)
+        index = block_value(airfield, "Index", self.path)
+        for block in self.entities:
+            if (block_value(block, "Index", self.path) == link
+                    and block_value(block, "MisObjID", self.path) == index):
+                return block.copy()
+        raise SystemExit(f"{self.path}: MCU_TR_Entity block: no Index = {link} "
+                         f"with MisObjID = {index} for Airfield LinkTrId")
+
+
+def airfield_planes(airfield, path):
+    start, end = required_block(airfield, "Planes", path, "  ", "Airfield")
+    planes = airfield[start:end]
+    entries = [planes[first:last] for first, last
+               in shipped_blocks(planes, "Plane", path, "    ")]
+    return start, end, entries
+
+
+def choose_plane(entries, script, start_type, country, path):
+    script_path = f"luascripts\\worldobjects\\planes\\{script}.txt"
+    for plane in entries:
+        if (block_value(plane, "StartType", path) == str(start_type)
+                and block_value(plane, "Script", path).strip('"').lower() == script_path.lower()):
+            return plane.copy()
+    raise SystemExit(f"{path}: Airfield Country = {country}, Plane block: "
+                     f"no Script = {script_path} with StartType = {start_type}")
+
+
+def validate_spawn_entry(entry, label):
+    required = ("name", "country", "x", "z", "heading_deg", "altitude_m", "script")
+    if not isinstance(entry, dict) or any(key not in entry for key in required):
+        raise SystemExit(f"{label}: expected {', '.join(required)}")
+    for key in ("name", "script"):
+        value = entry[key]
+        if not isinstance(value, str) or '"' in value or any(ord(c) < 32 for c in value):
+            raise SystemExit(f"{label}: loader-unsafe {key}")
+        reject_loader_unsafe(check_loader_safe(f'{key} = "{value}";', label))
+    if type(entry["country"]) is not int:
+        raise SystemExit(f"{label}: country must be an integer")
+    for key in ("x", "z", "heading_deg", "altitude_m"):
+        if type(entry[key]) not in (int, float) or not math.isfinite(entry[key]):
+            raise SystemExit(f"{label}: {key} must be a finite number")
+
+
+def build_spawn_airfield(mission, entry):
+    airfield = mission.airfield(entry["country"])
+    entity = mission.linked_entity(airfield)
+    start, end, entries = airfield_planes(airfield, mission.path)
+    chosen = choose_plane(entries, entry["script"], START_TYPE_AIR, entry["country"], mission.path)
+    set_block_value(chosen, "Altitude", entry["altitude_m"], mission.path)
+    airfield[start:end] = ["  Planes", "  {"] + chosen + ["  }"]
+    set_block_value(airfield, "Name", f'"{entry["name"]}"', mission.path)
+    for block in (airfield, entity):
+        for key, source in (("XPos", "x"), ("ZPos", "z"), ("YOri", "heading_deg")):
+            set_block_value(block, key, entry[source], mission.path)
+    return "\n".join(airfield + [""] + entity)
+
+
+def spawn_airfields(mission, path, next_index):
     """Copy each country's fakefield/entity and one matching air-start entry."""
     try:
         entries = json.loads(read_text(path))
@@ -133,89 +244,32 @@ def spawn_airfields(game, path, next_index):
         raise SystemExit(f"{path}: cannot read spawn list: {error}") from error
     if not isinstance(entries, list):
         raise SystemExit(f"{path}: spawn list must be a JSON array")
-    lines = read_text(os.path.join(game, DOGFIGHT_TEST)).splitlines()
-    airfields = [lines[start:end] for start, end in shipped_blocks(lines, "Airfield")]
-    entities = [lines[start:end] for start, end in shipped_blocks(lines, "MCU_TR_Entity")]
     groups = []
     for number, entry in enumerate(entries, 1):
         label = f"{path}: entry {number}"
-        required = ("name", "country", "x", "z", "heading_deg", "altitude_m", "script")
-        if not isinstance(entry, dict) or any(key not in entry for key in required):
-            raise SystemExit(f"{label}: expected {', '.join(required)}")
-        for key in ("name", "script"):
-            value = entry[key]
-            if not isinstance(value, str) or '"' in value or any(ord(c) < 32 for c in value):
-                raise SystemExit(f"{label}: loader-unsafe {key}")
-            problems = check_loader_safe(f'{key} = "{value}";', label)
-            if problems:
-                raise SystemExit("loader-unsafe strings:\n  " + "\n  ".join(problems))
-        if type(entry["country"]) is not int:
-            raise SystemExit(f"{label}: country must be an integer")
-        for key in ("x", "z", "heading_deg", "altitude_m"):
-            if type(entry[key]) not in (int, float) or not math.isfinite(entry[key]):
-                raise SystemExit(f"{label}: {key} must be a finite number")
-        country, script = entry["country"], entry["script"]
-        airfield = next((block.copy() for block in airfields
-                         if block_value(block, "Country") == str(country)), None)
-        if airfield is None:
-            raise SystemExit(f"{label}: no country {country} airfield in {DOGFIGHT_TEST}")
-        entity = next((block.copy() for block in entities
-                       if block_value(block, "Index") == block_value(airfield, "LinkTrId")
-                       and block_value(block, "MisObjID") == block_value(airfield, "Index")), None)
-        if entity is None:
-            raise SystemExit(f"{label}: no linked entity for country {country} in {DOGFIGHT_TEST}")
-        start, end = next(shipped_blocks(airfield, "Planes", "  "))
-        planes = airfield[start:end]
-        chosen = None
-        for first, last in shipped_blocks(planes, "Plane", "    "):
-            plane = planes[first:last]
-            if (block_value(plane, "StartType") == "0"
-                    and block_value(plane, "Script").strip('"').lower()
-                    == f"luascripts\\worldobjects\\planes\\{script}.txt".lower()):
-                chosen = plane
-                break
-        if chosen is None:
-            raise SystemExit(f"{label}: no StartType = 0 entry for {script} "
-                             f"and country {country} in {DOGFIGHT_TEST}")
-        set_block_value(chosen, "Altitude", entry["altitude_m"])
-        airfield[start:end] = ["  Planes", "  {"] + chosen + ["  }"]
-        set_block_value(airfield, "Name", f'"{entry["name"]}"')
-        for block in (airfield, entity):
-            for key, source in (("XPos", "x"), ("ZPos", "z"), ("YOri", "heading_deg")):
-                set_block_value(block, key, entry[source])
-        text = shift_group("\n".join(airfield + [""] + entity), next_index, 0)
-        problems = check_loader_safe(text, label)
-        if problems:
-            raise SystemExit("loader-unsafe strings:\n  " + "\n  ".join(problems))
+        validate_spawn_entry(entry, label)
+        text = shift_group(build_spawn_airfield(mission, entry), next_index, 0)
+        reject_loader_unsafe(check_loader_safe(text, label))
         groups.append(text)
         next_index = max_index(text) + 1
     return groups
 
 
-def planes_block(game, country, scripts):
+def planes_block(mission, country, scripts):
     """A Planes block for an Airfield of `country`, copied entry by entry from
     the game's own dogfight test airfield of that country: the ground-start
     ("Grouund Start", StartType 1) entry for each plane script named."""
-    text = read_text(os.path.join(game, DOGFIGHT_TEST)).replace("\r\n", "\n")
-    for a in re.finditer(r"\nAirfield\n\{\n(.*?)\n\}\n", text, re.S):
-        body = a.group(1)
-        if re.search(r"\bCountry = (\d+);", body).group(1) != str(country):
-            continue
-        entries = re.findall(r"\n    Plane\n    \{\n.*?\n    \}", body, re.S)
-        chosen = []
-        for script in scripts:
-            hits = [e for e in entries if f"Planes\\{script}.txt" in e and "StartType = 1;" in e]
-            if not hits:
-                raise SystemExit(f"no ground-start {script} for country {country} in {DOGFIGHT_TEST}")
-            chosen.append(hits[0])
-        # The test file's airfield is at top level (2-space body); a reference
-        # group's airfield sits one level deeper, so indent by two more spaces.
-        block = "  Planes\n  {" + "".join(chosen) + "\n  }"
-        return "\n".join("  " + l if l else l for l in block.split("\n"))
-    raise SystemExit(f"no country {country} airfield in {DOGFIGHT_TEST}")
+    airfield = mission.airfield(country)
+    _, _, entries = airfield_planes(airfield, mission.path)
+    chosen = [choose_plane(entries, script, START_TYPE_GROUND, country, mission.path)
+              for script in scripts]
+    # The test file's airfield is at top level (2-space body); a reference
+    # group's airfield sits one level deeper, so indent by two more spaces.
+    block = "  Planes\n  {" + "".join("\n" + "\n".join(plane) for plane in chosen) + "\n  }"
+    return "\n".join("  " + line if line else line for line in block.split("\n"))
 
 
-def add_airfield_planes(group_text, game, scripts):
+def add_airfield_planes(group_text, mission, scripts, label):
     """Give every Airfield without a Planes list the chosen spawn planes."""
     text = group_text.replace("\r\n", "\n")
     added = []
@@ -224,24 +278,27 @@ def add_airfield_planes(group_text, game, scripts):
         head, indent, body, tail = m.group(1), m.group(2), m.group(3), m.group(4)
         if re.search(r"^\s*Planes\s*$", body, re.M):
             return m.group(0)
-        country = re.search(r"\bCountry = (\d+);", body).group(1)
-        block = planes_block(game, country, scripts)
+        country = re.search(r"\bCountry = (\d+);", body)
+        if country is None:
+            raise SystemExit(f"{label}: Airfield block: missing Country key")
+        name = re.search(r'Name = "([^"]*)"', body)
+        if name is None:
+            raise SystemExit(f"{label}: Airfield block: missing Name key")
+        country = country.group(1)
+        block = planes_block(mission, country, scripts)
         body = re.sub(r"(\n\s*Callnum = -?\d+;)", lambda c: c.group(1) + "\n" + block, body, count=1)
-        added.append((re.search(r'Name = "([^"]*)"', body).group(1), country))
+        added.append((name.group(1), country))
         return head + body + tail
     text = re.sub(r"(\n(\s*)Airfield\n\2\{\n)(.*?)(\n\2\})", fix, text, flags=re.S)
     return text, added
 
 
-def options_block(game, title_ids):
-    src = os.path.join(game, r"data\Multiplayer\Dogfight\_test_dogfight_IL-3.Mission")
-    lines = read_text(src).replace("\r\n", "\n").split("\n")
-    end = next(i for i, l in enumerate(lines) if l == "}")  # closes Options
-    block = "\n".join(lines[: end + 1])
-    name, desc, author = title_ids
-    block = re.sub(r"LCName = \d+;", f"LCName = {name};", block, count=1)
-    block = re.sub(r"LCDesc = \d+;", f"LCDesc = {desc};", block, count=1)
-    block = re.sub(r"LCAuthor = \d+;", f"LCAuthor = {author};", block, count=1)
+def options_block(mission, title_ids):
+    start, end = required_block(mission.lines, "Options", mission.path)
+    options = mission.lines[start:end]
+    for key, value in zip(("LCName", "LCDesc", "LCAuthor"), title_ids):
+        set_block_value(options, key, value, mission.path)
+    block = "\n".join(mission.lines[:start] + options)
     assert "MissionType = 2;" in block and "landscape_korea" in block, "not a Korea dogfight Options block"
     return block
 
@@ -261,6 +318,7 @@ def main():
                     help="comma-separated plane scripts for reference airfields that have no Planes list")
     a = ap.parse_args()
     spawn_scripts = [s.strip() for s in a.spawn_planes.split(",") if s.strip()]
+    shipped = ShippedMission(a.game)
 
     probe = read_text(a.probe)
     table = {0: a.title, 1: "P14 in-game probe. Generated by IL-2 Mission Utility; see handoff/P14-air-tasking.md.", 2: "IL-2 Mission Utility"}
@@ -274,7 +332,7 @@ def main():
     for i, ref in enumerate(a.ref):
         text = read_text(ref)
         problems += check_loader_safe(text, ref)
-        text, added = add_airfield_planes(text, a.game, spawn_scripts)
+        text, added = add_airfield_planes(text, shipped, spawn_scripts, ref)
         for airfield, country in added:
             print(f"spawn planes added to airfield {airfield} (country {country}): {', '.join(spawn_scripts)}")
         lc_offset = LC_REF_OFFSET * (i + 1)
@@ -284,10 +342,10 @@ def main():
         next_index = (max_index(groups[-1]) // 1000 + 1) * 1000 + 1000
 
     if a.spawns:
-        groups.extend(spawn_airfields(a.game, a.spawns, next_index))
+        groups.extend(spawn_airfields(shipped, a.spawns, next_index))
 
     if problems:
-        print("loader-unsafe strings:\n  " + "\n  ".join(problems))
+        print(loader_unsafe_message(problems))
         return 1
 
     os.makedirs(a.out, exist_ok=True)
@@ -298,7 +356,7 @@ def main():
         if os.path.exists(stale):
             os.remove(stale)
     mission = os.path.join(a.out, a.name + ".Mission")
-    body = options_block(a.game, (0, 1, 2)).replace("\n", "\r\n")
+    body = options_block(shipped, (0, 1, 2)).replace("\n", "\r\n")
     for g in groups:
         body += "\r\n\r\n" + g.replace("\r\n", "\n").replace("\n", "\r\n").rstrip()
     body += "\r\n\r\n# end of file"
