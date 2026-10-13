@@ -1316,6 +1316,52 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 
 **Step 0g acceptance (tests):** the step 0 tests cover the new file; `probe_cells_match_the_table` checks every row above against literals (fourteen 1-ship flights, who is damaged, each Delete's Objects list in order, the two Deletes of J4, twelve detector commands for J1 to J6, the plane names). An ignored writer `write_p14_probe_1j` writes the files. Flights 0, 1A, 1N, 1D, 1G and 1H generate byte-for-byte the same files as before.
 
+### Step 0h. What can keep an aircraft from being deleted (flight 1K) — S. Branch `codex/p14-0h`
+
+**Why.** Flight 1J showed that a dead aircraft in a Delete's list is harmless, so flight 1G's survivor (G1a) has another cause. That case had three things no probe has isolated: the two aircraft were one formation and one of them was gone; the survivor had been damaged or had decided to return to base; and it was in a fight. Flight 1K takes each alone, and then repeats flight 1G's fight twice with two ways of writing the Delete. No pilot is needed.
+
+| Flight | File | Pilot | Cells | Length |
+|---|---|---|---|---|
+| **1K** | `P14_Probe_1K_traced.Group` | none | T-d3, T-d4 | 16.5 min |
+
+**Flight 1K** (no spawn list; built with `--ref "TemplateExamples/K14 AFB_mp.Group"` and `--no-resave`):
+
+| Cell | Centre (N, E km) | Armed | Closed | Cues |
+|---|---|---|---|---|
+| T-d3 | K0 to K7 at (+130, +20 + 8·n) for n = 0 to 7 | 01:00 | 20:00 | 00:00 "1K: no flying needed. Stay on the ground at K14 until 16:00" |
+| T-d4 | K8 at (+60, +20); K9 at (+60, +60); K10 at (+60, +100) | 01:00 | 20:00 | 16:00 "Flight 1K done. End the mission normally" |
+
+Every pair in both cells is **one 2-ship formation** of AI F-80Cs (`probe_flight`, 2 planes), starting 10 km south of its centre at 01:00. Plane `Name`s are the labels (`K0a`, `K0b`, … `K10b`); each plane has OnEvent 13 → its own subtitle, traced. The cells close at 20:00 with one `MCU_Delete` per aircraft.
+
+**Cell T-d3: one thing at a time.** Times as flights 1H and 1J unless the row says otherwise.
+
+| Pair | At 02:00 | At 04:00 | Detector at 04:30 | Asks |
+|---|---|---|---|---|
+| K0 | nothing | nothing | no | control: both in the end-of-mission list |
+| K1 | nothing | one `MCU_Delete`, Objects = [K1a] (the lead only) | both | does a Delete of the lead take the wingman with it? |
+| K2 | nothing | one `MCU_Delete`, Objects = [K2b] (the wingman only) | both | does a Delete of the wingman take the lead with it? |
+| K3 | one `MCU_Delete`, Objects = [K3b] | one `MCU_Delete`, Objects = [K3a, K3b] | both | a formation that has lost a member, and a list that still names it (flight 1G without the gunfire) |
+| K4 | `MCU_CMD_Damage` with `Damage = 1`, Objects = [K4a] | one `MCU_Delete`, Objects = [K4a, K4b] | both | does a Delete remove a damaged formation? |
+| K5 | `MCU_CMD_Damage` with `Damage = 0`, Objects = [K5a] | one `MCU_Delete`, Objects = [K5a, K5b] | both | the same at the lower level |
+| K6 | `MCU_CMD_Damage` with `Damage = 1`, Objects = [K6a] | nothing | no | control for K4: what level 1 does. Event 13 at 02:00 means it kills; if both are in the end-of-mission list, their height and place show whether they turned for home |
+| K7 | `MCU_CMD_Damage` with `Damage = 0`, Objects = [K7a] | nothing | no | control for K5 |
+
+`Damage = 2` is "Complete" in the editor (the reference file). The editor's other two levels are 0 and 1 by position ("Minor" is the default); which name goes with 1 was not read. `Type = 1` as in the reference file.
+
+**Cell T-d4: the fight.** Each pair has two DPRK-country (503) MiG-15bis hunters at ace skill, written as in flight 1G: they start 5 km behind the pair's start, and an `MCU_CMD_AttackTarget` (hunter lead → the pair's lead) is issued at 01:30 and every 90 s after it until the pair's Delete. Hunter plane `Name`s are `K8Ha`, `K8Hb`, and so on, with OnEvent 13 → a traced subtitle each. The cells are 40 km apart and 70 km from T-d3 so that no fight spills over.
+
+| Pair | Delete | Detector | Asks |
+|---|---|---|---|
+| K8 | 04:00: one `MCU_Delete`, Objects = [K8a, K8b] | 04:30, both | does a Delete remove aircraft that are being attacked? |
+| K9 | 15:00: one `MCU_Delete`, Objects = [K9a, K9b] | 15:30, both | flight 1G again: whatever the fight has done by 15:00 |
+| K10 | 15:00: one `MCU_Delete` per aircraft, fired by one timer | 15:30, both | the same fight with the other wiring |
+
+The hunters are never deleted before the close and get no detector.
+
+**How to read it.** K0 must be in the list. For each of K1 to K5 and K8 to K10: an aircraft with no event at its detector time and not in the list was removed; an event at the detector time means it was still there. K9 and K10 depend on what the hunters do, so they may show nothing: they count only if one aircraft of the pair has died by gunfire before 15:00 and the other has not. If K9's survivor is left behind and K10's is not, one Delete per aircraft is the fix. If both are left behind, the cause is the aircraft's state, and T-d3's rows say which.
+
+**Step 0h acceptance (tests):** the step 0 tests cover the new file; `probe_cells_match_the_table` checks every row of both tables against literals (eleven formations and six hunters, each command's time, kind, `Damage` level and Objects list in order, the two Deletes of K10, the detector lists, the Attack times of each hunter pair, plane names and countries). An ignored writer `write_p14_probe_1k` writes the files. Flights 0, 1A, 1N, 1D, 1G, 1H and 1J generate byte-for-byte the same files as before.
+
 ### Step 0T. Trace builds and replay core (P10) — M. Branch `claude/p14-trace`
 
 **Why (U12).** Subtitles show what fired only to whoever is watching, with no file and no "never fired". The server's text mission log records spawns, kills, takeoffs and landings anyway. A Mission Objective MCU writes an `AType:8` line when it fires, so a small objective hung on any MCU turns that MCU's firing into a log line (a **breadcrumb**). The app knows the whole MCU graph, so it can report what fired, what never fired, and where each chain stopped. It is built **before** probe flight 0 so the flight produces a real log, and cell T-t (below) tests whether it works.
