@@ -1572,6 +1572,26 @@ mod tests {
     }
 
     #[test]
+    fn trigger_delete_lists_spawned_entities_after_pack_reindexing() {
+        let root = configured(FlightConfig::default());
+        let pack = generate_pack(&root, 2).unwrap();
+        for name in ["Group 1", "Group 2"] {
+            let group = pack.find_by_name(name).expect("missing fighter group");
+            let mut entities = Vec::new();
+            group.for_each(&mut |node| {
+                if node.block_type == "MCU_TR_Entity" {
+                    entities.push(node.index.unwrap());
+                }
+            });
+            assert_eq!(entities.len(), 10);
+            let delete = group.find_by_name("Trigger Delete").expect("missing Trigger Delete");
+            assert_eq!(delete.objects, entities);
+            let delay = group.find_by_name("DELETE DELAY").expect("missing DELETE DELAY");
+            assert_eq!(delay.targets, [delete.index.unwrap()]);
+        }
+    }
+
+    #[test]
     fn bingo_sends_only_that_plane_home() {
         let cfg = FlightConfig {
             flight_count: 1,

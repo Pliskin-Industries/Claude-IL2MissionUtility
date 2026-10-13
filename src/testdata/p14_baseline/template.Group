@@ -86,7 +86,7 @@ Group
       Index = 18;
       Name = "Zone Out";
       Desc = "";
-      Targets = [21,23,30];
+      Targets = [21,23,29];
       Objects = [];
       XPos = 40000.000;
       YPos = 0.000;
@@ -217,28 +217,12 @@ Group
     }
 
     
-    MCU_Delete
-    {
-      Index = 29;
-      Name = "Trigger Delete";
-      Desc = "";
-      Targets = [];
-      Objects = [6,8,10,12];
-      XPos = 39550.000;
-      YPos = 0.000;
-      ZPos = 40300.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-    }
-
-    
     MCU_Timer
     {
-      Index = 30;
+      Index = 29;
       Name = "MISSION END";
       Desc = "";
-      Targets = [31,32];
+      Targets = [30,31];
       Objects = [];
       XPos = 40000.000;
       YPos = 0.000;
@@ -253,7 +237,7 @@ Group
     
     MCU_Timer
     {
-      Index = 31;
+      Index = 30;
       Name = "MISSION END ORDERS";
       Desc = "";
       Targets = [27];
@@ -271,10 +255,10 @@ Group
     
     MCU_Timer
     {
-      Index = 32;
+      Index = 31;
       Name = "DELAYED END ORDERS";
       Desc = "";
-      Targets = [28,33];
+      Targets = [28];
       Objects = [];
       XPos = 39700.000;
       YPos = 0.000;
@@ -283,24 +267,6 @@ Group
       YOri = 0;
       ZOri = 0;
       Time = 2;
-      Random = 100;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 33;
-      Name = "DELETE DELAY";
-      Desc = "";
-      Targets = [29];
-      Objects = [];
-      XPos = 39550.000;
-      YPos = 0.000;
-      ZPos = 40150.000;
-      XOri = 0;
-      YOri = 0;
-      ZOri = 0;
-      Time = 0.50;
       Random = 100;
     }
 
@@ -328,7 +294,7 @@ Group
       Index = 26;
       Name = "AFTER BRING UP";
       Desc = "";
-      Targets = [34];
+      Targets = [32];
       Objects = [];
       XPos = 39850.000;
       YPos = 0.000;
@@ -359,10 +325,10 @@ Group
     
     MCU_Timer
     {
-      Index = 34;
+      Index = 32;
       Name = "Formation 1";
       Desc = "";
-      Targets = [35,36];
+      Targets = [33,34];
       Objects = [];
       XPos = 39550.000;
       YPos = 0.000;
@@ -377,10 +343,10 @@ Group
     
     MCU_Timer
     {
-      Index = 36;
+      Index = 34;
       Name = "Goto WP 1";
       Desc = "";
-      Targets = [40];
+      Targets = [38];
       Objects = [];
       XPos = 39400.000;
       YPos = 0.000;
@@ -395,10 +361,10 @@ Group
     
     MCU_Timer
     {
-      Index = 37;
+      Index = 35;
       Name = "AttackArea 1";
       Desc = "";
-      Targets = [38,39];
+      Targets = [36,37];
       Objects = [];
       XPos = 39250.000;
       YPos = 0.000;
@@ -413,10 +379,10 @@ Group
     
     MCU_Timer
     {
-      Index = 39;
+      Index = 37;
       Name = "Mission Complete 1";
       Desc = "";
-      Targets = [30];
+      Targets = [29];
       Objects = [];
       XPos = 39100.000;
       YPos = 0.000;
@@ -695,7 +661,7 @@ Group
     Desc = "";
     MCU_CMD_Formation
     {
-      Index = 35;
+      Index = 33;
       Name = "Formation";
       Desc = "";
       Targets = [];
@@ -715,7 +681,7 @@ Group
     
     MCU_CMD_AttackArea
     {
-      Index = 38;
+      Index = 36;
       Name = "AttackArea";
       Desc = "";
       Targets = [];
@@ -745,10 +711,10 @@ Group
     Desc = "";
     MCU_Waypoint
     {
-      Index = 40;
+      Index = 38;
       Name = "WP 1";
       Desc = "";
-      Targets = [37];
+      Targets = [35];
       Objects = [7];
       XPos = 44000.000;
       YPos = 3050.000;
