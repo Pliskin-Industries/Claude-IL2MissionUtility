@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-12, with step 0e merged and its three flights waiting for the screen.
+> Last updated: 2026-10-12, after flights 1G, 1N and 1D and the handbook harvest.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -24,7 +24,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | `codex/p14-0b` | `Claude-IL2MissionUtility-0b` | Already merged. A leftover worktree. |
 | `claude/docs-layout-trial` | `Claude-IL2MissionUtility-docs` | This document layout. Merged 2026-10-10. A leftover worktree. |
 
-Last recorded test run on the active branch: 544 passed, 0 failed, 10 ignored (`cargo test --offline`, 2026-10-12, at `aa3b048`). Warnings on 2026-10-12: 69 build, 251 clippy. Record each new run on this line.
+Last recorded test run on the active branch: 544 passed, 0 failed, 10 ignored (`cargo test --offline`, 2026-10-12, after the last flight records). Warnings on 2026-10-12: 69 build, 251 clippy. Record each new run on this line.
 
 ## In progress: P14 Air Tasking (issues #28, #29)
 
@@ -33,14 +33,15 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 - **Flight 0 was flown on 2026-10-03 and gate G0 passed.** Results: `handoff/P14-probe-results.md`. Video check: `References/Recordings/flight0-harvest/README.md`.
 - **Step 3 is unblocked but not merged.** Its commit (`3224286`) reports 583 passed, 11 ignored. It still needs the lines marked `// P14 G0: default pending flight 0` settled, the probe fixes merged in (it is 24 commits behind), the shape and string guards extended to Probe 2, and a full review.
 - **Flight 1A was flown on 2026-10-12 by Claude, as a flying check with an air start.** The T-c cells and ZA4 gave clear answers (c, the re-check and h confirmed; o = fires once; a zone fires for a player). Risk n (cruise speed) was not measured, and the country-filter cells were not in the build. Results: `handoff/P14-probe-results.md`, last section. **The user ruled that it counts as flight 1A: gate G1 is met and step 4 may start** (`docs/decisions/0009`).
-- **Step 0e: the remaining probes, reshaped for an autopilot pilot** (decision 0010). Flight 1B is retired; flights 1N (cruise speed, NATO country filter), 1D (DPRK country filter) and 1G (kill events, no pilot) replace it. Spec: plan step 0e. **Built by Astra, reviewed, and merged as `aa3b048`.** The three missions (`P14_Probe_1N_20261012`, `P14_Probe_1D_20261012`, `P14_Probe_1G_20261012`) pass the resaver and sit in the game's `Dogfight` folder. **None is flown yet.**
-- **Handbook harvest (user request, 2026-10-12): not started.** The user asked for a full harvest of the game's in-game handbook and Museum pages for technical figures. The 13 aircraft rows of `src/model_spec.rs` have no source; whether harvested figures replace them is a separate decision, because it changes Template Builder's default waypoint speeds.
+- **Step 0e is built, merged (`aa3b048`) and flown.** Flights 1G, 1N and 1D were flown by Claude on 2026-10-12. Results: `handoff/P14-probe-results.md` (its last section is a one-table summary of step 0). Headlines: the country filter works on both sides (decision 0008, option 4); a lost aircraft raises OnEvent **13**, not 4, so the plan's loss counting must change; AI F-80Cs fly 733 km/h against the plan's 732; **one aircraft outlived its Delete**, which matters to the budget's hard limit (U22) and is not explained.
+- **The game's handbook is harvested for the 12 aircraft:** `docs/game-handbook/aircraft-characteristics.md`. It ends with a comparison against `src/model_spec.rs`, whose 13 aircraft rows have no source. No code was changed.
 - **Testing on this PC, with Claude flying (2026-10-12).** The game and editor run here on integrated graphics, and Claude can drive both. **Flight 0 was re-flown here as a calibration and matches the 2026-10-03 results** (`handoff/P14-probe-results.md`, last section), so this PC can fly the next probes. The Complex Trigger reference file is saved in `TemplateExamples/Reference/`. How to drive the game, and what is untested: `handoff/sessions/2026-10-12-il2-korea-on-this-pc.md`. Logs: `src/testdata/missionlog/real_4/`. Claude can also fly level legs, orbits and turns by keyboard.
 
 ## Waiting on the user
 
-0. **The screen of the second PC.** Claude needs the desktop to itself to fly 1G, 1N and 1D and to read the handbook. On 2026-10-12 a RustDesk window opened on that PC at 16:51 and the game stopped receiving input; Claude stopped and asked.
-1. **Decision: AI aircraft trigger check zones.** Flight 0 showed it. Options and the recommendation are in `docs/decisions/0008-ai-aircraft-trigger-check-zones.md`. New on 2026-10-12: NATO has only one country (USA), so the country-filter test (cell Y1) cannot be built on the NATO side as proposed.
+0. **Whether to change `src/model_spec.rs` from the handbook.** Proposal: take the handbook's practical ceilings for the 12 aircraft; leave the cruise speeds alone, because the handbook's "cruising speed" is an indicated economy speed and the app's figure is a transit speed that the game's AI was measured to match. A change to cruise speeds would change Template Builder output.
+1. **Decision 0008: AI aircraft trigger check zones.** Its option 4 (filter by country) is now tested and works on both sides: players on 601 or 501, AI on 602 or 503. The decision is the user's; the record is still `Proposed`.
+1a. **What to do about result g and the aircraft that outlived its Delete.** Both touch step 3 (budget, losses). Proposal: switch loss counting to event 13, and fly one more no-pilot probe on the Delete before step 3 is settled.
 2. **Whether objective breadcrumbs show as map markers.** Nothing shows near K14 on the briefing map (2026-10-12). The far map corner, where the breadcrumbs sit, was not inspected.
 3. **Go-ahead for the next steps below.** They were proposed on 2026-10-03 and not confirmed.
 4. **Older confirmations still listed in the plan:** §10 item 23 (a smaller Auto-fill) and the "For the user to confirm" list.
@@ -49,8 +50,8 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 1. Finish step 3 as listed above and merge it into `claude/p14-air-tasking`.
 2. Merge upstream. It is now 6 commits ahead, including v0.7.0 and the split of the UI into per-tab files. Trial result and the one expected baseline change: `handoff/sessions/2026-10-07-flight-0-follow-up.md`.
-3. Fly flights 1G (no pilot), 1N and 1D; read the results with `replay`; record them in `handoff/P14-probe-results.md`.
-4. Harvest the in-game handbook, then put the proposed `model_spec.rs` changes to the user as a before-and-after table.
+3. Probe the Delete finding (no pilot needed), then settle step 3 with event 13 and the flight results.
+4. Scope step 4 (threshold) with the country filter, if the user accepts decision 0008 option 4.
 
 ## Traps
 

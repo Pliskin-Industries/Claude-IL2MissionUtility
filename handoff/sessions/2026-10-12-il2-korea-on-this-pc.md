@@ -71,6 +71,18 @@ What the flight taught:
 - **The game loses input whenever something else takes the foreground.** Astra's and the test runs' shell windows did it, and so did a RustDesk window the user opened on this PC. With no foreground window at all, the computer-use tool refuses keys ("no app is frontmost"). Fly only when nothing else is running and the user is not using the PC.
 - The handbook is reached from the in-flight Esc menu (HANDBOOK); the Museum (main menu) lists 12 aircraft and tabs for ground vehicles, armor, artillery, railroad, equipment, ships and theater of war. The country-name file `data\GUI\DefaultCountryNames.eng` names only 000, 501, 502, 503 and 601.
 
+## Flights 1G, 1N, 1D and the handbook (same evening)
+
+All three flown; results in `handoff/P14-probe-results.md`. The handbook figures are in `docs/game-handbook/aircraft-characteristics.md`.
+
+More on driving the game, learned this evening:
+- **The level-flight helper is a toggle, and an air start may already have it on.** Hold LShift+A for 0.4 s, read the message at the top right ("Helper enabled" or "Helper disabled"), and press again if it says disabled. The helper holds the heading it has at that moment: 3 degrees off costs 5 km over 100 km.
+- **The game's cursor can lag one move behind the pointer** (seen in the handbook and menus after a long session). Send two moves to the target, or a one-tick scroll on it, and check the hover highlight before pressing.
+- **On the results screen** the first press on Leave Server can fail with "Unidentified app is in front" on the button release. Release the button again, then hold Enter twice. There are about 10 s before the next mission loads; if it does, wait for the load and leave again.
+- **The briefing map opens far north of Seoul.** Scroll down three ticks to zoom out and drag the map up; spawn markers carry the names from the spawn list.
+- **Keep each computer-use batch under 300 s,** or the batch itself times out.
+- The handbook is at Esc, Handbook, Characteristics, Compare. It works while a mission runs, so a no-pilot flight is a good time to read it.
+
 ## For decision 0008 (country filter)
 
-The editor lists five countries: Neutral Country (Neutral), USSR, PRC, DPRK (Eastern Bloc) and USA (Western Bloc). **NATO has one named country.** The mission log header also lists 602 and 603 on the NATO side, but the editor gives them no name, so a Complex Trigger cannot pick them from its country list (writing `Country = 602;` by hand is untested). Cell Y1 as proposed on 2026-10-07 (NATO AI on country 602, players on 601) has no second NATO country to use. The DPRK side has three, so the test is possible there. Not tried: giving Neutral Country the Western Bloc coalition in the mission's Countries table.
+The editor lists five countries: Neutral Country (Neutral), USSR, PRC, DPRK (Eastern Bloc) and USA (Western Bloc). **NATO has one named country.** The mission log header also lists 602 and 603 on the NATO side. The editor gives them no name, but a plane written with `Country = 602` loads and counts as NATO, and a trigger filtered to 601 ignores it (flight 1N). The filtered side is the players' country, so the trigger never needs 602 in its own list. Cell Y1 as proposed on 2026-10-07 (NATO AI on country 602, players on 601) has no second NATO country to use. The DPRK side has three, so the test is possible there. Not tried: giving Neutral Country the Western Bloc coalition in the mission's Countries table.

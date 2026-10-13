@@ -162,3 +162,30 @@ Step 0e probe `P14_Probe_1N_traced` (`handoff/p14-probes/flight1n/`), built as `
 **Result n:** the plan's 732 km/h matches what AI F-80Cs flying the built-in template actually do, to within 1 km/h. A player at full throttle is 20 % faster (877 km/h); the handbook's "cruising speed" for a player is 348 km/h indicated. Which of these the threshold timing should use is a step 4 decision (U3 says "F-80 transit time at cruise"); risk n's fallback is not triggered by the AI figure.
 
 Not done: the cue at 20:00 was not waited for; the mission was ended at 15:54 once every cell had its answer.
+
+## Flight 1D (DPRK-side country filter) — 2026-10-12, session `2026-10-12_19-58-17`
+
+Step 0e probe `P14_Probe_1D_traced` (`handoff/p14-probes/flight1d/`), built as `P14_Probe_1D_20261012` with `--spawns`. Flown by Claude from the `1D USSR` air start in a MiG-15bis (country 501): spawned at 05:46.34 at 3048 m, level-flight helper on, throttle 100 %, about 2960 m, heading 357° (the helper held the heading it had when it was switched on, 3° off north). Finished from the menu at 14:55.9. Logs: `src/testdata/missionlog/real_8/` (31 files).
+
+| Window | Who crossed | YD-CT (`Country = 501`) | YD-CT0 (no filter) | Plain zones `[1]` |
+|---|---|---|---|---|
+| A | AI pair, country **503** | **silent** | entered 02:17.80 and 02:18.56; left 03:56.12 and 03:56.38 | Z1 fired 02:17.80 |
+| B | AI pair, country **501** | entered 07:27.80 and 07:28.56; left 09:06.06 and 09:06.34 | the same four times | Z1 and Z2 fired 07:27.80 |
+| pilot | player, country 501 | entered 11:19.74; left 12:22.16 | the same | Z1, Z2 and Z3 fired 11:19.74 |
+
+**Result: the country filter works on the DPRK side too,** with the same pattern as flight 1N. A trigger filtered to USSR (501) ignores DPRK-country (503) aircraft of the same coalition and fires for USSR aircraft, AI or player.
+
+Speeds from this run: the AI pairs (F-80Cs with the country changed) again took 98.3 s across the 20 km circle, 732 km/h. The MiG-15bis at 100 % throttle crossed in 62.42 s; the track was about 4 km off the centre by then, so the chord was about 18.2 km and the speed about 1050 km/h. The handbook gives 1038 km/h maximum continuous and 1078 short-term.
+
+## Step 0 after the 2026-10-12 flights
+
+| Risk | Answer | From |
+|---|---|---|
+| a | Players and AI both trigger a check zone | flights 0, 1A |
+| c, re-check, h, o | confirmed; a pulsed zone fires once per entry into an empty zone | flights 1A, 1N |
+| g | **changed:** a lost aircraft raises event 13 (and 0, 2), never 4; Delete raises none | flight 1G |
+| n | AI F-80Cs on the built-in template: 733 km/h, against the plan's 732 | flights 1N, 1D |
+| country filter (decision 0008, option 4) | works on both sides, for AI and players; country 602 is usable for NATO AI | flights 1N, 1D |
+| new | an aircraft can outlive a Delete whose Objects list also holds a dead aircraft; cause not confirmed | flight 1G |
+
+Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.
