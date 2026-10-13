@@ -324,7 +324,7 @@ Then the shell cuts the template's own start and end logic, in this order:
    SNjj ON STATION ─► SNjj HOT  (relay in the area's HOT set, §3.5)  ─► SNjj EXTEND (timer, T_ext) ─────────►│
                    └► SNjj COLD (relay in the area's COLD set, §3.5) ──────────────────────────────────────►│
  Other DONE causes:                                                                                          │
-   each Plane entity OnEvent Type 4 ─► SNjj LOSSES (Counter = planes, Dropcount 0 = fire once, stay) ──────►│
+   each Plane entity OnEvent Type 13 ► SNjj LOSSES (Counter = planes, Dropcount 0 = fire once, stay) ──────►│
    Zone Out (Closer 0, 35 km, at target; armed on WP 1 arrival) ───────────────────────────────────────────►│
                                                                                                              ▼
  SNjj DONE HUB (latch; active from mission start; used once)
@@ -347,7 +347,7 @@ Notes:
 - A copy is used for one run only (D12). `DONE HUB` never needs re-arming.
 - Kill events that arrive after `Trigger Delete` (if Delete raises them, risk g) reach a closed hub and do nothing.
 - **Dropcount convention.** The codebase uses `Dropcount = 1` for a counter that resets after firing and can fire again (`template.rs` `SpawnCount` `drop = i32::from(repeat)`, `DeathCount` 1 in repeat mode; `flights.rs` `DeathCount` 1), and `Dropcount = 0` for one that fires once and stays. `LOSSES` (used once per copy) is `Dropcount 0`. `BUD s COUNT` (§3.3) fires at every full recount, so it is `Dropcount 1`.
-- `SNjj LOSSES` needs `attach_event(entity, 4, losses_idx)` (`template.rs` `attach_event`) on each plane's `MCU_TR_Entity`. The escort lead's planes count too. Fallback for risk g is `LossesImpl::Latch` (§8 step 0d).
+- `SNjj LOSSES` needs `attach_event(entity, 13, losses_idx)` (type 13, not 4: flight 1G showed that a lost aircraft raises 13 once and never 4; decision 0011) (`template.rs` `attach_event`) on each plane's `MCU_TR_Entity`. The escort lead's planes count too. Fallback for risk g is `LossesImpl::Latch` (§8 step 0d).
 - **Spawn-mode templates (risk u; shapes S5, S6).** Whether kill events, `Deactivate Units` and `Trigger Delete` act on planes made by an `MCU_Spawner` is UNVERIFIED. Probe 2 (step 3) flies one. If it fails, `inspect_sortie` refuses Spawn-mode templates with the message "Air Tasking needs an Activate-mode template".
 - The end timer is no longer reachable from anywhere except `DONE HUB`. A test asserts this.
 
@@ -787,7 +787,7 @@ impl Default for TotalsLimits { fn default() -> Self { Self { aircraft: 96, mcus
 // ThresholdImpl::ComplexTrigger and CounterResetImpl are reserved for step 12 (§3.9); v1 builders accept only ZoneOnly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum ThresholdImpl    { #[default] ZoneOnly, ComplexTrigger }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum ZoneOutImpl      { #[default] CheckZone, Watchdog }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum LossesImpl       { #[default] Type4, Latch }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum LossesImpl       { #[default] Type13, Latch }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum CounterResetImpl { #[default] SetVal, Ring }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum RandomImpl       { #[default] InMission, Seeded }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum BudgetImpl       { #[default] HeadCount, SingleSlot }      // §3.3
@@ -1177,7 +1177,7 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 | r: E7 (0) | Step 3 (budget) | `CensusImpl::SameTick` may be chosen (shorter recount) | `CensusImpl::Spaced` (the default), if E9 is confirmed | No |
 | E9 (0) | Step 3 (budget) | `CensusImpl::Spaced`: pulses 0.05 s apart are counted one by one | If E7 is confirmed, use `CensusImpl::SameTick`. If E7 and E9 both fail, a counter cannot take the census: `BudgetImpl::SingleSlot` (budget 1 per side, no counter) | No |
 | f (0) | Steps 5, 6 | `RandomImpl::InMission` | `RandomImpl::Seeded` (§3.7) | No |
-| g (1B) | Step 3 (LOSSES) | `LossesImpl::Type4` | `LossesImpl::Latch`: per-plane once-gate fed by types 4, 2 and 0 → LOSSES. If no kill event fires at all, LOSSES is left out; on-station end, Zone Out and the hard stop still end the sortie | No |
+| g (1G) | Step 3 (LOSSES) | `LossesImpl::Type13` (flight 1G) | `LossesImpl::Latch`: per-plane once-gate fed by types 4, 2 and 0 → LOSSES. If no kill event fires at all, LOSSES is left out; on-station end, Zone Out and the hard stop still end the sortie | No |
 | h (1A) | Step 4 | INNER is deactivated as written | INNER's output goes through a relay `THsaa INNER GATE`, and `INNER OFF` / `INNER ON` switch that relay | No |
 | j: J2 (0) | Steps 3–6 (every relay gate) | D11 as written | A pulse into an inactive relay is replayed when the relay is activated. Every gate in the design, and in the shipped Fighter Pack, then misfires | **Yes, before step 3** |
 | j: J1 (0) | Steps 3–6 | Either outcome is handled: the `… OUT` relays cover "runs on" | — | No |
@@ -1244,6 +1244,41 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 - `probe_spawn_lists_match_the_run_sheets`: each flight's spawn list has the entries in the run sheets above, at `K14_ORIGIN` + the offset (± 1 m).
 - Ignored writers `write_p14_probe_1n`, `write_p14_probe_1d`, `write_p14_probe_1g` write the plain file, the traced file, its `.trace.json`, the `.eng` files and the `.spawns.json` files into `target/p14/`. `write_p14_probe_1b` is removed.
 - Flights 0 and 1A generate byte-for-byte the same files as before.
+
+### Step 0f. Delete probe (flight 1H) — S. Branch `codex/p14-0f`
+
+**Why (decision 0011).** In flight 1G one aircraft was still flying 12 minutes after the Delete that should have removed it. That Delete's Objects list also held its dead wingman. The budget releases a slot when an aircraft is deleted (U22), so a Delete that can leave an aircraft behind breaks the hard limit. Flight 1H finds out when that happens and which wiring avoids it. No pilot is needed.
+
+| Flight | File | Pilot | Cells | Length |
+|---|---|---|---|---|
+| **1H** | `P14_Probe_1H_traced.Group` | none; a player may sit on the ground at K14 | T-d | 6 min |
+
+**Flight 1H** (no spawn list; built with `--ref "TemplateExamples/K14 AFB_mp.Group"` as flight 0):
+
+| Cell | Centre (N, E km) | Armed | Closed | Cues |
+|---|---|---|---|---|
+| T-d | D0 to D7 at (+130, +20 + 8·n) for n = 0 to 7 | 01:00 | 08:00 | 00:00 "1H: no flying needed. Stay on the ground at K14 until 05:30"; 05:30 "Flight 1H done. End the mission normally" |
+
+**Cell T-d.** Eight 2-ship AI F-80C flights (`probe_flight`, 2 planes), D0 to D7, start at 01:00, each 10 km south of its own centre. Each plane's `Name` is its label (`D0a`, `D0b`, … `D7b`), so the log's end-of-mission list names every aircraft that still exists. Each plane has OnEvent 13 → its own subtitle ("D2b ev13"), traced.
+
+| Flight | Killed at 02:00 (`MCU_CMD_Damage`, Complete) | Removed at 04:00 by | Asks |
+|---|---|---|---|
+| D0 | nobody | nothing | control: both must be in the end-of-mission list |
+| D1 | nobody | one `MCU_Delete`, Objects = [D1a, D1b] | control: a Delete of two live aircraft removes both |
+| D2 | D2b (the wingman) | one `MCU_Delete`, Objects = [D2a, D2b] | the flight 1G case: live aircraft first, dead second |
+| D3 | D3a (the lead) | one `MCU_Delete`, Objects = [D3a, D3b] | dead aircraft first, live second |
+| D4 | D4b | two `MCU_Delete`s, one per aircraft, fired by the same timer | candidate fix: one Delete per aircraft |
+| D5 | D5b | one `MCU_Delete`, Objects = [D5a] only | candidate fix: leave the dead aircraft out of the list |
+| D6 | D6b | the template's own `Deactivate Units`, then its `Trigger Delete` 0.5 s later (as G3 in flight 1G) | what a sortie's own clean-up does with a dead wingman |
+| D7 | nobody | nothing | control for the detector below |
+
+**Detector.** At 04:30 one `MCU_CMD_Damage` (Complete) per aircraft hits every aircraft of D1 to D7. An aircraft that still exists dies and raises event 13 at 04:30; an aircraft that was removed raises nothing. D7's two aircraft must both raise it, which shows the detector works. D0 is never touched and must be in the end-of-mission list, which shows the list works. The two readings are independent.
+
+**Confirmed if.** D1: no event at 04:30 and neither aircraft in the list. D7: two events at 04:30. D0: both in the list. Then each of D2 to D6 reads "removed" (no 04:30 event, not in the list) or "left behind" (a 04:30 event). If D2 or D3 leaves an aircraft behind and D4 or D5 does not, the fix is the wiring of D4 or D5. If D1 fails or D7 is silent, the flight says nothing and the cell must be redesigned.
+
+**The cell close at 08:00** removes whatever is left with one `MCU_Delete` per aircraft. The mission is ended at about 06:00, before it.
+
+**Step 0f acceptance (tests):** the step 0 tests cover the new file (`probe_files_parse_and_links_resolve`, `probe_strings_are_loader_safe`, `probe_blocks_match_shipped_shapes`, `probe_subtitles_are_unique`, `probe_cells_match_the_table`, `probe_run_sheets_match_the_tables`, `probe_traced_every_subtitle_source_has_a_breadcrumb`); `probe_cells_match_the_table` checks every row of the table above against literals (who is damaged and when, each Delete's Objects list in order, the two Deletes of D4, D6's use of the template's own MCUs, the detector's fourteen Damage commands at 04:30, one per aircraft of D1 to D7, and the plane names). An ignored writer `write_p14_probe_1h` writes the files. Flights 0, 1A, 1N, 1D and 1G generate byte-for-byte the same files as before.
 
 ### Step 0T. Trace builds and replay core (P10) — M. Branch `claude/p14-trace`
 
@@ -1368,7 +1403,7 @@ An event-queue simulator over an `Il2Entity` tree. Its semantics are explicit, a
 | Several pulses into one `MCU_Counter` in one tick | Configurable: `SameTickCounts::{Each, One}`, default `Each`. The budget tests run under both; with the census spaced 0.05 s apart (§3.3) the result must be the same. | r |
 | Same-tick delivery | Configurable: `DepthFirst` (the default: each pulse and every switch it causes is finished before the next pulse of the tick) and `Batched` (every pulse of a tick is delivered against the states at the start of the tick, and switches take effect at its end). The overshoot tests need `Batched`: under `DepthFirst` the first request shuts the gates before the second is delivered. | q |
 | `MCU_TR_ComplexTrigger` (added in step 12) | Emits "entered" once per scripted track entering the radius. | d |
-| OnEvent Type 4 | A scripted "kill" event on a plane entity emits once. | g |
+| OnEvent Type 13 | A scripted "kill" event on a plane entity emits once. (Type 4 never fires in the game: flight 1G.) | g |
 | `MCU_Delete`, commands, waypoints | Recorded, no effect, except a scripted "arrive at WP" event that fires the waypoint's Targets. | — |
 
 Inputs: scripted tracks (coalition, list of (t, x, z)), forced pulses (node name, t), kill events, and a fixed seed. Output: a log of (t, node name) pulses and state snapshots. Deterministic for a given seed.
@@ -1427,7 +1462,7 @@ Inputs: scripted tracks (coalition, list of (t, x, z)), forced pulses (node name
 - `shell_one_on_station_per_sortie`: exactly one `ON STATION`, `Time` = T_attack per file (1080 / 600 / 900 / 1200 / 300 / 600), targeted only by `ON STATION IN` (a latch), which is targeted only by the navigation lead's attack timer (for AirAlert, timer 39, not 37; for Yak and Il-10, the branch of entity 7, not the other lead's).
 - `shell_on_station_with_the_escort_first`: Armed Recon with its two flights swapped in file order: `ON STATION IN` is fed by the strike lead's on-target timer (second review, R4-4).
 - `shell_wp1_arms_zone_out`: the navigation lead's `WP 1` targets the Zone Out arming pair. `Zone Out` is centred on the target.
-- `shell_losses_counts_every_plane`: `LOSSES` Counter = 4 / 4 / 4 / 4 / 4 / 8, and the number of `OnEvent Type 4 → LOSSES` equals the plane count (the Armed Recon escort included).
+- `shell_losses_counts_every_plane`: `LOSSES` Counter = 4 / 4 / 4 / 4 / 4 / 8, and the number of `OnEvent Type 13 → LOSSES` equals the plane count (the Armed Recon escort included).
 - `shell_end_of_station_pair`: `ON STATION` targets exactly `SNjj HOT` and `SNjj COLD`; `HOT` targets `EXTEND`; `COLD` and `EXTEND` target `DONE HUB`; both relays are registered in `SideLogic.hot_consumers` / `cold_consumers` under the copy's area. The copy contains no check zone except Zone Out.
 - `shell_timing_values`: HVAR at clock distance: `HARD STOP.Time = 2100` (300 + 600 + 600 + 600); Armed Recon at clock distance: `2700`; `EXTEND.Time = 600`.
 - `shell_start_is_the_gate`: `ENii COPY r` targets `SNjj START` directly and there is no `GATE` MCU; `START` is registered in `SideLogic.gates` and `SideLogic.budget_events`; `START` targets the bring-up timer, `HARD STOP`, `STARTED ON` and `STARTED OFF`; `STARTED ON` activates `FLYING`. The shell writes no link to a `BUD`, `EN` or `ZN` MCU: those come through `SideLogic.links`.
@@ -1692,7 +1727,7 @@ The repo does not prove any of these in game. The shipped files only show what t
 | d | Complex Trigger filters and events | Per-object "entered alive", country filter | None: 0 hits in samples; only the drop-list in `template.rs` | UNVERIFIED. **Step 12 only**; it needs the user's 12a file and a two-player flight | v1 does not use it |
 | e | Counter reset (Dropcount, ModifierSetVal) | `Dropcount 1` = reset after firing (the codebase convention, §3.2 note); ModifierSetVal clears a partial count (the budget's `COUNT`, §3.3). Step 12 only: a fired `Dropcount 0` counter fires again after a reset (T-e E6) | `template.rs` `DeathCount` / `Reset Counter`, `flights.rs` `DeathCount`, commit `7437c51` | UNVERIFIED (flight 0) | `BudgetImpl::SingleSlot` (budget 1, no counter). Counter ring in step 12 |
 | f | Timer `Random %` rolled on each trigger | Quiet, jitter, waterfall, zone chance | `flights.rs` ≈1010-1013, `recon.rs` ≈1246-1256 | UNVERIFIED (the Fighter Pack already depends on it) | `RandomImpl::Seeded` |
-| g | Kill events per aircraft | Type 4 once per plane; none on Delete | `template.rs` ≈559-583; Fighter Pack Type 4 → DeathCount | UNVERIFIED | Per-plane latch on 4 / 2 / 0; the hard stop |
+| g | Kill events per aircraft | **Type 13** once per plane; none on Delete. Type 4 never fires (flight 1G, 2026-10-12; decision 0011) | `handoff/P14-probe-results.md`, flight 1G | VERIFIED for a gun kill and a Damage command; a crash without damage and a bail-out are untested | Per-plane latch on 4 / 2 / 0; the hard stop |
 | h | Deactivating a waiting checkzone cancels it | INNER CLOSE, INNER OFF | `USER_MANUAL.md` ≈203, `flights.rs` ≈905-915 | UNVERIFIED | Gate a downstream relay instead |
 | j | Relay gating; running-timer cancel | D11 relays | recon/flights closers | UNVERIFIED | Explicit clear; OUT relays already cover the cancel case |
 | k | The head count in game | §3.3 | none | UNVERIFIED (Probe 2, cell T-k) | `BudgetImpl::SingleSlot` |
