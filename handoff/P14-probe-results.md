@@ -271,6 +271,58 @@ Other facts from these runs:
 - `AType:24`, `25`, `27` and `31` appeared for the first time; they were not read.
 - AI against AI with ace hunters: in run 1 one pair was untouched for 15 minutes and one pair was destroyed in 8. It is no way to set up a test.
 
+## Flight 1L (the app's own logic, no pilot) — 2026-10-13, session `2026-10-13_17-17-19`
+
+Step 0i probe `P14_Probe_1L_traced` (`handoff/p14-probes/flight1l/`), built as `P14_Probe_1L_20261013` without the resaver, hosted by the game client on the second PC (game `261013`). Nobody spawned; the server was left at 24:51. Logs: `src/testdata/missionlog/real_15/` (54 files). One run.
+
+### Cell T-w: what `generate_template` writes (decisions 0012 and 0013)
+
+Each group came from `generate_template` (two independent F-80Cs, no orders) and was started by pulsing its own bring-up node. A Damage command aimed at a unit's entity does reach a spawned copy.
+
+| Group | Wiring | What happened |
+|---|---|---|
+| W1 | repeat spawn, death event **4** (as generated) | Wave 1 spawned at 01:00.6 and was killed at 03:00.1 (event 13 on both). `DeathCount` never fired. No second wave: nothing died at 06:00 and nothing is in the end-of-mission list. |
+| W2 | the same with death event **13** | Wave 1 killed at 03:00.1; `DeathCount` fired at 03:00.1; `COOLDOWN` at 04:00.1; wave 2 killed by the detector at 06:00.1; `DeathCount` and `COOLDOWN` fired again (07:00.1); wave 3 is in the end-of-mission list. |
+| W3 | repeat spawn, `Trigger Delete` with Plane indexes (as generated) | Clean-up at 03:02, new wave from 04:00.6, killed at 06:00.1, next wave at 07:00. **The end-of-mission list holds two W3a and two W3b:** the live wave and the first wave, still there, switched off. |
+| W4 | the same with `Trigger Delete` listing entities | The same sequence. The end-of-mission list holds one W4a and one W4b: the first wave was really deleted, and the spawner still worked. |
+| W5 | Activate mode, Plane indexes (as generated) | Clean-up at 03:02, `MISSION BEGIN` pulsed again at 04:00: both aircraft died to the detector at 06:00.1. The group came back. |
+| W6 | Activate mode, entities | The same pulses: nothing died at 06:00 and nothing is in the list. **The group did not come back.** |
+
+**Result for 0012: confirmed.** With event 4 the death counter never counts and no further wave comes; with event 13 the loop runs as designed.
+
+**Result for 0013.** In Spawn mode the corrected Delete removes each finished wave and the next wave still spawns; today's Delete leaves every finished wave in the mission. In Activate mode the corrected Delete ends the group for good at its first clean-up, where today it comes back. So the fix that keeps today's behaviour is: Spawn mode lists entities; Activate mode writes no Delete.
+
+### Cell T-v: every entity event, three ways to end
+
+| Aircraft | What happened | Events raised (type, time) |
+|---|---|---|
+| V1, killed by a level 2 Damage command at 02:00 | died at once | 12 (damaged) and 13 (killed) at 02:00.04; 0 (pilot killed), 1 (pilot wounded) and 3 (critical damage) at 02:00.10. Never 2 or 4. |
+| V2, written with `Fuel = 0.03` | the pilot bailed out at 01:21 (`AType:18`); the aircraft hit the ground at 01:43 | 7 (bingo fuel) at 01:00.6; 12 and 3 at 01:03.6; **13 at 01:19.4**; 2 (crashed) at 01:43.0. Never 4. |
+| V3, level 1 damage at 02:00, left alone | dropped its stores at 02:57, flew home, touched down at K14 at 24:07 | 3 at 02:00.10; 9 (bingo bombs) at 02:59.8; **5 (landed) at 24:20.1**. Still in the end-of-mission list 31 s later. Never 13. |
+
+- **Event 13 fires for every way an aircraft was lost** in these flights: a Damage command, AI gunfire (1G), a collision and a crash in a fight (1K), and running out of fuel with a bail-out. **Event 4 has never fired.**
+- **Event 7 fired on V1 and V3 at 01:03.6, three seconds after they were activated, with `Fuel = 1`.** What the game means by it is not known. Any logic that sends a flight home on event 7 would act at once. Flight 1M tests this on upstream's strike and CAP.
+- Event 5 marks a landing. The aircraft is removed some time after it (`DeleteAfterLand = 1`): see R0b and R3a below.
+
+### Cell T-r: the AI's own decision to return to base
+
+All four pairs took level 1 damage at 02:00. With `AiRTBDecision = 1` each aircraft dropped its stores 61 to 69 s later (`AType:26`); with `AiRTBDecision = 0` none did.
+
+| Pair | `AiRTBDecision` | At 05:00 | What happened |
+|---|---|---|---|
+| R0 | 1 | Delete of both | R0a removed. **R0b was not:** no kill at the 05:30 detector, and the log shows it on the ground at K14 at 17:43 (`AType:31`). It is not in the end-of-mission list at 24:51, so the game removed it after it landed. |
+| R1 | **0** | Delete of both | both removed |
+| R2 | **0** | nothing | both stayed in their target area. R2a is in the end-of-mission list there at 1,400 m; R2b died there at 24:38.8 with no command sent. |
+| R3 | 1 | Deactivate of both | R3b is in the end-of-mission list at 4,000 m on the way home, where it was at 05:00: the Deactivate reached it. **R3a was not reached:** it touched down at K14 at 22:12 and was gone by 24:51. |
+
+**Result.** With `AiRTBDecision = 1`, one aircraft of each damaged pair stops answering mission commands (Delete, Deactivate, Damage) and one keeps answering; which one varies (K4a, K4b, R0b, R3a: twice the lead, twice the wingman). The one that stops answering flies to the nearest friendly airfield, lands, and is removed by the game a few minutes later. **With `AiRTBDecision = 0` both aircraft stay on their task and both can be deleted.** One pair each, one run.
+
+For Air Tasking this means sortie aircraft are written with `AiRTBDecision = 0`, and going home after damage is done by the sortie's own logic (an event to a waypoint), which keeps the aircraft under control. The earlier reading ("an aircraft that has decided to go home stops taking commands") was half right: it is one aircraft of the pair, not both.
+
+Other facts from this run:
+- `AType:18` is a bail-out (`BOTID` is the pilot). `AType:31` is written when an aircraft meets the ground, crashing or landing; `AType:27` came with the two crashes and not with the landings.
+- An aircraft with no orders stays within 2 km of where it was spawned.
+
 ## Step 0 after the flights of 2026-10-12 and 2026-10-13
 
 | Risk | Answer | From |
@@ -280,7 +332,9 @@ Other facts from these runs:
 | g | **changed:** a lost aircraft raises event 13 (and 0, 2), never 4; Delete raises none | flight 1G |
 | n | AI F-80Cs on the built-in template: 733 km/h, against the plan's 732 | flights 1N, 1D |
 | country filter (decision 0008, option 4) | works on both sides, for AI and players; country 602 is usable for NATO AI | flights 1N, 1D |
-| new | **an aircraft can outlive its Delete, and a Damage command too**: seen four times, always an aircraft that was damaged or under fire. Likely cause: an AI aircraft that has decided by itself to return to base no longer takes mission commands. Not yet tested on its own | flights 1G, 1K |
+| new | **with `AiRTBDecision = 1`, one aircraft of a damaged pair stops answering Delete, Deactivate and Damage commands**, flies home, lands and is removed by the game. With `AiRTBDecision = 0` both stay on task and can be deleted | flights 1G, 1K, 1L |
+| g, again | event 13 fires for every kind of loss tried (command, gunfire, collision, crash, fuel and bail-out); event 4 never. In `generate_template`'s respawn loop the counter only works on 13 | flights 1G, 1K, 1L |
+| new | `Trigger Delete` with entities: fine in Spawn mode, ends the group for good in Activate mode | flight 1L |
 | new | a dead aircraft in a Delete's list is harmless; a Delete removes the aircraft it names, not the formation | flights 1J, 1K |
 | new | a Delete that lists Plane indexes (as Template Builder and the built-in sorties write it) removes nothing; a Delete that lists entities works | flight 1H |
 | new | a Damage command aimed at one aircraft kills its whole formation | flight 1H |
