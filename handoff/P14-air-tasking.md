@@ -1421,6 +1421,65 @@ The cells close at 26:00 with one `MCU_Delete` per aircraft (entities).
 
 **Step 0i acceptance (tests):** the step 0 tests cover the new file; `probe_cells_match_the_table` checks every row of the three tables against literals (the `AiRTBDecision` and `Fuel` values written, each command's time, kind, level and Objects, the fourteen event types on V1 to V3, each W group's options as seen in its nodes, the event type on its units, its `Trigger Delete` list, its `COOLDOWN` time, and the nodes the probe pulses with their times). An ignored writer `write_p14_probe_1l` writes the files. The earlier flights generate byte-for-byte the same files as before. **`src/template.rs` is not changed by this step.**
 
+### Step 0j. Upstream's strike and CAP, and the fixes as generated (flight 1M) — M. Branch `codex/p14-0j`
+
+**Why.** Four things in one no-pilot flight.
+1. **Upstream's new strike and CAP missions** send the flight home on entity event 7 (bingo fuel). In flight 1L event 7 fired three seconds after activation on aircraft with full tanks. The flight runs upstream's own generated files, with listeners, to see whether a strike turns for home before it attacks. The result goes into an issue for the upstream author (`handoff/upstream-issue-draft.md`).
+2. **Decisions 0012 and 0014** are now in `generate_template`. The flight runs groups the changed code generates, with nothing edited afterwards.
+3. **Decision 0015:** a sortie placed by `place_air_sortie` has `AiRTBDecision = 0`. Flight 1L tested one pair; this adds a 4-ship, the same 4-ship with the setting on, and a single aircraft with it on.
+4. **Decision 0016 (proposed)** leans on a re-triggered timer restarting and firing once. That was measured on game 1.004; cell T-j is flown again on 1.005.
+
+| Flight | File | Pilot | Cells | Length |
+|---|---|---|---|---|
+| **1M** | `P14_Probe_1M_traced.Group` | none | T-u, T-x, T-y, T-j | 14.5 min |
+
+**Flight 1M** (no spawn list; built with `--ref "TemplateExamples/K14 AFB_mp.Group"` and `--no-resave`):
+
+| Cell | Centre (N, E km) | Armed | Closed | Cues |
+|---|---|---|---|---|
+| T-u | U1 (+130, +20); U2 (+50, +100); U3 (+130, +60); U4 (+90, +20); U5 (+90, +60) | 01:00 | 16:00 | 00:00 "1M: no flying needed. Stay on the ground at K14 until 14:00" |
+| T-x | X1 (+10, +60); X2 (+10, +68); X3 (+10, +76) | 01:00 | 16:00 | none |
+| T-y | Y1 (+50, +20); Y2 (+50, +36); Y3 (+50, +52) | 01:00 | 16:00 | 14:00 "Flight 1M done. End the mission normally" |
+| T-j | as in flight 0 (automated from 09:00) | as in flight 0 | as in flight 0 | none |
+
+The cells close at 16:00 with one `MCU_Delete` per aircraft (entities).
+
+**Cell T-u: upstream's own files.** Each group is a copy of a file in `src/testdata/p14_probe_inputs/upstream_a31ad0a/` (written by upstream's code at commit `a31ad0a`; see the README there). The probe places the copy so that the group's origin (its `Zone IN`) is at the row's centre, cuts its `Translator Mission Begin` off, never pulses its check zones, and pulses its own `MISSION BEGIN` at 01:00. That is what `Zone IN` would do when a player arrives.
+
+Changes to a copy are limited to: new indexes and positions; plane `Name`s (`U1a` … `U5d`, so the log's end-of-mission list can be read); **added** listeners; and, in the two control rows, the removal named in the table. No link the app wrote is changed otherwise.
+
+Listeners added: on every plane entity one traced OnEvent subtitle for each of the row's four abort types and for 13 and 5 (`U1a ev7`, …); and a trace on the output of each order timer in the group (`Formation 1`, `Goto WP 1`, `AttackArea 1`, `OnAreaAttacked 1`, `Goto WP 2`, `Mission Complete 1`, `MISSION END`, `DELAYED END ORDERS` in a strike; `Goto WP 1`, `Goto WP 2`, `Goto WP 3`, `Return to WP 1`, `Goto WP 5` in the CAP).
+
+| Row | File | Change beyond the list above | Asks |
+|---|---|---|---|
+| U1 | `Upstream_Strike_NATO_F80C_4ship.Group` | none | does the strike reach its `AttackArea`, or does `Goto WP 2` (home) fire first, and on which event? |
+| U2 | `Upstream_Strike_DPRK_Il10_4ship.Group` | none | the same for a DPRK strike |
+| U3 | `Upstream_Strike_NATO_F80C_4ship.Group` | the four `OnEvent` type 7 hooks to `Goto WP 2` are removed | control: without the bingo-fuel abort, does the strike attack and come home? |
+| U4 | `Upstream_CAP_NATO_F86A_4ship.Group` | none | does the CAP patrol, or does `Goto WP 5` (home) fire at once? |
+| U5 | `Upstream_CAP_NATO_F86A_4ship.Group` | the four `OnEvent` type 7 hooks to `Goto WP 5` are removed | control for U4 |
+
+**How to read T-u.** For each strike: the times of `Goto WP 1`, `AttackArea 1`, `OnAreaAttacked 1`, `Goto WP 2`, `Mission Complete 1` and `MISSION END`, and the time of each abort event on each aircraft. "Aborted at once" is `Goto WP 2` firing before `AttackArea 1`, within a second of an event 7. For each strike that reaches `MISSION END`: its four aircraft are then deactivated; if they are in the end-of-mission list, the upstream `Trigger Delete` removed nothing (decision 0013, on upstream's own file). For the CAP: whether `Goto WP 5` fires, and when.
+
+**Cell T-x: the changed generator, as generated.** Three groups written **once** by the changed `generate_template` into `src/testdata/p14_probe_inputs/flight1m/` (two independent F-80C seats, no orders; `spawn_cooldown_min` set as an option so that `COOLDOWN` is 60 s) and loaded from there. A test checks that the current generator still writes the same bytes, so a later change to the generator is seen. Nothing in a group is edited after generation except indexes, positions, plane `Name`s and added traced listeners (OnEvent 13 per unit; the outputs of `DeathCount`, `COOLDOWN`, `SpawnCount`).
+
+| Group | Options | The probe pulses | Must show |
+|---|---|---|---|
+| X1 | `Spawn`, `allow_multiple_spawns` | 01:00 `SPAWN UNITS`; 03:00 a kill on each unit entity; 06:00 detector on each | 0012: `DeathCount` at 03:00, `COOLDOWN` at 04:00, a second wave dies at 06:00 |
+| X2 | the same | 01:00 `SPAWN UNITS`; 03:00 `MISSION END`; 04:00 `SPAWN UNITS`; 06:00 detector on each | 0014, Spawn mode: the new wave dies at 06:00, and the end-of-mission list holds one X2a and one X2b |
+| X3 | `Activate` | 01:00 `MISSION BEGIN`; 03:00 `MISSION END`; 04:00 `MISSION BEGIN`; 06:00 detector on each | 0014, Activate mode: no `DELETE DELAY` or `Trigger Delete` in the file, and both aircraft die at 06:00 (the group came back) |
+
+**Cell T-y: return to base, larger groups.** F-80C HVAR sortie copies, each starting 10 km south of its centre at 01:00, OnEvent 13 traced per plane.
+
+| Row | Built by | `AiRTBDecision` | At 02:00 | At 05:00 | Detector at 05:30 | Asks |
+|---|---|---|---|---|---|---|
+| Y1 | `place_air_sortie` on the 4-ship (decision 0015 in the code) | 0, set by `place_air_sortie` | `MCU_CMD_Damage`, level 1, Objects = [Y1a] | one `MCU_Delete`, Objects = the four entities | all four | are all four removed? |
+| Y2 | `probe_flight`, 4 planes | 1 (as the template has it) | the same | the same | all four | how many of four stop answering? |
+| Y3 | `probe_flight`, 1 plane | 1 | the same on Y3 | one `MCU_Delete`, Objects = [Y3] | Y3 | does a lone damaged aircraft stop answering? |
+
+**Cell T-j** is flight 0's cell, unchanged (J1 to J5). It is here for J5: a 10 s timer re-triggered at 5 s must fire once, 15 s after the first trigger.
+
+**Step 0j acceptance (tests):** the step 0 tests cover the new file; `probe_cells_match_the_table` checks every row of the tables against literals. For T-u it checks that, apart from the listed changes, each copy's nodes, links, properties and plane blocks equal the source file's (compare after undoing the index and position shift), and that U3 and U5 differ from U1 and U4 by exactly the four removed hooks. An ignored writer `write_p14_probe_1m` writes the files. The earlier flights generate byte-for-byte the same files as before.
+
 ### Step 0T. Trace builds and replay core (P10) — M. Branch `claude/p14-trace`
 
 **Why (U12).** Subtitles show what fired only to whoever is watching, with no file and no "never fired". The server's text mission log records spawns, kills, takeoffs and landings anyway. A Mission Objective MCU writes an `AType:8` line when it fires, so a small objective hung on any MCU turns that MCU's firing into a log line (a **breadcrumb**). The app knows the whole MCU graph, so it can report what fired, what never fired, and where each chain stopped. It is built **before** probe flight 0 so the flight produces a real log, and cell T-t (below) tests whether it works.
