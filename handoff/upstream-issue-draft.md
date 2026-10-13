@@ -54,7 +54,7 @@ So a group that reaches `MISSION END` is deactivated but never deleted. It stays
 
 ## 4. Smaller things, for information
 
-- **`AiRTBDecision = 1` can take an aircraft out of the mission's hands.** When a pair with that setting was damaged, one of the two stopped answering Delete, Deactivate and Damage commands, flew to the nearest friendly airfield and landed (six pairs, one aircraft each time). With `AiRTBDecision = 0` both stayed on task and both deleted cleanly. Your strike and CAP files already write 0, so they are not affected; a Template Builder group whose aircraft carry 1 would be.
+- **`AiRTBDecision = 1` can take an aircraft out of the mission's hands.** When a pair with that setting was damaged, one of the two stopped answering Delete, Deactivate and Damage commands, flew to the nearest friendly airfield and landed (four damaged pairs in three flights, one aircraft each time; two more cases in dogfights). With `AiRTBDecision = 0` both stayed on task and both deleted cleanly. Your strike and CAP files already write 0, so they are not affected; a Template Builder group whose aircraft carry 1 would be.
 - **A strike that is shot down never reaches `Mission Complete`,** so nothing pulses `MISSION END`. When strikes share Exclusive Activation, that plan would hold the lock. I read this from the code and have not flown it.
 - **`MissionResaver.exe` crashes on every mission since 1.005,** including the game's own `_test_dogfight_IL-3.Mission`. The game still hosts a plain `.Mission` with its `.eng`.
 
