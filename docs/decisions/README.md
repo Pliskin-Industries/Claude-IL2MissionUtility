@@ -48,5 +48,6 @@ What this makes easier, harder or necessary.
 | [0010](0010-reshape-the-remaining-probes-for-an-autopilot-pilot.md) | Reshape the remaining probes for an autopilot pilot | Accepted |
 | [0011](0011-losses-count-on-event-13.md) | Air Tasking counts a lost aircraft on OnEvent 13 | Accepted |
 | [0012](0012-aircraft-death-event-outside-air-tasking.md) | Which event counts a destroyed aircraft in Template Builder and Fighter Pack | Proposed |
+| [0013](0013-template-builder-delete-lists-plane-indexes.md) | Template Builder's clean-up Delete lists Plane indexes and removes nothing | Proposed |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

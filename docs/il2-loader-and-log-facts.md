@@ -55,3 +55,15 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **`MCU_CMD_AttackTarget`** (`TemplateExamples/CorrectedFlightfromTemplate.Group`): `AttackGroup = 1;` `Priority = 1;`, Objects = the attacker's entity, Targets = the target's entity.
 - **A dogfight spawn point** is an `Airfield` block with the `fakefield` model, an `MCU_TR_Entity` and a `Planes` list. An entry with `StartType = 0` is an air start at `Altitude`. Seen at K14 (`YOri = 0`): the plane spawned heading north at about 460 km/h indicated. The game's dogfight test mission has such entries for 12 aircraft on both sides, the F-80C and MiG-15bis among them.
 - No shipped file and no other template in this repo contains a Damage command or a Complex Trigger; the two reference files are the only examples.
+
+## Found on 2026-10-13 (flight 1H, game 1.005)
+
+- **An `MCU_Delete` must list entities.** With `Plane` block indexes in `Objects` it loads, the resaver accepts it, and in the game it removes nothing. Every file saved from the editor lists entities.
+- **`MCU_CMD_Damage` acts on the whole formation** of the aircraft it names. To kill one aircraft, make it a flight of its own.
+- **A deactivated aircraft still exists:** it is in the end-of-mission list, and a Damage command does not reach it.
+- **The end-of-mission list (`AType:12` after `AType:7`) holds live aircraft only.** A dead aircraft is absent whether or not a Delete named it.
+- **`AType:28`** is written once per aircraft when its flight is activated.
+- **Since game update 1.005 (`261013`), `MissionResaver.exe` crashes at once** (exit `0xC0000005`, no output) on every mission tried, the game's own `_test_dogfight_IL-3.Mission` included. Build with `--no-resave`: the game hosts a plain `.Mission` with its `.eng` beside it, and the server list shows the title from the `.eng`. A mission resaved under 1.004 also still loads.
+- **The launcher's update download stalls on the `Cdn` source.** Settings (the gear), source `S3`, then pause and resume: it runs at 8 to 27 MB/s for a few minutes and stalls again; pause and resume once more. Do not press pause once it says "Unpacking".
+- **The game's main menu goes to a hangar fly-by after about a minute idle** and hides the menu. One click on empty space brings it back.
+

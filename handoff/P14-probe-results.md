@@ -177,7 +177,39 @@ Step 0e probe `P14_Probe_1D_traced` (`handoff/p14-probes/flight1d/`), built as `
 
 Speeds from this run: the AI pairs (F-80Cs with the country changed) again took 98.3 s across the 20 km circle, 732 km/h. The MiG-15bis at 100 % throttle crossed in 62.42 s; the track was about 4 km off the centre by then, so the chord was about 18.2 km and the speed about 1050 km/h. The handbook gives 1038 km/h maximum continuous and 1078 short-term.
 
-## Step 0 after the 2026-10-12 flights
+## Flight 1H (the Delete probe, no pilot) — 2026-10-13, three runs
+
+Step 0f probe `P14_Probe_1H_traced` (`handoff/p14-probes/flight1h/`), hosted by the game client on the second PC. **The game had updated to 1.005 (`261013`) that morning.** Nobody spawned; Claude stayed on the briefing screen and left the server after 06:00. The three runs gave the same events at the same times.
+
+| Run | Session | Built as | Left at | Logs |
+|---|---|---|---|---|
+| 1 | `2026-10-13_14-35-56` | `P14_Probe_1H_20261012`, resaved by the 1.004 resaver the day before | 06:35 | `src/testdata/missionlog/real_9/` |
+| 2 | `2026-10-13_14-43-49` | the same files (the server reloaded the mission) | 06:56 | `real_10/` |
+| 3 | `2026-10-13_14-53-52` | `P14_Probe_1H_20261013`, **not resaved**: a plain `.Mission` and `.eng` | 06:26 | `real_11/` |
+
+**The controls held, so the flight can be read.** D0 (never touched): both aircraft in the end-of-mission list. D1 (one Delete, two live aircraft, entities in Objects): no event at 04:30 and neither aircraft in the list. D7 (never removed): both raised event 13 at 04:30.04.
+
+| Pair | Done to it | Observed | Result |
+|---|---|---|---|
+| D8 | 04:00: one `MCU_Delete` whose Objects are the two **Plane** indexes, as `generate_template` writes its `Trigger Delete` | Both aircraft were hit by the detector at 04:30.02 and raised event 13 at 04:30.04 | **A Delete that names Plane blocks removes nothing.** |
+| D9 | 04:00: `MCU_Deactivate`, no Delete | No event at 04:30. Both aircraft in the end-of-mission list | A deactivated aircraft still exists. A Damage command does not reach it. |
+| D2, D3, D4, D5, D6 | 02:00: `MCU_CMD_Damage` (Complete) with **one** aircraft's entity in Objects | **Both** aircraft of the pair got Kill records at 02:00.02 and raised event 13 at 02:00.04, whichever one was named (D3 named the lead, the others the wingman) | **A Damage command aimed at one aircraft kills its whole formation.** |
+| D2 to D6, after that | the 04:00 removals and the 04:30 detector | No second event, and none of the ten in the end-of-mission list | Nothing can be said about a Delete with one live and one dead aircraft: no pair was in that state. |
+| D5b, D7a, D7b | killed, named in no Delete | Not in the end-of-mission list | The end-of-mission list holds live aircraft only. A dead aircraft does not raise event 13 again when damaged. |
+
+**What this settles.**
+- **Air Tasking's clean-up must list entities in its Deletes.** The six built-in sorties and everything Template Builder generates list Plane indexes in `Trigger Delete`; in the game that Delete does nothing, and the units are left deactivated (`Deactivate Units` lists entities and works). Each spawn that is "cleaned up" this way stays in the mission. This is existing app behaviour and its own decision (`docs/decisions/0013`).
+- **Flight 1G's row for G3 must be read again:** "Deactivate, then Delete" raised no event because the aircraft were deactivated, not because they were deleted.
+- **Event 13 on a Damage kill is the same on game 1.005 as on 1.004.**
+
+**What it does not settle.** Whether a Delete skips a live aircraft when its list also names a dead one (flight 1G's survivor). Flight 1J (plan step 0g) repeats those rows with single-aircraft flights.
+
+Other facts from these runs:
+- `AType:28` is logged once per aircraft when its flight is activated (20 records at 01:00.5).
+- The unresaved mission logs `MFile:Multiplayer/Dogfight/P14_Probe_1H_20261013.mission`; the resaved one logs `.msnbin`. While it loads, the game shows "Multiplayer server overload: erratic plane behavior may occur". The events were the same.
+- The client-hosted server reloads the mission about 20 s after the results screen. Runs 2 and 3 came from that.
+
+## Step 0 after the flights of 2026-10-12 and 2026-10-13
 
 | Risk | Answer | From |
 |---|---|---|
@@ -186,6 +218,8 @@ Speeds from this run: the AI pairs (F-80Cs with the country changed) again took 
 | g | **changed:** a lost aircraft raises event 13 (and 0, 2), never 4; Delete raises none | flight 1G |
 | n | AI F-80Cs on the built-in template: 733 km/h, against the plan's 732 | flights 1N, 1D |
 | country filter (decision 0008, option 4) | works on both sides, for AI and players; country 602 is usable for NATO AI | flights 1N, 1D |
-| new | an aircraft can outlive a Delete whose Objects list also holds a dead aircraft; cause not confirmed | flight 1G |
+| new | an aircraft can outlive a Delete whose Objects list also holds a dead aircraft; cause not confirmed, flight 1J is built to test it | flights 1G, 1H |
+| new | a Delete that lists Plane indexes (as Template Builder and the built-in sorties write it) removes nothing; a Delete that lists entities works | flight 1H |
+| new | a Damage command aimed at one aircraft kills its whole formation | flight 1H |
 
 Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.
