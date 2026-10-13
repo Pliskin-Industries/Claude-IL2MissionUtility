@@ -209,6 +209,23 @@ Other facts from these runs:
 - The unresaved mission logs `MFile:Multiplayer/Dogfight/P14_Probe_1H_20261013.mission`; the resaved one logs `.msnbin`. While it loads, the game shows "Multiplayer server overload: erratic plane behavior may occur". The events were the same.
 - The client-hosted server reloads the mission about 20 s after the results screen. Runs 2 and 3 came from that.
 
+## Flight 1J (the Delete probe with single aircraft, no pilot) — 2026-10-13, session `2026-10-13_15-17-18`
+
+Step 0g probe `P14_Probe_1J_traced` (`handoff/p14-probes/flight1j/`), built as `P14_Probe_1J_20261013` without the resaver, hosted by the game client on the second PC (game `261013`). Nobody spawned; the server was left at 06:31. Logs: `src/testdata/missionlog/real_12/` (14 files). One run.
+
+**The controls held.** J0 (never touched): both aircraft in the end-of-mission list. J1 (one Delete, two live aircraft of two flights): no event at 04:30, neither in the list. J6: J6y raised event 13 at 02:00.04 and not again; J6x raised it at 04:30.04 only. So a Damage command aimed at a 1-ship flight kills that aircraft alone, and the detector works.
+
+| Pair | Killed at 02:00 | Removed at 04:00 by | The live aircraft at 04:30 | Result |
+|---|---|---|---|---|
+| J2 | J2y | one Delete, Objects = [J2x, J2y] | J2x: no event, not in the list | removed |
+| J3 | J3x | one Delete, Objects = [J3x, J3y] | J3y: no event, not in the list | removed |
+| J4 | J4y | one Delete per aircraft | J4x: no event, not in the list | removed |
+| J5 | J5y | one Delete, Objects = [J5x] | J5x: no event, not in the list | removed |
+
+**Result: a dead aircraft in a Delete's Objects list is harmless**, whether it comes before or after the live one. One Delete that lists every aircraft's entity removes the live ones.
+
+**So flight 1G's survivor has another cause.** What that case had and this flight did not: the two aircraft were one formation; the dead one was shot down by gunfire, not by a Damage command; the survivor had been in a fight (66 rounds fired) and ended the mission low and near K14, which looks like an aircraft that had decided to return to base. None of these has been tested on its own.
+
 ## Step 0 after the flights of 2026-10-12 and 2026-10-13
 
 | Risk | Answer | From |
@@ -218,7 +235,7 @@ Other facts from these runs:
 | g | **changed:** a lost aircraft raises event 13 (and 0, 2), never 4; Delete raises none | flight 1G |
 | n | AI F-80Cs on the built-in template: 733 km/h, against the plan's 732 | flights 1N, 1D |
 | country filter (decision 0008, option 4) | works on both sides, for AI and players; country 602 is usable for NATO AI | flights 1N, 1D |
-| new | an aircraft can outlive a Delete whose Objects list also holds a dead aircraft; cause not confirmed, flight 1J is built to test it | flights 1G, 1H |
+| new | one aircraft outlived its Delete in flight 1G; the dead aircraft in that Delete's list is **not** the cause (a Delete with a dead aircraft in its list removes the live ones); the cause is not found | flights 1G, 1J |
 | new | a Delete that lists Plane indexes (as Template Builder and the built-in sorties write it) removes nothing; a Delete that lists entities works | flight 1H |
 | new | a Damage command aimed at one aircraft kills its whole formation | flight 1H |
 

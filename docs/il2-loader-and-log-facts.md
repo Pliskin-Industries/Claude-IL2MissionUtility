@@ -66,4 +66,6 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **Since game update 1.005 (`261013`), `MissionResaver.exe` crashes at once** (exit `0xC0000005`, no output) on every mission tried, the game's own `_test_dogfight_IL-3.Mission` included. Build with `--no-resave`: the game hosts a plain `.Mission` with its `.eng` beside it, and the server list shows the title from the `.eng`. A mission resaved under 1.004 also still loads.
 - **The launcher's update download stalls on the `Cdn` source.** Settings (the gear), source `S3`, then pause and resume: it runs at 8 to 27 MB/s for a few minutes and stalls again; pause and resume once more. Do not press pause once it says "Unpacking".
 - **The game's main menu goes to a hangar fly-by after about a minute idle** and hides the menu. One click on empty space brings it back.
+- **A Delete may list a dead aircraft** (flight 1J): the live aircraft in the same list are removed, in either order.
+- **Leaving a client-hosted server:** on the results screen, press Leave Server and confirm within about 15 s. On 2026-10-13 a leave confirmed as the next load began left the game on "0 % please wait" for minutes.
 
