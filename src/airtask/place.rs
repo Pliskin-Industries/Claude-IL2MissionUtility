@@ -6,6 +6,9 @@ use super::library::{SortieShape, by_id, inspect_sortie, number};
 use crate::ast::Il2Entity;
 use crate::{mapnet, placement, template, weapon_range};
 
+// Decision 0015: keep damaged sortie aircraft under mission control.
+const AI_RTB_DECISION_OFF: &str = "0";
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SortiePlacement {
     pub target: (f64, f64),
@@ -28,6 +31,11 @@ pub struct PlacedSortie {
 pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<PlacedSortie, String> {
     // All fallible validation precedes mutation, including the speed fallback.
     let shape = inspect_sortie(root).map_err(|errors| errors.join("; "))?;
+    for &plane in shape.plane_objects.values() {
+        if by_id(root, plane).property("AiRTBDecision").is_none() {
+            return Err(format!("Air Tasking needs AiRTBDecision on Plane {plane}"));
+        }
+    }
     if [
         p.target.0,
         p.target.1,
@@ -97,6 +105,9 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
     // park_path_waypoints has a legacy RTB-name filter. The inspected ids also
     // handle renamed path/RTB nodes; existing RTBs are moved to p.rtb below.
     root.for_each_mut(&mut |node| {
+        if node.block_type == "Plane" {
+            node.set_property("AiRTBDecision", AI_RTB_DECISION_OFF);
+        }
         if node.index.is_some_and(|index| paths.contains(&index)) {
             placement::set_coord(node, "XPos", p.target.0);
             placement::set_coord(node, "ZPos", p.target.1);
@@ -223,6 +234,82 @@ mod tests {
                     && node.objects.contains(&lead)
             })
             .collect()
+    }
+
+    #[test]
+    fn place_all_builtins_disable_ai_rtb_only_on_copies() {
+        for (i, expected_planes) in [4, 4, 4, 4, 4, 8].into_iter().enumerate() {
+            let source = builtin(i);
+            let before = source.clone();
+            let mut copy = source.clone();
+            let placed = place_air_sortie(&mut copy, &PLACEMENT).unwrap();
+            let planes: Vec<_> = nodes(&copy)
+                .into_iter()
+                .filter(|node| node.block_type == "Plane")
+                .collect();
+            assert_eq!(planes.len(), expected_planes, "builtin {i}");
+            assert_eq!(placed.planes.len(), expected_planes, "builtin {i}");
+            let mut changed = 0;
+            for plane in planes {
+                let original = by_id(&source, plane.index.unwrap());
+                assert_eq!(original.property("AiRTBDecision"), Some("1"));
+                assert_eq!(
+                    plane.property("AiRTBDecision"),
+                    Some("0"),
+                    "builtin {i}, Plane {:?}",
+                    plane.index
+                );
+                changed += usize::from(
+                    plane.property("AiRTBDecision") != original.property("AiRTBDecision"),
+                );
+            }
+            assert_eq!(changed, expected_planes, "builtin {i}");
+            assert_eq!(source, before, "builtin {i} source changed");
+        }
+    }
+
+    #[test]
+    fn place_overrides_existing_ai_rtb_decision_values() {
+        for value in ["0", "2"] {
+            let mut root = builtin(3);
+            root.for_each_mut(&mut |node| {
+                if node.block_type == "Plane" {
+                    node.set_property("AiRTBDecision", value);
+                }
+            });
+            place_air_sortie(&mut root, &PLACEMENT).unwrap();
+            for plane in nodes(&root)
+                .into_iter()
+                .filter(|node| node.block_type == "Plane")
+            {
+                assert_eq!(plane.property("AiRTBDecision"), Some("0"));
+            }
+        }
+    }
+
+    #[test]
+    fn place_rejects_any_plane_missing_ai_rtb_decision_without_mutation() {
+        for i in 0..6 {
+            let source = builtin(i);
+            for plane in nodes(&source)
+                .into_iter()
+                .filter(|node| node.block_type == "Plane")
+            {
+                let plane_id = plane.index.unwrap();
+                let mut copy = source.clone();
+                copy.for_each_mut(&mut |node| {
+                    if node.index == Some(plane_id) {
+                        node.properties.retain(|(key, _)| key != "AiRTBDecision");
+                    }
+                });
+                let before = copy.clone();
+                assert_eq!(
+                    place_air_sortie(&mut copy, &PLACEMENT).unwrap_err(),
+                    format!("Air Tasking needs AiRTBDecision on Plane {plane_id}")
+                );
+                assert_eq!(copy, before, "builtin {i}, Plane {plane_id}");
+            }
+        }
     }
 
     #[test]
