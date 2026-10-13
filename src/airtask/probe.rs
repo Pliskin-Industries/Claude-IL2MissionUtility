@@ -7,6 +7,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
+use super::AiRtbDecision;
 use crate::ast::Il2Entity;
 use crate::locale::{P14_PROBE_LC_START, p14_probe_locale};
 use crate::parser::parse_group_file;
@@ -1047,21 +1048,6 @@ const K_FIGHTS: &[FightDeleteRow] = &[
         detector_s: K_FIGHT_DETECT_S,
     },
 ];
-
-#[derive(Clone, Copy)]
-enum AiRtbDecision {
-    Enabled,
-    Disabled,
-}
-
-impl AiRtbDecision {
-    fn property(self) -> &'static str {
-        match self {
-            Self::Enabled => "1",
-            Self::Disabled => "0",
-        }
-    }
-}
 
 struct RtbProbeRow {
     name: &'static str,
@@ -5340,14 +5326,39 @@ fn assert_larger_rtb_probe(root: &Il2Entity) {
     for plane in block_ids(&placed, "Plane") {
         assert_eq!(by_id(&placed, plane).property("AiRTBDecision"), Some("1"));
     }
-    super::place::place_air_sortie(&mut placed, &super::place::SortiePlacement {
-        target: world((50.0, 20.0)), heading_deg: 0.0, spawn_dist_m: 10_000.0,
-        rtb: world((40.0, 20.0)),
-    }).unwrap();
+    super::place::place_air_sortie(
+        &mut placed,
+        &super::place::SortiePlacement {
+            target: world((50.0, 20.0)),
+            heading_deg: 0.0,
+            spawn_dist_m: 10_000.0,
+            rtb: world((40.0, 20.0)),
+        },
+    )
+    .unwrap();
     let y1 = named(cell, "Y1");
-    for (produced, actual) in block_ids(&placed, "Plane").into_iter().zip(block_ids(y1, "Plane")) {
-        assert_eq!(by_id(&placed, produced).property("AiRTBDecision"), Some("0"));
-        assert_eq!(by_id(y1, actual).property("AiRTBDecision"), by_id(&placed, produced).property("AiRTBDecision"));
+    assert_eq!(named(&placed, "Trigger Delete").objects, [7, 9, 11, 13]);
+    assert_eq!(
+        named(y1, "Trigger Delete").objects,
+        [
+            id(y1, "Y1a entity"),
+            id(y1, "Y1b entity"),
+            id(y1, "Y1c entity"),
+            id(y1, "Y1d entity"),
+        ]
+    );
+    for (produced, actual) in block_ids(&placed, "Plane")
+        .into_iter()
+        .zip(block_ids(y1, "Plane"))
+    {
+        assert_eq!(
+            by_id(&placed, produced).property("AiRTBDecision"),
+            Some("0")
+        );
+        assert_eq!(
+            by_id(y1, actual).property("AiRTBDecision"),
+            by_id(&placed, produced).property("AiRTBDecision")
+        );
     }
     for node in [&placed, y1] {
         let rtb = named(node, "RTB 1");
@@ -5369,6 +5380,12 @@ fn assert_larger_rtb_probe(root: &Il2Entity) {
     // Keep the RTB changes above explicit; discard only their tested nodes.
     let mut ordinary = probe_flight(HVAR, 4, world((40.0, 20.0)), world((50.0, 20.0)), &mut 1);
     ordinary.set_name("Y1");
+    // The placed copy's Delete repair is asserted separately above.
+    let entities = block_ids(&ordinary, "MCU_TR_Entity");
+    ordinary
+        .find_by_name_mut("Trigger Delete")
+        .unwrap()
+        .set_objects(entities);
     let mut actual = y1.clone();
     let mut removed: HashSet<_> = [id(y1, "RTB 1"), id(y1, "RTB DELAY")].into_iter().collect();
     for label in ["Y1a", "Y1b", "Y1c", "Y1d"] {
@@ -5400,9 +5417,11 @@ fn assert_larger_rtb_probe(root: &Il2Entity) {
             }
         });
     }
-    assert_eq!(crate::duplicate::duplicate_template(&actual, &mut 1).0,
+    assert_eq!(
+        crate::duplicate::duplicate_template(&actual, &mut 1).0,
         crate::duplicate::duplicate_template(&ordinary, &mut 1).0,
-        "Y1 differs only by placement formatting, AiRTBDecision and the tested RTB chain");
+        "Y1 differs only by placement formatting, AiRTBDecision, entity Delete links and the tested RTB chain"
+    );
     for name in ["Y2", "Y3"] {
         let copy = named(cell, name);
         assert!(copy.find_by_name("RTB 1").is_none());

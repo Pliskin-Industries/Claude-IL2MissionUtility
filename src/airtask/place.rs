@@ -2,12 +2,15 @@
 
 use std::collections::BTreeSet;
 
-use super::library::{SortieShape, by_id, inspect_sortie, number};
+use super::library::{REGENERATE_TEMPLATE, SortieShape, by_id, inspect_sortie, number};
+use super::AiRtbDecision;
 use crate::ast::Il2Entity;
 use crate::{mapnet, placement, template, weapon_range};
 
-// Decision 0015: keep damaged sortie aircraft under mission control.
-const AI_RTB_DECISION_OFF: &str = "0";
+const MISSING_AI_RTB_DECISION: &str = "Air Tasking needs AiRTBDecision on Plane";
+const INVALID_PLACEMENT: &str = "Air Tasking needs finite placement coordinates and a nonnegative spawn distance. Choose finite coordinates and a spawn distance of zero or more.";
+const SPAWN_OVERFLOW: &str = "Air Tasking spawn coordinates overflow. Choose smaller coordinates or a shorter spawn distance.";
+const NO_RTB_INDEXES: &str = "Air Tasking has no free indexes for RTB";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SortiePlacement {
@@ -31,9 +34,12 @@ pub struct PlacedSortie {
 pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<PlacedSortie, String> {
     // All fallible validation precedes mutation, including the speed fallback.
     let shape = inspect_sortie(root).map_err(|errors| errors.join("; "))?;
-    for &plane in shape.plane_objects.values() {
+    let plane_objects: BTreeSet<_> = shape.plane_objects.values().copied().collect();
+    for &plane in &plane_objects {
         if by_id(root, plane).property("AiRTBDecision").is_none() {
-            return Err(format!("Air Tasking needs AiRTBDecision on Plane {plane}"));
+            return Err(format!(
+                "{MISSING_AI_RTB_DECISION} {plane}. {REGENERATE_TEMPLATE}"
+            ));
         }
     }
     if [
@@ -48,10 +54,7 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
     .any(|value| !value.is_finite())
         || p.spawn_dist_m < 0.0
     {
-        return Err(
-            "Air Tasking needs finite placement coordinates and a nonnegative spawn distance"
-                .into(),
-        );
+        return Err(INVALID_PLACEMENT.into());
     }
     let (sin, cos) = p.heading_deg.rem_euclid(360.0).to_radians().sin_cos();
     let spawn = (
@@ -59,7 +62,7 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
         p.target.1 - p.spawn_dist_m * sin,
     );
     if !spawn.0.is_finite() || !spawn.1.is_finite() {
-        return Err("Air Tasking spawn coordinates overflow".into());
+        return Err(SPAWN_OVERFLOW.into());
     }
     let missing: Vec<_> = shape
         .leads
@@ -70,7 +73,7 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
     let added = missing.len() + usize::from(shape.rtb_timer.is_none());
     root.max_index()
         .checked_add(added as i32 + 1)
-        .ok_or("Air Tasking has no free indexes for RTB")?;
+        .ok_or_else(|| format!("{NO_RTB_INDEXES}. {REGENERATE_TEMPLATE}"))?;
     let mut next_id = root.max_index() + 1;
     let mut new_rtb = Vec::new();
     for (n, &lead) in shape.leads.iter().enumerate() {
@@ -105,8 +108,20 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
     // park_path_waypoints has a legacy RTB-name filter. The inspected ids also
     // handle renamed path/RTB nodes; existing RTBs are moved to p.rtb below.
     root.for_each_mut(&mut |node| {
-        if node.block_type == "Plane" {
-            node.set_property("AiRTBDecision", AI_RTB_DECISION_OFF);
+        if node
+            .index
+            .is_some_and(|index| plane_objects.contains(&index))
+        {
+            node.set_property("AiRTBDecision", AiRtbDecision::Disabled.property());
+        }
+        if node.index.is_some()
+            && node.index == shape.delete
+            && node
+                .objects
+                .iter()
+                .all(|index| plane_objects.contains(index))
+        {
+            node.set_objects(shape.planes.clone());
         }
         if node.index.is_some_and(|index| paths.contains(&index)) {
             placement::set_coord(node, "XPos", p.target.0);
@@ -201,7 +216,7 @@ fn append_sibling(root: &mut Il2Entity, sibling: i32, node: Il2Entity) {
 mod tests {
     use super::*;
     use crate::airtask::library::tests::{builtin, generate, options, order, swap_flights};
-    use crate::airtask::library::{MULTIPLE_WAYPOINTS, NO_WAYPOINT, TestedShape, nodes};
+    use crate::airtask::library::{TestedShape, nodes};
     use crate::airtask::testkit::assert_links_resolve;
     use crate::template::{OrderKind, TemplateOptions};
 
@@ -237,10 +252,73 @@ mod tests {
     }
 
     #[test]
-    fn place_all_builtins_disable_ai_rtb_only_on_copies() {
+    fn place_all_builtins_delete_exactly_the_entities_in_plane_order() {
+        for (i, expected) in [
+            vec![7, 9, 11, 13],
+            vec![7, 9, 11, 13],
+            vec![7, 9, 11, 13],
+            vec![7, 9, 11, 13],
+            vec![7, 9, 11, 13],
+            vec![7, 9, 11, 13, 15, 17, 19, 21],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut copy = builtin(i);
+            place_air_sortie(&mut copy, &PLACEMENT).unwrap();
+            assert_eq!(
+                copy.find_by_name("Trigger Delete").unwrap().objects,
+                expected,
+                "builtin {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn place_delete_uses_plane_order_after_flight_reordering() {
+        let mut copy = builtin(3);
+        swap_flights(&mut copy);
+        place_air_sortie(&mut copy, &PLACEMENT).unwrap();
+        assert_eq!(
+            copy.find_by_name("Trigger Delete").unwrap().objects,
+            [11, 13, 7, 9]
+        );
+    }
+
+    #[test]
+    fn place_preserves_an_existing_entity_delete_list() {
+        let mut copy = builtin(3);
+        let expected = vec![13, 11, 9, 7];
+        copy.find_by_name_mut("Trigger Delete")
+            .unwrap()
+            .set_objects(expected.clone());
+        place_air_sortie(&mut copy, &PLACEMENT).unwrap();
+        assert_eq!(
+            copy.find_by_name("Trigger Delete").unwrap().objects,
+            expected
+        );
+    }
+
+    #[test]
+    fn place_without_delete_keeps_cleanup_deactivate_only() {
+        let mut copy = template::generate_template(&options(TestedShape::S1)).unwrap();
+        place_air_sortie(&mut copy, &PLACEMENT).unwrap();
+        assert_eq!(copy.count_block_type("MCU_Delete"), 0);
+        assert!(copy.find_by_name("DELETE DELAY").is_none());
+        assert_eq!(
+            copy.find_by_name("DELAYED END ORDERS").unwrap().targets,
+            [copy
+                .find_by_name("Deactivate Units")
+                .unwrap()
+                .index
+                .unwrap()]
+        );
+    }
+
+    #[test]
+    fn place_all_builtins_disable_ai_rtb_on_every_plane() {
         for (i, expected_planes) in [4, 4, 4, 4, 4, 8].into_iter().enumerate() {
             let source = builtin(i);
-            let before = source.clone();
             let mut copy = source.clone();
             let placed = place_air_sortie(&mut copy, &PLACEMENT).unwrap();
             let planes: Vec<_> = nodes(&copy)
@@ -249,7 +327,6 @@ mod tests {
                 .collect();
             assert_eq!(planes.len(), expected_planes, "builtin {i}");
             assert_eq!(placed.planes.len(), expected_planes, "builtin {i}");
-            let mut changed = 0;
             for plane in planes {
                 let original = by_id(&source, plane.index.unwrap());
                 assert_eq!(original.property("AiRTBDecision"), Some("1"));
@@ -259,12 +336,7 @@ mod tests {
                     "builtin {i}, Plane {:?}",
                     plane.index
                 );
-                changed += usize::from(
-                    plane.property("AiRTBDecision") != original.property("AiRTBDecision"),
-                );
             }
-            assert_eq!(changed, expected_planes, "builtin {i}");
-            assert_eq!(source, before, "builtin {i} source changed");
         }
     }
 
@@ -305,7 +377,9 @@ mod tests {
                 let before = copy.clone();
                 assert_eq!(
                     place_air_sortie(&mut copy, &PLACEMENT).unwrap_err(),
-                    format!("Air Tasking needs AiRTBDecision on Plane {plane_id}")
+                    format!(
+                        "Air Tasking needs AiRTBDecision on Plane {plane_id}. Load the template in Template Builder, correct the reported options or links, and press Generate again."
+                    )
                 );
                 assert_eq!(copy, before, "builtin {i}, Plane {plane_id}");
             }
@@ -539,7 +613,7 @@ mod tests {
         let before = root.clone();
         assert_eq!(
             place_air_sortie(&mut root, &PLACEMENT).unwrap_err(),
-            MULTIPLE_WAYPOINTS
+            "Air Tasking supports only one path waypoint per lead. Load the template in Template Builder, correct the reported options or links, and press Generate again."
         );
         assert_eq!(root, before);
     }
@@ -554,7 +628,7 @@ mod tests {
         let before = root.clone();
         assert_eq!(
             place_air_sortie(&mut root, &PLACEMENT).unwrap_err(),
-            NO_WAYPOINT
+            "Air Tasking needs a lead with a path waypoint. Load the template in Template Builder, correct the reported options or links, and press Generate again."
         );
         assert_eq!(root, before);
     }
@@ -611,7 +685,7 @@ mod tests {
         let before = root.clone();
         assert_eq!(
             place_air_sortie(&mut root, &PLACEMENT).unwrap_err(),
-            "Air Tasking needs a waypoint speed above 150 km/h; no usable model speed for unknown-p14-model"
+            "Air Tasking needs a waypoint speed above 150 km/h; no usable model speed for unknown-p14-model. Load the template in Template Builder, correct the reported options or links, and press Generate again."
         );
         assert_eq!(root, before);
     }

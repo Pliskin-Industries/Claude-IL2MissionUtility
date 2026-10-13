@@ -767,11 +767,8 @@ fn patch_plane_links(
                 .filter(|wrapper| wrapper.block_type == "OnEvents")
                 .flat_map(|wrapper| &mut wrapper.children)
                 .find(|event| {
-                    event.block_type == "OnEvent"
-                        && event.property("Type").and_then(|s| s.parse::<i32>().ok())
-                            == Some(EntityEvent::OnKilled.type_id())
-                        && event.property("TarId").and_then(|s| s.parse::<i32>().ok())
-                            == Some(old_death_id)
+                    crate::template::read_event(event)
+                        == Some((EntityEvent::OnKilled.type_id(), old_death_id))
                 })
                 .ok_or_else(|| {
                     format!(

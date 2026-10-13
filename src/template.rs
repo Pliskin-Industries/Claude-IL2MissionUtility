@@ -599,11 +599,10 @@ impl EntityEvent {
         }
     }
 
-    pub fn default_for(_kind: UnitKind) -> Self {
-        // Decision 0012: aircraft losses raise OnKilled too (flight 1L).
-        EntityEvent::OnKilled
-    }
 }
+
+/// Aircraft and ground units both report destruction through OnKilled.
+pub const DEFAULT_DEATH_EVENT: EntityEvent = EntityEvent::OnKilled;
 
 /// Bring units in by enabling parked entities, or by spawning them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1123,9 +1122,15 @@ pub struct EventHook {
 }
 
 impl EventHook {
-    pub fn default_for(kind: UnitKind) -> Self {
+    pub fn default_for(_kind: UnitKind) -> Self {
+        Self::default()
+    }
+}
+
+impl Default for EventHook {
+    fn default() -> Self {
         Self {
-            kind: EntityEvent::default_for(kind),
+            kind: DEFAULT_DEATH_EVENT,
             then: EventThen::ForceComplete,
         }
     }
@@ -3151,9 +3156,8 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     }
 
     if let Some(id) = death_count_id {
-        for (i, unit) in placed.iter_mut().enumerate() {
-            let kind = opts.seats.get(i).map(|s| s.unit.kind).unwrap_or(UnitKind::Plane);
-            attach_event(&mut unit.entity, EntityEvent::default_for(kind).type_id(), id);
+        for unit in &mut placed {
+            attach_event(&mut unit.entity, DEFAULT_DEATH_EVENT.type_id(), id);
         }
     }
 
@@ -3858,6 +3862,17 @@ pub(crate) fn attach_event(entity: &mut Il2Entity, event_type: i32, tar_id: i32)
     entity.children.push(wrap);
 }
 
+/// Read an OnEvent's type and target, rejecting other blocks and malformed links.
+pub(crate) fn read_event(event: &Il2Entity) -> Option<(i32, i32)> {
+    if event.block_type != "OnEvent" {
+        return None;
+    }
+    Some((
+        event.property("Type")?.parse().ok()?,
+        event.property("TarId")?.parse().ok()?,
+    ))
+}
+
 fn attach_report(entity: &mut Il2Entity, report_type: i32, cmd_id: i32, tar_id: i32) {
     let mut r = Il2Entity::new("OnReport");
     r.set_property("Type", report_type.to_string());
@@ -3961,6 +3976,9 @@ pub struct TemplateLoad {
     pub warnings: Vec<String>,
 }
 
+const LEGACY_AIRCRAFT_DEATH_WARNING: &str = "On Plane Destroyed (4) death links will be regenerated as On Killed (13). The next wave will now arrive after the whole group has been destroyed.";
+const ACTIVATE_DELETE_NOTE: &str = "Generate will remove the old Delete chain from this Activate-mode template. The units will be switched off as before and can be activated again.";
+
 /// Template Builder files keep `ENABLE / PULSE IN`, `Zone IN`, `MISSION END`,
 /// and a `Units` subgroup. Other groups are rebuilt from units + orders.
 pub fn looks_like_generated_template(root: &Il2Entity) -> bool {
@@ -4019,6 +4037,16 @@ pub fn load_template(root: &Il2Entity, catalog: &[CatalogUnit]) -> Result<Templa
     opts.seats = seats;
 
     read_bring_up(root, &mut opts, &mut consumed, &mut warnings);
+    if opts.bring_up == BringUp::Activate
+        && root
+            .find_by_name("Trigger Delete")
+            .is_some_and(|node| node.block_type == "MCU_Delete")
+        && root
+            .find_by_name("DELETE DELAY")
+            .is_some_and(|node| node.block_type == "MCU_Timer")
+    {
+        warnings.push(ACTIVATE_DELETE_NOTE.into());
+    }
     read_zones(root, &mut opts, native_format, &mut consumed, &mut warnings);
 
     let mut timer_to_order: HashMap<i32, (usize, usize)> = HashMap::new();
@@ -4987,6 +5015,7 @@ fn read_events(
         .values()
         .find(|e| e.name() == Some("Force Complete - High"))
         .and_then(|e| e.index);
+    let mut legacy_aircraft_death = false;
     for unit in loaded {
         let Some(&si) = unit.entity.index.and_then(|id| entity_to_seat.get(&id)) else {
             continue;
@@ -4997,18 +5026,14 @@ fn read_events(
                 continue;
             }
             for ev in &wrap.children {
-                if ev.block_type != "OnEvent" {
+                let Some((typ, tar)) = read_event(ev) else {
                     continue;
-                }
-                let typ = prop_i32(ev, "Type", -1);
-                let tar = prop_i32(ev, "TarId", -1);
+                };
                 if death_id == Some(tar) {
                     if opts.seats[si].unit.kind == UnitKind::Plane
                         && typ == EntityEvent::OnPlaneDestroyed.type_id()
                     {
-                        warnings.push(format!(
-                            "OnPlaneDestroyed (4) on {unit_name} targeting DeathCount will be regenerated as OnKilled (13) (decision 0012)."
-                        ));
+                        legacy_aircraft_death = true;
                     }
                     continue;
                 }
@@ -5041,6 +5066,9 @@ fn read_events(
                 opts.seats[si].events.push(EventHook { kind, then });
             }
         }
+    }
+    if legacy_aircraft_death {
+        warnings.push(LEGACY_AIRCRAFT_DEATH_WARNING.into());
     }
 }
 
@@ -5921,9 +5949,30 @@ mod tests {
 
     #[test]
     fn default_death_event_is_on_killed_for_every_unit_kind() {
+        assert_eq!(DEFAULT_DEATH_EVENT.type_id(), 13);
+        assert_eq!(EventHook::default().kind, EntityEvent::OnKilled);
+        assert_eq!(EventHook::default().then, EventThen::ForceComplete);
         for kind in UnitKind::ALL {
-            assert_eq!(EntityEvent::default_for(kind).type_id(), 13, "{kind:?}");
-            assert_eq!(EventHook::default_for(kind).kind.type_id(), 13, "{kind:?}");
+            assert!(
+                EntityEvent::available(kind).contains(&DEFAULT_DEATH_EVENT),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn read_event_requires_on_event_with_integer_type_and_target() {
+        let mut entity = Il2Entity::new("MCU_TR_Entity");
+        attach_event(&mut entity, 13, 42);
+        let event = &entity.children[0].children[0];
+        assert_eq!(read_event(event), Some((13, 42)));
+        assert_eq!(read_event(&entity), None);
+        for key in ["Type", "TarId"] {
+            let mut malformed = event.clone();
+            malformed.set_property(key, "invalid");
+            assert_eq!(read_event(&malformed), None);
+            malformed.properties.retain(|(name, _)| name != key);
+            assert_eq!(read_event(&malformed), None);
         }
     }
 
@@ -7018,7 +7067,10 @@ mod tests {
             },
         ];
         opts.seats[0].events = vec![
-            EventHook::default_for(UnitKind::Plane),
+            EventHook {
+                kind: EntityEvent::OnPlaneDestroyed,
+                then: EventThen::ForceComplete,
+            },
             EventHook {
                 kind: EntityEvent::OnPilotKilled,
                 then: EventThen::Order(2),
@@ -7029,16 +7081,16 @@ mod tests {
         let takeoff = pack.find_by_name("Take Off").unwrap();
         let took_tm = pack.find_by_name("OnTookOff 1").unwrap();
         let reports = entity_reports(&pack);
-        assert!(
-            reports.iter().any(|(t, c, tar)| {
-                *t == 3 && *c == takeoff.index.unwrap() && *tar == took_tm.index.unwrap()
-            })
-        );
+        assert!(reports.iter().any(|(t, c, tar)| {
+            *t == 3 && *c == takeoff.index.unwrap() && *tar == took_tm.index.unwrap()
+        }));
         let force = pack.find_by_name("Force Complete - High").unwrap();
         let form_tm = pack.find_by_name("Formation 1").unwrap();
         let events = entity_events(&pack);
-        assert!(events.contains(&(13, force.index.unwrap())));
-        assert!(events.contains(&(0, form_tm.index.unwrap())));
+        assert_eq!(
+            events,
+            [(4, force.index.unwrap()), (0, form_tm.index.unwrap())]
+        );
     }
 
     #[test]
@@ -7961,53 +8013,103 @@ mod tests {
         assert_eq!(seats[0].events[0].then, EventThen::Order(0));
     }
 
-    #[test]
-    fn activate_templates_with_or_without_legacy_delete_load_and_link() {
+    fn activate_cleanup_templates() -> [Il2Entity; 2] {
         let legacy = parse_group_file(include_str!(
             "../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group"
         )).unwrap();
-        assert!(legacy.find_by_name("Trigger Delete").is_some());
-        assert!(legacy.find_by_name("DELETE DELAY").is_some());
         let catalog = builtin_plane_catalog();
         let opts = load_template(&legacy, &catalog).unwrap().options;
         let current = generate_template(&opts).unwrap();
-        assert!(current.find_by_name("Trigger Delete").is_none());
-        assert!(current.find_by_name("DELETE DELAY").is_none());
-        for pack in [legacy, current] {
-            let loaded = load_template(&pack, &catalog).unwrap();
-            assert!(loaded.native_format);
-            assert_eq!(loaded.options.bring_up, BringUp::Activate);
-            assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
-            let regenerated = generate_template(&loaded.options).unwrap();
-            assert!(regenerated.find_by_name("Trigger Delete").is_none());
-            assert!(regenerated.find_by_name("DELETE DELAY").is_none());
+        [legacy, current]
+    }
 
-            let info = crate::bombers::inspect_plan(&pack).unwrap();
-            let end = pack.find_by_name("MISSION END").unwrap().index.unwrap();
-            assert_eq!(info.suggested_completion, Some(end));
-            assert!(!info.cleanup_warnings.contains_key(&end));
-            let input = crate::bombers::BomberInput {
-                label: info.name,
-                source_key: "cleanup compatibility".into(),
-                root: pack.clone(),
-                trigger_zone_ids: info.suggested_triggers,
-                completion_timer_id: end,
-            };
-            let exclusive = crate::bombers::link_bomber_plans(&[input.clone(), input]).unwrap();
-            assert_eq!(exclusive.count_block_type("MCU_Delete"), 2 * pack.count_block_type("MCU_Delete"));
+    fn link_activate_exclusive(pack: &Il2Entity) -> Il2Entity {
+        let info = crate::bombers::inspect_plan(pack).unwrap();
+        let input = crate::bombers::BomberInput {
+            label: info.name,
+            source_key: "cleanup compatibility".into(),
+            root: pack.clone(),
+            trigger_zone_ids: info.suggested_triggers,
+            completion_timer_id: pack.find_by_name("MISSION END").unwrap().index.unwrap(),
+        };
+        crate::bombers::link_bomber_plans(&[input.clone(), input]).unwrap()
+    }
 
-            let info = crate::recon::inspect_unit(&pack).unwrap();
-            let recon = crate::recon::generate_recon_ex(&[crate::recon::ReconInput {
+    fn link_activate_recon(pack: &Il2Entity) -> Il2Entity {
+        let info = crate::recon::inspect_unit(pack).unwrap();
+        crate::recon::generate_recon_ex(
+            &[crate::recon::ReconInput {
                 label: info.name,
                 root: pack.clone(),
                 trigger_zone_ids: info.suggested_triggers,
                 copies: 2,
-            }], crate::recon::ReconBuild::default()).unwrap();
-            assert_eq!(recon.count_block_type("MCU_Delete"), 2 * pack.count_block_type("MCU_Delete") + 2);
+            }],
+            crate::recon::ReconBuild::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn activate_templates_with_or_without_delete_load() {
+        let catalog = builtin_plane_catalog();
+        let expected_warnings = [
+            vec![
+                "Generate will remove the old Delete chain from this Activate-mode template. The units will be switched off as before and can be activated again.",
+            ],
+            vec![],
+        ];
+        for (pack, warnings) in activate_cleanup_templates()
+            .into_iter()
+            .zip(expected_warnings)
+        {
+            let loaded = load_template(&pack, &catalog).unwrap();
+            assert!(loaded.native_format);
+            assert_eq!(loaded.options.bring_up, BringUp::Activate);
+            assert_eq!(loaded.warnings, warnings);
+            let regenerated = generate_template(&loaded.options).unwrap();
+            assert_eq!(regenerated.count_block_type("MCU_Delete"), 0);
+            assert!(regenerated.find_by_name("DELETE DELAY").is_none());
+        }
+    }
+
+    #[test]
+    fn activate_templates_with_or_without_delete_link_exclusive() {
+        for (pack, expected_deletes) in activate_cleanup_templates().into_iter().zip([2, 0]) {
+            let info = crate::bombers::inspect_plan(&pack).unwrap();
+            let end = pack.find_by_name("MISSION END").unwrap().index.unwrap();
+            assert_eq!(info.suggested_completion, Some(end));
+            assert_eq!(
+                info.cleanup_warnings.get(&end).map(String::as_str),
+                if expected_deletes == 2 {
+                    Some(
+                        "Delete \"Trigger Delete\" lists unit block indexes and will not remove those units. In the mission editor, change its Objects links to the units' entity indexes.",
+                    )
+                } else {
+                    None
+                }
+            );
+            assert_eq!(
+                link_activate_exclusive(&pack).count_block_type("MCU_Delete"),
+                expected_deletes
+            );
+        }
+    }
+
+    #[test]
+    fn activate_templates_with_or_without_delete_link_recon() {
+        for (pack, expected_deletes) in activate_cleanup_templates().into_iter().zip([4, 2]) {
+            let recon = link_activate_recon(&pack);
+            assert_eq!(recon.count_block_type("MCU_Delete"), expected_deletes);
             assert!(recon.find_by_name("Dump unused 1").is_some());
             assert!(recon.find_by_name("Dump unused 2").is_some());
-            for linked in [&exclusive, &recon] {
-                let indexed = collect_by_index(linked);
+        }
+    }
+
+    #[test]
+    fn activate_templates_with_or_without_delete_keep_links_resolved() {
+        for pack in activate_cleanup_templates() {
+            for linked in [link_activate_exclusive(&pack), link_activate_recon(&pack)] {
+                let indexed = collect_by_index(&linked);
                 linked.for_each(&mut |node| {
                     for target in node.targets.iter().chain(&node.objects) {
                         assert!(indexed.contains_key(target), "missing link target {target}");
@@ -8106,6 +8208,7 @@ mod tests {
     #[test]
     fn load_legacy_aircraft_death_event_regenerates_on_killed() {
         let mut opts = one_mig();
+        opts.seats = vec![opts.seats[0].clone(); 4];
         opts.bring_up = BringUp::Spawn;
         opts.allow_multiple_spawns = true;
         let mut pack = generate_template(&opts).unwrap();
@@ -8122,20 +8225,25 @@ mod tests {
                 changed += 1;
             }
         });
-        assert_eq!(changed, 1);
+        assert_eq!(changed, 4);
         let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
         assert!(loaded.options.allow_multiple_spawns);
-        assert!(loaded.options.seats[0].events.is_empty());
         assert!(
-            loaded.warnings.iter().any(|warning| {
-                warning.contains("OnPlaneDestroyed (4)") && warning.contains("OnKilled (13)")
-            }),
-            "missing legacy death-event correction: {:?}",
-            loaded.warnings
+            loaded
+                .options
+                .seats
+                .iter()
+                .all(|seat| seat.events.is_empty())
+        );
+        assert_eq!(
+            loaded.warnings,
+            [
+                "On Plane Destroyed (4) death links will be regenerated as On Killed (13). The next wave will now arrive after the whole group has been destroyed."
+            ]
         );
         let rebuilt = generate_template(&loaded.options).unwrap();
         let death = rebuilt.find_by_name("DeathCount").unwrap();
-        assert_eq!(entity_events(&rebuilt), vec![(13, death.index.unwrap())]);
+        assert_eq!(entity_events(&rebuilt), vec![(13, death.index.unwrap()); 4]);
         let reloaded = load_template(&rebuilt, &builtin_plane_catalog()).unwrap();
         assert!(reloaded.warnings.is_empty(), "{:?}", reloaded.warnings);
         assert!(reloaded.options.seats[0].events.is_empty());

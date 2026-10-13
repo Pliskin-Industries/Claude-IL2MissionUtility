@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::ast::Il2Entity;
-use crate::template::EntityEvent;
+use crate::template::{EntityEvent, read_event};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -622,8 +622,8 @@ impl Walker<'_> {
             .filter(|n| n.block_type == "OnEvents")
         {
             for event in events.children.iter().filter(|n| n.block_type == "OnEvent") {
-                if value(event, "Type", -1) == EntityEvent::OnKilled.type_id() {
-                    let target = value(event, "TarId", -1);
+                let (event_type, target) = read_event(event).expect("OnEvent needs Type and TarId");
+                if event_type == EntityEvent::OnKilled.type_id() {
                     assert!(
                         self.nodes.contains_key(&target),
                         "kill TarId {target} must resolve"
