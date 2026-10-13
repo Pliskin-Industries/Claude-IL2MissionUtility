@@ -339,10 +339,11 @@ const A1_EXIT_KM: (f64, f64) = (30.0, 60.0);
 const C4_KM: (f64, f64) = (40.0, -8.0);
 const N_START_KM: (f64, f64) = (30.0, 30.0);
 const N_END_KM: (f64, f64) = (54.0, 30.0);
-const G1_KM: (f64, f64) = (130.0, 80.0);
-const G3_KM: (f64, f64) = (130.0, 53.0);
-const G4_KM: (f64, f64) = (130.0, 110.0);
-const D_START_SOUTH_KM: f64 = 10.0;
+const START_SOUTH_KM: f64 = 10.0;
+const G_START_S: f64 = 60.0; // 01:00.
+const G_DAMAGE_S: f64 = 240.0; // 04:00.
+const G_REMOVE_S: f64 = 600.0; // 10:00.
+const G_HUNTER_ATTACK_S: [f64; 4] = [90.0, 180.0, 270.0, 360.0]; // 01:30, 03:00, 04:30, 06:00.
 const D_KILL_S: f64 = 120.0;
 const D_REMOVE_S: f64 = 240.0;
 const D_DETECT_S: f64 = 270.0;
@@ -360,6 +361,42 @@ const G_EVENT_TYPES: [i32; 5] = [
     EVENT_KILLED,
 ];
 const H_EVENT_TYPES: [i32; 1] = [EVENT_KILLED];
+
+enum EventProbeAction {
+    ShotDownByHunter,
+    ProbeDelete,
+    TemplateCleanup,
+    DamageCommand,
+}
+
+struct EventProbeRow {
+    name: &'static str,
+    centre_km: Option<(f64, f64)>, // None uses the current cell's centre.
+    action: EventProbeAction,
+}
+
+const G_FLIGHTS: &[EventProbeRow] = &[
+    EventProbeRow {
+        name: "G1",
+        centre_km: Some((130.0, 80.0)),
+        action: EventProbeAction::ShotDownByHunter,
+    },
+    EventProbeRow {
+        name: "G2",
+        centre_km: None,
+        action: EventProbeAction::ProbeDelete,
+    },
+    EventProbeRow {
+        name: "G3",
+        centre_km: Some((130.0, 53.0)),
+        action: EventProbeAction::TemplateCleanup,
+    },
+    EventProbeRow {
+        name: "G4",
+        centre_km: Some((130.0, 110.0)),
+        action: EventProbeAction::DamageCommand,
+    },
+];
 
 #[derive(Clone, Copy)]
 enum Seat {
@@ -1439,12 +1476,15 @@ fn build_y(p: &mut Probe, side: Side) {
 
 fn build_g(p: &mut Probe) {
     let centre = p.cell.unwrap().centre_km;
-    for (n, at) in [(1, G1_KM), (2, centre), (3, G3_KM), (4, G4_KM)] {
-        let name = format!("G{n}");
-        let flight_id = p.ai_with_close_delete(&name, 2, (at.0 - 10.0, at.1), at, 60.0);
+    let mut hunter_target = None;
+    for row in G_FLIGHTS {
+        let name = row.name;
+        let at = row.centre_km.unwrap_or(centre);
+        let flight_id =
+            p.ai_with_close_delete(name, 2, (at.0 - START_SOUTH_KM, at.1), at, G_START_S);
         let entities = block_ids(by_id(&p.root, flight_id), "MCU_TR_Entity");
         for (i, &entity) in entities.iter().enumerate() {
-            let label = format!("G{n}{}", wingman_letter(i));
+            let label = format!("{name}{}", wingman_letter(i));
             by_id_mut(&mut p.root, entity).set_name(&format!("{label} entity"));
             for event_type in G_EVENT_TYPES {
                 let text = format!("{label} ev{event_type}");
@@ -1458,24 +1498,38 @@ fn build_g(p: &mut Probe) {
                 }
             }
         }
-        if n == 2 {
-            let delete = p.delete("G2 DELETE", &entities);
-            p.at("G2 DELETE AT", 600.0, &[delete]);
-        } else if n == 3 {
-            let flight = by_id(&p.root, flight_id);
-            let deactivate = id(flight, "Deactivate Units");
-            let delay = id(flight, "DELETE DELAY");
-            // Preserve the HVAR Delete's Plane-object links and its 0.5 s
-            // DELETE DELAY; the probe-owned Deletes use entity links as specified.
-            p.at("G3 DEACTIVATE AT", 600.0, &[deactivate, delay]);
-        } else if n == 4 {
-            for (i, entity) in entities.into_iter().enumerate() {
-                let name = format!("G4{} DAMAGE", wingman_letter(i));
-                p.damage_at(&name, 240.0, entity);
+        match row.action {
+            EventProbeAction::ShotDownByHunter => {
+                hunter_target = Some((name, at, entities[Seat::Lead.index()]));
+            }
+            EventProbeAction::ProbeDelete => {
+                let delete = p.delete(&format!("{name} DELETE"), &entities);
+                p.at(&format!("{name} DELETE AT"), G_REMOVE_S, &[delete]);
+            }
+            EventProbeAction::TemplateCleanup => {
+                let flight = by_id(&p.root, flight_id);
+                let deactivate = id(flight, "Deactivate Units");
+                let delay = id(flight, "DELETE DELAY");
+                // Preserve the HVAR Delete's Plane-object links and its 0.5 s
+                // DELETE DELAY; the probe-owned Deletes use entity links as specified.
+                p.at(
+                    &format!("{name} DEACTIVATE AT"),
+                    G_REMOVE_S,
+                    &[deactivate, delay],
+                );
+            }
+            EventProbeAction::DamageCommand => {
+                for (i, entity) in entities.into_iter().enumerate() {
+                    let name = format!("{name}{} DAMAGE", wingman_letter(i));
+                    p.damage_at(&name, G_DAMAGE_S, entity);
+                }
             }
         }
     }
-    let hunter = p.ai_with_close_delete("G1 HUNTER", 2, (115.0, 80.0), G1_KM, 60.0);
+    // Create the hunter after G1-G4 to preserve generated object order.
+    let (name, at, target) = hunter_target.expect("G flights include a hunter target");
+    let hunter_name = format!("{name} HUNTER");
+    let hunter = p.ai_with_close_delete(&hunter_name, 2, (115.0, 80.0), at, G_START_S);
     p.set_flight_plane_country(hunter, COUNTRY_DPRK);
     by_id_mut(&mut p.root, hunter).for_each_mut(&mut |node| {
         if node.block_type == "Plane" {
@@ -1483,18 +1537,27 @@ fn build_g(p: &mut Probe) {
             node.set_property("AILevel", "4");
         }
     });
-    let mut attack = p.reference_mcu("MCU_CMD_AttackTarget", "G1 HUNTER ATTACK");
-    attack.set_objects(vec![block_ids(by_id(&p.root, hunter), "MCU_TR_Entity")[0]]);
-    attack.set_targets(vec![id(&p.root, "G1a entity")]);
+    let mut attack = p.reference_mcu("MCU_CMD_AttackTarget", &format!("{hunter_name} ATTACK"));
+    attack.set_objects(vec![
+        block_ids(by_id(&p.root, hunter), "MCU_TR_Entity")[Seat::Lead.index()],
+    ]);
+    attack.set_targets(vec![target]);
     let attack = p.add(attack);
     // Reissue while retaining the copied template's waypoint/AttackArea orders.
-    for (n, time_s) in [(1, 90.0), (2, 180.0), (3, 270.0), (4, 360.0)] {
-        p.at(&format!("G1 HUNTER ATTACK AT {n}"), time_s, &[attack]);
+    for (i, time_s) in G_HUNTER_ATTACK_S.into_iter().enumerate() {
+        p.at(
+            &format!("{hunter_name} ATTACK AT {}", i + 1),
+            time_s,
+            &[attack],
+        );
     }
-    p.icon("T-g G1", G1_KM, "[1]");
-    p.icon("T-g G2", centre, "[1]");
-    p.icon("T-g G3", G3_KM, "[1]");
-    p.icon("T-g G4", G4_KM, "[1]");
+    for row in G_FLIGHTS {
+        p.icon(
+            &format!("T-g {}", row.name),
+            row.centre_km.unwrap_or(centre),
+            "[1]",
+        );
+    }
 }
 
 fn build_d(p: &mut Probe) {
@@ -1506,7 +1569,7 @@ fn build_d(p: &mut Probe) {
         let flight_id = p.ai_without_close_delete(
             name,
             2,
-            (centre.0 - D_START_SOUTH_KM, centre.1),
+            (centre.0 - START_SOUTH_KM, centre.1),
             centre,
             cell.arm_s,
         );
