@@ -131,21 +131,21 @@ These dates are the handbook's. Some differ from the historical reference in `do
 
 For ceilings, the comparison against operating documents is in `docs/historical-reference/aircraft-service-ceilings.md` (its "Sim IL-2 Korea" column is this page's practical ceiling).
 
-The app's table gives each aircraft one cruise speed and one ceiling, with no source. The handbook's ceiling is the same kind of figure. Its cruising speed is not: it is an indicated economy speed, where the app's figure is used as a transit speed.
+The app's table gives each aircraft one cruise speed and one ceiling. Since 2026-10-13 the ceilings are documented figures with their sources noted in `src/model_spec.rs`; the cruise speeds have no source. The handbook's ceiling is the same kind of figure. Its cruising speed is not: it is an indicated economy speed, where the app's figure is used as a transit speed.
 
 | Aircraft | App cruise | Handbook cruising | Handbook max continuous | App ceiling | Handbook ceiling |
 |---|---:|---:|---:|---:|---:|
-| F-80C-10 | 732 | 348 | 837 | 13716 | 12900 |
-| F-84E | 770 | 540 | 975 | 12192 | 13700 |
-| F-86A-5 | 800 | 640 | 1038 | 15240 | 14900 |
-| F-51D | 583 | 430 | 674 | 11278 | 12700 |
+| F-80C-10 | 732 | 348 | 837 | 13030 | 12900 |
+| F-84E | 770 | 540 | 975 | 13716 | 13700 |
+| F-86A-5 | 800 | 640 | 1038 | 14630 | 14900 |
+| F-51D | 583 | 430 | 674 | 12680 | 12700 |
 | B-29 | 350 | 413 | 586 | 10668 | 10700 |
-| C-47B | 257 | 235 | 376 | 6096 | 8600 |
-| MiG-15bis | 850 | 520 | 1038 | 15000 | 15500 |
-| La-11 | 500 | 460 | 666 | 10150 | 10300 |
-| Yak-9P | 554 | 380 | 668 | 10600 | 11000 |
-| IL-10 | 436 | 330 | 550 | 6950 | 6000 |
-| Tu-2 | 465 | 330 | 557 | 10500 | 8000 |
-| Li-2T | 240 | 230 | 319 | 6800 | 5500 |
+| C-47B | 257 | 235 | 376 | 8047 | 8600 |
+| MiG-15bis | 850 | 520 | 1038 | 15500 | 15500 |
+| La-11 | 500 | 460 | 666 | 10250 | 10300 |
+| Yak-9P | 554 | 380 | 668 | 10500 | 11000 |
+| IL-10 | 436 | 330 | 550 | 7250 | 6000 |
+| Tu-2 | 465 | 330 | 557 | 9500 | 8000 |
+| Li-2T | 240 | 230 | 319 | 5600 | 5500 |
 
 One measured point: AI F-80Cs flying the built-in template (waypoint `Speed = 660`, which is 90 % of the app's 732) crossed a 20 km circle at 733 km/h over the ground (flight 1N).

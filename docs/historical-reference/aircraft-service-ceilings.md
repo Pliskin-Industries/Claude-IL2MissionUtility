@@ -3,6 +3,8 @@
 Research date: 2026-10-12. Primary documents were read for 3 of the 12 aircraft (F-51D, B-29, C-47). For 2 more (F-80C, F-84E) the figure comes from the official USAF history (Knaack 1978), read with word positions so that each value is tied to its table column. The other 7 rest on web pages that name books as their sources. Each row is labelled.
 No USAF Standard Aircraft Characteristics (SAC) chart was found for the F-80C, F-84E or F-86A: archive.org holds none (title search, 2026-10-12), and the index at generalstaff.org lists none for these types.
 
+**Status:** on 2026-10-13 the user ruled that all twelve aircraft take the "Recommended" figure, and `src/model_spec.rs` now holds them, each with its source in a comment. Where this page says "the tool" or "tool before", it means the figures the app had until then.
+
 The column "Sim IL-2 Korea" is the practical ceiling the game's own handbook shows (`docs/game-handbook/aircraft-characteristics.md`). It is there for comparison only.
 
 Conversion used throughout: 1 ft = 0.3048 m. The unit the source used is marked "(orig.)".
@@ -16,7 +18,7 @@ Ceiling definitions used below:
 
 ## 1. Summary table
 
-| Aircraft | Recommended ceiling (m) | Ceiling type and weight | Source (short) | Confidence | Tool now (m) | Sim IL-2 Korea (m) |
+| Aircraft | Recommended ceiling (m) | Ceiling type and weight | Source (short) | Confidence | Tool before 2026-10-13 (m) | Sim IL-2 Korea (m) |
 |---|---|---|---|---|---|---|
 | F-80C-10 | 13030 | Service; weight not stated, table gives max gross 16,856 lb (42,750 ft orig.) | Knaack 1978, p. 11, F-80C column; official USAF history | Medium | 13716 | 12900 |
 | F-84E | 13716 | Service; weight not stated, table gives max gross 18,000 lb (45,000 ft orig.) | Knaack 1978, p. 50, F-84E column; official USAF history | Medium | 12192 | 13700 |
@@ -225,7 +227,7 @@ Against the two existing sets: the sim's 5,500 m is 100 m low and consistent wit
 
 No. A correction (indicated against true height, a standard-day adjustment, feet against metres) would move every aircraft the same way. The differences go both ways and vary from 0 to 1,950 m.
 
-| Aircraft | Recommended (m) | Tool now, difference | Sim IL-2 Korea, difference |
+| Aircraft | Recommended (m) | Tool before 2026-10-13, difference | Sim IL-2 Korea, difference |
 |---|---|---|---|
 | F-80C-10 | 13030 | +686 | −130 |
 | F-84E | 13716 | −1524 | −16 |
@@ -242,7 +244,7 @@ No. A correction (indicated against true height, a standard-day adjustment, feet
 
 What the pattern shows:
 
-- **The tool's NATO figures are round numbers in feet** (45,000, 40,000, 50,000, 37,000, 35,000, 20,000 ft). Two of them belong to a different variant: 45,000 ft is the F-80A/B, and 40,000 ft sits by the F-84G. The Tu-2 figure sits by the ASh-83 variant. They read as estimates, not as figures taken from a document.
+- **The tool's old NATO figures were round numbers in feet** (45,000, 40,000, 50,000, 37,000, 35,000, 20,000 ft). Two of them belong to a different variant: 45,000 ft is the F-80A/B, and 40,000 ft sits by the F-84G. The Tu-2 figure sits by the ASh-83 variant. They read as estimates, not as figures taken from a document.
 - **The game's handbook is within 130 m of the recommended figure for 7 of the 12** (F-80C, F-84E, F-51D, B-29, MiG-15bis, La-11, Li-2T). For those it has plainly used the same published figures, rounded to 100 m.
 - **Five game figures match no source found** (F-86A +270 m, C-47B +553 m, Yak-9P +500 m, Il-10 −1,250 m, Tu-2 −1,500 m). The game may compute these from its flight model at a loaded weight; that is a guess and nothing read supports or refutes it.
 
