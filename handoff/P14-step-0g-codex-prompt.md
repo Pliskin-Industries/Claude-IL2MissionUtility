@@ -50,3 +50,7 @@ Do not write any block from memory: every key and its order comes from an existi
 <structured_output_contract>
 Return: (1) summary, five lines at most; (2) command results, the byte-for-byte comparison, the writer's files with sizes, and what the throwaway check printed; (3) the const table as written; (4) for each of J0 to J6: the two plane names and entity indexes, the Damage command index, the Delete indexes with their Objects lists in order; the detector count; (5) what you found about a 1-plane `probe_flight`; (6) anything the table left open that you chose, and residual risks.
 </structured_output_contract>
+
+<correction_2026_10_13>
+The icon line above is wrong. In this game USA (601) is coalition 2 and the DPRK side is coalition 1, so `[1]` shows the icons to the DPRK side, and flight 1H's `[2]` was right. Flight 1J was flown with `[1]`; the builder keeps that value so that the flown file regenerates, and says so in a comment. It has no effect on the flight's result.
+</correction_2026_10_13>
