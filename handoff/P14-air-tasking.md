@@ -1286,6 +1286,36 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 
 **Step 0f acceptance (tests):** the step 0 tests cover the new file (`probe_files_parse_and_links_resolve`, `probe_strings_are_loader_safe`, `probe_blocks_match_shipped_shapes`, `probe_subtitles_are_unique`, `probe_cells_match_the_table`, `probe_run_sheets_match_the_tables`, `probe_traced_every_subtitle_source_has_a_breadcrumb`); `probe_cells_match_the_table` checks every row of the table above against literals (who is damaged and when, each Delete's Objects list in order, the two Deletes of D4, D6's use of the template's own MCUs, D8's Delete listing the two Plane indexes, D9's Deactivate with no Delete, the detector's eighteen Damage commands at 04:30, one per aircraft of D1 to D9, and the plane names). An ignored writer `write_p14_probe_1h` writes the files. Flights 0, 1A, 1N, 1D and 1G generate byte-for-byte the same files as before.
 
+### Step 0g. Delete probe with single aircraft (flight 1J) — S. Branch `codex/p14-0g`
+
+**Why.** Flight 1H (2026-10-13, `handoff/P14-probe-results.md`) answered the Plane-index question and left the main one open: its Damage command, aimed at one aircraft of a pair, killed both, so no flight held one live and one dead aircraft when its Delete fired. Flight 1J repeats the mixed cases with aircraft that are each a flight of their own, so that a Damage command kills exactly one. No pilot is needed.
+
+| Flight | File | Pilot | Cells | Length |
+|---|---|---|---|---|
+| **1J** | `P14_Probe_1J_traced.Group` | none | T-d2 | 6 min |
+
+**Flight 1J** (no spawn list; built with `--ref "TemplateExamples/K14 AFB_mp.Group"` and `--no-resave`: the game's `MissionResaver.exe` crashes since update 1.005, and the game hosts a plain `.Mission` with its `.eng`):
+
+| Cell | Centre (N, E km) | Armed | Closed | Cues |
+|---|---|---|---|---|
+| T-d2 | J0 to J6 at (+130, +20 + 8·n) for n = 0 to 6 | 01:00 | 08:00 | 00:00 "1J: no flying needed. Stay on the ground at K14 until 05:30"; 05:30 "Flight 1J done. End the mission normally" |
+
+**Cell T-d2.** Seven pairs J0 to J6. Each pair is **two separate 1-ship AI F-80C flights** (`probe_flight`, 1 plane each), `x` and `y`, with their centres 1 km west and 1 km east of the pair's centre, each starting 10 km south of its own centre at 01:00. Each plane's `Name` is its label (`J0x`, `J0y`, … `J6y`). Each plane has OnEvent 13 → its own subtitle ("J2y ev13"), traced. Times as flight 1H: kills at 02:00 by `MCU_CMD_Damage` (Complete), removal at 04:00, detector at 04:30, close at 08:00 with one `MCU_Delete` per aircraft.
+
+| Pair | Killed at 02:00 | Removed at 04:00 by | Detector at 04:30 | Asks |
+|---|---|---|---|---|
+| J0 | nobody | nothing | no | control: both must be in the end-of-mission list |
+| J1 | nobody | one `MCU_Delete`, Objects = [J1x, J1y] | both | control: one Delete removes two live aircraft of two flights |
+| J2 | J2y | one `MCU_Delete`, Objects = [J2x, J2y] | both | the flight 1G case: live aircraft first, dead second |
+| J3 | J3x | one `MCU_Delete`, Objects = [J3x, J3y] | both | dead aircraft first, live second |
+| J4 | J4y | two `MCU_Delete`s, one per aircraft, fired by the same timer | both | candidate fix: one Delete per aircraft |
+| J5 | J5y | one `MCU_Delete`, Objects = [J5x] only | both | candidate fix: leave the dead aircraft out of the list |
+| J6 | J6y | nothing | both | control: the Damage command kills only J6y (J6x must raise event 13 at 04:30, not at 02:00), and whether a dead aircraft raises it again |
+
+**Confirmed if.** J0: both in the end-of-mission list. J1: no event at 04:30, neither in the list. J6: J6y's event at 02:00 only, J6x's event at 04:30 only. Then, for the live aircraft of J2 to J5 (J2x, J3y, J4x, J5x): "removed" is no event at 04:30 and not in the list; "left behind" is an event at 04:30. If J2 or J3 leaves its live aircraft behind and J4 or J5 does not, a sortie's clean-up must not name a dead aircraft in a Delete that also names a live one. If J2 and J3 both remove it, a dead aircraft in the list is harmless and flight 1G's survivor has another cause.
+
+**Step 0g acceptance (tests):** the step 0 tests cover the new file; `probe_cells_match_the_table` checks every row above against literals (fourteen 1-ship flights, who is damaged, each Delete's Objects list in order, the two Deletes of J4, twelve detector commands for J1 to J6, the plane names). An ignored writer `write_p14_probe_1j` writes the files. Flights 0, 1A, 1N, 1D, 1G and 1H generate byte-for-byte the same files as before.
+
 ### Step 0T. Trace builds and replay core (P10) — M. Branch `claude/p14-trace`
 
 **Why (U12).** Subtitles show what fired only to whoever is watching, with no file and no "never fired". The server's text mission log records spawns, kills, takeoffs and landings anyway. A Mission Objective MCU writes an `AType:8` line when it fires, so a small objective hung on any MCU turns that MCU's firing into a log line (a **breadcrumb**). The app knows the whole MCU graph, so it can report what fired, what never fired, and where each chain stopped. It is built **before** probe flight 0 so the flight produces a real log, and cell T-t (below) tests whether it works.
