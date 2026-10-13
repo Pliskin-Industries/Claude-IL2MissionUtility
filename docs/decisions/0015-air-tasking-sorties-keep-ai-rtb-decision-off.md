@@ -1,8 +1,8 @@
 # 0015. Air Tasking writes its sortie aircraft with `AiRTBDecision = 0`
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-13
-- **Decided by:** open; the user decides. Finding and recommendation by Claude.
+- **Decided by:** the user, 2026-10-13 ("0015 go with recommendation"). Finding and recommendation by Claude.
 
 ## Context
 Flights 1G, 1K and 1L (`handoff/P14-probe-results.md`): with `AiRTBDecision = 1`, a damaged pair of AI aircraft splits. One of the two stops answering Delete, Deactivate and Damage commands, flies to the nearest friendly airfield, lands, and is removed by the game a few minutes later. Which of the two it is varies. With `AiRTBDecision = 0`, a damaged pair stayed on its task and both aircraft were deleted on command (one pair, one run).
@@ -10,7 +10,7 @@ Flights 1G, 1K and 1L (`handoff/P14-probe-results.md`): with `AiRTBDecision = 1`
 The air budget (U20, U22) counts a sortie as finished when its clean-up has run. An aircraft that no longer answers commands would stay in the air, uncounted, for up to twenty minutes.
 
 ## Decision
-None yet. Claude recommends: every aircraft Air Tasking places is written with `AiRTBDecision = 0`. Going home after damage is part of the sortie's own logic (an entity event to the exit waypoint), which keeps the aircraft under the mission's control.
+Every aircraft Air Tasking places is written with `AiRTBDecision = 0`. Going home after damage is part of the sortie's own logic (an entity event to the exit waypoint), which keeps the aircraft under the mission's control.
 
 ## Rejected
 - **Leave it at 1 and count on the landing.** The aircraft raises event 5 when it lands and is removed after that, but only if it reaches an airfield; one that is shot down on the way raises 13, and one that does neither is never accounted for.

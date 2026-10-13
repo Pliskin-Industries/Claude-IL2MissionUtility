@@ -47,9 +47,9 @@ What this makes easier, harder or necessary.
 | [0009](0009-flight-1a-of-2026-10-12-meets-gate-g1.md) | The 2026-10-12 flight counts as flight 1A; gate G1 is met | Accepted |
 | [0010](0010-reshape-the-remaining-probes-for-an-autopilot-pilot.md) | Reshape the remaining probes for an autopilot pilot | Accepted |
 | [0011](0011-losses-count-on-event-13.md) | Air Tasking counts a lost aircraft on OnEvent 13 | Accepted |
-| [0012](0012-aircraft-death-event-outside-air-tasking.md) | Which event counts a destroyed aircraft in Template Builder and Fighter Pack | Proposed |
+| [0012](0012-aircraft-death-event-outside-air-tasking.md) | Which event counts a destroyed aircraft in Template Builder and Fighter Pack: event 13 | Accepted |
 | [0013](0013-template-builder-delete-lists-plane-indexes.md) | Template Builder's clean-up Delete lists Plane indexes and removes nothing: list entities | Accepted |
-| [0014](0014-no-delete-in-activate-mode.md) | Template Builder writes no Delete for a group that is re-activated | **Proposed** |
-| [0015](0015-air-tasking-sorties-keep-ai-rtb-decision-off.md) | Air Tasking writes its sortie aircraft with `AiRTBDecision = 0` | **Proposed** |
+| [0014](0014-no-delete-in-activate-mode.md) | Template Builder writes no Delete for a group that is re-activated | Accepted |
+| [0015](0015-air-tasking-sorties-keep-ai-rtb-decision-off.md) | Air Tasking writes its sortie aircraft with `AiRTBDecision = 0` | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
