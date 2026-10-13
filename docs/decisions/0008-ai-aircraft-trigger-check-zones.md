@@ -1,8 +1,8 @@
 # 0008. What to do about AI aircraft triggering check zones
 
-- **Status:** Proposed. The user has not decided.
-- **Date:** raised 2026-10-03; options discussed 2026-10-07
-- **Decided by:** the user, after flight 1A
+- **Status:** Accepted (option 4)
+- **Date:** raised 2026-10-03; options discussed 2026-10-07; decided 2026-10-12
+- **Decided by:** the user, after flights 1N and 1D
 
 ## Context
 P14's player threshold assumed that only players trigger a check zone. Flight 0 showed otherwise (`handoff/P14-probe-results.md`, cell T-a1):
@@ -30,8 +30,24 @@ Countries on the Korea map: DPRK side has 501 USSR, 502 PRC, 503 DPRK. NATO side
 2. If it fails, use option 1 for v1: it adds no MCUs, which fits the fewest-MCUs rule (U13).
 3. Keep option 3 in reserve if option 1 makes area placement too restrictive.
 
-## What the decision waits on
-- The Complex Trigger reference file from the editor (`STATE.md`, "Waiting on the user").
-- Flight 1A's result for zone ZA4, which confirms that a zone fires for a player at all.
+## Decision (2026-10-12)
+**Option 4: filter by country.** Players fly one country on each side and the app's AI flies another country of the same coalition. The player threshold uses a Complex Trigger filtered to the players' country.
 
-The decision shapes step 4 (threshold) only, and step 4 already waits for flight 1A.
+| Side | Players | App's AI |
+|---|---|---|
+| NATO | 601 (USA) | 602 |
+| DPRK | 501 (USSR) | 503 (DPRK) |
+
+Evidence: flights 1N and 1D (`handoff/P14-probe-results.md`). On both sides the filtered trigger stayed silent for the AI's country and fired for the players' country, AI or human. A plane written as country 602 loads and counts as NATO.
+
+## Rejected
+- **1, keep the AI out of tasking areas.** Not needed now; it limited where areas could go.
+- **2, mute the zone while enemy AI is there.** More wiring, and players go undetected meanwhile.
+- **3, accept that AI sets the threshold off.** Changes what the threshold means.
+
+## Consequences
+- Step 4 (threshold) is scoped on a Complex Trigger, not on a plain check zone. The block shape is in `TemplateExamples/Reference/ComplexTrigger_reference.Group`.
+- Every AI aircraft the app writes for Air Tasking carries the AI country of its side. The built-in sortie templates are 601 or 503 today, so placing a NATO sortie changes its planes to 602.
+- A mission maker's own AI on country 601 or 501 would still set the threshold off. The manual must say so.
+- 602 has no name in the game's country table. How it shows on the map and in the statistics screen has not been looked at.
+- Not tested: a trigger with two `Country` lines, and two or more players (step 12).
