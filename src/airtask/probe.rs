@@ -1,4 +1,4 @@
-//! Test-only generators for the P14 in-game probes (steps 0b/0e).
+//! Test-only generators for the P14 in-game probes (steps 0b/0e/0f).
 //! Flights 0, 1A, 1G, 1N and 1D were flown; their results are recorded in
 //! `handoff/P14-probe-results.md`. Committed copies of the flown files are in
 //! `handoff/p14-probes/`. Flight 1B was retired by decision 0010.
@@ -44,10 +44,13 @@ pub(crate) enum Flight {
     OneN,
     OneD,
     OneG,
+    OneH,
 }
 
 impl Flight {
-    const ALL: [Self; 5] = [Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG];
+    const ALL: [Self; 6] = [
+        Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG, Self::OneH,
+    ];
 
     fn stem(self) -> &'static str {
         match self {
@@ -56,6 +59,7 @@ impl Flight {
             Self::OneN => "P14_Probe_1N",
             Self::OneD => "P14_Probe_1D",
             Self::OneG => "P14_Probe_1G",
+            Self::OneH => "P14_Probe_1H",
         }
     }
 
@@ -66,6 +70,7 @@ impl Flight {
             Self::OneN => RUN_SHEET_1N,
             Self::OneD => RUN_SHEET_1D,
             Self::OneG => RUN_SHEET_1G,
+            Self::OneH => RUN_SHEET_1H,
         }
     }
 
@@ -87,7 +92,7 @@ impl Flight {
                 altitude_m: 3050.0,
                 script: "mig15bis",
             }],
-            Self::Zero | Self::OneA | Self::OneG => &[],
+            Self::Zero | Self::OneA | Self::OneG | Self::OneH => &[],
         }
     }
 }
@@ -207,6 +212,12 @@ pub(crate) const RUN_SHEET_1G: &[Cell] = &[Cell {
     arm_s: 60.0,
     close_s: 900.0,
 }];
+pub(crate) const RUN_SHEET_1H: &[Cell] = &[Cell {
+    key: "T-d",
+    centre_km: (130.0, 20.0),
+    arm_s: 60.0,
+    close_s: 480.0,
+}];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Cue {
@@ -311,6 +322,16 @@ pub(crate) const CUES: &[Cue] = &[
         time_s: 930.0,
         text: "Flight 1G done. End the mission normally",
     },
+    Cue {
+        flight: Flight::OneH,
+        time_s: 0.0,
+        text: "1H: no flying needed. Stay on the ground at K14 until 05:30",
+    },
+    Cue {
+        flight: Flight::OneH,
+        time_s: 330.0,
+        text: "Flight 1H done. End the mission normally",
+    },
 ];
 
 const A1_START_KM: (f64, f64) = (-30.0, 60.0);
@@ -321,6 +342,10 @@ const N_END_KM: (f64, f64) = (54.0, 30.0);
 const G1_KM: (f64, f64) = (130.0, 80.0);
 const G3_KM: (f64, f64) = (130.0, 53.0);
 const G4_KM: (f64, f64) = (130.0, 110.0);
+const D_START_SOUTH_KM: f64 = 10.0;
+const D_KILL_S: f64 = 120.0;
+const D_REMOVE_S: f64 = 240.0;
+const D_DETECT_S: f64 = 270.0;
 const E_SIX_PULSES: [f64; 6] = [60.0, 62.0, 64.0, 66.0, 68.0, 70.0];
 const E3_PULSES: [f64; 3] = [60.0, 62.0, 66.0];
 const E_PARTIAL_PULSES: [f64; 3] = [60.0, 62.0, 64.0];
@@ -333,6 +358,114 @@ const G_EVENT_TYPES: [i32; 5] = [
     EVENT_PLANE_DESTROYED,
     EVENT_PLANE_LANDED,
     EVENT_KILLED,
+];
+const H_EVENT_TYPES: [i32; 1] = [EVENT_KILLED];
+
+#[derive(Clone, Copy)]
+enum Seat {
+    Lead,
+    Wingman,
+}
+
+impl Seat {
+    fn index(self) -> usize {
+        match self {
+            Self::Lead => 0,
+            Self::Wingman => 1,
+        }
+    }
+}
+
+enum DeleteRemoval {
+    Nothing,
+    DeleteBothEntities,
+    DeleteEachEntity,
+    DeleteLeadEntity,
+    TemplateCleanup,
+    DeletePlaneIndexes,
+    DeactivateOnly,
+}
+
+struct DeleteProbeRow {
+    name: &'static str,
+    centre_km: (f64, f64),
+    killed: Option<Seat>,
+    removal: DeleteRemoval,
+    detector: bool,
+}
+
+// Step 0f: killed at 02:00, removed at 04:00, detector at 04:30.
+const D_FLIGHTS: &[DeleteProbeRow] = &[
+    DeleteProbeRow {
+        name: "D0",
+        centre_km: (130.0, 20.0),
+        killed: None,
+        removal: DeleteRemoval::Nothing,
+        detector: false,
+    },
+    DeleteProbeRow {
+        name: "D1",
+        centre_km: (130.0, 28.0),
+        killed: None,
+        removal: DeleteRemoval::DeleteBothEntities,
+        detector: true,
+    },
+    DeleteProbeRow {
+        name: "D2",
+        centre_km: (130.0, 36.0),
+        killed: Some(Seat::Wingman),
+        removal: DeleteRemoval::DeleteBothEntities,
+        detector: true,
+    },
+    DeleteProbeRow {
+        name: "D3",
+        centre_km: (130.0, 44.0),
+        killed: Some(Seat::Lead),
+        removal: DeleteRemoval::DeleteBothEntities,
+        detector: true,
+    },
+    DeleteProbeRow {
+        name: "D4",
+        centre_km: (130.0, 52.0),
+        killed: Some(Seat::Wingman),
+        removal: DeleteRemoval::DeleteEachEntity,
+        detector: true,
+    },
+    DeleteProbeRow {
+        name: "D5",
+        centre_km: (130.0, 60.0),
+        killed: Some(Seat::Wingman),
+        removal: DeleteRemoval::DeleteLeadEntity,
+        detector: true,
+    },
+    DeleteProbeRow {
+        name: "D6",
+        centre_km: (130.0, 68.0),
+        killed: Some(Seat::Wingman),
+        removal: DeleteRemoval::TemplateCleanup,
+        detector: true,
+    },
+    DeleteProbeRow {
+        name: "D7",
+        centre_km: (130.0, 76.0),
+        killed: None,
+        removal: DeleteRemoval::Nothing,
+        detector: true,
+    },
+    DeleteProbeRow {
+        name: "D8",
+        centre_km: (114.0, 20.0),
+        killed: None,
+        removal: DeleteRemoval::DeletePlaneIndexes,
+        detector: true,
+    },
+    DeleteProbeRow {
+        name: "D9",
+        centre_km: (114.0, 28.0),
+        killed: None,
+        removal: DeleteRemoval::DeactivateOnly,
+        detector: true,
+    },
 ];
 
 fn world(km: (f64, f64)) -> (f64, f64) {
@@ -617,6 +750,13 @@ impl Probe {
         self.add(node)
     }
 
+    /// Create an object-linked Delete; the caller supplies its trigger and timing.
+    fn delete(&mut self, name: &str, objects: &[i32]) -> i32 {
+        let delete = self.control("MCU_Delete", name, &[]);
+        by_id_mut(&mut self.root, delete).set_objects(objects.to_vec());
+        delete
+    }
+
     fn switch_at(&mut self, block: &str, name: &str, time_s: f64, targets: &[i32]) -> i32 {
         let action = self.control(block, name, targets);
         self.at(&format!("{name} AT"), time_s, &[action]);
@@ -794,7 +934,8 @@ impl Probe {
         tick
     }
 
-    fn ai(
+    /// Start a copied AI flight; the caller supplies any cell-close Deletes.
+    fn ai_without_close_delete(
         &mut self,
         name: &str,
         planes: usize,
@@ -811,15 +952,27 @@ impl Probe {
         );
         flight.set_name(name);
         let bring_up = id(&flight, "MISSION BEGIN");
-        let entities = block_ids(&flight, "MCU_TR_Entity");
         let zones = block_ids(&flight, "MCU_CheckZone");
         let flight_id = self.add(flight);
         self.at(&format!("{name} START"), start_s, &[bring_up]);
         for zone in zones {
             self.close_node(zone);
         }
-        let delete = self.control("MCU_Delete", &format!("{name} CLOSE DELETE"), &[]);
-        by_id_mut(&mut self.root, delete).set_objects(entities);
+        flight_id
+    }
+
+    /// Start a copied AI flight with one cell-close Delete listing all aircraft entities.
+    fn ai_with_close_delete(
+        &mut self,
+        name: &str,
+        planes: usize,
+        start_km: (f64, f64),
+        exit_km: (f64, f64),
+        start_s: f64,
+    ) -> i32 {
+        let flight_id = self.ai_without_close_delete(name, planes, start_km, exit_km, start_s);
+        let entities = block_ids(by_id(&self.root, flight_id), "MCU_TR_Entity");
+        let delete = self.delete(&format!("{name} CLOSE DELETE"), &entities);
         let close = id(&self.root, &format!("{} CLOSE", self.cell.unwrap().key));
         self.link(close, delete);
         flight_id
@@ -845,6 +998,13 @@ impl Probe {
     fn ai_delete_at(&mut self, name: &str, time_s: f64) {
         let delete = id(&self.root, &format!("{name} CLOSE DELETE"));
         self.at(&format!("{name} DELETE AT"), time_s, &[delete]);
+    }
+
+    fn damage_at(&mut self, name: &str, time_s: f64, entity: i32) {
+        let mut damage = self.reference_mcu("MCU_CMD_Damage", name);
+        damage.set_objects(vec![entity]);
+        let damage = self.add(damage);
+        self.at(&format!("{name} AT"), time_s, &[damage]);
     }
 
     fn hand_breadcrumb(
@@ -926,7 +1086,7 @@ fn build_a1(p: &mut Probe) {
         p.link(p.arm, zone);
         p.observe(zone, &format!("{name} fired"));
     }
-    p.ai("T-a1 AI", 4, A1_START_KM, A1_EXIT_KM, 10.0);
+    p.ai_with_close_delete("T-a1 AI", 4, A1_START_KM, A1_EXIT_KM, 10.0);
     p.icon("T-a1", centre, "[2]");
 }
 
@@ -1264,7 +1424,7 @@ fn build_y(p: &mut Probe, side: Side) {
         ("B", player_country, 330.0, 630.0),
     ] {
         let name = format!("{prefix}-{suffix}");
-        let flight = p.ai(
+        let flight = p.ai_with_close_delete(
             &name,
             2,
             (centre.0 - 30.0, centre.1),
@@ -1281,7 +1441,7 @@ fn build_g(p: &mut Probe) {
     let centre = p.cell.unwrap().centre_km;
     for (n, at) in [(1, G1_KM), (2, centre), (3, G3_KM), (4, G4_KM)] {
         let name = format!("G{n}");
-        let flight_id = p.ai(&name, 2, (at.0 - 10.0, at.1), at, 60.0);
+        let flight_id = p.ai_with_close_delete(&name, 2, (at.0 - 10.0, at.1), at, 60.0);
         let entities = block_ids(by_id(&p.root, flight_id), "MCU_TR_Entity");
         for (i, &entity) in entities.iter().enumerate() {
             let label = format!("G{n}{}", wingman_letter(i));
@@ -1299,8 +1459,7 @@ fn build_g(p: &mut Probe) {
             }
         }
         if n == 2 {
-            let delete = p.control("MCU_Delete", "G2 DELETE", &[]);
-            by_id_mut(&mut p.root, delete).set_objects(entities);
+            let delete = p.delete("G2 DELETE", &entities);
             p.at("G2 DELETE AT", 600.0, &[delete]);
         } else if n == 3 {
             let flight = by_id(&p.root, flight_id);
@@ -1312,14 +1471,11 @@ fn build_g(p: &mut Probe) {
         } else if n == 4 {
             for (i, entity) in entities.into_iter().enumerate() {
                 let name = format!("G4{} DAMAGE", wingman_letter(i));
-                let mut damage = p.reference_mcu("MCU_CMD_Damage", &name);
-                damage.set_objects(vec![entity]);
-                let damage = p.add(damage);
-                p.at(&format!("{name} AT"), 240.0, &[damage]);
+                p.damage_at(&name, 240.0, entity);
             }
         }
     }
-    let hunter = p.ai("G1 HUNTER", 2, (115.0, 80.0), G1_KM, 60.0);
+    let hunter = p.ai_with_close_delete("G1 HUNTER", 2, (115.0, 80.0), G1_KM, 60.0);
     p.set_flight_plane_country(hunter, COUNTRY_DPRK);
     by_id_mut(&mut p.root, hunter).for_each_mut(&mut |node| {
         if node.block_type == "Plane" {
@@ -1341,6 +1497,84 @@ fn build_g(p: &mut Probe) {
     p.icon("T-g G4", G4_KM, "[1]");
 }
 
+fn build_d(p: &mut Probe) {
+    let cell = p.cell.unwrap();
+    let close = id(&p.root, &format!("{} CLOSE", cell.key));
+    for row in D_FLIGHTS {
+        let name = row.name;
+        let centre = row.centre_km;
+        let flight_id = p.ai_without_close_delete(
+            name,
+            2,
+            (centre.0 - D_START_SOUTH_KM, centre.1),
+            centre,
+            cell.arm_s,
+        );
+        let flight = by_id(&p.root, flight_id);
+        let planes = block_ids(flight, "Plane");
+        let entities = block_ids(flight, "MCU_TR_Entity");
+        for (i, &entity) in entities.iter().enumerate() {
+            let label = format!("{name}{}", wingman_letter(i));
+            by_id_mut(&mut p.root, planes[i]).set_name(&label);
+            by_id_mut(&mut p.root, entity).set_name(&format!("{label} entity"));
+            let subtitle = p.subtitle(&format!("{label} ev{EVENT_KILLED}"), 1);
+            attach_event(by_id_mut(&mut p.root, entity), EVENT_KILLED, subtitle);
+            p.sources.push(p.source(entity, Some(EVENT_KILLED), None));
+
+            // The close must not depend on a Delete handling a mixed live/dead list.
+            let delete = p.delete(&format!("{label} CLOSE DELETE"), &[entity]);
+            p.link(close, delete);
+            if row.detector {
+                p.damage_at(&format!("{label} DETECTOR"), D_DETECT_S, entity);
+            }
+        }
+        if let Some(seat) = row.killed {
+            let label = format!("{name}{}", wingman_letter(seat.index()));
+            p.damage_at(&format!("{label} DAMAGE"), D_KILL_S, entities[seat.index()]);
+        }
+        match row.removal {
+            DeleteRemoval::Nothing => {}
+            DeleteRemoval::DeleteBothEntities => {
+                let delete = p.delete(&format!("{name} DELETE"), &entities);
+                p.at(&format!("{name} DELETE AT"), D_REMOVE_S, &[delete]);
+            }
+            DeleteRemoval::DeleteEachEntity => {
+                let mut deletes = Vec::new();
+                for (i, entity) in entities.into_iter().enumerate() {
+                    let label = format!("{name}{}", wingman_letter(i));
+                    let delete = p.delete(&format!("{label} DELETE"), &[entity]);
+                    deletes.push(delete);
+                }
+                p.at(&format!("{name} DELETE AT"), D_REMOVE_S, &deletes);
+            }
+            DeleteRemoval::DeleteLeadEntity => {
+                let delete = p.delete(&format!("{name} DELETE"), &[entities[Seat::Lead.index()]]);
+                p.at(&format!("{name} DELETE AT"), D_REMOVE_S, &[delete]);
+            }
+            DeleteRemoval::TemplateCleanup => {
+                let flight = by_id(&p.root, flight_id);
+                let deactivate = id(flight, "Deactivate Units");
+                let delay = id(flight, "DELETE DELAY");
+                // As G3: keep the template's Plane-object Delete and 0.5 s delay.
+                p.at(&format!("{name} DEACTIVATE AT"), D_REMOVE_S, &[deactivate, delay]);
+            }
+            DeleteRemoval::DeletePlaneIndexes => {
+                // Deliberately match generate_template's Trigger Delete Objects
+                // (object_ids): Plane indexes, unlike the editor-saved examples'
+                // entity indexes. Keep the lead before the wingman.
+                let delete = p.delete(&format!("{name} DELETE"), &planes);
+                p.at(&format!("{name} DELETE AT"), D_REMOVE_S, &[delete]);
+            }
+            DeleteRemoval::DeactivateOnly => {
+                let deactivate = p.control("MCU_Deactivate", &format!("{name} DEACTIVATE"), &[]);
+                by_id_mut(&mut p.root, deactivate).set_objects(entities);
+                p.at(&format!("{name} DEACTIVATE AT"), D_REMOVE_S, &[deactivate]);
+            }
+        }
+        p.icon(&format!("{} {name}", cell.key), centre, "[2]");
+    }
+}
+
 fn build(flight: Flight) -> Probe {
     let mut p = Probe::new(flight);
     for &cell in flight.sheet() {
@@ -1358,7 +1592,8 @@ fn build(flight: Flight) -> Probe {
             "Y-N" => build_y(&mut p, Side::Nato),
             "Y-D" => build_y(&mut p, Side::Dprk),
             "T-g2" => build_g(&mut p),
-            _ => unreachable!("unknown probe cell"),
+            "T-d" => build_d(&mut p),
+            _ => panic!("unknown probe cell {}", cell.key),
         }
     }
     p.cues(flight);
@@ -1379,6 +1614,9 @@ pub(crate) fn generate_probe_1d() -> Il2Entity {
 }
 pub(crate) fn generate_probe_1g() -> Il2Entity {
     build(Flight::OneG).root
+}
+pub(crate) fn generate_probe_1h() -> Il2Entity {
+    build(Flight::OneH).root
 }
 
 fn serialize_probe(root: &Il2Entity) -> String {
@@ -1500,6 +1738,12 @@ fn write_p14_probe_1d() {
 #[ignore = "writes target/p14 probe files"]
 fn write_p14_probe_1g() {
     write_probe(Flight::OneG, TraceCarrier::default());
+}
+
+#[test]
+#[ignore = "writes target/p14 probe files"]
+fn write_p14_probe_1h() {
+    write_probe(Flight::OneH, TraceCarrier::default());
 }
 
 fn number(node: &Il2Entity, property: &str) -> f64 {
@@ -1658,23 +1902,35 @@ fn assert_flight_country(
     exit: (f64, f64),
     country: i32,
 ) {
+    let original = parse_group_file(HVAR).unwrap();
+    let names: Vec<_> = block_ids(&original, "Plane")
+        .into_iter()
+        .take(count)
+        .map(|plane| by_id(&original, plane).name().unwrap())
+        .collect();
+    assert_named_flight(flight, &original, &names, start, exit, country);
+}
+
+fn assert_named_flight(
+    flight: &Il2Entity,
+    original: &Il2Entity,
+    names: &[&str],
+    start: (f64, f64),
+    exit: (f64, f64),
+    country: i32,
+) {
     let country = country.to_string();
     let planes = block_ids(flight, "Plane");
     let entities = block_ids(flight, "MCU_TR_Entity");
-    assert_eq!(planes.len(), count);
-    assert_eq!(entities.len(), count);
-    let original = parse_group_file(HVAR).unwrap();
-    let original_planes = block_ids(&original, "Plane");
+    assert_eq!(planes.len(), names.len());
+    assert_eq!(entities.len(), names.len());
+    let original_planes = block_ids(original, "Plane");
     for (i, &plane_id) in planes.iter().enumerate() {
         let plane = by_id(flight, plane_id);
-        let source = by_id(&original, original_planes[i]);
-        assert_eq!(
-            plane.name(),
-            source.name(),
-            "keep the first planes in file order"
-        );
+        let source = by_id(original, original_planes[i]);
+        assert_eq!(plane.name(), Some(names[i]), "plane names in file order");
         let source_pos = source.pos_xz().unwrap();
-        let original_lead = by_id(&original, original_planes[0]).pos_xz().unwrap();
+        let original_lead = by_id(original, original_planes[0]).pos_xz().unwrap();
         let position = plane.pos_xz().unwrap();
         assert_near(position.0, start.0 + source_pos.0 - original_lead.0);
         assert_near(position.1, start.1 + source_pos.1 - original_lead.1);
@@ -1727,6 +1983,7 @@ fn probe_files_parse_and_links_resolve() {
         (Flight::OneN, generate_probe_1n()),
         (Flight::OneD, generate_probe_1d()),
         (Flight::OneG, generate_probe_1g()),
+        (Flight::OneH, generate_probe_1h()),
     ] {
         let (traced, _) = build(flight).traced(TraceCarrier::default());
         for root in [root, traced] {
@@ -2054,17 +2311,219 @@ fn probe_subtitles_are_unique() {
 }
 
 #[test]
+fn losses_impl_defaults_to_type13() {
+    assert_eq!(super::LossesImpl::default(), super::LossesImpl::Type13);
+}
+
+fn assert_delete_probe(root: &Il2Entity) {
+    use super::testkit::{TICKS_PER_SECOND, WalkerConfig, WalkerInput, walk};
+
+    let original = parse_group_file(HVAR).unwrap();
+    assert_eq!(root.count_block_type("Plane"), 20);
+    assert_eq!(root.count_block_type("MCU_TR_Entity"), 20);
+    assert_eq!(root.count_block_type("OnEvent"), 20);
+    assert_eq!(root.count_block_type("MCU_Delete"), 37); // 10 template + 20 close + 7 removals.
+    assert_eq!(root.count_block_type("MCU_Icon"), 10);
+    let mut close_targets = vec![id(root, "T-d CLOSE OFF")];
+    for (name, labels, start, centre) in [
+        ("D0", ["D0a", "D0b"], (120.0, 20.0), (130.0, 20.0)),
+        ("D1", ["D1a", "D1b"], (120.0, 28.0), (130.0, 28.0)),
+        ("D2", ["D2a", "D2b"], (120.0, 36.0), (130.0, 36.0)),
+        ("D3", ["D3a", "D3b"], (120.0, 44.0), (130.0, 44.0)),
+        ("D4", ["D4a", "D4b"], (120.0, 52.0), (130.0, 52.0)),
+        ("D5", ["D5a", "D5b"], (120.0, 60.0), (130.0, 60.0)),
+        ("D6", ["D6a", "D6b"], (120.0, 68.0), (130.0, 68.0)),
+        ("D7", ["D7a", "D7b"], (120.0, 76.0), (130.0, 76.0)),
+        ("D8", ["D8a", "D8b"], (104.0, 20.0), (114.0, 20.0)),
+        ("D9", ["D9a", "D9b"], (104.0, 28.0), (114.0, 28.0)),
+    ] {
+        let flight = named(root, name);
+        assert_named_flight(flight, &original, &labels, world(start), world(centre), COUNTRY_USA);
+        assert_at(root, &format!("{name} START"), 60.0, &[id(flight, "MISSION BEGIN")]);
+        for label in labels {
+            let plane = named(flight, label);
+            let entity = named(flight, &format!("{label} entity"));
+            let entity_id = entity.index.unwrap();
+            assert_eq!(number(plane, "LinkTrId"), f64::from(entity_id));
+            assert_eq!(entity.children.len(), 1);
+            let events = &entity.children[0];
+            assert_eq!(events.block_type, "OnEvents");
+            assert_eq!(events.children.len(), 1);
+            let event = &events.children[0];
+            assert_eq!(event.block_type, "OnEvent");
+            assert_eq!(number(event, "Type"), f64::from(EVENT_KILLED));
+            let subtitle = named(root, &format!("{label} ev{EVENT_KILLED}"));
+            assert_eq!(subtitle.block_type, "MCU_TR_Subtitle");
+            assert_eq!(number(event, "TarId"), f64::from(subtitle.index.unwrap()));
+
+            let delete = named(root, &format!("{label} CLOSE DELETE"));
+            assert_eq!(delete.block_type, "MCU_Delete");
+            assert_eq!(delete.objects, [entity_id]);
+            assert!(delete.targets.is_empty());
+            close_targets.push(delete.index.unwrap());
+        }
+    }
+    assert_at(root, "T-d CLOSE", 480.0, &close_targets);
+
+    // Literal aircraft lists pin both the killed seat and the untouched controls.
+    let mut damage_commands = BTreeSet::new();
+    for (labels, suffix, time_s) in [
+        (&["D2b", "D3a", "D4b", "D5b", "D6b"][..], "DAMAGE", 120.0),
+        (
+            &[
+                "D1a", "D1b", "D2a", "D2b", "D3a", "D3b", "D4a", "D4b",
+                "D5a", "D5b", "D6a", "D6b", "D7a", "D7b", "D8a", "D8b",
+                "D9a", "D9b",
+            ][..],
+            "DETECTOR",
+            270.0,
+        ),
+    ] {
+        for label in labels {
+            let name = format!("{label} {suffix}");
+            let damage = named(root, &name);
+            let damage_id = damage.index.unwrap();
+            assert_eq!(damage.block_type, "MCU_CMD_Damage");
+            assert_eq!(damage.property("Damage"), Some("2"));
+            assert_eq!(damage.property("Type"), Some("1"));
+            assert_eq!(damage.objects, [id(root, &format!("{label} entity"))]);
+            assert!(damage.targets.is_empty());
+            let timer_name = format!("{name} AT");
+            assert_at(root, &timer_name, time_s, &[damage_id]);
+            let mut inputs = Vec::new();
+            root.for_each(&mut |node| {
+                if node.targets.contains(&damage_id) {
+                    inputs.push(node.index.unwrap());
+                }
+            });
+            assert_eq!(inputs, [id(root, &timer_name)], "{name} fires only at {time_s}");
+            assert!(damage_commands.insert(damage_id));
+        }
+    }
+    assert_eq!(damage_commands.len(), 23);
+    assert_eq!(
+        damage_commands.iter()
+            .filter(|&&index| by_id(root, index).name().unwrap().ends_with(" DETECTOR"))
+            .count(),
+        18
+    );
+    assert_eq!(
+        block_ids(root, "MCU_CMD_Damage").into_iter().collect::<BTreeSet<_>>(),
+        damage_commands
+    );
+
+    let mut probe_deletes: BTreeSet<_> = close_targets[1..].iter().copied().collect();
+    for (name, labels) in [
+        ("D1", &["D1a", "D1b"][..]),
+        ("D2", &["D2a", "D2b"][..]),
+        ("D3", &["D3a", "D3b"][..]),
+        ("D5", &["D5a"][..]),
+    ] {
+        let delete = named(root, &format!("{name} DELETE"));
+        let delete_id = delete.index.unwrap();
+        assert_eq!(delete.block_type, "MCU_Delete");
+        assert_eq!(
+            delete.objects,
+            labels.iter().map(|label| id(root, &format!("{label} entity"))).collect::<Vec<_>>(),
+            "{name}: Delete Objects order"
+        );
+        assert!(delete.targets.is_empty());
+        assert_at(root, &format!("{name} DELETE AT"), 240.0, &[delete_id]);
+        assert!(probe_deletes.insert(delete_id));
+    }
+    let mut d4_deletes = Vec::new();
+    for label in ["D4a", "D4b"] {
+        let delete = named(root, &format!("{label} DELETE"));
+        assert_eq!(delete.block_type, "MCU_Delete");
+        assert_eq!(delete.objects, [id(root, &format!("{label} entity"))]);
+        assert!(delete.targets.is_empty());
+        d4_deletes.push(delete.index.unwrap());
+        assert!(probe_deletes.insert(delete.index.unwrap()));
+    }
+    assert_at(root, "D4 DELETE AT", 240.0, &d4_deletes);
+
+    let d8_delete = named(root, "D8 DELETE");
+    assert_eq!(d8_delete.block_type, "MCU_Delete");
+    assert_eq!(d8_delete.objects, [id(root, "D8a"), id(root, "D8b")]);
+    assert!(d8_delete.targets.is_empty());
+    assert_at(root, "D8 DELETE AT", 240.0, &[d8_delete.index.unwrap()]);
+    assert!(probe_deletes.insert(d8_delete.index.unwrap()));
+    assert_eq!(
+        named(root, "T-d").children.iter()
+            .filter(|node| node.block_type == "MCU_Delete")
+            .map(|node| node.index.unwrap())
+            .collect::<BTreeSet<_>>(),
+        probe_deletes,
+        "only the seven removal Deletes and twenty individual close Deletes"
+    );
+
+    let d9 = named(root, "D9");
+    let d9_deactivate = named(root, "D9 DEACTIVATE");
+    assert_eq!(d9_deactivate.block_type, "MCU_Deactivate");
+    assert_eq!(d9_deactivate.objects, [id(d9, "D9a entity"), id(d9, "D9b entity")]);
+    assert!(d9_deactivate.targets.is_empty());
+    assert_ne!(d9_deactivate.index, named(d9, "Deactivate Units").index);
+    assert!(named(root, "T-d").children.contains(d9_deactivate));
+    assert_at(root, "D9 DEACTIVATE AT", 240.0, &[d9_deactivate.index.unwrap()]);
+    assert!(root.find_by_name("D9 DELETE AT").is_none());
+
+    // Walk the scheduled pulses, including the copied template's timers: no
+    // Delete of either D9 Plane or entity may fire before the individual closes.
+    let d9_objects = [id(d9, "D9a"), id(d9, "D9b"), id(d9, "D9a entity"), id(d9, "D9b entity")];
+    let log = walk(root, WalkerConfig::default(), &WalkerInput {
+        until: 480 * TICKS_PER_SECOND,
+        ..WalkerInput::default()
+    });
+    let d9_deletes: Vec<_> = log.pulses.iter().filter_map(|pulse| {
+        let node = by_id(root, pulse.index);
+        (node.block_type == "MCU_Delete" && node.objects.iter().any(|id| d9_objects.contains(id)))
+            .then_some((pulse.t, pulse.index))
+    }).collect();
+    assert_eq!(d9_deletes, [
+        (480 * TICKS_PER_SECOND, id(root, "D9a CLOSE DELETE")),
+        (480 * TICKS_PER_SECOND, id(root, "D9b CLOSE DELETE")),
+    ]);
+
+    let d6 = named(root, "D6");
+    let deactivate = named(d6, "Deactivate Units");
+    let delay = named(d6, "DELETE DELAY");
+    let delete = named(d6, "Trigger Delete");
+    assert_at(
+        root,
+        "D6 DEACTIVATE AT",
+        240.0,
+        &[deactivate.index.unwrap(), delay.index.unwrap()],
+    );
+    assert_eq!(deactivate.block_type, "MCU_Deactivate");
+    assert_eq!(deactivate.objects, [id(d6, "D6a entity"), id(d6, "D6b entity")]);
+    assert!(deactivate.targets.is_empty());
+    assert_eq!(delay.block_type, "MCU_Timer");
+    assert_eq!(number(delay, "Time"), 0.5);
+    assert_eq!(delay.property("Random"), Some("100"));
+    assert_eq!(delay.targets, [delete.index.unwrap()]);
+    assert_eq!(delete.block_type, "MCU_Delete");
+    assert_eq!(delete.objects, [id(d6, "D6a"), id(d6, "D6b")]);
+    assert!(delete.targets.is_empty());
+    for name in ["D0", "D7"] {
+        assert!(root.find_by_name(&format!("{name} DELETE AT")).is_none());
+        assert!(root.find_by_name(&format!("{name} DEACTIVATE AT")).is_none());
+    }
+}
+
+#[test]
 fn probe_cells_match_the_table() {
     let zero = generate_probe_0();
     let one_a = generate_probe_1a();
     let one_g = generate_probe_1g();
     let one_n = generate_probe_1n();
     let one_d = generate_probe_1d();
+    let one_h = generate_probe_1h();
     assert_eq!(zero.count_block_type("Plane"), 4);
     assert_eq!(one_a.count_block_type("Plane"), 0);
     assert_eq!(one_g.count_block_type("Plane"), 10);
     assert_eq!(one_n.count_block_type("Plane"), 4);
     assert_eq!(one_d.count_block_type("Plane"), 4);
+    assert_delete_probe(&one_h);
 
     for (name, coalition) in [("ZA1", "[2]"), ("ZA2", "[1]")] {
         assert_zone(&zero, name, 12_000.0, true, coalition, (0.0, 60.0));
@@ -2271,11 +2730,11 @@ fn probe_cells_match_the_table() {
     );
 
     assert_eq!(zero.count_block_type("MCU_TR_MissionObjective"), 5);
-    for root in [&zero, &one_a, &one_n, &one_d, &one_g] {
+    for root in [&zero, &one_a, &one_n, &one_d, &one_g, &one_h] {
         assert!(root.find_by_name("T-o").is_none());
         assert!(root.find_by_name("P14 DPRK SPAWN").is_none());
     }
-    for root in [&one_a, &one_n, &one_d, &one_g] {
+    for root in [&one_a, &one_n, &one_d, &one_g, &one_h] {
         assert_eq!(root.count_block_type("MCU_TR_MissionObjective"), 0);
     }
 
@@ -2727,6 +3186,7 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::OneN, "Y-N", (100.0, 30.0), 10.0, 1200.0),
         (Flight::OneD, "Y-D", (140.0, -30.0), 10.0, 1200.0),
         (Flight::OneG, "T-g2", (130.0, 50.0), 60.0, 900.0),
+        (Flight::OneH, "T-d", (130.0, 20.0), 60.0, 480.0),
     ];
     let expected_cues = [
         (
@@ -2795,6 +3255,16 @@ fn probe_run_sheets_match_the_tables() {
             Flight::OneG,
             930.0,
             "Flight 1G done. End the mission normally",
+        ),
+        (
+            Flight::OneH,
+            0.0,
+            "1H: no flying needed. Stay on the ground at K14 until 05:30",
+        ),
+        (
+            Flight::OneH,
+            330.0,
+            "Flight 1H done. End the mission normally",
         ),
     ];
     assert_eq!(CUES.len(), expected_cues.len());
@@ -2893,6 +3363,7 @@ fn probe_run_sheets_match_the_tables() {
     let one_n = generate_probe_1n();
     let one_d = generate_probe_1d();
     let one_g = generate_probe_1g();
+    let one_h = generate_probe_1h();
     for (root, name, km, coalition) in [
         (&one_a, "T-c C", (40.0, -20.0), "[2]"),
         (&one_a, "T-c C4", (40.0, -8.0), "[2]"),
@@ -2906,6 +3377,16 @@ fn probe_run_sheets_match_the_tables() {
         (&one_g, "T-g G2", (130.0, 50.0), "[1]"),
         (&one_g, "T-g G3", (130.0, 53.0), "[1]"),
         (&one_g, "T-g G4", (130.0, 110.0), "[1]"),
+        (&one_h, "T-d D0", (130.0, 20.0), "[2]"),
+        (&one_h, "T-d D1", (130.0, 28.0), "[2]"),
+        (&one_h, "T-d D2", (130.0, 36.0), "[2]"),
+        (&one_h, "T-d D3", (130.0, 44.0), "[2]"),
+        (&one_h, "T-d D4", (130.0, 52.0), "[2]"),
+        (&one_h, "T-d D5", (130.0, 60.0), "[2]"),
+        (&one_h, "T-d D6", (130.0, 68.0), "[2]"),
+        (&one_h, "T-d D7", (130.0, 76.0), "[2]"),
+        (&one_h, "T-d D8", (114.0, 20.0), "[2]"),
+        (&one_h, "T-d D9", (114.0, 28.0), "[2]"),
     ] {
         let mut found = 0;
         root.for_each(&mut |node| {
@@ -2933,7 +3414,7 @@ fn probe_run_sheets_match_the_tables() {
 
 #[test]
 fn probe_spawn_lists_match_the_run_sheets() {
-    for flight in [Flight::Zero, Flight::OneA, Flight::OneG] {
+    for flight in [Flight::Zero, Flight::OneA, Flight::OneG, Flight::OneH] {
         assert!(flight.spawns().is_empty());
         assert_eq!(spawn_json(flight), "[]\n");
     }
@@ -3231,6 +3712,7 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
         (Flight::OneN, 15, 15, 0, 0, 15),
         (Flight::OneD, 13, 13, 0, 0, 13),
         (Flight::OneG, 50, 18, 8, 0, 50),
+        (Flight::OneH, 22, 22, 20, 0, 22),
     ] {
         let probe = build(flight);
         let plain = probe.root.clone();
@@ -3332,10 +3814,15 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
             } else {
                 if source.block_type == "MCU_TR_Entity" {
                     entity_sources += 1;
+                    let expected_types: &[i32] = match flight {
+                        Flight::OneG => &G_EVENT_TYPES,
+                        Flight::OneH => &H_EVENT_TYPES,
+                        _ => panic!("unexpected entity observation in {flight:?}"),
+                    };
                     assert_eq!(
                         event_types.iter().copied().collect::<Vec<_>>(),
-                        G_EVENT_TYPES.map(Some),
-                        "{context}: T-g event types"
+                        expected_types.iter().copied().map(Some).collect::<Vec<_>>(),
+                        "{context}: entity event types"
                     );
                 } else {
                     assert_eq!(
