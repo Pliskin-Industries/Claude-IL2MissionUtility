@@ -5,6 +5,7 @@ use std::path::Path;
 
 use super::{AirRole, AirSide, AirSortie, SortieSource};
 use crate::ast::Il2Entity;
+use crate::template::EntityEvent;
 use crate::{in_theatre, model_spec, parser, weapon_range};
 
 pub(crate) const BUILTINS: [(&str, &str); 6] = [
@@ -107,7 +108,7 @@ pub struct SortieShape {
     pub delayed_end_timer: i32,
     pub delete_timer: i32,
     pub mission_complete_timers: Vec<i32>,
-    /// (plane entity, DeathCount) pairs, all OnEvent Type 4.
+    /// (plane entity, DeathCount) pairs, all OnKilled (OnEvent Type 13).
     pub repeat_kill_events: Vec<(i32, i32)>,
     pub rtb_waypoints: BTreeMap<i32, i32>,
     pub rtb_timer: Option<i32>,
@@ -125,6 +126,8 @@ pub(crate) const MULTIPLE_WAYPOINTS: &str =
 const LAST_ATTACK: &str =
     "Air Tasking needs the attack order to be the last order before Mission Complete";
 const HOOKS: &str = "Air Tasking does not support event or report hooks yet";
+// Decision 0012, flight 1L: legacy event 4 never advances the repeat counter.
+const LEGACY_REPEAT_DEATH: &str = "Air Tasking Repeat needs OnKilled (13) into DeathCount; OnPlaneDestroyed (4) does not count aircraft deaths (decision 0012)";
 const PLANES_ONLY: &str = "Air Tasking supports plane units only";
 const UNTESTED: &str = "Air Tasking supports only tested sortie shapes S1-S7";
 
@@ -433,8 +436,16 @@ fn inspect_hooks(
             }
             for event in &wrapper.children {
                 let target = event.property("TarId").and_then(|v| v.parse::<i32>().ok());
+                let event_type = event.property("Type").and_then(|v| v.parse::<i32>().ok());
+                if event.block_type == "OnEvent"
+                    && death.is_some()
+                    && target == death
+                    && event_type == Some(EntityEvent::OnPlaneDestroyed.type_id())
+                {
+                    return Err(LEGACY_REPEAT_DEATH.into());
+                }
                 if event.block_type != "OnEvent"
-                    || !is(event, "Type", "4")
+                    || event_type != Some(EntityEvent::OnKilled.type_id())
                     || target.is_none()
                     || target != death
                 {
@@ -462,7 +473,9 @@ fn inspect_hooks(
                 .len()
                 != planes.len())
     {
-        return Err("Air Tasking needs one repeat-mode kill event per plane".into());
+        return Err(
+            "Air Tasking Repeat needs one OnKilled (13) event into DeathCount per plane".into()
+        );
     }
     Ok(events)
 }
@@ -1303,6 +1316,44 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn inspect_sortie_accepts_on_killed_repeat_events() {
+        let mut opts = options(TestedShape::S6);
+        opts.seats.push(opts.seats[0].clone());
+        let mut root = generate(&opts);
+        let mut events = 0;
+        root.for_each_mut(&mut |node| {
+            if node.block_type == "OnEvent" {
+                node.set_property("Type", "13");
+                events += 1;
+            }
+        });
+        assert_eq!(events, 2);
+        let shape = inspect_sortie(&root).unwrap();
+        assert_eq!(shape.mode, SortieMode::Repeat);
+        let death = root.find_by_name("DeathCount").unwrap().index.unwrap();
+        assert_eq!(
+            shape.repeat_kill_events,
+            shape.planes.iter().map(|&entity| (entity, death)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn inspect_sortie_refuses_legacy_on_plane_destroyed_repeat_events() {
+        let mut root = generate(&options(TestedShape::S6));
+        let mut events = 0;
+        root.for_each_mut(&mut |node| {
+            if node.block_type == "OnEvent" {
+                node.set_property("Type", "4");
+                events += 1;
+            }
+        });
+        assert_eq!(events, 1);
+        assert_eq!(inspect_sortie(&root).unwrap_err(), [
+            "Air Tasking Repeat needs OnKilled (13) into DeathCount; OnPlaneDestroyed (4) does not count aircraft deaths (decision 0012)"
+        ]);
+    }
+
+    #[test]
     fn inspect_sortie_accepts_each_tested_shape() {
         for (kind, cases) in shape_cases() {
             assert!(!cases.is_empty());
@@ -1325,6 +1376,18 @@ pub(crate) mod tests {
                         0
                     }
                 );
+                for &(entity, target) in &shape.repeat_kill_events {
+                    let events: Vec<_> = nodes(by_id(&root, entity))
+                        .into_iter()
+                        .filter(|node| node.block_type == "OnEvent")
+                        .collect();
+                    assert_eq!(events.len(), 1);
+                    assert_eq!(events[0].property("Type"), Some("13"));
+                    assert_eq!(
+                        events[0].property("TarId").unwrap().parse::<i32>().unwrap(),
+                        target
+                    );
+                }
             }
         }
     }

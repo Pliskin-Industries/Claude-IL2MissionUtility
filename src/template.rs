@@ -598,11 +598,9 @@ impl EntityEvent {
         }
     }
 
-    pub fn default_for(kind: UnitKind) -> Self {
-        match kind {
-            UnitKind::Plane => EntityEvent::OnPlaneDestroyed,
-            _ => EntityEvent::OnKilled,
-        }
+    pub fn default_for(_kind: UnitKind) -> Self {
+        // Decision 0012: aircraft losses raise OnKilled too (flight 1L).
+        EntityEvent::OnKilled
     }
 }
 
@@ -4993,6 +4991,13 @@ fn read_events(
                 let typ = prop_i32(ev, "Type", -1);
                 let tar = prop_i32(ev, "TarId", -1);
                 if death_id == Some(tar) {
+                    if opts.seats[si].unit.kind == UnitKind::Plane
+                        && typ == EntityEvent::OnPlaneDestroyed.type_id()
+                    {
+                        warnings.push(format!(
+                            "OnPlaneDestroyed (4) on {unit_name} targeting DeathCount will be regenerated as OnKilled (13) (decision 0012)."
+                        ));
+                    }
                     continue;
                 }
                 let Some(kind) = EntityEvent::from_type_id(typ) else {
@@ -5849,11 +5854,21 @@ mod tests {
         assert_repeat_spawn_graph(&root);
         let death = root.find_by_name("DeathCount").unwrap();
         let events = entity_events(&root);
+        // This shipped example keeps its historical event 4; decision 0012
+        // changes generated files, not the examples.
         let hits = events
             .iter()
             .filter(|(t, tar)| *t == 4 && *tar == death.index.unwrap())
             .count();
         assert_eq!(hits, 4);
+    }
+
+    #[test]
+    fn default_death_event_is_on_killed_for_every_unit_kind() {
+        for kind in UnitKind::ALL {
+            assert_eq!(EntityEvent::default_for(kind).type_id(), 13, "{kind:?}");
+            assert_eq!(EventHook::default_for(kind).kind.type_id(), 13, "{kind:?}");
+        }
     }
 
     #[test]
@@ -5892,8 +5907,8 @@ mod tests {
         assert_eq!(delete.objects, planes);
         let events = entity_events(&pack);
         assert!(
-            events.iter().any(|(t, tar)| *t == 4 && *tar == death.index.unwrap()),
-            "aircraft OnPlaneDestroyed should pulse DeathCount, got {events:?}"
+            events.iter().any(|(t, tar)| *t == 13 && *tar == death.index.unwrap()),
+            "aircraft OnKilled (13) should pulse DeathCount, got {events:?}"
         );
         let text = serialize_group(&pack);
         assert!(text.contains("MCU_ModifierSetVal"));
@@ -5923,13 +5938,25 @@ mod tests {
         assert_eq!(death.property("Counter"), Some("3"));
         let death_id = death.index.unwrap();
         let events = entity_events(&pack);
-        let hits = events.iter().filter(|(t, tar)| *t == 4 && *tar == death_id).count();
+        let hits = events.iter().filter(|(t, tar)| *t == 13 && *tar == death_id).count();
         assert_eq!(hits, 3);
         assert_repeat_spawn_graph(&pack);
         let zone_out = pack.find_by_name("Zone Out").unwrap();
         let mission_end = pack.find_by_name("MISSION END").unwrap();
         assert!(zone_out.targets.contains(&mission_end.index.unwrap()));
         assert!(!death.targets.contains(&mission_end.index.unwrap()));
+    }
+
+    #[test]
+    fn repeat_spawn_counts_aircraft_and_ground_on_killed() {
+        let mut opts = one_mig();
+        opts.bring_up = BringUp::Spawn;
+        opts.allow_multiple_spawns = true;
+        opts.seats.push(TemplateSeat::new(catalog_vehicle()));
+        let pack = generate_template(&opts).unwrap();
+        let death = pack.find_by_name("DeathCount").unwrap();
+        assert_eq!(death.property("Counter"), Some("2"));
+        assert_eq!(entity_events(&pack), vec![(13, death.index.unwrap()); 2]);
     }
 
     #[test]
@@ -6931,10 +6958,7 @@ mod tests {
             },
         ];
         opts.seats[0].events = vec![
-            EventHook {
-                kind: EntityEvent::OnPlaneDestroyed,
-                then: EventThen::ForceComplete,
-            },
+            EventHook::default_for(UnitKind::Plane),
             EventHook {
                 kind: EntityEvent::OnPilotKilled,
                 then: EventThen::Order(2),
@@ -6953,7 +6977,7 @@ mod tests {
         let force = pack.find_by_name("Force Complete - High").unwrap();
         let form_tm = pack.find_by_name("Formation 1").unwrap();
         let events = entity_events(&pack);
-        assert!(events.contains(&(4, force.index.unwrap())));
+        assert!(events.contains(&(13, force.index.unwrap())));
         assert!(events.contains(&(0, form_tm.index.unwrap())));
     }
 
@@ -7961,6 +7985,44 @@ mod tests {
         assert!(got.seats[0].events.iter().any(|e| {
             e.kind == EntityEvent::OnPlaneDestroyed && e.then == EventThen::ForceComplete
         }));
+    }
+
+    #[test]
+    fn load_legacy_aircraft_death_event_regenerates_on_killed() {
+        let mut opts = one_mig();
+        opts.bring_up = BringUp::Spawn;
+        opts.allow_multiple_spawns = true;
+        let mut pack = generate_template(&opts).unwrap();
+        let death_id = pack
+            .find_by_name("DeathCount")
+            .unwrap()
+            .index
+            .unwrap()
+            .to_string();
+        let mut changed = 0;
+        pack.for_each_mut(&mut |node| {
+            if node.block_type == "OnEvent" && node.property("TarId") == Some(death_id.as_str()) {
+                node.set_property("Type", "4");
+                changed += 1;
+            }
+        });
+        assert_eq!(changed, 1);
+        let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
+        assert!(loaded.options.allow_multiple_spawns);
+        assert!(loaded.options.seats[0].events.is_empty());
+        assert!(
+            loaded.warnings.iter().any(|warning| {
+                warning.contains("OnPlaneDestroyed (4)") && warning.contains("OnKilled (13)")
+            }),
+            "missing legacy death-event correction: {:?}",
+            loaded.warnings
+        );
+        let rebuilt = generate_template(&loaded.options).unwrap();
+        let death = rebuilt.find_by_name("DeathCount").unwrap();
+        assert_eq!(entity_events(&rebuilt), vec![(13, death.index.unwrap())]);
+        let reloaded = load_template(&rebuilt, &builtin_plane_catalog()).unwrap();
+        assert!(reloaded.warnings.is_empty(), "{:?}", reloaded.warnings);
+        assert!(reloaded.options.seats[0].events.is_empty());
     }
 
     #[test]

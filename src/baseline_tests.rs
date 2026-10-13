@@ -397,7 +397,7 @@ fn trace_off_changes_nothing() {
             fingerprint = (fingerprint ^ u64::from(byte)).wrapping_mul(0x100000001b3);
         }
     }
-    assert_eq!(fingerprint, 0xac124eef53f1139f);
+    assert_eq!(fingerprint, 0x39005a41019e0e3d);
 
     fn check_source(dir: &Path) {
         for entry in std::fs::read_dir(dir).unwrap() {

@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 
 use crate::ast::Il2Entity;
+use crate::template::EntityEvent;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -108,7 +109,7 @@ pub(crate) struct WalkerInput {
     pub tracks: Vec<ScriptedTrack>,
     pub pulses: Vec<(Tick, WalkerNode)>,
     /// A Plane or its linked MCU_TR_Entity. Scripted deaths do not simulate
-    /// existence/spawning; each entity emits Type 4 at most once per run.
+    /// existence/spawning; each entity emits OnKilled (13) at most once per run.
     pub kills: Vec<(Tick, WalkerNode)>,
     pub arrivals: Vec<(Tick, WalkerNode)>,
 }
@@ -621,7 +622,7 @@ impl Walker<'_> {
             .filter(|n| n.block_type == "OnEvents")
         {
             for event in events.children.iter().filter(|n| n.block_type == "OnEvent") {
-                if value(event, "Type", -1) == 4 {
+                if value(event, "Type", -1) == EntityEvent::OnKilled.type_id() {
                     let target = value(event, "TarId", -1);
                     assert!(
                         self.nodes.contains_key(&target),
@@ -1351,7 +1352,8 @@ mod walker_tests {
         plane.set_property("LinkTrId", "2");
         let mut entity = node("MCU_TR_Entity", 2, "Plane entity", &[]);
         entity.set_property("Enabled", "0");
-        crate::template::attach_event(&mut entity, 4, 10);
+        crate::template::attach_event(&mut entity, 13, 10);
+        crate::template::attach_event(&mut entity, 4, 11);
         crate::template::attach_event(&mut entity, 2, 11);
         let mut spawn = node("MCU_Spawner", 3, "Spawn", &[11]);
         spawn.set_objects(vec![2]);
