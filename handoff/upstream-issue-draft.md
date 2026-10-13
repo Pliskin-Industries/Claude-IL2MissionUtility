@@ -25,7 +25,7 @@ Game version 1.005 (`261013`), dogfight server hosted from the client, AI aircra
 
 So with event 4 the next wave only comes if players leave the zone and return. Fighter Pack builds on the same counter.
 
-**Suggested fix.** Use 13 for aircraft too.
+**Proposed fix.** `EntityEvent::default_for` returns `OnKilled` (13) for aircraft as it already does for everything else. One line; each generated aircraft's `OnEvent` to `DeathCount` changes from `Type = 4` to `Type = 13`. I can send the patch.
 
 ## 2. `Trigger Delete` lists the units' own indexes, and the game ignores it
 
@@ -42,7 +42,7 @@ So a group that reaches `MISSION END` is deactivated but never deleted. It stays
 
 **A catch before fixing it.** In Activate mode the group is re-activated when players come back to the zone. That works today only because the Delete does nothing. With entity indexes in `Trigger Delete`, my re-activated group did not come back. In Spawn mode the corrected Delete was fine: the next wave still spawned.
 
-**Suggested fix.** Spawn mode: list entities in `Trigger Delete`. Activate mode: do not write the Delete (the Deactivate already does the job, and the units are needed again).
+**Proposed fix.** Spawn mode: `Trigger Delete` lists the entity indexes (`entity_ids` in place of `object_ids`). Activate mode: do not write `DELETE DELAY` and `Trigger Delete` at all; the Deactivate already does the job, the units are needed again, and it saves two MCUs per group. I can send the patch.
 
 ## 3. Strike and CAP aborts **[pending flight 1M]**
 
@@ -62,4 +62,8 @@ So a group that reaches `MISSION END` is deactivated but never deleted. It stays
 
 Each test mission has a handful of AI flights well away from each other. A timer does one thing to each flight (kill it, delete it, start its own bring-up node), and 30 seconds later a "detector" tries to kill every aircraft in it: an aircraft that still exists dies and raises event 13, one that was removed stays silent. The end-of-mission list in the log gives a second, independent count of what still exists. Events are made visible by pointing each one at a `Mission Objective` MCU, which the text log records with its time.
 
-I am happy to send the mission files, the logs, or a patch for 1 and 2.
+## Why I was looking
+
+The fork is adding a tab we call Air Tasking ("Wing Commander"). Its job is to run the AI air war from inside the utility: you mark areas and objectives on the Map, and the app writes the logic that launches historical sorties against them during the mission, from a mission clock and when players enter an area, within a budget of sorties alive per side. It builds on the groups Template Builder generates, which is how these three points surfaced. Your new strike and CAP missions are a natural base for it: Air Tasking could schedule and budget them instead of running them one at a time. If that interests you I would rather build it in a way you can take upstream.
+
+I am happy to send the mission files, the logs, or patches for 1 and 2.
