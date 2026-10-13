@@ -1,6 +1,6 @@
 # DRAFT, not sent. Issue for `eszyman/IL2MissionUtility`
 
-> Status: draft of 2026-10-13. Sections marked **[pending flight 1M]** wait for the test that flies the app's own strike and CAP files. Do not post until the user says so, and run the text through `/hfe-mayer` first.
+> Status: draft of 2026-10-13, updated after flight 1L. Sections marked **[pending flight 1M]** wait for the test that flies the app's own strike and CAP files. Do not post until the user says so, and run the text through `/hfe-mayer` first.
 
 ---
 
@@ -14,7 +14,7 @@ Game version 1.005 (`261013`), dogfight server hosted from the client, AI aircra
 
 **What the app writes.** For an aircraft, the death counter (`DeathCount`) listens for `OnPlaneDestroyed` (event type 4). That is `EntityEvent::default_for(UnitKind::Plane)`.
 
-**What the game does.** Every aircraft I destroyed raised `OnKilled` (13) once, at the moment it died. None raised 4. That held for a Damage command, AI gunfire, a mid-air collision, and running out of fuel.
+**What the game does.** Every aircraft I destroyed raised `OnKilled` (13) once, at the moment it died. None raised 4. That held for a Damage command, AI gunfire, a mid-air collision, a crash during a fight, and an aircraft that ran out of fuel (13 fired when the pilot bailed out).
 
 **What that means in a mission.** I generated a repeat-spawn group with the app's own `generate_template` ("Allow multiple spawns" on) and killed the first wave:
 
@@ -38,7 +38,7 @@ So with event 4 the next wave only comes if players leave the zone and return. F
 | the two entity indexes (what the mission editor writes when you object-link a Delete) | both aircraft gone |
 | the two Plane block indexes (what the app writes) | both aircraft still flying |
 
-So a group that reaches `MISSION END` is deactivated but never deleted. It stays in the mission, switched off. With repeat spawns, every finished wave stays.
+So a group that reaches `MISSION END` is deactivated but never deleted. It stays in the mission, switched off. With repeat spawns every finished wave stays: after one clean-up and one respawn, the log's end-of-mission list held two copies of each aircraft, the live one and the first one.
 
 **A catch before fixing it.** In Activate mode the group is re-activated when players come back to the zone. That works today only because the Delete does nothing. With entity indexes in `Trigger Delete`, my re-activated group did not come back. In Spawn mode the corrected Delete was fine: the next wave still spawned.
 
@@ -54,7 +54,7 @@ So a group that reaches `MISSION END` is deactivated but never deleted. It stays
 
 ## 4. Smaller things, for information
 
-- **A damaged AI aircraft can stop taking mission commands.** Four times, an aircraft that had been damaged ignored a Delete, and where I sent one, a Damage command at full strength. Each had `AiRTBDecision = 1`. **[pending flight 1L: whether `AiRTBDecision = 0` avoids it]**
+- **`AiRTBDecision = 1` can take an aircraft out of the mission's hands.** When a pair with that setting was damaged, one of the two stopped answering Delete, Deactivate and Damage commands, flew to the nearest friendly airfield and landed (six pairs, one aircraft each time). With `AiRTBDecision = 0` both stayed on task and both deleted cleanly. Your strike and CAP files already write 0, so they are not affected; a Template Builder group whose aircraft carry 1 would be.
 - **A strike that is shot down never reaches `Mission Complete`,** so nothing pulses `MISSION END`. When strikes share Exclusive Activation, that plan would hold the lock. I read this from the code and have not flown it.
 - **`MissionResaver.exe` crashes on every mission since 1.005,** including the game's own `_test_dogfight_IL-3.Mission`. The game still hosts a plain `.Mission` with its `.eng`.
 
