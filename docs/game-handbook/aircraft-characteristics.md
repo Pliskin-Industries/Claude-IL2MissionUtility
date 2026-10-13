@@ -129,6 +129,8 @@ These dates are the handbook's. Some differ from the historical reference in `do
 
 ## Compared with `src/model_spec.rs`
 
+For ceilings, the comparison against operating documents is in `docs/historical-reference/aircraft-service-ceilings.md` (its "Sim IL-2 Korea" column is this page's practical ceiling).
+
 The app's table gives each aircraft one cruise speed and one ceiling, with no source. The handbook's ceiling is the same kind of figure. Its cruising speed is not: it is an indicated economy speed, where the app's figure is used as a transit speed.
 
 | Aircraft | App cruise | Handbook cruising | Handbook max continuous | App ceiling | Handbook ceiling |

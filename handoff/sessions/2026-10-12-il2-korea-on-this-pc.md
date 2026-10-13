@@ -83,6 +83,18 @@ More on driving the game, learned this evening:
 - **Keep each computer-use batch under 300 s,** or the batch itself times out.
 - The handbook is at Esc, Handbook, Characteristics, Compare. It works while a mission runs, so a no-pilot flight is a good time to read it.
 
+## After the user's four rulings (same night)
+
+The user ruled on four open items: ceilings from operating documents with the game's figures shown beside them; decision 0008 option 4 accepted; losses on event 13 **and** one more probe of the Delete; the step 0e style findings fixed, not left as notes.
+
+- **Cleanup.** Astra jobs `20261013002855-f7dd857c` (the 13 findings) and `20261013004843-c2393294` (an unused import, two unguarded lookups, stale comments). Commit `67c5a13` on `codex/p14-0e-cleanup`, merged as `4cd5d03`. Checked by Claude: 544 passed, 0 failed, 10 ignored; 69 build and 251 clippy warnings; the 20 flown probe files regenerate byte for byte.
+- **Step 0f (flight 1H).** Spec in the plan, prompt in `handoff/P14-step-0f-codex-prompt.md`, branch `codex/p14-0f`, Astra job `20261013005731-daaf69e1`.
+- **Ceilings.** `docs/historical-reference/aircraft-service-ceilings.md`. How the sources were reached, for the next person who tries:
+  - archive.org holds no SAC chart or flight handbook for the F-80C, F-84E or F-86A (title searches through `advancedsearch.php`).
+  - `generalstaff.org/CDA/Aircraft.htm` opens in a browser but not through web fetch. It has no page for the F-80, F-84, F-86, F-51 or C-47.
+  - Knaack's tables were read from the scan's text layer (`DTIC_ADA057002_djvu.xml`), which gives each word's position, so a value can be tied to its column. The plain OCR text cannot do that.
+- **A second session wrote into this worktree.** Decision 0012 (aircraft death event in Template Builder and Fighter Pack), its row in the decisions index and a line in `STATE.md` appeared uncommitted at 20:53. They came from the side task raised earlier in this session. This session left them as found.
+
 ## For decision 0008 (country filter)
 
 The editor lists five countries: Neutral Country (Neutral), USSR, PRC, DPRK (Eastern Bloc) and USA (Western Bloc). **NATO has one named country.** The mission log header also lists 602 and 603 on the NATO side. The editor gives them no name, but a plane written with `Country = 602` loads and counts as NATO, and a trigger filtered to 601 ignores it (flight 1N). The filtered side is the players' country, so the trigger never needs 602 in its own list. Cell Y1 as proposed on 2026-10-07 (NATO AI on country 602, players on 601) has no second NATO country to use. The DPRK side has three, so the test is possible there. Not tried: giving Neutral Country the Western Bloc coalition in the mission's Countries table.

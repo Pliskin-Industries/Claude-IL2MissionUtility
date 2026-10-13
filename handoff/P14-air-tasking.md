@@ -1257,9 +1257,9 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 
 | Cell | Centre (N, E km) | Armed | Closed | Cues |
 |---|---|---|---|---|
-| T-d | D0 to D7 at (+130, +20 + 8·n) for n = 0 to 7 | 01:00 | 08:00 | 00:00 "1H: no flying needed. Stay on the ground at K14 until 05:30"; 05:30 "Flight 1H done. End the mission normally" |
+| T-d | D0 to D7 at (+130, +20 + 8·n) for n = 0 to 7; D8 at (+114, +20); D9 at (+114, +28) | 01:00 | 08:00 | 00:00 "1H: no flying needed. Stay on the ground at K14 until 05:30"; 05:30 "Flight 1H done. End the mission normally" |
 
-**Cell T-d.** Eight 2-ship AI F-80C flights (`probe_flight`, 2 planes), D0 to D7, start at 01:00, each 10 km south of its own centre. Each plane's `Name` is its label (`D0a`, `D0b`, … `D7b`), so the log's end-of-mission list names every aircraft that still exists. Each plane has OnEvent 13 → its own subtitle ("D2b ev13"), traced.
+**Cell T-d.** Ten 2-ship AI F-80C flights (`probe_flight`, 2 planes), D0 to D9, start at 01:00, each 10 km south of its own centre. Each plane's `Name` is its label (`D0a`, `D0b`, … `D9b`), so the log's end-of-mission list names every aircraft that still exists. Each plane has OnEvent 13 → its own subtitle ("D2b ev13"), traced.
 
 | Flight | Killed at 02:00 (`MCU_CMD_Damage`, Complete) | Removed at 04:00 by | Asks |
 |---|---|---|---|
@@ -1271,14 +1271,18 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 | D5 | D5b | one `MCU_Delete`, Objects = [D5a] only | candidate fix: leave the dead aircraft out of the list |
 | D6 | D6b | the template's own `Deactivate Units`, then its `Trigger Delete` 0.5 s later (as G3 in flight 1G) | what a sortie's own clean-up does with a dead wingman |
 | D7 | nobody | nothing | control for the detector below |
+| D8 | nobody | one `MCU_Delete`, Objects = the two `Plane` blocks' own indexes (not their entities) | what Template Builder writes today: does a Delete that names the Plane blocks remove anything? |
+| D9 | nobody | one `MCU_Deactivate`, Objects = [D9a, D9b]; no Delete | control for D6: what the detector and the end-of-mission list show for an aircraft that is deactivated and not deleted |
 
-**Detector.** At 04:30 one `MCU_CMD_Damage` (Complete) per aircraft hits every aircraft of D1 to D7. An aircraft that still exists dies and raises event 13 at 04:30; an aircraft that was removed raises nothing. D7's two aircraft must both raise it, which shows the detector works. D0 is never touched and must be in the end-of-mission list, which shows the list works. The two readings are independent.
+**Why D8 and D9 (found while reviewing the build, 2026-10-12).** `generate_template` fills `Trigger Delete` with the `Plane` blocks' indexes and `Deactivate Units` with their entities (`template.rs`, `delete.set_objects(object_ids)`). The six built-in sorties carry the same lists. Every example file saved from the editor lists entities in a Delete (20 files checked, none lists a Plane block). So D6, which uses the template's own chain, cannot tell "deleted" from "only deactivated" without these two.
 
-**Confirmed if.** D1: no event at 04:30 and neither aircraft in the list. D7: two events at 04:30. D0: both in the list. Then each of D2 to D6 reads "removed" (no 04:30 event, not in the list) or "left behind" (a 04:30 event). If D2 or D3 leaves an aircraft behind and D4 or D5 does not, the fix is the wiring of D4 or D5. If D1 fails or D7 is silent, the flight says nothing and the cell must be redesigned.
+**Detector.** At 04:30 one `MCU_CMD_Damage` (Complete) per aircraft hits every aircraft of D1 to D9. An aircraft that still exists dies and raises event 13 at 04:30; an aircraft that was removed raises nothing. D7's two aircraft must both raise it, which shows the detector works. D0 is never touched and must be in the end-of-mission list, which shows the list works. The two readings are independent.
+
+**Confirmed if.** D1: no event at 04:30 and neither aircraft in the list. D7: two events at 04:30. D0: both in the list. Then each of D2 to D5 and D8 reads "removed" (no 04:30 event, not in the list) or "left behind" (a 04:30 event). D9 shows how a deactivated aircraft reads; D6 is then read against D9: the same as D9 means the template's Delete did nothing more than the Deactivate. If D2 or D3 leaves an aircraft behind and D4 or D5 does not, the fix is the wiring of D4 or D5. If D1 fails or D7 is silent, the flight says nothing and the cell must be redesigned.
 
 **The cell close at 08:00** removes whatever is left with one `MCU_Delete` per aircraft. The mission is ended at about 06:00, before it.
 
-**Step 0f acceptance (tests):** the step 0 tests cover the new file (`probe_files_parse_and_links_resolve`, `probe_strings_are_loader_safe`, `probe_blocks_match_shipped_shapes`, `probe_subtitles_are_unique`, `probe_cells_match_the_table`, `probe_run_sheets_match_the_tables`, `probe_traced_every_subtitle_source_has_a_breadcrumb`); `probe_cells_match_the_table` checks every row of the table above against literals (who is damaged and when, each Delete's Objects list in order, the two Deletes of D4, D6's use of the template's own MCUs, the detector's fourteen Damage commands at 04:30, one per aircraft of D1 to D7, and the plane names). An ignored writer `write_p14_probe_1h` writes the files. Flights 0, 1A, 1N, 1D and 1G generate byte-for-byte the same files as before.
+**Step 0f acceptance (tests):** the step 0 tests cover the new file (`probe_files_parse_and_links_resolve`, `probe_strings_are_loader_safe`, `probe_blocks_match_shipped_shapes`, `probe_subtitles_are_unique`, `probe_cells_match_the_table`, `probe_run_sheets_match_the_tables`, `probe_traced_every_subtitle_source_has_a_breadcrumb`); `probe_cells_match_the_table` checks every row of the table above against literals (who is damaged and when, each Delete's Objects list in order, the two Deletes of D4, D6's use of the template's own MCUs, D8's Delete listing the two Plane indexes, D9's Deactivate with no Delete, the detector's eighteen Damage commands at 04:30, one per aircraft of D1 to D9, and the plane names). An ignored writer `write_p14_probe_1h` writes the files. Flights 0, 1A, 1N, 1D and 1G generate byte-for-byte the same files as before.
 
 ### Step 0T. Trace builds and replay core (P10) — M. Branch `claude/p14-trace`
 

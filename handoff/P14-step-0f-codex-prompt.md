@@ -57,3 +57,18 @@ Do not write any block from memory: every key and its order comes from a file na
 <structured_output_contract>
 Return: (1) summary, five lines at most; (2) command results, the byte-for-byte comparison, the writer's files with sizes, and what the throwaway check printed; (3) for each of D0 to D7: the two plane names and entity indexes, the Damage command indexes and times, the Delete indexes with their Objects lists in order; the fourteen detector commands' time; (4) anything the table left open that you chose, and residual risks.
 </structured_output_contract>
+
+<delta_2026_10_12>
+Added after the first build, sent to the same thread. The step 0f table in the plan gained two rows; build them.
+
+- Cell T-d now has ten flights, D0 to D9. D8's centre is (+114, +20) and D9's is (+114, +28); D0 to D7 keep theirs. Same start rule (10 km south of its own centre at 01:00), same plane names (`D8a` … `D9b`), same OnEvent 13 subtitles and icons.
+- D8: nobody killed. Removal at 04:00 by one `MCU_Delete` whose Objects list holds the two **Plane blocks' own indexes** in lead, wingman order, not their entities. This is deliberate: it is what `generate_template` writes into `Trigger Delete`. Say so in a comment.
+- D9: nobody killed. At 04:00 one `MCU_Deactivate` (probe-owned, not the template's), Objects = [D9a entity, D9b entity]. No Delete at 04:00.
+- Detector at 04:30 now covers D1 to D9: eighteen Damage commands.
+- Cell close at 08:00: one `MCU_Delete` per aircraft for D8 and D9 as for the others (entities).
+- Tests: extend `probe_cells_match_the_table` for the two rows (D8's Delete lists exactly the two Plane indexes; D9 has a Deactivate at 04:00 and no Delete before 08:00; eighteen detector commands).
+
+If `assert_links_resolve` or the builder's reference check rejects a Delete whose Objects are Plane indexes, do not weaken the shared check: report it, and say how the copied template's own `Trigger Delete` passes it.
+
+Acceptance is unchanged, and flights 0, 1A, 1N, 1D and 1G stay byte-for-byte identical.
+</delta_2026_10_12>
