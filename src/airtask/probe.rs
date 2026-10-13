@@ -23,6 +23,11 @@ const COMPLEX_TRIGGER: &str =
 const DAMAGE: &str = include_str!("../../TemplateExamples/Reference/CommandDamage_reference.Group");
 const ATTACK_TARGET: &str =
     include_str!("../../TemplateExamples/CorrectedFlightfromTemplate.Group");
+// Assets and loadout from the first Plane in
+// TemplateExamples/CorrectedFlightfromTemplate.Group (a MiG-15bis).
+const MIG15BIS_PLANE_KEYS: [&str; 8] = [
+    "Script", "Model", "Skin", "BotSkin", "PayloadId", "ModMask", "GunLoad", "GunBelt",
+];
 pub(crate) const K14_ORIGIN: (f64, f64) = (105_934.0, 269_477.0);
 
 const COUNTRY_USA: i32 = 601; // NATO players and the built-in HVAR template.
@@ -400,11 +405,13 @@ const C5_REPEAT_PULSE_S: f64 = 630.0;
 const N_START_KM: (f64, f64) = (30.0, 30.0);
 const N_END_KM: (f64, f64) = (54.0, 30.0);
 const START_SOUTH_KM: f64 = 10.0;
-const G_HUNTER_BEHIND_START_KM: f64 = 5.0;
+const HUNTER_BEHIND_START_KM: f64 = 5.0;
+const HUNTER_FIRST_ATTACK_S: f64 = 90.0;
+const HUNTER_ATTACK_STEP_S: f64 = 90.0;
 const G_START_S: f64 = 60.0; // 01:00.
 const G_DAMAGE_S: f64 = 240.0; // 04:00.
 const G_REMOVE_S: f64 = 600.0; // 10:00.
-const G_HUNTER_ATTACK_S: [f64; 4] = [90.0, 180.0, 270.0, 360.0]; // 01:30, 03:00, 04:30, 06:00.
+const G_HUNTER_ATTACK_COUNT: usize = 4; // The first four orders of the shared rule.
 const D_START_S: f64 = 60.0;
 const D_KILL_S: f64 = 120.0;
 const D_REMOVE_S: f64 = 240.0;
@@ -412,16 +419,14 @@ const D_DETECT_S: f64 = 270.0;
 const D_DONE_S: f64 = 330.0;
 const D_CLOSE_S: f64 = 480.0;
 const J_PAIR_HALF_SPACING_KM: f64 = 1.0;
-const K_CHANGE_S: f64 = 120.0;
+const K_CHANGE_S: f64 = D_KILL_S; // T-d3 changes share 1H/1J's 02:00 step.
 const K_FIGHT_REMOVE_S: f64 = 900.0;
 const K_FIGHT_DETECT_S: f64 = 930.0;
 const K_DONE_S: f64 = 960.0;
 const K_CLOSE_S: f64 = 1200.0;
-// The handoff explicitly ends the long sequence at 14:30. A 90 s cadence
-// reaches 13:30, so retain it and add that final order after a 60 s interval.
-const K_HUNTER_ATTACK_S: [f64; 10] = [
-    90.0, 180.0, 270.0, 360.0, 450.0, 540.0, 630.0, 720.0, 810.0, 870.0,
-];
+// K9 and K10: The 14:30 order is off the 90 s step: the build prompt asked for it
+// and the flight was flown with it (handoff/P14-air-tasking.md, step 0h).
+const K_HUNTER_EXTRA_ATTACK_S: f64 = 870.0;
 const E_SIX_PULSES: [f64; 6] = [60.0, 62.0, 64.0, 66.0, 68.0, 70.0];
 const E3_PULSES: [f64; 3] = [60.0, 62.0, 66.0];
 const E_PARTIAL_PULSES: [f64; 3] = [60.0, 62.0, 64.0];
@@ -778,24 +783,24 @@ impl DamageLevel {
 
 enum FormationChange {
     Nothing,
-    DeleteWingman,
+    DeleteWingmanEntity,
     DamageLead(DamageLevel),
 }
 
 #[derive(Clone, Copy)]
 enum FormationRemoval {
     Nothing,
-    DeleteLead,
-    DeleteWingman,
-    DeleteBoth,
-    DeleteEach,
+    DeleteLeadEntity,
+    DeleteWingmanEntity,
+    DeleteBothEntities,
+    DeleteEachEntity,
 }
 
 struct FormationDeleteRow {
     name: &'static str,
     centre_km: (f64, f64),
-    at_two_minutes: FormationChange,
-    at_four_minutes: FormationRemoval,
+    change: FormationChange,
+    removal: FormationRemoval,
     detector: bool,
 }
 
@@ -804,57 +809,57 @@ const K_FORMATIONS: &[FormationDeleteRow] = &[
     FormationDeleteRow {
         name: "K0",
         centre_km: (130.0, 20.0),
-        at_two_minutes: FormationChange::Nothing,
-        at_four_minutes: FormationRemoval::Nothing,
+        change: FormationChange::Nothing,
+        removal: FormationRemoval::Nothing,
         detector: false,
     },
     FormationDeleteRow {
         name: "K1",
         centre_km: (130.0, 28.0),
-        at_two_minutes: FormationChange::Nothing,
-        at_four_minutes: FormationRemoval::DeleteLead,
+        change: FormationChange::Nothing,
+        removal: FormationRemoval::DeleteLeadEntity,
         detector: true,
     },
     FormationDeleteRow {
         name: "K2",
         centre_km: (130.0, 36.0),
-        at_two_minutes: FormationChange::Nothing,
-        at_four_minutes: FormationRemoval::DeleteWingman,
+        change: FormationChange::Nothing,
+        removal: FormationRemoval::DeleteWingmanEntity,
         detector: true,
     },
     FormationDeleteRow {
         name: "K3",
         centre_km: (130.0, 44.0),
-        at_two_minutes: FormationChange::DeleteWingman,
-        at_four_minutes: FormationRemoval::DeleteBoth,
+        change: FormationChange::DeleteWingmanEntity,
+        removal: FormationRemoval::DeleteBothEntities,
         detector: true,
     },
     FormationDeleteRow {
         name: "K4",
         centre_km: (130.0, 52.0),
-        at_two_minutes: FormationChange::DamageLead(DamageLevel::Level1),
-        at_four_minutes: FormationRemoval::DeleteBoth,
+        change: FormationChange::DamageLead(DamageLevel::Level1),
+        removal: FormationRemoval::DeleteBothEntities,
         detector: true,
     },
     FormationDeleteRow {
         name: "K5",
         centre_km: (130.0, 60.0),
-        at_two_minutes: FormationChange::DamageLead(DamageLevel::Level0),
-        at_four_minutes: FormationRemoval::DeleteBoth,
+        change: FormationChange::DamageLead(DamageLevel::Level0),
+        removal: FormationRemoval::DeleteBothEntities,
         detector: true,
     },
     FormationDeleteRow {
         name: "K6",
         centre_km: (130.0, 68.0),
-        at_two_minutes: FormationChange::DamageLead(DamageLevel::Level1),
-        at_four_minutes: FormationRemoval::Nothing,
+        change: FormationChange::DamageLead(DamageLevel::Level1),
+        removal: FormationRemoval::Nothing,
         detector: false,
     },
     FormationDeleteRow {
         name: "K7",
         centre_km: (130.0, 76.0),
-        at_two_minutes: FormationChange::DamageLead(DamageLevel::Level0),
-        at_four_minutes: FormationRemoval::Nothing,
+        change: FormationChange::DamageLead(DamageLevel::Level0),
+        removal: FormationRemoval::Nothing,
         detector: false,
     },
 ];
@@ -867,27 +872,28 @@ struct FightDeleteRow {
     detector_s: f64,
 }
 
-// Step 0h, T-d4: hunters use K_HUNTER_ATTACK_S, strictly before Delete.
+// Step 0h, T-d4: hunter orders follow the shared rule, strictly before Delete,
+// plus K_HUNTER_EXTRA_ATTACK_S for K9 and K10.
 const K_FIGHTS: &[FightDeleteRow] = &[
     FightDeleteRow {
         name: "K8",
         centre_km: (60.0, 20.0),
         delete_s: D_REMOVE_S,
-        removal: FormationRemoval::DeleteBoth,
+        removal: FormationRemoval::DeleteBothEntities,
         detector_s: D_DETECT_S,
     },
     FightDeleteRow {
         name: "K9",
         centre_km: (60.0, 60.0),
         delete_s: K_FIGHT_REMOVE_S,
-        removal: FormationRemoval::DeleteBoth,
+        removal: FormationRemoval::DeleteBothEntities,
         detector_s: K_FIGHT_DETECT_S,
     },
     FightDeleteRow {
         name: "K10",
         centre_km: (60.0, 100.0),
         delete_s: K_FIGHT_REMOVE_S,
-        removal: FormationRemoval::DeleteEach,
+        removal: FormationRemoval::DeleteEachEntity,
         detector_s: K_FIGHT_DETECT_S,
     },
 ];
@@ -968,6 +974,20 @@ fn reference_block(block: &str) -> &'static Il2Entity {
 
 fn wingman_letter(index: usize) -> char {
     if index == 0 { 'a' } else { 'b' }
+}
+
+fn hunter_name_and_start(name: &str, target_start_km: (f64, f64)) -> (String, (f64, f64)) {
+    (
+        format!("{name} HUNTER"),
+        (target_start_km.0 - HUNTER_BEHIND_START_KM, target_start_km.1),
+    )
+}
+
+fn hunter_attack_times_before(delete_s: f64) -> impl Iterator<Item = f64> {
+    std::iter::successors(Some(HUNTER_FIRST_ATTACK_S), |time_s| {
+        Some(time_s + HUNTER_ATTACK_STEP_S)
+    })
+    .take_while(move |&time_s| time_s < delete_s)
 }
 
 /// Remove nodes and their links, including event/report links if a future HVAR
@@ -1437,7 +1457,12 @@ impl Probe {
     }
 
     /// Keep G1's country, skill, Attack shape and object order for every hunter.
-    fn hunter_orders(&mut self, hunter: i32, target: i32, times_s: &[f64]) {
+    fn configure_hunter_and_attacks(
+        &mut self,
+        hunter: i32,
+        target: i32,
+        times_s: impl IntoIterator<Item = f64>,
+    ) {
         self.set_flight_plane_country(hunter, COUNTRY_DPRK);
         by_id_mut(&mut self.root, hunter).for_each_mut(&mut |node| {
             if node.block_type == "Plane" {
@@ -1445,15 +1470,21 @@ impl Probe {
                 node.set_property("AILevel", AI_LEVEL_ACE);
             }
         });
-        let name = by_id(&self.root, hunter).name().unwrap().to_string();
+        let flight = by_id(&self.root, hunter);
+        let name = flight
+            .name()
+            .unwrap_or_else(|| panic!("hunter flight Index {hunter}: missing Name"))
+            .to_string();
+        let entities = block_ids(flight, "MCU_TR_Entity");
+        let lead = *entities
+            .first()
+            .unwrap_or_else(|| panic!("{name}: missing lead MCU_TR_Entity"));
         let mut attack = self.reference_mcu("MCU_CMD_AttackTarget", &format!("{name} ATTACK"));
-        attack.set_objects(vec![
-            block_ids(by_id(&self.root, hunter), "MCU_TR_Entity")[Seat::Lead.index()],
-        ]);
+        attack.set_objects(vec![lead]);
         attack.set_targets(vec![target]);
         let attack = self.add(attack);
         // Reissue while retaining the copied template's waypoint/AttackArea orders.
-        for (i, &time_s) in times_s.iter().enumerate() {
+        for (i, time_s) in times_s.into_iter().enumerate() {
             self.at(&format!("{name} ATTACK AT {}", i + 1), time_s, &[attack]);
         }
     }
@@ -1461,12 +1492,25 @@ impl Probe {
     fn set_mig15bis(&mut self, flight_id: i32) {
         // The same saved file as AttackTarget also supplies a MiG Plane.
         // Copy its assets and loadout; the HVAR payload belongs to the F-80C.
-        let reference = parse_group_file(ATTACK_TARGET).expect("MiG reference parses");
-        let plane = by_id(&reference, block_ids(&reference, "Plane")[0]);
+        static MIG15BIS_PLANE: OnceLock<Il2Entity> = OnceLock::new();
+        let plane = MIG15BIS_PLANE.get_or_init(|| {
+            let reference = parse_group_file(ATTACK_TARGET)
+                .expect("TemplateExamples/CorrectedFlightfromTemplate.Group: MiG reference must parse");
+            let planes = block_ids(&reference, "Plane");
+            let plane = planes.first().expect(
+                "TemplateExamples/CorrectedFlightfromTemplate.Group: missing first Plane (MiG-15bis)",
+            );
+            by_id(&reference, *plane).clone()
+        });
         by_id_mut(&mut self.root, flight_id).for_each_mut(&mut |node| {
             if node.block_type == "Plane" {
-                for key in ["Script", "Model", "Skin", "BotSkin", "PayloadId", "ModMask", "GunLoad", "GunBelt"] {
-                    node.set_property(key, plane.property(key).unwrap());
+                for key in MIG15BIS_PLANE_KEYS {
+                    let value = plane.property(key).unwrap_or_else(|| {
+                        panic!(
+                            "TemplateExamples/CorrectedFlightfromTemplate.Group: MiG-15bis Plane missing {key}",
+                        )
+                    });
+                    node.set_property(key, value);
                 }
             }
         });
@@ -1488,9 +1532,13 @@ impl Probe {
         let flight = by_id(&self.root, flight_id);
         let planes = block_ids(flight, "Plane");
         let entities = block_ids(flight, "MCU_TR_Entity");
-        assert_eq!(planes.len(), 2);
-        assert_eq!(entities.len(), 2);
-        let close = id(&self.root, &format!("{} CLOSE", self.cell.unwrap().key));
+        assert_eq!(planes.len(), 2, "{name}: expected exactly two Plane blocks");
+        assert_eq!(
+            entities.len(), 2, "{name}: expected exactly two MCU_TR_Entity blocks",
+        );
+        let cell = self.cell
+            .unwrap_or_else(|| panic!("{name}: missing formation cell"));
+        let close = id(&self.root, &format!("{} CLOSE", cell.key));
         for (i, &entity) in entities.iter().enumerate() {
             let label = format!("{name}{}", wingman_letter(i));
             self.watch_aircraft(&label, planes[i], entity, close);
@@ -1500,7 +1548,7 @@ impl Probe {
 
     fn detect_formation_at(&mut self, name: &str, entities: &[i32], time_s: f64) {
         for (i, &entity) in entities.iter().enumerate() {
-            self.damage_at(&format!("{name}{} DETECTOR", wingman_letter(i)), time_s, entity);
+            self.detect_aircraft(&format!("{name}{}", wingman_letter(i)), entity, time_s);
         }
     }
 
@@ -1511,50 +1559,50 @@ impl Probe {
         time_s: f64,
         removal: FormationRemoval,
     ) {
-        let deletes = match removal {
-            FormationRemoval::Nothing => return,
-            FormationRemoval::DeleteLead => vec![
-                self.delete(&format!("{name} DELETE"), &[entities[Seat::Lead.index()]]),
-            ],
-            FormationRemoval::DeleteWingman => vec![
-                self.delete(&format!("{name} DELETE"), &[entities[Seat::Wingman.index()]]),
-            ],
-            FormationRemoval::DeleteBoth => vec![self.delete(&format!("{name} DELETE"), entities)],
-            FormationRemoval::DeleteEach => entities.iter().enumerate().map(|(i, &entity)| {
-                self.delete(&format!("{name}{} DELETE", wingman_letter(i)), &[entity])
-            }).collect(),
-        };
-        self.at(&format!("{name} DELETE AT"), time_s, &deletes);
+        match removal {
+            FormationRemoval::Nothing => {}
+            FormationRemoval::DeleteLeadEntity => {
+                self.delete_entities_at(name, &[entities[Seat::Lead.index()]], time_s);
+            }
+            FormationRemoval::DeleteWingmanEntity => {
+                self.delete_entities_at(name, &[entities[Seat::Wingman.index()]], time_s);
+            }
+            FormationRemoval::DeleteBothEntities => self.delete_entities_at(name, entities, time_s),
+            FormationRemoval::DeleteEachEntity => {
+                self.delete_each_entity_at(name, entities, time_s, wingman_letter);
+            }
+        }
     }
 
-    fn detect_aircraft(&mut self, label: &str, entity: i32) {
-        self.damage_at(&format!("{label} DETECTOR"), D_DETECT_S, entity);
+    fn detect_aircraft(&mut self, label: &str, entity: i32, time_s: f64) {
+        self.damage_at(&format!("{label} DETECTOR"), time_s, entity);
     }
 
     fn kill_aircraft(&mut self, label: &str, entity: i32) {
         self.damage_at(&format!("{label} DAMAGE"), D_KILL_S, entity);
     }
 
-    fn remove_at(&mut self, name: &str, deletes: &[i32]) {
-        self.at(&format!("{name} DELETE AT"), D_REMOVE_S, deletes);
+    fn remove_at(&mut self, name: &str, deletes: &[i32], time_s: f64) {
+        self.at(&format!("{name} DELETE AT"), time_s, deletes);
     }
 
-    fn delete_entities_at(&mut self, name: &str, entities: &[i32]) {
+    fn delete_entities_at(&mut self, name: &str, entities: &[i32], time_s: f64) {
         let delete = self.delete(&format!("{name} DELETE"), entities);
-        self.remove_at(name, &[delete]);
+        self.remove_at(name, &[delete], time_s);
     }
 
     fn delete_each_entity_at(
         &mut self,
         name: &str,
         entities: &[i32],
+        time_s: f64,
         suffix: impl Fn(usize) -> char,
     ) {
         let deletes: Vec<_> = entities.iter().enumerate().map(|(i, &entity)| {
             let label = format!("{name}{}", suffix(i));
             self.delete(&format!("{label} DELETE"), &[entity])
         }).collect();
-        self.remove_at(name, &deletes);
+        self.remove_at(name, &deletes, time_s);
     }
 
     fn hand_breadcrumb(
@@ -2049,8 +2097,7 @@ fn build_g(p: &mut Probe) {
                 hunter_target = Some((name, at, entities[Seat::Lead.index()]));
             }
             EventProbeAction::ProbeDelete => {
-                let delete = p.delete(&format!("{name} DELETE"), &entities);
-                p.at(&format!("{name} DELETE AT"), G_REMOVE_S, &[delete]);
+                p.delete_entities_at(name, &entities, G_REMOVE_S);
             }
             EventProbeAction::TemplateCleanup => {
                 let flight = by_id(&p.root, flight_id);
@@ -2074,10 +2121,14 @@ fn build_g(p: &mut Probe) {
     }
     // Create the hunter after G1-G4 to preserve generated object order.
     let (name, at, target) = hunter_target.expect("G flights include a hunter target");
-    let hunter_name = format!("{name} HUNTER");
-    let hunter_start_km = (at.0 - START_SOUTH_KM - G_HUNTER_BEHIND_START_KM, at.1);
+    let (hunter_name, hunter_start_km) =
+        hunter_name_and_start(name, (at.0 - START_SOUTH_KM, at.1));
     let hunter = p.ai_with_close_delete(&hunter_name, 2, hunter_start_km, at, G_START_S);
-    p.hunter_orders(hunter, target, &G_HUNTER_ATTACK_S);
+    p.configure_hunter_and_attacks(
+        hunter,
+        target,
+        hunter_attack_times_before(G_REMOVE_S).take(G_HUNTER_ATTACK_COUNT),
+    );
     for row in G_FLIGHTS {
         // The spec slipped: icons show to the DPRK side; kept because the flown file must regenerate.
         p.icon(
@@ -2108,7 +2159,7 @@ fn build_d(p: &mut Probe) {
             let label = format!("{name}{}", wingman_letter(i));
             p.watch_aircraft(&label, planes[i], entity, close);
             if row.detector {
-                p.detect_aircraft(&label, entity);
+                p.detect_aircraft(&label, entity, D_DETECT_S);
             }
         }
         if let Some(seat) = row.killed {
@@ -2117,9 +2168,13 @@ fn build_d(p: &mut Probe) {
         }
         match row.removal {
             DeleteRemoval::Nothing => {}
-            DeleteRemoval::DeleteBothEntities => p.delete_entities_at(name, &entities),
-            DeleteRemoval::DeleteEachEntity => p.delete_each_entity_at(name, &entities, wingman_letter),
-            DeleteRemoval::DeleteLeadEntity => p.delete_entities_at(name, &[entities[Seat::Lead.index()]]),
+            DeleteRemoval::DeleteBothEntities => p.delete_entities_at(name, &entities, D_REMOVE_S),
+            DeleteRemoval::DeleteEachEntity => {
+                p.delete_each_entity_at(name, &entities, D_REMOVE_S, wingman_letter);
+            }
+            DeleteRemoval::DeleteLeadEntity => {
+                p.delete_entities_at(name, &[entities[Seat::Lead.index()]], D_REMOVE_S);
+            }
             DeleteRemoval::TemplateCleanup => {
                 let flight = by_id(&p.root, flight_id);
                 let deactivate = id(flight, "Deactivate Units");
@@ -2132,7 +2187,7 @@ fn build_d(p: &mut Probe) {
                 // (object_ids): Plane indexes, unlike the editor-saved examples'
                 // entity indexes. Keep the lead before the wingman.
                 let delete = p.delete(&format!("{name} DELETE"), &planes);
-                p.remove_at(name, &[delete]);
+                p.remove_at(name, &[delete], D_REMOVE_S);
             }
             DeleteRemoval::DeactivateOnly => {
                 let deactivate = p.control("MCU_Deactivate", &format!("{name} DEACTIVATE"), &[]);
@@ -2168,7 +2223,7 @@ fn build_d2(p: &mut Probe) {
             let (plane, entity) = (*plane, *entity);
             p.watch_aircraft(&label, plane, entity, close);
             if row.detector {
-                p.detect_aircraft(&label, entity);
+                p.detect_aircraft(&label, entity, D_DETECT_S);
             }
             entity
         });
@@ -2178,9 +2233,13 @@ fn build_d2(p: &mut Probe) {
         }
         match row.removal {
             DeletePairRemoval::Nothing => {}
-            DeletePairRemoval::DeleteBothEntities => p.delete_entities_at(name, &entities),
-            DeletePairRemoval::DeleteEachEntity => p.delete_each_entity_at(name, &entities, |i| PairAircraft::BOTH[i].suffix()),
-            DeletePairRemoval::DeleteXEntity => p.delete_entities_at(name, &[entities[PairAircraft::X.index()]]),
+            DeletePairRemoval::DeleteBothEntities => p.delete_entities_at(name, &entities, D_REMOVE_S),
+            DeletePairRemoval::DeleteEachEntity => {
+                p.delete_each_entity_at(name, &entities, D_REMOVE_S, |i| PairAircraft::BOTH[i].suffix());
+            }
+            DeletePairRemoval::DeleteXEntity => {
+                p.delete_entities_at(name, &[entities[PairAircraft::X.index()]], D_REMOVE_S);
+            }
         }
         // The spec slipped: icons show to the DPRK side; kept because the flown file must regenerate.
         p.icon(&format!("{} {name}", cell.key), row.centre_km, COALITION_DPRK);
@@ -2188,7 +2247,7 @@ fn build_d2(p: &mut Probe) {
 }
 
 fn build_d3(p: &mut Probe) {
-    let cell = p.cell.unwrap();
+    let cell = p.cell.expect("flight 1K: missing T-d3 cell");
     for row in K_FORMATIONS {
         let name = row.name;
         let centre = row.centre_km;
@@ -2196,19 +2255,18 @@ fn build_d3(p: &mut Probe) {
             name, 2, (centre.0 - START_SOUTH_KM, centre.1), centre, cell.arm_s,
         );
         let entities = p.watch_formation(name, flight);
-        match row.at_two_minutes {
+        match row.change {
             FormationChange::Nothing => {}
-            FormationChange::DeleteWingman => {
+            FormationChange::DeleteWingmanEntity => {
                 let label = format!("{name}{}", wingman_letter(Seat::Wingman.index()));
-                let delete = p.delete(&format!("{label} DELETE"), &[entities[Seat::Wingman.index()]]);
-                p.at(&format!("{label} DELETE AT"), K_CHANGE_S, &[delete]);
+                p.delete_entities_at(&label, &[entities[Seat::Wingman.index()]], K_CHANGE_S);
             }
             FormationChange::DamageLead(level) => {
                 let label = format!("{name}{}", wingman_letter(Seat::Lead.index()));
                 p.damage_level_at(&format!("{label} DAMAGE"), K_CHANGE_S, entities[Seat::Lead.index()], level);
             }
         }
-        p.remove_formation_at(name, &entities, D_REMOVE_S, row.at_four_minutes);
+        p.remove_formation_at(name, &entities, D_REMOVE_S, row.removal);
         if row.detector {
             p.detect_formation_at(name, &entities, D_DETECT_S);
         }
@@ -2217,7 +2275,7 @@ fn build_d3(p: &mut Probe) {
 }
 
 fn build_d4(p: &mut Probe) {
-    let cell = p.cell.unwrap();
+    let cell = p.cell.expect("flight 1K: missing T-d4 cell");
     for row in K_FIGHTS {
         let name = row.name;
         let centre = row.centre_km;
@@ -2227,13 +2285,13 @@ fn build_d4(p: &mut Probe) {
         p.remove_formation_at(name, &entities, row.delete_s, row.removal);
         p.detect_formation_at(name, &entities, row.detector_s);
 
-        let hunter_name = format!("{name} HUNTER");
-        let hunter_start = (start.0 - G_HUNTER_BEHIND_START_KM, start.1);
+        let (hunter_name, hunter_start) = hunter_name_and_start(name, start);
         let hunter = p.ai_without_close_delete(&hunter_name, 2, hunter_start, centre, cell.arm_s);
         p.set_mig15bis(hunter);
-        let attack_times: Vec<_> = K_HUNTER_ATTACK_S.into_iter()
-            .take_while(|&time_s| time_s < row.delete_s).collect();
-        p.hunter_orders(hunter, entities[Seat::Lead.index()], &attack_times);
+        let extra_order = std::iter::once(K_HUNTER_EXTRA_ATTACK_S)
+            .filter(|&time_s| time_s < row.delete_s);
+        let attack_times = hunter_attack_times_before(row.delete_s).chain(extra_order);
+        p.configure_hunter_and_attacks(hunter, entities[Seat::Lead.index()], attack_times);
         p.watch_formation(&format!("{name}H"), hunter);
         p.icon(&format!("{} {name}", cell.key), centre, COALITION_NATO);
     }
