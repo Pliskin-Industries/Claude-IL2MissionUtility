@@ -1362,6 +1362,65 @@ The hunters are never deleted before the close and get no detector.
 
 **Step 0h acceptance (tests):** the step 0 tests cover the new file; `probe_cells_match_the_table` checks every row of both tables against literals (eleven formations and six hunters, each command's time, kind, `Damage` level and Objects list in order, the two Deletes of K10, the detector lists, the Attack times of each hunter pair, plane names and countries). An ignored writer `write_p14_probe_1k` writes the files. Flights 0, 1A, 1N, 1D, 1G, 1H and 1J generate byte-for-byte the same files as before.
 
+### Step 0i. The app's own logic in the game (flight 1L) — M. Branch `codex/p14-0i`
+
+**Why.** Three things wait on one flight.
+1. **Decision 0012** (which event counts a destroyed aircraft). The user asked for the test that settles it. It runs what `generate_template` writes for a repeat-spawn group, as written today (event 4) and with event 13, and watches for the next wave.
+2. **Decision 0013** (Accepted: `Trigger Delete` lists entities). Today that Delete does nothing, so no re-activation or respawn has ever met units that are really gone. The flight runs both bring-up modes with the corrected list before the app is changed.
+3. **Flight 1K's reading** that an AI aircraft which has decided to return to base stops taking commands. The flight repeats the damaged pairs with `AiRTBDecision = 0`.
+
+No pilot is needed.
+
+| Flight | File | Pilot | Cells | Length |
+|---|---|---|---|---|
+| **1L** | `P14_Probe_1L_traced.Group` | none | T-r, T-v, T-w | 24.5 min |
+
+**Flight 1L** (no spawn list; built with `--ref "TemplateExamples/K14 AFB_mp.Group"` and `--no-resave`):
+
+| Cell | Centre (N, E km) | Armed | Closed | Cues |
+|---|---|---|---|---|
+| T-r | R0 to R3 at (+130, +20 + 8·n) for n = 0 to 3 | 01:00 | 26:00 | 00:00 "1L: no flying needed. Stay on the ground at K14 until 24:00" |
+| T-v | V1 at (+130, +52); V2 at (+130, +60); V3 at (+130, +68) | 01:00 | 26:00 | none |
+| T-w | W1 to W6 at (+90, +20 + 8·n) for n = 0 to 5 | 01:00 | 26:00 | 24:00 "Flight 1L done. End the mission normally" |
+
+The cells close at 26:00 with one `MCU_Delete` per aircraft (entities).
+
+**Cell T-r: the AI's own decision to return to base.** Each pair is one 2-ship formation of AI F-80Cs (`probe_flight`, 2 planes), starting 10 km south of its centre at 01:00. Plane `Name`s are the labels (`R0a` … `R3b`); each plane has OnEvent 13 → its own subtitle, traced.
+
+| Pair | `AiRTBDecision` on both planes | At 02:00 | At 05:00 | Detector at 05:30 | Asks |
+|---|---|---|---|---|---|
+| R0 | 1 (as the template has it) | `MCU_CMD_Damage`, `Damage = 1`, Objects = [R0a] | one `MCU_Delete`, Objects = [R0a, R0b] | both | flight 1K's K4 with three minutes for both to decide: are both left? |
+| R1 | **0** | the same | the same | both | does switching the decision off make them deletable? |
+| R2 | **0** | the same | nothing | no | control for R1: with the decision off, do they still go home? (end-of-mission place and height) |
+| R3 | 1 | the same | one probe-owned `MCU_Deactivate`, Objects = [R3a, R3b] | no | does a Deactivate reach an aircraft that is going home? (frozen near where it was at 05:00, or near K14) |
+
+**Cell T-v: every event, for three ways to end.** Each is one single-aircraft flight (`probe_flight`, 1 plane) with OnEvents **0 to 13** on its entity, each type → its own subtitle (`V1 ev0` … `V1 ev13`), traced.
+
+| Aircraft | What happens to it | Asks |
+|---|---|---|
+| V1 | 02:00: `MCU_CMD_Damage` at `Damage = 2` | the full set of events for an outright kill (flight 1G listened for five types) |
+| V2 | written with `Fuel = 0.03` | what a fuel-starved aircraft raises: bingo fuel (7), a landing (5), a crash (2), a kill (13) |
+| V3 | 02:00: `MCU_CMD_Damage` at `Damage = 1`; `AiRTBDecision` stays 1; nothing else | what an aircraft raises when it is damaged, goes home and lands; and whether it is still in the end-of-mission list at 24:30 (each plane has `DeleteAfterLand = 1`) |
+
+**Cell T-w: what `generate_template` writes.** Six groups, each built by `generate_template` from two **independent** F-80C seats with no orders (a `Follows` seat forces Activate mode), then placed and started by the probe the way `probe_flight` treats a sortie: the group's `Translator Mission Begin` is cut off, its two check zones are never pulsed, and the probe pulses the group's own nodes. Nothing else in the group is removed; in particular `DeathCount`, `COOLDOWN`, `SpawnCount` and `Trigger Spawner` stay. Plane `Name`s are `W1a`, `W1b`, and so on. Each unit entity also gets a traced OnEvent 13 subtitle; that adds a listener and changes none of the group's own links. The probe traces the output of `DeathCount`, `COOLDOWN` and `SpawnCount` in each group that has them.
+
+| Group | Options | Changed after generation | The probe pulses | Asks |
+|---|---|---|---|---|
+| W1 | `bring_up = Spawn`, `allow_multiple_spawns = true` | `COOLDOWN` `Time` set to 60 | 01:00 `SPAWN UNITS`; 03:00 a kill (`Damage = 2`) on each unit entity; 06:00 detector on each | today's wiring: does a second wave come after the first is killed? |
+| W2 | the same | the same, and each unit's `OnEvent` to `DeathCount` changed from type 4 to **13** | the same | the same with event 13 |
+| W3 | the same | `COOLDOWN` 60; OnEvent type 13; nothing else | 01:00 `SPAWN UNITS`; 03:00 `MISSION END`; 04:00 `SPAWN UNITS` again; 06:00 detector on each | today's Delete (Plane indexes) in the spawn loop: a clean-up, then a new wave |
+| W4 | the same | as W3, and `Trigger Delete` `Objects` set to the unit **entities** | the same | the corrected Delete in the spawn loop: does the new wave still come? |
+| W5 | `bring_up = Activate` | nothing | 01:00 `MISSION BEGIN`; 03:00 `MISSION END`; 04:00 `MISSION BEGIN` again; 06:00 detector on each | today's Delete with re-activation: the group comes back when a player returns |
+| W6 | `bring_up = Activate` | `Trigger Delete` `Objects` set to the unit **entities** | the same | the corrected Delete with re-activation: does the group still come back? |
+
+**How to read T-w.** "A wave is there" means its aircraft die to a kill or detector command (event 13 and Kill records at that time) or are in the end-of-mission list; a spawned wave should also show as new objects in the log.
+- **0012:** W1 against W2. If W2's `DeathCount` and `COOLDOWN` fire after 03:00 and a second wave dies at 06:00, while W1 shows none of that, event 13 is the fix. If W1 also sends a wave, event 4 does fire for spawned aircraft and decision 0012 needs no change.
+- **0013, spawn mode:** W4 against W3. If W4's second wave dies at 06:00, the corrected Delete does not break the spawn loop.
+- **0013, activate mode:** W6 against W5. If W5's aircraft die at 06:00 and W6's do not, the corrected Delete ends a group for good the first time its players leave, where today it comes back. That would be a change in behaviour for the user to rule on before the app is changed.
+- Whether a Damage command aimed at a unit's entity reaches a **spawned** copy is not known. If the 03:00 kills in W1 and W2 kill nothing, the row cannot be read and the kill must be made another way.
+
+**Step 0i acceptance (tests):** the step 0 tests cover the new file; `probe_cells_match_the_table` checks every row of the three tables against literals (the `AiRTBDecision` and `Fuel` values written, each command's time, kind, level and Objects, the fourteen event types on V1 to V3, each W group's options as seen in its nodes, the event type on its units, its `Trigger Delete` list, its `COOLDOWN` time, and the nodes the probe pulses with their times). An ignored writer `write_p14_probe_1l` writes the files. The earlier flights generate byte-for-byte the same files as before. **`src/template.rs` is not changed by this step.**
+
 ### Step 0T. Trace builds and replay core (P10) — M. Branch `claude/p14-trace`
 
 **Why (U12).** Subtitles show what fired only to whoever is watching, with no file and no "never fired". The server's text mission log records spawns, kills, takeoffs and landings anyway. A Mission Objective MCU writes an `AType:8` line when it fires, so a small objective hung on any MCU turns that MCU's firing into a log line (a **breadcrumb**). The app knows the whole MCU graph, so it can report what fired, what never fired, and where each chain stopped. It is built **before** probe flight 0 so the flight produces a real log, and cell T-t (below) tests whether it works.
