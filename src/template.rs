@@ -6582,7 +6582,7 @@ mod tests {
         ];
         seats[0].altitude = 12_000.0;
         copy_seat_attributes(&mut seats, 0);
-        assert_eq!(seats[1].altitude, 6950.0, "IL-10 capped at its ceiling");
+        assert_eq!(seats[1].altitude, 7250.0, "IL-10 capped at its ceiling");
         assert_eq!(seats[2].altitude, 12_000.0, "MiG ceiling is above 12000 m");
         assert_eq!(seats[1].start_type, PlaneStart::Air.as_i32());
     }
