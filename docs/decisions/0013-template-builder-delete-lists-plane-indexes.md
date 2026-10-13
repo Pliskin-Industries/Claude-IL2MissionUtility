@@ -1,8 +1,8 @@
 # 0013. Template Builder's clean-up Delete lists Plane indexes and removes nothing
 
-- **Status:** Proposed
-- **Date:** 2026-10-13
-- **Decided by:** open; the user decides. Finding and recommendation by Claude. No Template Builder code was changed.
+- **Status:** Accepted (option B)
+- **Date:** raised and decided 2026-10-13
+- **Decided by:** the user ("0013: fix it"), on Claude's finding and recommendation
 
 ## Context
 `generate_template` ends a group's life with `Deactivate Units` and, 0.5 s later, `Trigger Delete`. It fills the first with the units' entity indexes and the second with the units' own block indexes (`template.rs`, `delete.set_objects(object_ids.clone())`). The six built-in sorties in `TemplateExamples/Historical1950/` carry the same lists. All 20 example files saved from the mission editor list entities in a Delete; none lists a unit block.
@@ -27,7 +27,9 @@ So a group that Template Builder "cleans up" is switched off and stays in the mi
 Tested on aircraft only. Vehicles, ships and trains get the same list from the same line of code; whether the game treats their block indexes the same way has not been flown.
 
 ## Decision
-None yet. Claude recommends option B.
+**Option B: `Trigger Delete` lists the units' entities.** The files Generate writes change by that one list per group; the user has agreed to that change.
+
+Before the app is changed, one probe flight runs the generated logic with the corrected list (plan step 0i): a Delete that works might break a later respawn or re-activation that the dead Delete never touched. The six built-in sorties (option C) are not part of this decision.
 
 ## Options
 
