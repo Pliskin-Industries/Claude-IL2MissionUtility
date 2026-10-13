@@ -1,0 +1,98 @@
+diff --git a/src/template.rs b/src/template.rs
+index 6582826..d4f7149 100644
+--- a/src/template.rs
++++ b/src/template.rs
+@@ -9487,6 +9487,93 @@ mod tests {
+         out.unwrap_or_default()
+     }
+ 
++    #[test]
++    #[ignore]
++    fn write_upstream_mission_package_files() {
++        // Fresh Template Builder uses bundled_catalog, including the prototypes'
++        // country, AI RTB and start defaults, rather than synthetic planes alone.
++        let catalog = bundled_catalog();
++        let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
++            .join("target/upstream-mission-files");
++        std::fs::create_dir_all(&output).expect("create mission output directory");
++        let terrain = crate::terrain::open_store(&crate::terrain::default_store_path())
++            .or_else(|_| crate::terrain::builtin())
++            .ok();
++        // No loaded group or external catalog: the UI has no locale source paths.
++        let sidecars = crate::locale::merge_template_sidecars(&[]);
++
++        for (stem, model, country, package) in [
++            (
++                "Upstream_Strike_NATO_F80C_4ship",
++                "f80c10",
++                Some(601),
++                MissionPackage::Strike,
++            ),
++            (
++                "Upstream_Strike_DPRK_Il10_4ship",
++                "il10",
++                None,
++                MissionPackage::Strike,
++            ),
++            (
++                "Upstream_CAP_NATO_F86A_4ship",
++                "f86a5",
++                Some(601),
++                MissionPackage::Cap,
++            ),
++        ] {
++            let plane = catalog
++                .iter()
++                .find(|u| u.is_air() && script_type_id(&u.script) == model)
++                .expect("aircraft in the UI catalog")
++                .clone();
++            // The first save dialog does not rename the generated root group:
++            // generate_unit_template keeps the default "Unit Template" name.
++            let mut opts = TemplateOptions::default();
++            append_seat(&mut opts.seats, plane.clone(), opts.per_group);
++            opts.seats[0].role = FlightRole::Lead;
++            apply_formation_numbers(&mut opts.seats, 0, opts.per_group);
++            for _ in 0..3 {
++                append_seat(&mut opts.seats, plane.clone(), opts.per_group);
++            }
++            if let Some(country) = country {
++                for seat in &mut opts.seats {
++                    seat.country = country;
++                }
++            }
++            opts.waypoint_speed = crate::model_spec::suggested_waypoint_speed_kmh(
++                opts.seats.iter().map(|s| s.unit.script.as_str()),
++            );
++            let applied =
++                apply_mission_package(&mut opts.seats, 0, package, opts.waypoint_spacing)
++                    .expect("apply the UI mission package");
++            if applied.disable_zone_out {
++                opts.zone_out_enabled = false;
++            }
++            opts.waypoint_count = used_waypoint_count(&opts.seats);
++
++            let mut pack = generate_template(&opts).expect("generate the UI template");
++            if let Some(store) = terrain.as_ref() {
++                crate::terrain_apply::apply_terrain_heights(&mut pack, store);
++            }
++            let text = serialize_group(&pack);
++            let path = output.join(format!("{stem}.Group"));
++            // ui::save_with_sidecars is private; use its same existing writers.
++            std::fs::write(&path, &text).expect("write group exactly as the UI does");
++            let written = crate::locale::write_sidecars(&path, &sidecars)
++                .expect("write the UI's language sidecars");
++            assert!(written.is_empty(), "fresh templates have no language sidecars");
++
++            let bytes = std::fs::read(&path).expect("read the written group");
++            assert_eq!(bytes, text.as_bytes());
++            let saved = std::str::from_utf8(&bytes).expect("group text is UTF-8");
++            assert!(!saved.replace("\r\n", "").contains('\n'));
++            let reparsed = parse_group_file(saved).expect("parse the written group");
++            assert_eq!(serialize_group(&reparsed), saved);
++            println!("{}: {} bytes", path.display(), bytes.len());
++        }
++    }
++
+     #[test]
+     fn cap_diamond_loops_at_low_priority_until_abort() {
+         let mut opts = one_mig();
