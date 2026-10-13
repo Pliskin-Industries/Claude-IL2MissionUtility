@@ -336,10 +336,21 @@ pub(crate) const CUES: &[Cue] = &[
 
 const A1_START_KM: (f64, f64) = (-30.0, 60.0);
 const A1_EXIT_KM: (f64, f64) = (30.0, 60.0);
+const A1_AI_START_S: f64 = 10.0;
+const AI_VS_PLAYER_RADIUS_M: f64 = 12_000.0;
 const C4_KM: (f64, f64) = (40.0, -8.0);
+const C_ZONE_RADIUS_M: f64 = 5000.0;
+const C_ACTIVATE_S: f64 = 660.0;
+const C_PULSE_AFTER_ACTIVATE_S: f64 = 0.1;
+const C2_RECHECK_OFF_S: f64 = 670.0;
+const C2_RECHECK_ON_S: f64 = 675.0;
+const C4_WAITING_ON_S: f64 = 690.0;
+const C4_WAITING_OFF_S: f64 = 705.0;
+const C5_REPEAT_PULSE_S: f64 = 630.0;
 const N_START_KM: (f64, f64) = (30.0, 30.0);
 const N_END_KM: (f64, f64) = (54.0, 30.0);
 const START_SOUTH_KM: f64 = 10.0;
+const G_HUNTER_BEHIND_START_KM: f64 = 5.0;
 const G_START_S: f64 = 60.0; // 01:00.
 const G_DAMAGE_S: f64 = 240.0; // 04:00.
 const G_REMOVE_S: f64 = 600.0; // 10:00.
@@ -351,8 +362,24 @@ const E_SIX_PULSES: [f64; 6] = [60.0, 62.0, 64.0, 66.0, 68.0, 70.0];
 const E3_PULSES: [f64; 3] = [60.0, 62.0, 66.0];
 const E_PARTIAL_PULSES: [f64; 3] = [60.0, 62.0, 64.0];
 const E9_PULSES: [f64; 3] = [120.0, 120.05, 120.10];
+const E_PULSE_PERIOD_S: f64 = 2.0;
+const E3_DEACTIVATE_S: f64 = 63.0;
+const E3_ACTIVATE_S: f64 = 65.0;
+const E4_RESET_S: f64 = 63.0;
+const E5_ACTIVATE_S: f64 = 63.0;
+const E6_RESET_S: f64 = 65.0;
+const E7_SAME_TICK_S: f64 = 100.0;
+const E8_ONCE_GATE_S: f64 = 110.0;
+const F_PULSE_COUNT: usize = 40;
+const F1_PULSE_PERIOD_S: f64 = 3.0;
+const F2_START_S: f64 = 330.0;
+const F2_PULSE_PERIOD_S: f64 = 5.0;
+const F2_RANDOM_DELAY_STEP_S: f64 = 0.5;
+const T1_SINGLE_PULSE_S: f64 = 275.0;
 const T2_PULSES: [f64; 5] = [277.0, 279.0, 281.0, 283.0, 285.0];
+const T3_SAME_TICK_S: f64 = 287.0;
 const T5_PULSES: [f64; 2] = [315.0, 320.0];
+const T7_SAME_TICK_S: f64 = 325.0;
 const G_EVENT_TYPES: [i32; 5] = [
     EVENT_PILOT_KILLED,
     EVENT_PLANE_CRASHED,
@@ -361,6 +388,70 @@ const G_EVENT_TYPES: [i32; 5] = [
     EVENT_KILLED,
 ];
 const H_EVENT_TYPES: [i32; 1] = [EVENT_KILLED];
+
+struct CounterProbeRow {
+    name: &'static str,
+    threshold: i32,
+    dropcount: i32,
+    repeat_readout: bool,
+}
+
+const E_COUNTERS: [CounterProbeRow; 9] = [
+    CounterProbeRow {
+        name: "E1",
+        threshold: 3,
+        dropcount: 0,
+        repeat_readout: true,
+    },
+    CounterProbeRow {
+        name: "E2",
+        threshold: 3,
+        dropcount: 1,
+        repeat_readout: true,
+    },
+    CounterProbeRow {
+        name: "E3",
+        threshold: 3,
+        dropcount: 0,
+        repeat_readout: false,
+    },
+    CounterProbeRow {
+        name: "E4",
+        threshold: 3,
+        dropcount: 0,
+        repeat_readout: false,
+    },
+    CounterProbeRow {
+        name: "E5",
+        threshold: 3,
+        dropcount: 0,
+        repeat_readout: false,
+    },
+    CounterProbeRow {
+        name: "E6",
+        threshold: 3,
+        dropcount: 0,
+        repeat_readout: true,
+    },
+    CounterProbeRow {
+        name: "E7",
+        threshold: 3,
+        dropcount: 1,
+        repeat_readout: false,
+    },
+    CounterProbeRow {
+        name: "E8",
+        threshold: 1,
+        dropcount: 0,
+        repeat_readout: true,
+    },
+    CounterProbeRow {
+        name: "E9",
+        threshold: 3,
+        dropcount: 1,
+        repeat_readout: false,
+    },
+];
 
 enum EventProbeAction {
     ShotDownByHunter,
@@ -1119,51 +1210,62 @@ fn set_expected_time(map: &mut TraceMap, source: TraceSource) {
 fn build_a1(p: &mut Probe) {
     let centre = p.cell.unwrap().centre_km;
     for (name, coalition) in [("ZA1", "[2]"), ("ZA2", "[1]")] {
-        let zone = p.zone(name, 12_000.0, true, coalition, centre);
+        let zone = p.zone(name, AI_VS_PLAYER_RADIUS_M, true, coalition, centre);
         p.link(p.arm, zone);
         p.observe(zone, &format!("{name} fired"));
     }
-    p.ai_with_close_delete("T-a1 AI", 4, A1_START_KM, A1_EXIT_KM, 10.0);
+    p.ai_with_close_delete("T-a1 AI", 4, A1_START_KM, A1_EXIT_KM, A1_AI_START_S);
     p.icon("T-a1", centre, "[2]");
 }
 
 fn build_e(p: &mut Probe) {
-    let mut counts = Vec::new();
-    for n in 1..=9 {
-        let count = p.count(
-            &format!("E{n}"),
-            if n == 8 { 1 } else { 3 },
-            i32::from([2, 7, 9].contains(&n)),
-        );
-        p.observe(count, &format!("E{n} fired"));
-        if [1, 2, 6, 8].contains(&n) {
-            p.readout(count, &format!("E{n} fired 2+"), 2);
+    let [
+        dropcount_once,
+        dropcount_reset,
+        deactivate_activate,
+        reset_partial,
+        inactive_pulses,
+        reset_fired,
+        same_tick_count,
+        once_gate,
+        census_spacing,
+    ] = E_COUNTERS.map(|row| {
+        let count = p.count(row.name, row.threshold, row.dropcount);
+        p.observe(count, &format!("{} fired", row.name));
+        if row.repeat_readout {
+            p.readout(count, &format!("{} fired 2+", row.name), 2);
         }
-        counts.push(count);
-    }
+        count
+    });
     p.pulse_loop(
         "E1 E2",
-        E_SIX_PULSES[0],
-        2.0,
+        p.cell.unwrap().arm_s,
+        E_PULSE_PERIOD_S,
         E_SIX_PULSES.len(),
-        &counts[..2],
+        &[dropcount_once, dropcount_reset],
     );
-    p.pulses("E3", &E3_PULSES, counts[2]);
-    p.switch_at("MCU_Deactivate", "E3 OFF", 63.0, &[counts[2]]);
-    p.switch_at("MCU_Activate", "E3 ON", 65.0, &[counts[2]]);
-    p.pulses("E4", &E_PARTIAL_PULSES, counts[3]);
-    p.pulses("E5", &E_PARTIAL_PULSES, counts[4]);
-    p.link(p.init_off, counts[4]);
-    p.switch_at("MCU_Activate", "E5 ON", 63.0, &[counts[4]]);
-    p.pulses("E6", &E_SIX_PULSES, counts[5]);
-    for (name, at, count) in [("E4 RESET", 63.0, counts[3]), ("E6 RESET", 65.0, counts[5])] {
+    p.pulses("E3", &E3_PULSES, deactivate_activate);
+    p.switch_at("MCU_Deactivate", "E3 OFF", E3_DEACTIVATE_S, &[deactivate_activate]);
+    p.switch_at("MCU_Activate", "E3 ON", E3_ACTIVATE_S, &[deactivate_activate]);
+    p.pulses("E4", &E_PARTIAL_PULSES, reset_partial);
+    p.pulses("E5", &E_PARTIAL_PULSES, inactive_pulses);
+    p.link(p.init_off, inactive_pulses);
+    p.switch_at("MCU_Activate", "E5 ON", E5_ACTIVATE_S, &[inactive_pulses]);
+    p.pulses("E6", &E_SIX_PULSES, reset_fired);
+    for (name, at, count) in [
+        ("E4 RESET", E4_RESET_S, reset_partial),
+        ("E6 RESET", E6_RESET_S, reset_fired),
+    ] {
         let (x, z) = p.position();
         let mut node = modifier_set_val(name, &mut p.next_id, x, z);
         node.append_target(count);
         let reset = p.add(node);
         p.at(&format!("{name} AT"), at, &[reset]);
     }
-    for (name, at, size, count) in [("E7", 100.0, 3, counts[6]), ("E8", 110.0, 2, counts[7])] {
+    for (name, at, size, count) in [
+        ("E7", E7_SAME_TICK_S, 3, same_tick_count),
+        ("E8", E8_ONCE_GATE_S, 2, once_gate),
+    ] {
         let relays: Vec<_> = (1..=size)
             .map(|n| {
                 let relay = p.relay(&format!("{name} INPUT {n}"), 0.0);
@@ -1173,7 +1275,7 @@ fn build_e(p: &mut Probe) {
             .collect();
         p.at(&format!("{name} SAME TICK"), at, &relays);
     }
-    p.pulses("E9", &E9_PULSES, counts[8]);
+    p.pulses("E9", &E9_PULSES, census_spacing);
 }
 
 fn build_f(p: &mut Probe) {
@@ -1183,9 +1285,10 @@ fn build_f(p: &mut Probe) {
     p.observe(f1, "F1 hit");
     p.readout(f1, "F1 reached 12", 12);
     p.readout(f1, "F1 reached 29", 29);
-    p.pulse_loop("F1", 150.0, 3.0, 40, &[f1]);
+    p.pulse_loop("F1", p.cell.unwrap().arm_s, F1_PULSE_PERIOD_S, F_PULSE_COUNT, &[f1]);
 
-    let outs: Vec<_> = (1..=4)
+    let waterfall_chances_pct = [25, 33, 50, 100];
+    let outs: Vec<_> = (1..=waterfall_chances_pct.len())
         .map(|k| {
             let out = p.relay(&format!("F2 OUT {k}"), 0.0);
             p.observe(out, &format!("F2 out {k}"));
@@ -1196,10 +1299,10 @@ fn build_f(p: &mut Probe) {
     let mut inputs = vec![open];
     // Equal-weight waterfall, using the shipped randomizer's 0.5*k delays.
     // Close future output relays, not running random timers (risk J1).
-    for (k, pct) in [25, 33, 50, 100].into_iter().enumerate() {
+    for (k, pct) in waterfall_chances_pct.into_iter().enumerate() {
         let node = timer_random(
             &format!("F2 RANDOM {}", k + 1),
-            0.5 * (k + 1) as f64,
+            F2_RANDOM_DELAY_STEP_S * (k + 1) as f64,
             pct,
             &mut p.next_id,
             x,
@@ -1207,17 +1310,18 @@ fn build_f(p: &mut Probe) {
         );
         let random = p.add(node);
         p.link(random, outs[k]);
-        if k < 3 {
+        let later_outputs = &outs[k + 1..];
+        if !later_outputs.is_empty() {
             let close = p.control(
                 "MCU_Deactivate",
                 &format!("F2 CLOSE AFTER {}", k + 1),
-                &outs[k + 1..],
+                later_outputs,
             );
             p.link(random, close);
         }
         inputs.push(random);
     }
-    p.pulse_loop("F2", 330.0, 5.0, 40, &inputs);
+    p.pulse_loop("F2", F2_START_S, F2_PULSE_PERIOD_S, F_PULSE_COUNT, &inputs);
     for out in outs {
         p.close_node(out);
     }
@@ -1226,9 +1330,9 @@ fn build_f(p: &mut Probe) {
 fn build_tt(p: &mut Probe) {
     // Flight 0, 2026-09-28: Success 0 logs without ending the round. T1/T2/
     // T3/T7 test single, repeated and same-tick firings of the default style.
-    let t1 = p.at("T-t T1", 275.0, &[]);
+    let t1 = p.at("T-t T1", T1_SINGLE_PULSE_S, &[]);
     p.observe(t1, "T-t T1 fired");
-    p.hand_breadcrumb(t1, &[t1], TraceCarrier::default(), Some(275.0));
+    p.hand_breadcrumb(t1, &[t1], TraceCarrier::default(), Some(T1_SINGLE_PULSE_S));
 
     let t2 = p.relay("T-t T2", 0.0);
     p.observe(t2, "T-t T2 fired");
@@ -1239,10 +1343,10 @@ fn build_tt(p: &mut Probe) {
     for suffix in ['a', 'b'] {
         let relay = p.relay(&format!("T-t T3{suffix}"), 0.0);
         p.observe(relay, &format!("T-t T3{suffix} fired"));
-        p.hand_breadcrumb(relay, &[relay], TraceCarrier::default(), Some(287.0));
+        p.hand_breadcrumb(relay, &[relay], TraceCarrier::default(), Some(T3_SAME_TICK_S));
         t3.push(relay);
     }
-    p.at("T-t T3 SAME TICK", 287.0, &t3);
+    p.at("T-t T3 SAME TICK", T3_SAME_TICK_S, &t3);
 
     // Information only: spawned-and-deleted vehicles were silent in real_2.
     let t5 = p.relay("T-t T5", 0.0);
@@ -1250,7 +1354,7 @@ fn build_tt(p: &mut Probe) {
     p.pulses("T-t T5", &T5_PULSES, t5);
     p.hand_breadcrumb(t5, &[t5], TraceCarrier::Spawn, None);
 
-    let t7 = p.at("T-t T7 SAME TICK", 325.0, &[]);
+    let t7 = p.at("T-t T7 SAME TICK", T7_SAME_TICK_S, &[]);
     let subtitle = p.subtitle("T-t T7 fired", 1);
     let mut inputs = vec![];
     for n in 1..=2 {
@@ -1260,21 +1364,26 @@ fn build_tt(p: &mut Probe) {
         inputs.push(relay);
     }
     // Exactly one carrier, with two direct inputs (no intervening latch).
-    p.hand_breadcrumb(t7, &inputs, TraceCarrier::default(), Some(325.0));
+    p.hand_breadcrumb(t7, &inputs, TraceCarrier::default(), Some(T7_SAME_TICK_S));
     for source in [t1, t2, t5, t7] {
         p.close_node(source);
     }
 }
 
 fn build_j(p: &mut Probe) {
-    let j1 = p.relay("J1", 10.0);
+    let arm_s = p.cell.unwrap().arm_s;
+    let running_timer_s = 10.0;
+    let deactivate_running_s = arm_s + 5.0;
+    let activate_pulsed_relay_s = arm_s + 1.0;
+    let retrigger_running_s = arm_s + 5.0;
+    let j1 = p.relay("J1", running_timer_s);
     p.link(p.arm, j1);
-    p.switch_at("MCU_Deactivate", "J1 OFF", 545.0, &[j1]);
+    p.switch_at("MCU_Deactivate", "J1 OFF", deactivate_running_s, &[j1]);
     p.observe(j1, "J1 out");
     let j2 = p.relay("J2", 0.0);
     p.link(p.init_off, j2);
     p.link(p.arm, j2);
-    p.switch_at("MCU_Activate", "J2 ON", 541.0, &[j2]);
+    p.switch_at("MCU_Activate", "J2 ON", activate_pulsed_relay_s, &[j2]);
     p.observe(j2, "J2 out");
     let j3 = p.relay("J3", 0.0);
     p.link(p.init_off, j3);
@@ -1293,10 +1402,10 @@ fn build_j(p: &mut Probe) {
         p.link(input, j4);
         inputs.push(input);
     }
-    p.at("J4 SAME TICK", 540.0, &inputs);
-    let j5 = p.relay("J5", 10.0);
+    p.at("J4 SAME TICK", arm_s, &inputs);
+    let j5 = p.relay("J5", running_timer_s);
     p.link(p.arm, j5);
-    p.at("J5 RETRIGGER", 545.0, &[j5]);
+    p.at("J5 RETRIGGER", retrigger_running_s, &[j5]);
     p.observe(j5, "J5 out");
     p.readout(j5, "J5 out 2+", 2);
     for relay in [j1, j2, j3, j4, j5] {
@@ -1336,46 +1445,55 @@ fn again(p: &mut Probe, zone: i32, name: &str, off_s: f64, on_s: f64, pulse_s: f
 }
 
 fn build_z(p: &mut Probe) {
-    let z1 = p.zone("Z1", 5000.0, false, "[1]", p.cell.unwrap().centre_km);
+    let cell = p.cell.unwrap();
+    let empty_zone_radius_m = 5000.0;
+    let recheck_off_s = cell.arm_s + 10.0;
+    let recheck_on_s = cell.arm_s + 15.0;
+    let z1 = p.zone("Z1", empty_zone_radius_m, false, "[1]", cell.centre_km);
     p.link(p.init_off, z1);
     let on = p.control("MCU_Activate", "Z1 ON", &[z1]);
     p.link(p.arm, on);
     p.link(p.arm, z1);
     p.observe(z1, "Z1 fired");
-    again(p, z1, "Z1", 610.0, 615.0, 615.0);
-    p.icon("T-z", p.cell.unwrap().centre_km, "[2]");
+    again(p, z1, "Z1", recheck_off_s, recheck_on_s, recheck_on_s);
+    p.icon("T-z", cell.centre_km, "[2]");
 }
 
 fn build_c(p: &mut Probe) {
     let centre = p.cell.unwrap().centre_km;
-    let zones: Vec<_> = (0..=5)
-        .map(|n| {
-            let zone = p.zone(
-                &format!("C{n}"),
-                5000.0,
-                true,
-                "[2]",
-                if n == 4 { C4_KM } else { centre },
-            );
-            p.observe(zone, &format!("C{n} fired"));
-            if (1..=4).contains(&n) {
-                p.link(p.init_off, zone);
-            }
-            zone
-        })
-        .collect();
-    p.at("C0 SENTINEL", 660.0, &[zones[0]]);
-    p.switch_at("MCU_Activate", "C1 ON", 660.0, &[zones[1]]);
-    p.switch_at("MCU_Activate", "C2 ON", 660.0, &[zones[2]]);
-    p.at("C2 PULSE", 660.1, &[zones[2]]);
-    p.at("C3 INACTIVE PULSE", 660.0, &[zones[3]]);
-    again(p, zones[2], "C2", 670.0, 675.0, 675.1);
-    p.switch_at("MCU_Activate", "C4 ON", 690.0, &[zones[4]]);
-    p.at("C4 PULSE", 690.1, &[zones[4]]);
-    p.switch_at("MCU_Deactivate", "C4 OFF", 705.0, &[zones[4]]);
-    p.at("C5 PULSE", 630.0, &[zones[5]]);
-    p.readout(zones[5], "C5 fired 2+", 2);
-    p.readout(zones[5], "C5 fired 10+", 10);
+    let mut observed_zone = |name: &str, km| {
+        let zone = p.zone(name, C_ZONE_RADIUS_M, true, "[2]", km);
+        p.observe(zone, &format!("{name} fired"));
+        zone
+    };
+    let sentinel = observed_zone("C0", centre);
+    let activate_only = observed_zone("C1", centre);
+    let activate_and_pulse = observed_zone("C2", centre);
+    let pulse_while_deactivated = observed_zone("C3", centre);
+    let cancel_waiting = observed_zone("C4", C4_KM);
+    let repeat_firings = observed_zone("C5", centre);
+    for zone in [activate_only, activate_and_pulse, pulse_while_deactivated, cancel_waiting] {
+        p.link(p.init_off, zone);
+    }
+    p.at("C0 SENTINEL", C_ACTIVATE_S, &[sentinel]);
+    p.switch_at("MCU_Activate", "C1 ON", C_ACTIVATE_S, &[activate_only]);
+    p.switch_at("MCU_Activate", "C2 ON", C_ACTIVATE_S, &[activate_and_pulse]);
+    p.at("C2 PULSE", C_ACTIVATE_S + C_PULSE_AFTER_ACTIVATE_S, &[activate_and_pulse]);
+    p.at("C3 INACTIVE PULSE", C_ACTIVATE_S, &[pulse_while_deactivated]);
+    again(
+        p,
+        activate_and_pulse,
+        "C2",
+        C2_RECHECK_OFF_S,
+        C2_RECHECK_ON_S,
+        C2_RECHECK_ON_S + C_PULSE_AFTER_ACTIVATE_S,
+    );
+    p.switch_at("MCU_Activate", "C4 ON", C4_WAITING_ON_S, &[cancel_waiting]);
+    p.at("C4 PULSE", C4_WAITING_ON_S + C_PULSE_AFTER_ACTIVATE_S, &[cancel_waiting]);
+    p.switch_at("MCU_Deactivate", "C4 OFF", C4_WAITING_OFF_S, &[cancel_waiting]);
+    p.at("C5 PULSE", C5_REPEAT_PULSE_S, &[repeat_firings]);
+    p.readout(repeat_firings, "C5 fired 2+", 2);
+    p.readout(repeat_firings, "C5 fired 10+", 10);
     p.icon("T-c C", centre, "[2]");
     p.icon("T-c C4", C4_KM, "[2]");
 }
@@ -1386,12 +1504,12 @@ enum NVariant {
 }
 
 fn build_n(p: &mut Probe, variant: NVariant) {
-    let radius = match variant {
+    let radius_m = match variant {
         NVariant::Tn => 2000.0,
         NVariant::Tn2 => 5000.0,
     };
     for (name, km) in [("T-n START", N_START_KM), ("T-n END", N_END_KM)] {
-        let zone = p.zone(&format!("{name} ZONE"), radius, true, "[2]", km);
+        let zone = p.zone(&format!("{name} ZONE"), radius_m, true, "[2]", km);
         let off = p.control("MCU_Deactivate", &format!("{name} OFF"), &[zone]);
         p.link(zone, off);
         p.link(p.arm, zone);
@@ -1402,7 +1520,7 @@ fn build_n(p: &mut Probe, variant: NVariant) {
         icon.set_name(name);
     }
     if matches!(variant, NVariant::Tn) {
-        let za4 = p.zone("ZA4", 12_000.0, true, "[2]", p.cell.unwrap().centre_km);
+        let za4 = p.zone("ZA4", AI_VS_PLAYER_RADIUS_M, true, "[2]", p.cell.unwrap().centre_km);
         p.link(p.arm, za4);
         p.observe(za4, "ZA4 fired");
     }
@@ -1419,6 +1537,14 @@ fn build_y(p: &mut Probe, side: Side) {
         Side::Dprk => ("YD", COUNTRY_USSR, COUNTRY_DPRK, "[1]"),
     };
     let centre = p.cell.unwrap().centre_km;
+    let zone_radius_m = 10_000.0;
+    let ai_country_zone_pulse_s = p.cell.unwrap().arm_s;
+    let player_country_zone_pulse_s = 325.0;
+    let pilot_zone_pulse_s = 640.0;
+    let (ai_country_start_s, ai_country_delete_s) = (20.0, 320.0);
+    let (player_country_start_s, player_country_delete_s) = (330.0, 630.0);
+    let ai_start_km = (centre.0 - 30.0, centre.1);
+    let ai_exit_km = (centre.0 + 30.0, centre.1);
     for (suffix, filtered) in [("CT", true), ("CT0", false)] {
         let name = format!("{prefix}-{suffix}");
         let mut node = p.reference_mcu("MCU_TR_ComplexTrigger", &name);
@@ -1450,24 +1576,22 @@ fn build_y(p: &mut Probe, side: Side) {
             }
         }
     }
-    for (n, time_s) in [(1, 10.0), (2, 325.0), (3, 640.0)] {
+    for (n, time_s) in [
+        (1, ai_country_zone_pulse_s),
+        (2, player_country_zone_pulse_s),
+        (3, pilot_zone_pulse_s),
+    ] {
         let name = format!("{prefix}-Z{n}");
-        let zone = p.zone(&name, 10_000.0, true, coalition, centre);
+        let zone = p.zone(&name, zone_radius_m, true, coalition, centre);
         p.at(&format!("{name} PULSE"), time_s, &[zone]);
         p.observe(zone, &format!("{name} fired"));
     }
     for (suffix, flight_country, start_s, delete_s) in [
-        ("A", ai_country, 20.0, 320.0),
-        ("B", player_country, 330.0, 630.0),
+        ("A", ai_country, ai_country_start_s, ai_country_delete_s),
+        ("B", player_country, player_country_start_s, player_country_delete_s),
     ] {
         let name = format!("{prefix}-{suffix}");
-        let flight = p.ai_with_close_delete(
-            &name,
-            2,
-            (centre.0 - 30.0, centre.1),
-            (centre.0 + 30.0, centre.1),
-            start_s,
-        );
+        let flight = p.ai_with_close_delete(&name, 2, ai_start_km, ai_exit_km, start_s);
         p.set_flight_plane_country(flight, flight_country);
         p.ai_delete_at(&name, delete_s);
     }
@@ -1529,7 +1653,8 @@ fn build_g(p: &mut Probe) {
     // Create the hunter after G1-G4 to preserve generated object order.
     let (name, at, target) = hunter_target.expect("G flights include a hunter target");
     let hunter_name = format!("{name} HUNTER");
-    let hunter = p.ai_with_close_delete(&hunter_name, 2, (115.0, 80.0), at, G_START_S);
+    let hunter_start_km = (at.0 - START_SOUTH_KM - G_HUNTER_BEHIND_START_KM, at.1);
+    let hunter = p.ai_with_close_delete(&hunter_name, 2, hunter_start_km, at, G_START_S);
     p.set_flight_plane_country(hunter, COUNTRY_DPRK);
     by_id_mut(&mut p.root, hunter).for_each_mut(&mut |node| {
         if node.block_type == "Plane" {
