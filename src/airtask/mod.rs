@@ -30,6 +30,21 @@ pub use timing::{derived_timing, f80_transit_s}; // fn derived_timing(t: &Thresh
 pub const DPRK: usize = 0;
 pub const NATO: usize = 1;
 
+#[derive(Clone, Copy)]
+pub(crate) enum AiRtbDecision {
+    Enabled,
+    Disabled,
+}
+
+impl AiRtbDecision {
+    pub(crate) fn property(self) -> &'static str {
+        match self {
+            Self::Enabled => "1",
+            Self::Disabled => "0",
+        }
+    }
+}
+
 pub type Ymd = (u16, u8, u8);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
