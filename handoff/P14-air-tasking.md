@@ -1484,6 +1484,8 @@ Listeners added: on every plane entity one traced OnEvent subtitle for each of t
 
 ### Step 0k. Upstream's go-home fix and Fighter Pack's count (flight 1N) — M. Branch `codex/p14-0k`
 
+> **Built, merged (`b92df87`) and flown on 2026-10-14 as flight 1P**, not 1N: flight 1N already exists (2026-10-12) and its files must not change. Results: `handoff/P14-probe-results.md`, "Flight 1P". Two changes to the tables below were made before the build. In cell T-f the 03:00 kill is one level 2 Damage command per aircraft, because Fighter Pack aircraft are independent formations. Cell T-b's aircraft come from `bundled_catalog()`, because `builtin_plane_catalog()` holds only the seven fighters; `simpleb29` is left out.
+
 **Why.**
 1. **Upstream's Il-10 strike never got home** in flight 1M: its go-home timer fired two or three times, and the flight was left with no orders. The proposed fix for the upstream issue (`handoff/upstream-issue-draft.md`, section 3) is a once-only gate before that timer. This flight proves or refutes it, with a second variant that drops the Force Complete instead.
 2. **Decision 0016** (accepted 2026-10-14) changes Fighter Pack so that each aircraft is counted once. This flight flies a Fighter Pack flight with and without the change.

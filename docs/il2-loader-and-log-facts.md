@@ -77,7 +77,15 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **Log records:** `AType:18` bail-out; `AType:31` an aircraft meets the ground (crash or landing); `AType:27` with a crash; `AType:26` stores dropped.
 - **A Damage command aimed at a unit's entity reaches a spawned copy.** A deactivated wave of a spawner stays in the end-of-mission list under the same name as the live wave.
 - **Probe groups made by `generate_template` keep the app's key order in their `Plane` blocks** (`Index`, `LinkTrId`, `Name`), not the shipped order the other probe blocks use, because flight 1L tests what the app writes. `probe_blocks_match_shipped_shapes` exempts them by index.
-- **Event 7 ("bingo fuel") fires on the F-80C and the F-86A-5 about 3 s after activation, with full tanks** (flights 1L and 1M, air starts at 1,500 and 3,050 m). The Il-10 did not raise it. Do not send a flight home on event 7.
-- **A timer that sends `Force Complete` and a waypoint together must fire only once per flight** (flight 1M). When it fired a second time while the flight was already on that waypoint, the flight was left with no orders.
+- **Event 7 ("bingo fuel") can fire about 3 s after activation, with full tanks** (flights 1L, 1M and 1P): on upstream's F-80C strike and F-86A CAP, and on flight 1L's single F-80Cs. It is **not** a property of the type: in flight 1P twelve single aircraft as Template Builder writes them (F-80C and F-86A-5 among them) and a Fighter Pack F-80C flight did not raise it. The cause is not known. Do not send a flight home on event 7.
+- **A timer that sends `Force Complete` and a waypoint together must fire only once per flight** (flight 1M). When it fired a second time while the flight was already on that waypoint, the flight was left with no orders. **A `Counter` with `Counter = 1` and `Dropcount = 0` between the abort events and that timer fixes it** (flight 1P, the Il-10 strike).
+
+## Found on 2026-10-14 (flight 1P, game 1.005)
+
+- **An aircraft with no bombs raises event 9 (bingo bombs) about 2.7 s after activation; one with no forward guns raises event 8 (bingo main guns)** (B-29, C-47B and Li-2T). Do not hook either as "out of ammunition" on an aircraft that may carry none.
+- **The Fighter Pack death count works as decision 0016 built it:** each lost aircraft is counted once, when its 60 s `Delay Delete n` runs out. Pointed straight at `DeathCount`, the death event counts each kill twice.
+- **An attack order with no target in its area runs out after its `Time` and reports `OnAreaAttacked`** (flight 1P, H4: no weapon released, report at 120 s).
+- **`AType:25` is written when an aircraft releases a weapon** (`OBJID` the aircraft, `TID` the new object). Read from the log; one record per aircraft per release seen.
+- **Fighter Pack aircraft are separate formations** (`FlightRole::Independent` in `flights.rs`), so a Damage command on the lead would reach only the lead (flight 1H: a Damage command acts on one formation). Read from the code; flight 1P used one Damage command per aircraft and did not test it.
 - **With `AiRTBDecision = 1`, all aircraft of a damaged formation but one stop answering commands** (flight 1M: three of a 4-ship).
 
