@@ -85,7 +85,7 @@ const MISSION_END_ORDERS_TIME: f64 = 0.05;
 const RTB_DELAY: f64 = 0.5;
 const DELAYED_END_TIME: f64 = 2.0;
 const RTB_DEACTIVATE_DELAY: f64 = 60.0;
-const DELETE_WAIT: f64 = 0.5;
+pub(crate) const DELETE_WAIT: f64 = 0.5;
 pub const DEFAULT_TIME_ON_TARGET_S: f32 = 180.0;
 /// Configurable pause (`MCU_Timer`) between sequential orders.
 pub const DEFAULT_TIMER_S: f32 = 5.0;

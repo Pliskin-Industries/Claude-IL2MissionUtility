@@ -202,8 +202,8 @@ pub(crate) fn assemble_side(
                 extension_s: plan.stop.extension_min * 60.0,
                 target,
                 census_delay_s: census_delay(plan.strategies.census, registry.flags.len() + 1),
-                zone_out: plan.strategies.zone_out, // P14 G0: default pending flight 0
-                losses: plan.strategies.losses,     // P14 G0: default pending flight 0
+                zone_out: plan.strategies.zone_out, // Flight 0, 0d: CheckZone remains default; J5 permits Watchdog.
+                losses: plan.strategies.losses,     // Flight 1G, decisions 0011/0017: losses use OnKilled (13).
             };
             let shell = wrap_sortie(&mut copy, &prefix, &shape, &spec, &mut alloc)?;
             shell.register(area, &mut registry);

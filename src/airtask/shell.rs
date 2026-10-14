@@ -1,4 +1,4 @@
-//! One-use sortie shells. Engine assumptions remain pending the P14 probes.
+//! One-use Activate sortie shells (flights 1G, 1J, 1P; decision 0017).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -101,12 +101,13 @@ fn strip(root: &mut Il2Entity, shape: &SortieShape) {
     by_id_mut(root, shape.zone_out).unwrap().set_targets(vec![]);
     root.for_each_mut(&mut |node| {
         if node.index.is_some_and(|id| shape.planes.contains(&id)) {
-            node.children.retain(|child| child.block_type != "OnEvents");
+            node.children.retain(|child| !matches!(child.block_type.as_str(), "OnEvents" | "OnReports"));
         }
     });
     remove_ids(
         root,
-        &shape.mission_complete_timers.iter().copied().collect(),
+        &shape.mission_complete_timers.iter().copied()
+            .chain(shape.delete_timer).chain(shape.delete).collect(),
     );
     let all: BTreeMap<_, _> = nodes(root)
         .into_iter()
@@ -152,7 +153,7 @@ fn strip(root: &mut Il2Entity, shape: &SortieShape) {
 }
 
 /// Wrap an inspected, placed copy. RTB insertion belongs to place_air_sortie;
-/// this adds 15 MCUs, and assembly adds COPY r (17 including the new RTB timer).
+/// this adds 17 MCUs, and assembly adds COPY r (19 including the new RTB timer).
 /// A rejected wrap leaves both the input tree and the allocator unchanged.
 pub fn wrap_sortie(
     root: &mut Il2Entity,
@@ -186,15 +187,17 @@ pub fn wrap_sortie(
         shape.zone_out_activate,
         shape.zone_out_pulse,
         shape.end_timer,
-        shape.delete_timer,
+        shape.delayed_end_timer,
         shape.navigation_attack_timer,
         shape.path_waypoints[&shape.navigation_lead],
     ]
     .iter()
     .chain(&shape.planes)
+    .chain(shape.delete_timer.iter())
+    .chain(shape.delete.iter())
     .any(|id| !present.contains(id))
     {
-        return Err("Air Tasking shell shape does not match this copy's indexes".into());
+        return Err(format!("Air Tasking {prefix}: shell shape does not match this copy's indexes"));
     }
     let mut copy = root.clone();
     strip(&mut copy, shape);
@@ -203,7 +206,8 @@ pub fn wrap_sortie(
     }) {
         return Err("Air Tasking needs DONE HUB to be the only link into the end timer".into());
     }
-    let mut alloc = (*next_id).max(copy.max_index() + 1);
+    // Do not reuse indexes of the removed template Delete chain.
+    let mut alloc = (*next_id).max(root.max_index() + 1);
     let mut added = Vec::new();
     let mut ids = BTreeMap::new();
     let (x, z) = by_id(&copy, shape.bring_up_timer)
@@ -237,6 +241,16 @@ pub fn wrap_sortie(
         ids.insert(name, node.index.unwrap());
         added.push(node);
     }
+    // Use Template Builder's Spawn-mode Delete shapes, flown in flight 1L.
+    let delay = template::timer(
+        &format!("{prefix} DELETE DELAY"), template::DELETE_WAIT, &mut alloc, x, z,
+    );
+    let mut delete = template::mcu("MCU_Delete", &format!("{prefix} DELETE"), &mut alloc, x, z);
+    delete.set_objects(shape.planes.clone());
+    for (name, node) in [("DELETE DELAY", delay), ("DELETE", delete)] {
+        ids.insert(name, node.index.unwrap());
+        added.push(node);
+    }
     let mut targets = BTreeMap::from([
         (
             ids["START"],
@@ -262,15 +276,15 @@ pub fn wrap_sortie(
         (ids["DONE HUB"], vec![ids["DONE HUB OFF"], shape.end_timer]),
         (ids["DONE HUB OFF"], vec![ids["DONE HUB"]]),
         (ids["LANDED"], vec![ids["FLYING"]]),
+        (ids["DELETE DELAY"], vec![ids["DELETE"], ids["LANDED"]]),
     ]);
-    // Relay single-use latches are the primary J4 hypothesis.
-    // P14 G0: default pending flight 0
+    // Flight 0: J4 confirmed; relay latches stay as written.
     by_id_mut(&mut copy, shape.navigation_attack_timer)
         .unwrap()
         .append_target(ids["ON STATION IN"]);
-    by_id_mut(&mut copy, shape.delete_timer)
+    by_id_mut(&mut copy, shape.delayed_end_timer)
         .unwrap()
-        .append_target(ids["LANDED"]);
+        .append_target(ids["DELETE DELAY"]);
     let wp = by_id_mut(&mut copy, shape.path_waypoints[&shape.navigation_lead]).unwrap();
     wp.append_target(shape.zone_out_activate);
     wp.append_target(shape.zone_out_pulse);
@@ -280,7 +294,7 @@ pub fn wrap_sortie(
     zone.set_targets(vec![ids["DONE HUB"]]);
     let mut single_use_outs = Vec::new();
     match spec.zone_out {
-        ZoneOutImpl::CheckZone => {} // P14 G0: default pending flight 0
+        ZoneOutImpl::CheckZone => {} // Flight 0, 0d: CheckZone remains default; J5 permits Watchdog.
         ZoneOutImpl::Watchdog => {
             // Reuse Zone Out as an inside check. A 5 s poll refreshes a 10 s
             // watchdog. This variant requires J5 = Restart; it is not selected
@@ -322,36 +336,16 @@ pub fn wrap_sortie(
             added.extend([watchdog, out, poll, poll_out, close]);
         }
     }
-    for (n, &entity) in shape.planes.iter().enumerate() {
-        let destination = match spec.losses {
-            LossesImpl::Type4 => ids["LOSSES"], // P14 G0: default pending flight 0
-            LossesImpl::Latch => {
-                let mut latch = template::timer(
-                    &format!("{prefix} LOSS {:02}", n + 1),
-                    0.0,
-                    &mut alloc,
-                    x,
-                    z,
+    // Flight 1G and decisions 0011/0017: one OnKilled (13) per aircraft.
+    match spec.losses {
+        LossesImpl::Type13 => {
+            for &entity in &shape.planes {
+                template::attach_event(
+                    by_id_mut(&mut copy, entity).unwrap(),
+                    template::EntityEvent::OnKilled.type_id(),
+                    ids["LOSSES"],
                 );
-                let mut off = template::mcu(
-                    "MCU_Deactivate",
-                    &format!("{prefix} LOSS {:02} OFF", n + 1),
-                    &mut alloc,
-                    x,
-                    z,
-                );
-                off.set_targets(vec![latch.index.unwrap()]);
-                latch.set_targets(vec![off.index.unwrap(), ids["LOSSES"]]);
-                let id = latch.index.unwrap();
-                added.extend([latch, off]);
-                id
             }
-        };
-        let entity = by_id_mut(&mut copy, entity).unwrap();
-        template::attach_event(entity, 4, destination);
-        if spec.losses == LossesImpl::Latch {
-            template::attach_event(entity, 2, destination);
-            template::attach_event(entity, 0, destination);
         }
     }
     for node in &mut added {
@@ -383,7 +377,7 @@ pub fn wrap_sortie(
         cold: ids["COLD"],
         flying: ids["FLYING"],
         landed: ids["LANDED"],
-        delete_timer: shape.delete_timer,
+        delete_timer: ids["DELETE DELAY"],
         single_use_outs,
     })
 }
@@ -635,14 +629,13 @@ mod tests {
     #[test]
     fn shell_delete_timer_releases_the_budget() {
         for f in fixtures() {
-            assert!(
-                by_id(&f.root, f.shape.delete_timer)
-                    .targets
-                    .contains(&f.ids.landed)
-            );
+            let delete = shell_id(&f, "DELETE");
+            assert_eq!(by_id(&f.root, f.ids.delete_timer).targets, [delete, f.ids.landed]);
+            assert_eq!(by_id(&f.root, delete).block_type, "MCU_Delete");
+            assert_eq!(by_id(&f.root, delete).objects, f.shape.planes);
             assert_eq!(by_id(&f.root, f.ids.landed).block_type, "MCU_Deactivate");
             assert_eq!(by_id(&f.root, f.ids.landed).targets, [f.ids.flying]);
-            assert!(f.logic.budget_events.contains(&f.shape.delete_timer));
+            assert!(f.logic.budget_events.contains(&f.ids.delete_timer));
         }
     }
 
@@ -717,7 +710,7 @@ mod tests {
                 .collect();
             assert_eq!(events.len(), count as usize);
             for event in events {
-                assert_eq!(event.property("Type"), Some("4"));
+                assert_eq!(event.property("Type"), Some("13"));
                 assert_eq!(event.property("TarId"), Some(losses.to_string().as_str()));
             }
         }
@@ -792,14 +785,14 @@ mod tests {
     }
 
     #[test]
-    fn shell_adds_17_mcus_per_copy() {
+    fn shell_adds_19_mcus_per_copy() {
         let original = builtin(1);
         let shape = inspect_sortie(&original).unwrap();
         let mut stripped = original.clone();
         strip(&mut stripped, &shape);
-        assert_eq!(mcus(&original) - mcus(&stripped), 7);
+        assert_eq!(mcus(&original) - mcus(&stripped), 9);
         let f = fixture(original, Strategies::default());
-        assert_eq!(mcus(&f.root) - mcus(&stripped), 17 + 1);
+        assert_eq!(mcus(&f.root) - mcus(&stripped), 19 + 1);
         assert!(f.root.find_by_name("RTB 1").is_some());
     }
 
@@ -810,9 +803,10 @@ mod tests {
         let rtb = shape.rtb_timer.unwrap();
         let mut stripped = original.clone();
         strip(&mut stripped, &shape);
+        assert_eq!(mcus(&original) - mcus(&stripped), 8);
         let f = fixture(original, Strategies::default());
         assert_eq!(f.shape.rtb_timer, Some(rtb));
-        assert_eq!(mcus(&f.root) - mcus(&stripped), 16 + 1); // one lead lacked RTB
+        assert_eq!(mcus(&f.root) - mcus(&stripped), 18 + 1); // one lead lacked RTB
         assert_eq!(
             nodes(&f.root)
                 .iter()
@@ -827,77 +821,117 @@ mod tests {
     }
 
     #[test]
-    fn shell_delete_timer_still_targets_delete() {
+    fn shell_replaces_the_template_delete_chain() {
+        for original in [builtin(1), generate(&options(TestedShape::S1))] {
+            let f = fixture(original, Strategies::default());
+            assert_eq!(f.root.count_block_type("MCU_Delete"), 1);
+            let delete = named(&f.root, "SN01 DELETE");
+            assert_eq!(delete.objects, f.shape.planes);
+            assert_eq!(by_id(&f.root, f.ids.delete_timer).name(), Some("SN01 DELETE DELAY"));
+            assert_eq!(number(by_id(&f.root, f.ids.delete_timer), "Time").unwrap(), 0.5);
+            assert_eq!(by_id(&f.root, f.ids.delete_timer).targets, [delete.index.unwrap(), f.ids.landed]);
+            assert!(by_id(&f.root, f.shape.delayed_end_timer).targets.contains(&f.ids.delete_timer));
+            for old in [f.shape.delete, f.shape.delete_timer].into_iter().flatten() {
+                assert!(!nodes(&f.root).iter().any(|node| node.index == Some(old)));
+            }
+            assert_links_resolve(&f.root);
+        }
+    }
+
+    #[test]
+    fn shell_does_not_reuse_removed_delete_chain_indexes() {
+        let mut root = builtin(1);
+        place_air_sortie(&mut root, &SortiePlacement {
+            target: TARGET,
+            heading_deg: 0.0,
+            spawn_dist_m: 55_000.0,
+            rtb: (60_000.0, 230_000.0),
+        }).unwrap();
+        let shape = inspect_sortie(&root).unwrap();
+        // Put the removed chain above every retained index, then pass a stale
+        // allocator so the shell must reserve the input's whole index range.
+        let removed = [root.max_index() + 1, root.max_index() + 2];
+        let remap = std::collections::HashMap::from([
+            (shape.delete_timer.unwrap(), removed[0]),
+            (shape.delete.unwrap(), removed[1]),
+        ]);
+        for (&old, &new) in &remap {
+            let node = by_id_mut(&mut root, old).unwrap();
+            node.index = Some(new);
+            node.set_property("Index", new.to_string());
+        }
+        crate::duplicate::reconnect_pointers(&mut root, &remap);
+        let shape = inspect_sortie(&root).unwrap();
+        let mut retained = root.clone();
+        strip(&mut retained, &shape);
+        let retained: BTreeSet<_> = nodes(&retained).iter().filter_map(|node| node.index).collect();
+        let mut next = 1;
+        wrap_sortie(&mut root, "SN01", &shape, &ShellSpec {
+            attack_time_s: 600.0,
+            final_time_s: 2100.0,
+            extension_s: 600.0,
+            target: TARGET,
+            census_delay_s: 0.05,
+            zone_out: ZoneOutImpl::CheckZone,
+            losses: LossesImpl::Type13,
+        }, &mut next).unwrap();
+        let added: Vec<_> = nodes(&root).iter().filter_map(|node| node.index)
+            .filter(|index| !retained.contains(index)).collect();
+        assert!(!added.is_empty());
+        for index in added {
+            assert!(!removed.contains(&index), "shell reused removed Delete-chain index {index}");
+        }
+        assert_links_resolve(&root);
+    }
+
+    #[test]
+    fn shell_writes_only_the_losses_hooks() {
         for f in fixtures() {
-            let targets = &by_id(&f.root, f.shape.delete_timer).targets;
-            assert!(
-                targets
-                    .iter()
-                    .any(|&id| by_id(&f.root, id).block_type == "MCU_Delete")
-            );
+            for &entity in &f.shape.planes {
+                let events: Vec<_> = nodes(by_id(&f.root, entity)).into_iter()
+                    .filter(|node| node.block_type == "OnEvent").collect();
+                assert_eq!(events.len(), 1);
+                assert_eq!(template::read_event(events[0]), Some((13, shell_id(&f, "LOSSES"))));
+            }
+            assert_eq!(f.root.count_block_type("OnEvent"), f.shape.planes.len());
+            assert_eq!(f.root.count_block_type("OnReport"), 0);
         }
     }
 
     #[test]
-    fn shell_wraps_a_spawn_mode_template() {
-        let f = fixture(generate(&options(TestedShape::S5)), Strategies::default());
-        assert_eq!(
-            by_id(&f.root, f.shape.bring_up_timer).name(),
-            Some("SPAWN UNITS")
-        );
-        assert!(
-            by_id(&f.root, f.ids.start)
-                .targets
-                .contains(&f.shape.bring_up_timer)
-        );
+    fn shell_deletion_frees_the_budget() {
+        use crate::airtask::assemble::{assemble_side, tests::{context, finish, test_plan}};
+        let mut plan = test_plan();
+        plan.pool.truncate(1); // two HVAR copies, one budget slot
+        let mut logic = SideLogic::default();
+        let mut next = 1;
+        let mut copies = assemble_side(AirSide::Nato, &plan, &context(), &mut logic, &mut next).unwrap();
+        copies.trees[0].children.extend(crate::airtask::budget::build_side(
+            AirSide::Nato, 1, &mut logic, &plan.strategies, &mut next,
+        ));
+        let root = finish(AirSide::Nato, &mut copies, &logic, &mut next);
+        let first = &copies.entries[0].copies[0];
+        let second = &copies.entries[0].copies[1];
+        let delete = named(&root, "SN01 DELETE").index.unwrap();
+        let script = WalkerInput {
+            until: ticks(80.0),
+            pulses: vec![
+                (ticks(2.0), first.pointer.into()),
+                (ticks(10.0), first.shell.done_hub.into()),
+                (ticks(40.0), second.pointer.into()),
+                (ticks(75.0), second.pointer.into()),
+            ],
+            ..WalkerInput::default()
+        };
         for config in configs() {
-            let log = walk(&runtime(&f, false), config, &input(&f, 2000.0, Some(10.0)));
-            assert_eq!(
-                times(&log, named(&f.root, "Trigger Spawner").index.unwrap()).len(),
-                1
-            );
-            assert_eq!(
-                times(&log, named(&f.root, "Trigger Delete").index.unwrap()).len(),
-                1
-            );
-        }
-    }
-
-    #[test]
-    fn shell_sweeps_repeat_mode_machinery() {
-        let f = fixture(generate(&options(TestedShape::S6)), Strategies::default());
-        for name in [
-            "DeathCount",
-            "DeathCount ReActivate",
-            "DeathCount Deactivate",
-            "Reset Counter",
-            "Modifier Set Value",
-            "COOLDOWN",
-        ] {
-            assert!(f.root.find_by_name(name).is_none(), "{name}");
-        }
-        for name in ["SpawnCount", "Trigger Spawner"] {
-            assert!(f.root.find_by_name(name).is_some());
-        }
-        for event in nodes(&f.root)
-            .into_iter()
-            .filter(|n| n.block_type == "OnEvent")
-        {
-            assert_eq!(event.property("Type"), Some("4"));
-            assert_eq!(
-                event.property("TarId"),
-                Some(shell_id(&f, "LOSSES").to_string().as_str())
-            );
-        }
-        for config in configs() {
-            let mut script = input(&f, 2000.0, None);
-            script.kills.push((ticks(10.0), f.shape.planes[0].into()));
-            let log = walk(&runtime(&f, false), config, &script);
-            assert_eq!(
-                times(&log, named(&f.root, "Trigger Spawner").index.unwrap()).len(),
-                1
-            );
-            assert_eq!(times(&log, f.ids.done_hub), [ticks(10.0)]);
+            let log = walk(&root, config, &script);
+            assert_eq!(times(&log, first.shell.start), [ticks(2.0)]);
+            assert_eq!(times(&log, first.shell.done_hub), [ticks(10.0)]);
+            assert_eq!(times(&log, first.shell.delete_timer), [ticks(70.6)]);
+            assert_eq!(times(&log, delete), [ticks(70.6)]);
+            assert!(active(&log, first.shell.flying, ticks(70.55)));
+            assert!(!active(&log, first.shell.flying, ticks(70.6)));
+            assert_eq!(times(&log, second.shell.start), [ticks(75.0)]);
         }
     }
 
@@ -920,7 +954,6 @@ mod tests {
                 shape.end_timer,
                 shape.end_orders_timer,
                 shape.delayed_end_timer,
-                shape.delete_timer,
                 shape.zone_out_activate,
                 shape.zone_out_pulse,
             ] {
@@ -932,7 +965,6 @@ mod tests {
 
     #[test]
     fn shell_refuses_a_second_link_into_the_end_timer() {
-        let f = fixture(builtin(1), Strategies::default());
         let mut root = builtin(1);
         let shape = inspect_sortie(&root).unwrap();
         by_id_mut(&mut root, shape.navigation_attack_timer)
@@ -952,7 +984,7 @@ mod tests {
                 target: TARGET,
                 census_delay_s: 0.05,
                 zone_out: ZoneOutImpl::CheckZone,
-                losses: LossesImpl::Type4,
+                losses: LossesImpl::Type13,
             },
             &mut next,
         )
@@ -960,7 +992,6 @@ mod tests {
         assert!(error.contains("only link"));
         assert_eq!(root, before);
         assert_eq!(next, initial);
-        assert_eq!(f.ids.delete_timer, shape.delete_timer);
     }
 
     #[test]
@@ -1017,48 +1048,6 @@ mod tests {
     }
 
     #[test]
-    fn shell_losses_latch_counts_each_plane_once_across_types_4_2_0() {
-        let f = fixture(
-            builtin(1),
-            Strategies {
-                losses: LossesImpl::Latch,
-                ..Strategies::default()
-            },
-        );
-        let mut script = input(&f, 100.0, None);
-        for (i, &entity) in f.shape.planes.iter().enumerate() {
-            let hooks: Vec<_> = nodes(by_id(&f.root, entity))
-                .into_iter()
-                .filter(|n| n.block_type == "OnEvent")
-                .collect();
-            assert_eq!(
-                hooks
-                    .iter()
-                    .map(|n| n.property("Type").unwrap())
-                    .collect::<Vec<_>>(),
-                ["4", "2", "0"]
-            );
-            let latch: i32 = hooks[0].property("TarId").unwrap().parse().unwrap();
-            assert!(
-                hooks
-                    .iter()
-                    .all(|n| n.property("TarId").unwrap().parse::<i32>().unwrap() == latch)
-            );
-            for event in 0..3 {
-                script.pulses.push((
-                    ticks(10.0 + i as f64 + f64::from(event) * 0.1),
-                    latch.into(),
-                ));
-            }
-        }
-        for config in configs() {
-            let log = walk(&runtime(&f, false), config, &script);
-            assert_eq!(times(&log, shell_id(&f, "LOSSES")), [ticks(13.0)]);
-            assert_eq!(times(&log, f.ids.done_hub), [ticks(13.0)]);
-        }
-    }
-
-    #[test]
     fn shell_done_fires_once_when_on_station_end_and_zone_out_coincide() {
         let f = fixture(builtin(1), Strategies::default());
         let mut script = input(&f, 800.0, None);
@@ -1102,7 +1091,7 @@ mod tests {
         for config in configs() {
             let log = walk(&runtime(&f, false), config, &input(&f, 2200.0, Some(302.0)));
             assert_eq!(times(&log, f.ids.done_hub), [ticks(902.5)]);
-            assert_eq!(times(&log, f.shape.delete_timer), [ticks(963.1)]);
+            assert_eq!(times(&log, f.ids.delete_timer), [ticks(963.1)]);
             assert!(active(&log, f.ids.flying, ticks(963.05)));
             assert!(!active(&log, f.ids.flying, ticks(963.1)));
         }
@@ -1168,532 +1157,5 @@ mod tests {
             testkit::walker_every_deactivated_out_has_a_rearm_or_is_single_use(&h.root, &[])
                 .unwrap();
         }
-    }
-}
-
-#[cfg(test)]
-mod probe_writers {
-    use super::*;
-    use crate::airtask::assemble::{assemble_side, emit_side_logic};
-    use crate::airtask::budget;
-    use crate::airtask::library::{
-        TestedShape, inspect_sortie,
-        tests::{builtin, generate, options},
-    };
-    use crate::airtask::place::{SortiePlacement, place_air_sortie};
-    use crate::airtask::probe::K14_ORIGIN;
-    use crate::airtask::shell::test_support::{named, ticks, times};
-    use crate::airtask::testkit::*;
-    use crate::airtask::{
-        AirBudget, AirContext, AirPlan, AirSide, PoolEntry, Strategies, TargetRef, TriggerMode,
-        builtin_library,
-    };
-    use crate::{duplicate, locale, parser, serialize, trace};
-
-    fn subtitle(root: &mut Il2Entity, source: i32, text: &str, duration: i32, next: &mut i32) {
-        // Same SubtitleInfo layout as probe.rs::Probe::subtitle (private).
-        // The shared locale helper below handles both probe generations.
-        let mut node = template::mcu("MCU_TR_Subtitle", text, next, K14_ORIGIN.0, K14_ORIGIN.1);
-        node.set_property("Enabled", "1");
-        node.set_property("Coalitions", "[0,1,2]");
-        let mut info = Il2Entity::new("SubtitleInfo");
-        for (key, value) in [
-            ("Duration", duration),
-            ("FontSize", 20),
-            ("HAlign", 1),
-            ("VAlign", 2),
-            ("RColor", 0),
-            ("GColor", 100),
-            ("BColor", 0),
-            (
-                "LCText",
-                locale::P14_PROBE_TRACE_LCNAME + 10 + node.index.unwrap(),
-            ),
-        ] {
-            info.set_property(key, value.to_string());
-        }
-        node.children.push(info);
-        by_id_mut(root, source)
-            .unwrap()
-            .append_target(node.index.unwrap());
-        root.children.push(node);
-    }
-
-    fn at(
-        root: &mut Il2Entity,
-        begin: i32,
-        name: &str,
-        seconds: f64,
-        targets: Vec<i32>,
-        next: &mut i32,
-    ) -> i32 {
-        let mut node = template::timer(name, seconds, next, K14_ORIGIN.0, K14_ORIGIN.1);
-        node.set_targets(targets);
-        let id = node.index.unwrap();
-        by_id_mut(root, begin).unwrap().append_target(id);
-        root.children.push(node);
-        id
-    }
-
-    fn write_traced(stem: &str, mut root: Il2Entity, sources: Vec<i32>, mut next: i32) {
-        assert_links_resolve(&root);
-        walker_every_deactivated_out_has_a_rearm_or_is_single_use(&root, &[]).unwrap();
-        for &id in &sources {
-            assert!(
-                matches!(
-                    by_id(&root, id).block_type.as_str(),
-                    "MCU_Timer" | "MCU_Counter" | "MCU_CheckZone"
-                ),
-                "trace the pulse feeding a state command, not the command's state links"
-            );
-        }
-        let mut map = trace::TraceMap::default();
-        let carrier = trace::TraceCarrier::default(); // P14 G0: default pending flight 0
-        trace::instrument(
-            &mut root,
-            &trace::TraceSelect {
-                indexes: sources,
-                event_types: vec![4],
-                ..trace::TraceSelect::default()
-            },
-            &mut next,
-            carrier,
-            &mut map,
-        );
-        let text = serialize::serialize_group(&root);
-        let reparsed = parser::parse_group_file(&text).unwrap();
-        assert_links_resolve(&reparsed);
-        assert!(!map.entries.is_empty());
-        let locale = locale::p14_probe_locale(&root);
-        let english = locale::encode_locale_utf16le(&locale::serialize_locale(&locale));
-        let dir = std::path::Path::new("target/p14");
-        std::fs::create_dir_all(dir).unwrap();
-        let group = dir.join(format!("{stem}_traced.Group"));
-        let sidecar = group.with_extension("trace.json");
-        let eng = group.with_extension("eng");
-        std::fs::write(&group, text).unwrap();
-        trace::write_trace_sidecar(&sidecar, &map).unwrap();
-        std::fs::write(&eng, english).unwrap();
-        assert_eq!(trace::read_trace_sidecar(&sidecar).unwrap(), map);
-        use std::io::Write;
-        let mut output = std::io::stdout().lock();
-        for path in [group, sidecar, eng] {
-            writeln!(
-                output,
-                "WROTE {} ({} bytes)",
-                path.display(),
-                std::fs::metadata(&path).unwrap().len()
-            )
-            .unwrap();
-        }
-    }
-
-    fn budget_cell(
-        label: &str,
-        n: u8,
-        t: f64,
-        root: &mut Il2Entity,
-        next: &mut i32,
-        sources: &mut Vec<i32>,
-    ) {
-        let count = if n == 2 { 7 } else { 5 };
-        let h = budget::tests::harness(AirSide::Nato, n, count, Strategies::default());
-        let (mut cell, map) = duplicate::duplicate_template(&h.root, next);
-        cell.set_name(label);
-        cell.for_each_mut(&mut |node| {
-            if node.block_type.starts_with("MCU_") {
-                if let Some(name) = node.name() {
-                    node.set_name(&format!("{label} {name}"));
-                }
-            }
-        });
-        let begin = named(&cell, &format!("{label} Translator Mission Begin"))
-            .index
-            .unwrap();
-        let requests = if n == 2 {
-            vec![0.0, 2.0, 4.0, 6.0, 32.0, 34.0, 36.0]
-        } else {
-            vec![0.0, 0.0, 5.0, 22.0, 32.0]
-        };
-        for (i, offset) in requests.into_iter().enumerate() {
-            let request = at(
-                &mut cell,
-                begin,
-                &format!("{label} request {}", i + 1),
-                t + offset,
-                vec![map[&h.requests[i]]],
-                next,
-            );
-            sources.push(request);
-            subtitle(
-                &mut cell,
-                request,
-                &format!("{label}: request {}", i + 1),
-                1,
-                next,
-            );
-            let start = map[&h.gates[i]];
-            sources.push(start);
-            subtitle(
-                &mut cell,
-                start,
-                &format!("{label}: copy {} START", i + 1),
-                1,
-                next,
-            );
-        }
-        if n == 2 {
-            at(
-                &mut cell,
-                begin,
-                "T-k simultaneous deletions",
-                t + 30.0,
-                vec![map[&h.deletions[0]], map[&h.deletions[1]]],
-                next,
-            );
-        } else {
-            at(
-                &mut cell,
-                begin,
-                "T-k1 first deletion",
-                t + 20.0,
-                vec![map[&h.deletions[0]]],
-                next,
-            );
-            // Delete the other possible starters too: under DepthFirst the
-            // fourth request can start after copy 1 has left the head count.
-            at(
-                &mut cell,
-                begin,
-                "T-k1 remaining deletions",
-                t + 30.0,
-                h.deletions[1..4].iter().map(|id| map[id]).collect(),
-                next,
-            );
-        }
-        for (i, &deletion) in h.deletions.iter().enumerate() {
-            sources.push(map[&deletion]);
-            subtitle(
-                &mut cell,
-                map[&deletion],
-                &format!("{label}: copy {} deleted", i + 1),
-                1,
-                next,
-            );
-        }
-        sources.extend(h.flags.iter().map(|id| map[id]));
-        for suffix in ["CHECK", "CENSUS", "COUNT", "END", "REOPEN OUT", "AGAIN"] {
-            if let Some(node) = cell.find_by_name(&format!("{label} BUD N {suffix}")) {
-                sources.push(node.index.unwrap());
-            }
-        }
-        for delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
-            let log = walk(
-                &cell,
-                WalkerConfig {
-                    same_tick_delivery: delivery,
-                    ..WalkerConfig::default()
-                },
-                &WalkerInput {
-                    until: ticks(t + 40.0),
-                    ..WalkerInput::default()
-                },
-            );
-            if n == 2 {
-                for (i, expected) in [1, 1, 0, 0, 1, 1, 0].into_iter().enumerate() {
-                    assert_eq!(times(&log, map[&h.gates[i]]).len(), expected);
-                }
-            } else {
-                assert_eq!(times(&log, map[&h.gates[0]]).len(), 1);
-                assert_eq!(
-                    times(&log, map[&h.gates[1]]).len(),
-                    usize::from(delivery == SameTickDelivery::Batched)
-                );
-                assert!(times(&log, map[&h.gates[2]]).is_empty());
-                assert_eq!(
-                    times(&log, map[&h.gates[3]]).len(),
-                    usize::from(delivery == SameTickDelivery::DepthFirst)
-                );
-                assert_eq!(times(&log, map[&h.gates[4]]).len(), 1);
-            }
-        }
-        root.children.push(cell);
-    }
-
-    #[test]
-    #[ignore = "writes target/p14 Probe 2 sortie, budget and trace files"]
-    fn write_p14_sortie_probe() {
-        let mut next = 1;
-        let mut root = group("P14 Sortie Probe", &mut next);
-        root.set_property("Desc", "\"Probe 2: join NATO at K14 and remain within 35 km of the targets. Probe-only Zone Out watches NATO so one ground observer can keep the sortie alive.\"");
-        let mut logic = SideLogic::default();
-        let mut sources = Vec::new();
-        let mut observations = Vec::new();
-        let mut arrivals = Vec::new();
-        for (i, (source, start_s)) in [
-            (builtin(1), 60.0),
-            (builtin(0), 90.0),
-            (generate(&options(TestedShape::S5)), 120.0),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let mut source = source;
-            let target = (K14_ORIGIN.0 + 10_000.0, K14_ORIGIN.1 + i as f64 * 6000.0);
-            let placed = place_air_sortie(
-                &mut source,
-                &SortiePlacement {
-                    target,
-                    heading_deg: 0.0,
-                    spawn_dist_m: 55_000.0,
-                    rtb: K14_ORIGIN,
-                },
-            )
-            .unwrap();
-            let (mut copy, _) = duplicate::duplicate_template(&source, &mut next);
-            let shape = inspect_sortie(&copy).unwrap();
-            let prefix = format!("SN{:02}", i + 1);
-            copy.set_name(&format!("{prefix} Probe 2"));
-            let ids = wrap_sortie(
-                &mut copy,
-                &prefix,
-                &shape,
-                &ShellSpec {
-                    attack_time_s: placed.attack_time_s,
-                    final_time_s: placed.attack_time_s + 1500.0,
-                    extension_s: 600.0,
-                    target,
-                    census_delay_s: budget::census_delay(Strategies::default().census, i + 1),
-                    zone_out: ZoneOutImpl::CheckZone, // P14 G0: default pending flight 0
-                    losses: LossesImpl::Type4,        // P14 G0: default pending flight 0
-                },
-                &mut next,
-            )
-            .unwrap();
-            ids.register(i + 1, &mut logic);
-            // This is only the observation mission. Production copies keep
-            // the original opposing coalition, verified by the shell tests.
-            by_id_mut(&mut copy, shape.zone_out)
-                .unwrap()
-                .set_property("PlaneCoalitions", "[2]");
-            let mut launch = template::timer(
-                &format!("{prefix} launch at {start_s}"),
-                start_s,
-                &mut next,
-                target.0,
-                target.1,
-            );
-            launch.set_targets(vec![ids.start]);
-            logic.mission_begin.push(launch.index.unwrap());
-            sources.push(launch.index.unwrap());
-            copy.children.push(launch);
-            let mut hot = template::mcu(
-                "MCU_Activate",
-                &format!("PROBE {prefix} HOT ON"),
-                &mut next,
-                target.0,
-                target.1,
-            );
-            hot.set_targets(vec![ids.hot]);
-            let mut cold_off = template::mcu(
-                "MCU_Deactivate",
-                &format!("PROBE {prefix} COLD OFF"),
-                &mut next,
-                target.0,
-                target.1,
-            );
-            cold_off.set_targets(vec![ids.cold]);
-            let mut hot_time = template::timer(
-                &format!("PROBE {prefix} HOT AT"),
-                600.0,
-                &mut next,
-                target.0,
-                target.1,
-            );
-            let mut cold_time = template::timer(
-                &format!("PROBE {prefix} COLD OFF AT"),
-                600.05,
-                &mut next,
-                target.0,
-                target.1,
-            );
-            hot_time.set_targets(vec![hot.index.unwrap()]);
-            cold_time.set_targets(vec![cold_off.index.unwrap()]);
-            logic
-                .mission_begin
-                .extend([hot_time.index.unwrap(), cold_time.index.unwrap()]);
-            copy.children.extend([hot, cold_off, hot_time, cold_time]);
-            let extend = named(&copy, &format!("{prefix} EXTEND")).index.unwrap();
-            let delete = named(&copy, "Trigger Delete").index.unwrap();
-            // Commands are sinks in the walker; observe the timer in the same
-            // tick as Trigger Delete, rather than pulse Targets on the command.
-            for (id, label) in [
-                (ids.start, "START"),
-                (ids.done_hub, "DONE HUB"),
-                (extend, "EXTEND expired"),
-                (ids.hot, "EXTEND begins"),
-                (ids.delete_timer, "Trigger Delete"),
-            ] {
-                sources.push(id);
-                subtitle(&mut copy, id, &format!("{prefix}: {label}"), 1, &mut next);
-            }
-            assert!(by_id(&copy, ids.delete_timer).targets.contains(&delete));
-            arrivals.push((
-                ticks(start_s + 300.0),
-                shape.path_waypoints[&shape.navigation_lead].into(),
-            ));
-            observations.push((ids, placed.attack_time_s, start_s));
-            root.children.push(copy);
-        }
-        // Three timed airborne demonstrations, independently of T-k's N=2.
-        root.children.extend(budget::build_side(
-            AirSide::Nato,
-            3,
-            &mut logic,
-            &Strategies::default(),
-            &mut next,
-        ));
-        let init = emit_side_logic(
-            AirSide::Nato,
-            &logic,
-            std::slice::from_mut(&mut root),
-            &mut next,
-        )
-        .unwrap();
-        root.children.extend(init);
-        let log = walk(
-            &root,
-            WalkerConfig::default(),
-            &WalkerInput {
-                until: ticks(2600.0),
-                arrivals,
-                tracks: vec![ScriptedTrack {
-                    coalition: 2,
-                    samples: vec![(0, K14_ORIGIN.0, K14_ORIGIN.1)],
-                }],
-                ..WalkerInput::default()
-            },
-        );
-        for (ids, attack, start) in observations {
-            assert_eq!(times(&log, ids.start), [ticks(start)]);
-            assert_eq!(times(&log, ids.done_hub).len(), 1);
-            let done = times(&log, ids.done_hub)[0];
-            assert!((done as f64 / 20.0 - (start + 300.5 + attack + 600.0)).abs() <= 0.5);
-            assert_eq!(times(&log, ids.delete_timer), [done + ticks(60.6)]);
-        }
-        budget_cell("T-k", 2, 180.0, &mut root, &mut next, &mut sources);
-        budget_cell("T-k1", 1, 240.0, &mut root, &mut next, &mut sources);
-        write_traced("P14_Sortie_Probe", root, sources, next);
-    }
-
-    #[test]
-    #[ignore = "writes target/p14 Probe 2 load file with 24 copies per side"]
-    fn write_p14_load_probe() {
-        let nato = [(150_000.0, 250_000.0), (155_000.0, 280_000.0)];
-        let dprk = [(180_000.0, 250_000.0), (185_000.0, 280_000.0)];
-        let ctx = AirContext {
-            nato_objectives: &nato,
-            east_objectives: &dprk,
-            ..crate::airtask::assemble::tests::context()
-        };
-        let mut plan = AirPlan {
-            library: builtin_library(),
-            budget: AirBudget::default(),
-            seed: 7,
-            ..AirPlan::default()
-        };
-        // Step 11's six entry roles. NATO uses six runs; repeat the two DPRK
-        // entries to reach the same 24-copy load without exceeding runs<=6.
-        for (index, area, mode) in [
-            (0, 0, TriggerMode::Clock),
-            (1, 1, TriggerMode::Clock),
-            (2, 0, TriggerMode::Zone),
-            (3, 1, TriggerMode::Both),
-            (4, 0, TriggerMode::Zone),
-            (5, 1, TriggerMode::Both),
-            (4, 0, TriggerMode::Zone),
-            (5, 1, TriggerMode::Both),
-        ] {
-            let sortie = &plan.library[index];
-            let target = if sortie.side == AirSide::Nato {
-                nato[area]
-            } else {
-                dprk[area]
-            };
-            let mut entry = PoolEntry::new(
-                sortie.id.clone(),
-                TargetRef::Objective {
-                    side: sortie.side,
-                    xz: target,
-                },
-            );
-            entry.mode = mode;
-            entry.runs = 6;
-            plan.pool.push(entry);
-        }
-        let mut next = 1;
-        let mut root = group("P14 Load Probe", &mut next);
-        let mut sources = Vec::new();
-        for side in [AirSide::Dprk, AirSide::Nato] {
-            let mut logic = SideLogic::default();
-            let mut copies = assemble_side(side, &plan, &ctx, &mut logic, &mut next).unwrap();
-            assert_eq!(logic.gates.len(), 24);
-            for entry in &copies.entries {
-                for copy in &entry.copies {
-                    sources.extend([
-                        copy.shell.start,
-                        copy.shell.done_hub,
-                        copy.shell.delete_timer,
-                    ]);
-                }
-            }
-            copies.trees[0].children.extend(budget::build_side(
-                side,
-                2,
-                &mut logic,
-                &plan.strategies,
-                &mut next,
-            ));
-            let init = emit_side_logic(side, &logic, &mut copies.trees, &mut next).unwrap();
-            copies.trees[0].children.extend(init);
-            root.children.extend(copies.trees);
-        }
-        let mut begin = template::mcu(
-            "MCU_TR_MissionBegin",
-            "LOAD PROBE CUE",
-            &mut next,
-            K14_ORIGIN.0,
-            K14_ORIGIN.1,
-        );
-        begin.set_property("Enabled", "1");
-        let begin_id = begin.index.unwrap();
-        root.children.push(begin);
-        let cue = at(
-            &mut root,
-            begin_id,
-            "LOAD PROBE READY",
-            1.0,
-            vec![],
-            &mut next,
-        );
-        subtitle(
-            &mut root,
-            cue,
-            "P14 load probe: 24 copies per side, idle. Record load time and server tick delay.",
-            20,
-            &mut next,
-        );
-        sources.push(cue);
-        assert_eq!(root.count_block_type("Plane"), 240);
-        let log = walk(
-            &root,
-            WalkerConfig::default(),
-            &WalkerInput {
-                until: ticks(10.0),
-                ..WalkerInput::default()
-            },
-        );
-        assert!(!log.pulses.iter().any(|p| p.name.ends_with(" START")));
-        write_traced("P14_Load_Probe", root, sources, next);
     }
 }

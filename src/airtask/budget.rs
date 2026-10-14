@@ -9,7 +9,7 @@ use crate::template;
 
 pub(crate) fn census_delay(census: CensusImpl, order: usize) -> f64 {
     match census {
-        CensusImpl::Spaced => order as f64 / 20.0, // P14 G0: default pending flight 0
+        CensusImpl::Spaced => order as f64 / 20.0, // Flight 0: E7 confirmed; Spaced remains the census default.
         CensusImpl::SameTick => 0.0,
     }
 }
@@ -31,7 +31,7 @@ pub(crate) fn build_side(
     next_id: &mut i32,
 ) -> Vec<Il2Entity> {
     let n = match strategies.budget {
-        BudgetImpl::HeadCount => n, // P14 G0: default pending flight 0
+        BudgetImpl::HeadCount => n, // Flight 0: E1/E2/E4 confirmed; HeadCount remains the budget default.
         BudgetImpl::SingleSlot => 1,
     };
     assert!((1..=6).contains(&n), "validated air budget must be 1..=6");
