@@ -1,37 +1,75 @@
 # DRAFT, not sent. Issue for `eszyman/IL2MissionUtility`
 
-> Status: draft, updated 2026-10-14 after flight 1M. Section 3's proposed fix for the Il-10 case is marked **[pending flight 1N]**. Do not post until the user says so, and run the text through `/hfe-mayer` first.
+> Status: draft, updated 2026-10-14 after flight 1P (the plan's "flight 1N"), which confirmed section 3's fix. `/hfe-mayer` pass done 2026-10-14. Do not post until the user says so.
 
 ---
 
 **Title:** Korea 1.005: jet strikes and CAPs abort on start, the death counter never counts aircraft, and the clean-up Delete removes nothing
 
-Hi. I use the fork at `Pliskin-Industries/Claude-IL2MissionUtility`. While building a new tab I flew a series of small test missions with the game's text log switched on, to check what the generated logic really does in IL-2 Korea. Three results affect groups the app generates today. Each is from a logged flight, not from reading the code; the logs and the mission files are in the fork and I can attach whatever helps.
+Hi. I use the fork at `Pliskin-Industries/Claude-IL2MissionUtility`. While building a new tab I flew a series of small test missions with the game's text log switched on, to check what the generated logic really does in IL-2 Korea. Each result below is from a logged flight, not from reading the code; the logs and the mission files are in the fork and I can attach whatever helps.
 
 Game version 1.005 (`261013`), dogfight server hosted from the client, AI aircraft only.
 
+| # | Problem | Proposed fix | Flown with the fix |
+|---|---|---|---|
+| 1 | Aircraft never raise event 4, so `DeathCount` never counts them | death event 13 for aircraft; in Fighter Pack, point it at each aircraft's `Delay Delete n` | yes |
+| 2 | `Trigger Delete` lists Plane block indexes, which the game ignores | Spawn mode: list entities. Activate mode: write no Delete | yes |
+| 3 | Jet strikes and CAPs abort on event 7 at start; a go-home step that fires twice leaves the flight with no orders | no abort on event 7; a once-only counter before the go-home timer | yes |
+
 ## 1. A destroyed aircraft raises event 13, never event 4
 
-**What the app writes.** For an aircraft, the death counter (`DeathCount`) listens for `OnPlaneDestroyed` (event type 4). That is `EntityEvent::default_for(UnitKind::Plane)`.
+### What the app writes
 
-**What the game does.** Every aircraft I destroyed raised `OnKilled` (13) once, at the moment it died. None raised 4. That held for a Damage command, AI gunfire, a mid-air collision, a crash during a fight, and an aircraft that ran out of fuel (13 fired when the pilot bailed out).
+For an aircraft, the death counter (`DeathCount`) listens for `OnPlaneDestroyed` (event type 4). That is `EntityEvent::default_for(UnitKind::Plane)`.
 
-**What that means in a mission.** I generated a repeat-spawn group with the app's own `generate_template` ("Allow multiple spawns" on) and killed the first wave:
+### What the game does
+
+Every aircraft I destroyed raised `OnKilled` (13) once, at the moment it died. None raised 4. That held for a Damage command, AI gunfire, a mid-air collision, a crash during a fight, and an aircraft that ran out of fuel (13 fired when the pilot bailed out).
+
+I generated a repeat-spawn group with the app's own `generate_template` ("Allow multiple spawns" on) and killed the first wave:
 
 | Group | Death event | After the first wave was killed |
 |---|---|---|
 | as generated | 4 | `DeathCount` never fired. No second wave. |
 | same group, event changed to 13 | 13 | `DeathCount` fired at once, `COOLDOWN` ran, the second wave spawned. Killing that wave started the cycle again. |
 
-So with event 4 the next wave only comes if players leave the zone and return. Fighter Pack builds on the same counter.
+So with event 4 the next wave only comes if players leave the zone and return.
 
-**Proposed fix.** `EntityEvent::default_for` returns `OnKilled` (13) for aircraft as it already does for everything else. One line; each generated aircraft's `OnEvent` to `DeathCount` changes from `Type = 4` to `Type = 13`. I can send the patch.
+### Proposed fix
+
+`EntityEvent::default_for` returns `OnKilled` (13) for aircraft as it already does for everything else. One line; each generated aircraft's `OnEvent` to `DeathCount` changes from `Type = 4` to `Type = 13`.
+
+### Fighter Pack needs a second change with it
+
+In a Fighter Pack flight each aircraft feeds its flight's `DeathCount` twice. A kill also raises pilot wounded (1) and critical damage (3), and Fighter Pack sends both to `CLEANUP n`:
+
+```mermaid
+flowchart LR
+    K[Aircraft killed] --> E13[Event 13]
+    K --> E13b[Events 1 and 3]
+    E13 -->|as written| DC[DeathCount]
+    E13b --> CL[CLEANUP n] --> DD[Delay Delete n, 60 s] --> DC
+    E13 -.->|proposed| DD
+```
+
+So once the death event fires, every kill counts twice, and a 4-ship is replaced after two losses. Today the double feed does no harm only because event 4 never fires. With the proposed wiring the timer is each aircraft's only feed, and a timer that is triggered again while it runs restarts and fires once (measured on 1.004 and 1.005). The change is one `TarId` per aircraft and no new MCUs. I flew both:
+
+| Fighter Pack flight, four F-80Cs killed at once | `DeathCount` fired |
+|---|---|
+| death event 13 on `DeathCount` | twice: at the kills, and 60 s later |
+| death event 13 on that aircraft's own `Delay Delete n` | once, 60 s after the kills |
+
+I can send the patch for both changes.
 
 ## 2. `Trigger Delete` lists the units' own indexes, and the game ignores it
 
-**What the app writes.** `Deactivate Units` lists each unit's entity (`MCU_TR_Entity`) index. `Trigger Delete` lists each unit's own block index (`object_ids` in `generate_template`).
+### What the app writes
 
-**What the game does.** I deleted two live aircraft two ways:
+`Deactivate Units` lists each unit's entity (`MCU_TR_Entity`) index. `Trigger Delete` lists each unit's own block index (`object_ids` in `generate_template`).
+
+### What the game does
+
+I deleted two live aircraft two ways:
 
 | `MCU_Delete` Objects | Result 30 s later |
 |---|---|
@@ -40,35 +78,70 @@ So with event 4 the next wave only comes if players leave the zone and return. F
 
 So a group that reaches `MISSION END` is deactivated but never deleted. It stays in the mission, switched off. With repeat spawns every finished wave stays: after one clean-up and one respawn, the log's end-of-mission list held two copies of each aircraft, the live one and the first one.
 
-**A catch before fixing it.** In Activate mode the group is re-activated when players come back to the zone. That works today only because the Delete does nothing. With entity indexes in `Trigger Delete`, my re-activated group did not come back. In Spawn mode the corrected Delete was fine: the next wave still spawned.
+### A catch before fixing it
 
-**Proposed fix.** Spawn mode: `Trigger Delete` lists the entity indexes (`entity_ids` in place of `object_ids`). Activate mode: do not write `DELETE DELAY` and `Trigger Delete` at all; the Deactivate already does the job, the units are needed again, and it saves two MCUs per group. I can send the patch.
+In Activate mode the group is re-activated when players come back to the zone. That works today only because the Delete does nothing. With entity indexes in `Trigger Delete`, my re-activated group did not come back. In Spawn mode the corrected Delete was fine: the next wave still spawned.
+
+### Proposed fix
+
+- Spawn mode: `Trigger Delete` lists the entity indexes (`entity_ids` in place of `object_ids`).
+- Activate mode: do not write `DELETE DELAY` and `Trigger Delete` at all. The Deactivate already does the job, the units are needed again, and it saves two MCUs per group.
+
+I can send the patch.
 
 ## 3. Strike and CAP: jets abort at once, and the go-home step can leave a flight with no orders
 
-I flew the strike and CAP groups your app writes (built at commit `a31ad0a` with Template Builder's own functions and the options the UI leaves), unchanged apart from added listeners, twice each.
+### What the app writes
+
+I flew the strike and CAP groups your app writes (built at commit `a31ad0a` with Template Builder's own functions and the options the UI leaves), unchanged apart from added listeners. Every abort event, event 7 (bingo fuel) among them, pulses one go-home timer, which sends `Force Complete - High` and the home waypoint to the lead.
+
+### What the game does
+
+Two runs of each:
 
 | Group | What happened, both runs |
 |---|---|
-| F-80C strike, as written | All four raised event 7 (bingo fuel) 3 s after they were activated, with full tanks. The go-home timer fired at once. The flight never reached its AttackArea. |
+| F-80C strike, as written | All four raised event 7 3 s after they were activated, with full tanks. The go-home timer fired at once. The flight never reached its AttackArea. |
 | Same strike, event 7 hooks removed | Attacked, went home when out of bombs, `Mission Complete` at about 5:50. |
 | F-86A CAP, as written | Event 7 at 3 s, went home at once. |
 | Same CAP, event 7 hooks removed | Patrolled normally. |
 | Il-10 strike, as written | No event 7. Attacked, then never got home: the go-home timer fired two or three times, and the flight stayed near the target with no orders. |
 
-**Event 7.** On game 1.005 the F-80C and F-86A raise "bingo fuel" about 3 s after activation, with full tanks; the Il-10 did not. Why the game raises it is not known. Any jet strike or CAP the app writes today goes home before doing its job.
+Event 7: the F-80Cs and F-86As in these files raise it about 3 s after activation; the Il-10s did not. It is not simply the type: twelve single aircraft as Template Builder writes them, the F-80C and F-86A among them, did not raise it, and nor did a Fighter Pack F-80C flight. Why the game raises it is not known.
 
-**The go-home timer.** Every abort event pulses the same timer, which sends `Force Complete - High` and the home waypoint to the lead. When the four "out of bombs" events arrived within half a second, the timer fired once and the flight went home. When they arrived over about a second, it fired twice: the second Force Complete seems to end the home waypoint the flight is already flying to, and the repeated waypoint does not restart it. A flight with no orders stays where it is, which is what the Il-10s did.
+The go-home timer: when the four "out of bombs" events arrived within half a second, the timer fired once and the flight went home. When they arrived over about a second, it fired twice. The second Force Complete seems to end the home waypoint the flight is already flying to, and the repeated waypoint does not restart it. A flight with no orders stays where it is, which is what the Il-10s did.
 
-**Proposed fixes.**
+### Proposed fix
+
 - Do not use event 7 as an abort for jets (or at all, until it is understood).
-- Make the go-home step fire once per flight: a `Counter` of 1 that does not reset, between the abort events and the go-home timer. **[pending flight 1N, which flies this fix and a version without the Force Complete]**
+- Make the go-home step fire once per flight: a `Counter` of 1 that does not reset (`Counter = 1`, `Dropcount = 0`), between the abort events and the go-home timer. One MCU per flight.
+
+```mermaid
+flowchart LR
+    A[Abort events 1, 3, 9] --> C[Counter 1, Dropcount 0]
+    C --> T[Go-home timer]
+    T --> FC[Force Complete - High]
+    T --> WP[Home waypoint]
+    R[Attack order finished] --> T
+```
+
+### The fix, flown
+
+One run:
+
+| Group | What happened |
+|---|---|
+| Il-10 strike, as written (control) | the go-home timer fired four times; no `Mission Complete`; the survivors stayed near the target |
+| Il-10 strike with the once-only counter | the go-home timer fired once; home; `Mission Complete` at 7:29 |
+| F-80C strike, event 7 hooks removed, with the counter | went home when its attack order ran out (no target in its area); `Mission Complete` at 6:28 |
+
+I also flew the Il-10 strike with the Force Complete removed from the go-home timer. It went home too, but its four abort events came within 0.3 s, so the timer fired once and the case that matters was not tested. The counter is the fix I would propose.
 
 ## 4. Smaller things, for information
 
-- **`AiRTBDecision = 1` can take aircraft out of the mission's hands.** When a formation with that setting was damaged, all its aircraft but one stopped answering Delete, Deactivate and Damage commands, flew to the nearest friendly airfield and landed (one of two in four pairs, three of four in a 4-ship). With `AiRTBDecision = 0` every aircraft stayed on task and deleted cleanly. Your strike and CAP files already write 0; a Template Builder group whose aircraft carry 1 would be affected.
-- **A strike that is shot down never reaches `Mission Complete`,** so nothing pulses `MISSION END`. When strikes share Exclusive Activation, that plan would hold the lock. I read this from the code and have not flown it.
-- **`MissionResaver.exe` crashes on every mission since 1.005,** including the game's own `_test_dogfight_IL-3.Mission`. The game still hosts a plain `.Mission` with its `.eng`.
+- `AiRTBDecision = 1` can take aircraft out of the mission's hands. When a formation with that setting was damaged, all its aircraft but one stopped answering Delete, Deactivate and Damage commands, flew to the nearest friendly airfield and landed (one of two in four pairs, three of four in a 4-ship). With `AiRTBDecision = 0` every aircraft stayed on task and deleted cleanly. Your strike and CAP files already write 0; a Template Builder group whose aircraft carry 1 would be affected.
+- A strike that is shot down never reaches `Mission Complete`, so nothing pulses `MISSION END`. When strikes share Exclusive Activation, that plan would hold the lock. I read this from the code and have not flown it.
+- `MissionResaver.exe` crashes on every mission since 1.005, including the game's own `_test_dogfight_IL-3.Mission`. The game still hosts a plain `.Mission` with its `.eng`.
 
 ## How these were tested
 
