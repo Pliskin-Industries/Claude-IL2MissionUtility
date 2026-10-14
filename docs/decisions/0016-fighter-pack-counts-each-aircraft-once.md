@@ -32,5 +32,5 @@ None yet. Claude recommends B.
 ## Consequences
 - Under B a replacement flight comes later by the clean-up delay (60 s by default) when its trigger was a death. The cooldown before a replacement is already minutes.
 - `Deactivate n` also fires for an aircraft that died. A Deactivate on a dead aircraft does nothing.
-- The timer-restart behaviour was measured on game 1.004 (flight 0 and its calibration). Flight 1M repeats that cell on 1.005.
+- The timer-restart behaviour was measured on game 1.004 (flight 0 and its calibration) and again on 1.005 in flight 1M (two runs): a 10 s timer re-triggered at 5 s fired once, 15 s after its first trigger.
 - Generated Fighter Pack files change by one `TarId` per aircraft.

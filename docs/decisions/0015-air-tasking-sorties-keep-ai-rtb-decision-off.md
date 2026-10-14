@@ -20,3 +20,7 @@ Every aircraft Air Tasking places is written with `AiRTBDecision = 0`. Going hom
 - The six built-in sorties carry `AiRTBDecision = 1` on every plane; `place_air_sortie` sets 0 on the copies it places and leaves the files alone.
 - A damaged AI aircraft keeps fighting until the sortie's logic sends it home. Which events do that (3 critical damage, 1 pilot wounded) is part of step 3.
 - Not tested: more than one pair, a 4-ship, and a single aircraft with the setting on.
+
+## Evidence added 2026-10-14 (flight 1M)
+Built and flown: a 4-ship placed by `place_air_sortie` (setting 0, written by the code) was damaged and then deleted on command, all four. The same 4-ship with the setting on: three of the four ignored the Delete and a Damage command and flew home. A single damaged aircraft with the setting on stayed reachable. The decision stands; the case for it is stronger than the pairs showed.
+
