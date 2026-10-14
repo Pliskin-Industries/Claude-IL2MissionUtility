@@ -1,4 +1,4 @@
-//! Test-only generators for the P14 in-game probes (steps 0b/0e/0f/0g/0h/0i/0j).
+//! Test-only generators for the P14 in-game probes (steps 0b/0e/0f/0g/0h/0i/0j/0k).
 //! Flights 0, 1A, 1G, 1N and 1D were flown; their results are recorded in
 //! `handoff/P14-probe-results.md`. Committed copies of the flown files are in
 //! `handoff/p14-probes/`. Flight 1B was retired by decision 0010.
@@ -13,8 +13,9 @@ use crate::locale::{P14_PROBE_LC_START, p14_probe_locale};
 use crate::parser::parse_group_file;
 use crate::serialize::serialize_group;
 use crate::template::{
-    BringUp, FlightRole, TemplateOptions, TemplateSeat, attach_event, builtin_plane_catalog,
-    checkzone, counter, generate_template, mcu, modifier_set_val, timer, timer_random,
+    BringUp, FlightRole, PlaneStart, TemplateOptions, TemplateSeat, UnitKind,
+    apply_plane_start, attach_event, builtin_plane_catalog, bundled_catalog,
+    checkzone, counter, generate_template, mcu, modifier_set_val, read_event, timer, timer_random,
 };
 use crate::trace::{self, ObjectiveStyle, TraceCarrier, TraceMap, TraceSelect, TraceSource};
 
@@ -22,6 +23,13 @@ const HVAR: &str =
     include_str!("../../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group");
 const W_INPUT_DIR: &str = "src/testdata/p14_probe_inputs/flight1l";
 const X_INPUT_DIR: &str = "src/testdata/p14_probe_inputs/flight1m";
+const P_INPUT_DIR: &str = "src/testdata/p14_probe_inputs/flight1p";
+const P_PACK_FILE: &str = "FighterPack_F80C_4ship.Group";
+const P_FLIGHT: &str = "1P";
+const P_PACK_AIRCRAFT: u32 = 4;
+const P_PACK_SKILL: i32 = 2;
+const P_PACK_DEATH_COUNT_RESET: &str = "1";
+const P_PACK_RANDOM_PERCENT: &str = "100";
 const U_INPUT_DIR: &str = "src/testdata/p14_probe_inputs/upstream_a31ad0a";
 const U_NATO_STRIKE_FILE: &str = "Upstream_Strike_NATO_F80C_4ship.Group";
 const U_DPRK_STRIKE_FILE: &str = "Upstream_Strike_DPRK_Il10_4ship.Group";
@@ -74,8 +82,17 @@ const TEMPLATE_SPAWN_COUNT: &str = "SpawnCount";
 const TEMPLATE_TRANSLATOR_MISSION_BEGIN: &str = "Translator Mission Begin";
 const TEMPLATE_ZONE_IN: &str = "Zone IN";
 const TEMPLATE_DELAYED_END_ORDERS: &str = "DELAYED END ORDERS";
+const TEMPLATE_LOGIC: &str = "Logic";
+const TEMPLATE_FORCE_COMPLETE_HIGH: &str = "Force Complete - High";
 const STRIKE_HOME_TIMER: &str = "Goto WP 2";
 const CAP_HOME_TIMER: &str = "Goto WP 5";
+const HOME_ONCE_GATE: &str = "Go Home Once";
+const PACK_RANDOMIZER_INPUT: &str = "Randomizer:INPUT";
+const PACK_CLOSE_INPUT: &str = "CloseInput";
+const PACK_WAIT_FOR_OUTPUT: &str = "Wait for Output 1000ms";
+const PACK_RANDOM_FLIGHT: &str = "Random 1:100% 500ms";
+const PACK_RANDOMIZER_OUTPUT: &str = "Out 1";
+const PACK_SPAWN: &str = "Spawn 1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Flight {
@@ -89,12 +106,13 @@ pub(crate) enum Flight {
     OneK,
     OneL,
     OneM,
+    OneP,
 }
 
 impl Flight {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 11] = [
         Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG, Self::OneH, Self::OneJ,
-        Self::OneK, Self::OneL, Self::OneM,
+        Self::OneK, Self::OneL, Self::OneM, Self::OneP,
     ];
 
     fn stem(self) -> &'static str {
@@ -109,6 +127,7 @@ impl Flight {
             Self::OneK => "P14_Probe_1K",
             Self::OneL => "P14_Probe_1L",
             Self::OneM => "P14_Probe_1M",
+            Self::OneP => "P14_Probe_1P",
         }
     }
 
@@ -124,6 +143,7 @@ impl Flight {
             Self::OneK => RUN_SHEET_1K,
             Self::OneL => RUN_SHEET_1L,
             Self::OneM => RUN_SHEET_1M,
+            Self::OneP => RUN_SHEET_1P,
         }
     }
 
@@ -146,7 +166,7 @@ impl Flight {
                 script: "mig15bis",
             }],
             Self::Zero | Self::OneA | Self::OneG | Self::OneH | Self::OneJ | Self::OneK
-                | Self::OneL | Self::OneM => &[],
+                | Self::OneL | Self::OneM | Self::OneP => &[],
         }
     }
 }
@@ -342,6 +362,27 @@ pub(crate) const RUN_SHEET_1M: &[Cell] = &[
     },
 ];
 
+pub(crate) const RUN_SHEET_1P: &[Cell] = &[
+    Cell {
+        key: "T-h",
+        centre_km: (50.0, 20.0),
+        arm_s: P_START_S,
+        close_s: P_CLOSE_S,
+    },
+    Cell {
+        key: "T-f",
+        centre_km: (90.0, 20.0),
+        arm_s: P_START_S,
+        close_s: P_CLOSE_S,
+    },
+    Cell {
+        key: "T-b",
+        centre_km: (10.0, 20.0),
+        arm_s: P_START_S,
+        close_s: P_CLOSE_S,
+    },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Cue {
     pub flight: Flight,
@@ -495,6 +536,16 @@ pub(crate) const CUES: &[Cue] = &[
         time_s: M_DONE_S,
         text: "Flight 1M done. End the mission normally",
     },
+    Cue {
+        flight: Flight::OneP,
+        time_s: 0.0,
+        text: "1P: no flying needed. Stay on the ground at K14 until 14:00",
+    },
+    Cue {
+        flight: Flight::OneP,
+        time_s: P_DONE_S,
+        text: "Flight 1P done. End the mission normally",
+    },
 ];
 
 const A1_START_KM: (f64, f64) = (-30.0, 60.0);
@@ -549,6 +600,10 @@ const L_CLOSE_S: f64 = 1560.0;
 const M_START_S: f64 = 60.0;
 const M_DONE_S: f64 = 840.0;
 const M_CLOSE_S: f64 = 960.0;
+const P_START_S: f64 = 60.0;
+const P_KILL_S: f64 = 180.0;
+const P_DONE_S: f64 = 840.0;
+const P_CLOSE_S: f64 = 960.0;
 const X_CHANGE_S: f64 = 180.0;
 const X_RESTART_S: f64 = 240.0;
 const X_DETECT_S: f64 = 360.0;
@@ -577,6 +632,17 @@ const V_EVENT_TYPES: [i32; 14] = [
     EVENT_DAMAGED,
     EVENT_KILLED,
 ];
+const G_EVENT_TYPES: [i32; 5] = [
+    EVENT_PILOT_KILLED,
+    EVENT_PLANE_CRASHED,
+    EVENT_PLANE_DESTROYED,
+    EVENT_PLANE_LANDED,
+    EVENT_KILLED,
+];
+const B_EVENT_TYPES: [i32; 5] = [
+    EVENT_PLANE_BINGO_FUEL, EVENT_PLANE_BINGO_MAIN_MG, EVENT_PLANE_BINGO_BOMBS,
+    EVENT_KILLED, EVENT_PLANE_LANDED,
+];
 const E_SIX_PULSES: [f64; 6] = [60.0, 62.0, 64.0, 66.0, 68.0, 70.0];
 const E3_PULSES: [f64; 3] = [60.0, 62.0, 66.0];
 const E_PARTIAL_PULSES: [f64; 3] = [60.0, 62.0, 64.0];
@@ -599,13 +665,6 @@ const T2_PULSES: [f64; 5] = [277.0, 279.0, 281.0, 283.0, 285.0];
 const T3_SAME_TICK_S: f64 = 287.0;
 const T5_PULSES: [f64; 2] = [315.0, 320.0];
 const T7_SAME_TICK_S: f64 = 325.0;
-const G_EVENT_TYPES: [i32; 5] = [
-    EVENT_PILOT_KILLED,
-    EVENT_PLANE_CRASHED,
-    EVENT_PLANE_DESTROYED,
-    EVENT_PLANE_LANDED,
-    EVENT_KILLED,
-];
 
 struct CounterProbeRow {
     name: &'static str,
@@ -1221,13 +1280,17 @@ impl UpstreamOrders {
         }
     }
 
-    fn event_types(&self) -> [i32; 6] {
+    fn abort_events(&self) -> [i32; 4] {
         match self {
             Self::Strike => [EVENT_PLANE_BINGO_BOMBS, EVENT_PLANE_CRITICAL_DAMAGE,
-                EVENT_PILOT_WOUNDED, EVENT_PLANE_BINGO_FUEL, EVENT_KILLED, EVENT_PLANE_LANDED],
+                EVENT_PILOT_WOUNDED, EVENT_PLANE_BINGO_FUEL],
             Self::Cap => [EVENT_PLANE_BINGO_MAIN_MG, EVENT_PLANE_BINGO_FUEL,
-                EVENT_PLANE_CRITICAL_DAMAGE, EVENT_PILOT_WOUNDED, EVENT_KILLED, EVENT_PLANE_LANDED],
+                EVENT_PLANE_CRITICAL_DAMAGE, EVENT_PILOT_WOUNDED],
         }
+    }
+
+    fn event_types(&self) -> Vec<i32> {
+        self.abort_events().into_iter().chain([EVENT_KILLED, EVENT_PLANE_LANDED]).collect()
     }
 
     fn timers(&self) -> &'static [&'static str] {
@@ -1243,6 +1306,23 @@ impl UpstreamOrders {
 enum UpstreamChange {
     None,
     RemoveEvent7AbortHooks,
+    OnceOnlyAbortGate,
+    RemoveHomeForceComplete,
+    RemoveEvent7AbortHooksAndGate,
+}
+
+impl UpstreamChange {
+    fn removes_event7_hooks(&self) -> bool {
+        matches!(self, Self::RemoveEvent7AbortHooks | Self::RemoveEvent7AbortHooksAndGate)
+    }
+
+    fn gates_aborts(&self) -> bool {
+        matches!(self, Self::OnceOnlyAbortGate | Self::RemoveEvent7AbortHooksAndGate)
+    }
+
+    fn removes_home_force_complete(&self) -> bool {
+        matches!(self, Self::RemoveHomeForceComplete)
+    }
 }
 
 struct UpstreamProbeRow {
@@ -1289,6 +1369,101 @@ const U_GROUPS: &[UpstreamProbeRow] = &[
         orders: UpstreamOrders::Cap,
         change: UpstreamChange::RemoveEvent7AbortHooks,
     },
+];
+
+const H_GROUPS: &[UpstreamProbeRow] = &[
+    UpstreamProbeRow {
+        name: "H1",
+        centre_km: (50.0, 20.0),
+        source_file: U_DPRK_STRIKE_FILE,
+        orders: UpstreamOrders::Strike,
+        change: UpstreamChange::None,
+    },
+    UpstreamProbeRow {
+        name: "H2",
+        centre_km: (50.0, 60.0),
+        source_file: U_DPRK_STRIKE_FILE,
+        orders: UpstreamOrders::Strike,
+        change: UpstreamChange::OnceOnlyAbortGate,
+    },
+    UpstreamProbeRow {
+        name: "H3",
+        centre_km: (50.0, 100.0),
+        source_file: U_DPRK_STRIKE_FILE,
+        orders: UpstreamOrders::Strike,
+        change: UpstreamChange::RemoveHomeForceComplete,
+    },
+    UpstreamProbeRow {
+        name: "H4",
+        centre_km: (130.0, 20.0),
+        source_file: U_NATO_STRIKE_FILE,
+        orders: UpstreamOrders::Strike,
+        change: UpstreamChange::RemoveEvent7AbortHooksAndGate,
+    },
+];
+
+enum FighterCountChange {
+    None,
+    RemoveEvent7Hooks,
+    RemoveEvent7HooksAndCountDeathsDirectly,
+}
+
+impl FighterCountChange {
+    fn removes_event7_hooks(&self) -> bool {
+        matches!(self, Self::RemoveEvent7Hooks | Self::RemoveEvent7HooksAndCountDeathsDirectly)
+    }
+
+    fn counts_deaths_directly(&self) -> bool {
+        matches!(self, Self::RemoveEvent7HooksAndCountDeathsDirectly)
+    }
+}
+
+struct FighterCountRow {
+    name: &'static str,
+    centre_km: (f64, f64),
+    change: FighterCountChange,
+}
+
+// One frozen four-aircraft flight, three copies. All seats are Independent:
+// each row's 03:00 timer fires four separate entity-linked Damage commands.
+const P_FIGHTERS: &[FighterCountRow] = &[
+    FighterCountRow {
+        name: "F1",
+        centre_km: (90.0, 20.0),
+        change: FighterCountChange::None,
+    },
+    FighterCountRow {
+        name: "F2",
+        centre_km: (90.0, 60.0),
+        change: FighterCountChange::RemoveEvent7Hooks,
+    },
+    FighterCountRow {
+        name: "F3",
+        centre_km: (90.0, 100.0),
+        change: FighterCountChange::RemoveEvent7HooksAndCountDeathsDirectly,
+    },
+];
+
+struct BingoAircraftRow {
+    name: &'static str,
+    centre_km: (f64, f64),
+    script: &'static str,
+}
+
+// Template Builder's bundled catalog, selected by script, excluding simpleb29.
+const B_AIRCRAFT: &[BingoAircraftRow] = &[
+    BingoAircraftRow { name: "B1", centre_km: (10.0, 20.0), script: "f80c10" },
+    BingoAircraftRow { name: "B2", centre_km: (10.0, 28.0), script: "f84e" },
+    BingoAircraftRow { name: "B3", centre_km: (10.0, 36.0), script: "f86a5" },
+    BingoAircraftRow { name: "B4", centre_km: (10.0, 44.0), script: "f51d" },
+    BingoAircraftRow { name: "B5", centre_km: (10.0, 52.0), script: "b29" },
+    BingoAircraftRow { name: "B6", centre_km: (10.0, 60.0), script: "c47b" },
+    BingoAircraftRow { name: "B7", centre_km: (10.0, 68.0), script: "mig15bis" },
+    BingoAircraftRow { name: "B8", centre_km: (10.0, 76.0), script: "la11" },
+    BingoAircraftRow { name: "B9", centre_km: (10.0, 84.0), script: "yak9p" },
+    BingoAircraftRow { name: "B10", centre_km: (10.0, 92.0), script: "il10" },
+    BingoAircraftRow { name: "B11", centre_km: (10.0, 100.0), script: "tu2" },
+    BingoAircraftRow { name: "B12", centre_km: (10.0, 108.0), script: "li2t" },
 ];
 
 struct GeneratedProbeRow {
@@ -1933,11 +2108,15 @@ impl Probe {
     }
 
     fn damage_level_at(&mut self, name: &str, time_s: f64, entity: i32, level: DamageLevel) {
+        let damage = self.damage_command(name, entity, level);
+        self.at(&format!("{name} AT"), time_s, &[damage]);
+    }
+
+    fn damage_command(&mut self, name: &str, entity: i32, level: DamageLevel) -> i32 {
         let mut damage = self.reference_mcu("MCU_CMD_Damage", name);
         damage.set_property("Damage", level.property());
         damage.set_objects(vec![entity]);
-        let damage = self.add(damage);
-        self.at(&format!("{name} AT"), time_s, &[damage]);
+        self.add(damage)
     }
 
     /// Keep G1's country, skill, Attack shape and object order for every hunter.
@@ -2996,9 +3175,13 @@ fn build_w(p: &mut Probe) {
 }
 
 fn m_node_id(root: &Il2Entity, group_name: &str, node_name: &str) -> i32 {
+    probe_node_id(root, "1M", group_name, node_name)
+}
+
+fn probe_node_id(root: &Il2Entity, flight: &str, group_name: &str, node_name: &str) -> i32 {
     root.find_by_name(node_name)
-        .unwrap_or_else(|| panic!("flight 1M {group_name}: missing node {node_name}"))
-        .index.unwrap_or_else(|| panic!("flight 1M {group_name}: node {node_name} missing Index"))
+        .unwrap_or_else(|| panic!("flight {flight} {group_name}: missing node {node_name}"))
+        .index.unwrap_or_else(|| panic!("flight {flight} {group_name}: node {node_name} missing Index"))
 }
 
 fn frozen_m_group(
@@ -3008,15 +3191,26 @@ fn frozen_m_group(
     centre_km: (f64, f64),
     next_id: &mut i32,
 ) -> Il2Entity {
+    frozen_probe_group("1M", name, directory, file, centre_km, next_id)
+}
+
+fn frozen_probe_group(
+    flight: &str,
+    name: &str,
+    directory: &str,
+    file: &str,
+    centre_km: (f64, f64),
+    next_id: &mut i32,
+) -> Il2Entity {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(directory).join(file);
     let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("flight 1M {name}: cannot read {}: {error}", path.display()));
+        .unwrap_or_else(|error| panic!("flight {flight} {name}: cannot read {}: {error}", path.display()));
     let source = parse_group_file(&text)
-        .unwrap_or_else(|error| panic!("flight 1M {name}: cannot parse {}: {error}", path.display()));
-    let zone = m_node_id(&source, name, TEMPLATE_ZONE_IN);
+        .unwrap_or_else(|error| panic!("flight {flight} {name}: cannot parse {}: {error}", path.display()));
+    let zone = probe_node_id(&source, flight, name, TEMPLATE_ZONE_IN);
     let anchor = by_id(&source, zone).pos_xz()
-        .unwrap_or_else(|| panic!("flight 1M {name}: Zone IN missing position"));
-    m_node_id(&source, name, TEMPLATE_TRANSLATOR_MISSION_BEGIN);
+        .unwrap_or_else(|| panic!("flight {flight} {name}: Zone IN missing position"));
+    probe_node_id(&source, flight, name, TEMPLATE_TRANSLATOR_MISSION_BEGIN);
     let (mut copy, _) = crate::duplicate::duplicate_template(&source, next_id);
     crate::placement::move_anchor_to(&mut copy, anchor, world(centre_km));
     crate::recon::silence_clone_starts(&mut copy);
@@ -3024,41 +3218,92 @@ fn frozen_m_group(
 }
 
 fn build_u(p: &mut Probe) {
-    let cell = p.cell.expect("flight 1M: missing T-u cell");
+    build_upstream_rows(p, "1M", U_GROUPS);
+}
+
+fn remove_probe_event_hook(copy: &mut Il2Entity, entity: i32, hook: (i32, i32), context: &str) {
+    let mut removed = 0;
+    by_id_mut(copy, entity).for_each_mut(&mut |node| {
+        if node.block_type == "OnEvents" {
+            node.children.retain(|event| {
+                let remove = read_event(event) == Some(hook);
+                removed += usize::from(remove);
+                !remove
+            });
+        }
+    });
+    assert_eq!(removed, 1, "{context}: entity {entity} missing one event {} hook to {}", hook.0, hook.1);
+}
+
+fn retarget_probe_event_hook(
+    copy: &mut Il2Entity, entity: i32, hook: (i32, i32), target: i32, context: &str,
+) {
+    let mut changed = 0;
+    by_id_mut(copy, entity).for_each_mut(&mut |event| {
+        if read_event(event) == Some(hook) {
+            event.set_property("TarId", target.to_string());
+            changed += 1;
+        }
+    });
+    assert_eq!(changed, 1, "{context}: entity {entity} missing one event {} hook to {}", hook.0, hook.1);
+}
+
+fn apply_upstream_change(
+    flight: &str, row: &UpstreamProbeRow, copy: &mut Il2Entity, entities: &[i32], next_id: &mut i32,
+) {
+    let name = row.name;
+    let context = format!("flight {flight} {name}");
+    let home = probe_node_id(copy, flight, name, row.orders.home_timer());
+    if row.change.removes_event7_hooks() {
+        for &entity in entities {
+            remove_probe_event_hook(copy, entity, (EVENT_PLANE_BINGO_FUEL, home), &context);
+        }
+    }
+    if row.change.gates_aborts() {
+        let (x, z) = by_id(copy, home).pos_xz()
+            .unwrap_or_else(|| panic!("{context}: {} missing position", row.orders.home_timer()));
+        // The same existing counter builder as Probe::count; keep its shape.
+        let mut gate = counter(HOME_ONCE_GATE, 1, 0, next_id, x, z);
+        gate.set_targets(vec![home]);
+        let gate_id = gate.index.expect("probe counter missing Index");
+        let aborts: Vec<_> = row.orders.abort_events().into_iter()
+            .filter(|&event| event != EVENT_PLANE_BINGO_FUEL || !row.change.removes_event7_hooks())
+            .collect();
+        for &entity in entities {
+            for &event in &aborts {
+                retarget_probe_event_hook(copy, entity, (event, home), gate_id, &context);
+            }
+        }
+        let logic = probe_node_id(copy, flight, name, TEMPLATE_LOGIC);
+        by_id_mut(copy, logic).children.push(gate);
+    }
+    if row.change.removes_home_force_complete() {
+        let force = probe_node_id(copy, flight, name, TEMPLATE_FORCE_COMPLETE_HIGH);
+        let home = by_id_mut(copy, home);
+        assert_eq!(home.targets.iter().filter(|&&target| target == force).count(), 1,
+            "{context}: {} missing one Force Complete target", row.orders.home_timer());
+        home.set_targets(home.targets.iter().copied().filter(|&target| target != force).collect());
+    }
+}
+
+fn build_upstream_rows(p: &mut Probe, flight: &str, rows: &[UpstreamProbeRow]) {
+    let cell = p.cell.unwrap_or_else(|| panic!("flight {flight}: missing upstream probe cell"));
     let close = id(&p.root, &format!("{} CLOSE", cell.key));
-    for row in U_GROUPS {
+    for row in rows {
         let name = row.name;
         // The named wrapper is probe-owned; even the source Group Name stays intact.
         let mut wrapper = group(name, &mut p.next_id);
-        let mut copy = frozen_m_group(name, U_INPUT_DIR, row.source_file, row.centre_km, &mut p.next_id);
+        let mut copy = frozen_probe_group(flight, name, U_INPUT_DIR, row.source_file, row.centre_km, &mut p.next_id);
         let planes = block_ids(&copy, "Plane");
         let entities = block_ids(&copy, "MCU_TR_Entity");
-        assert_eq!(planes.len(), 4, "flight 1M {name}: expected four Plane blocks");
-        assert_eq!(entities.len(), 4, "flight 1M {name}: expected four plane entities");
-        let home = m_node_id(&copy, name, row.orders.home_timer()).to_string();
-        if matches!(row.change, UpstreamChange::RemoveEvent7AbortHooks) {
-            for &entity in &entities {
-                let mut removed = 0;
-                by_id_mut(&mut copy, entity).for_each_mut(&mut |node| {
-                    if node.block_type == "OnEvents" {
-                        node.children.retain(|event| {
-                            let remove = event.block_type == "OnEvent"
-                                && event.property("Type") == Some(EVENT_PLANE_BINGO_FUEL.to_string().as_str())
-                                && event.property("TarId") == Some(home.as_str());
-                            removed += usize::from(remove);
-                            !remove
-                        });
-                    }
-                });
-                assert_eq!(removed, 1,
-                    "flight 1M {name}: entity {entity} missing one event 7 hook to {}", row.orders.home_timer());
-            }
-        }
-        m_node_id(&copy, name, TEMPLATE_MISSION_BEGIN);
+        assert_eq!(planes.len(), 4, "flight {flight} {name}: expected four Plane blocks");
+        assert_eq!(entities.len(), 4, "flight {flight} {name}: expected four plane entities");
+        apply_upstream_change(flight, row, &mut copy, &entities, &mut p.next_id);
+        probe_node_id(&copy, flight, name, TEMPLATE_MISSION_BEGIN);
         let outputs: Vec<_> = row.orders.timers().iter().map(|&timer_name| {
-            let index = m_node_id(&copy, name, timer_name);
+            let index = probe_node_id(&copy, flight, name, timer_name);
             assert_eq!(by_id(&copy, index).block_type, "MCU_Timer",
-                "flight 1M {name}: {timer_name} must be a timer");
+                "flight {flight} {name}: {timer_name} must be a timer");
             (timer_name, index)
         }).collect();
         wrapper.children.push(copy);
@@ -3186,34 +3431,187 @@ fn build_larger_rtb(p: &mut Probe) {
     }
 }
 
+fn current_p_pack() -> Il2Entity {
+    let mut source = crate::pack::builtin_template()
+        .unwrap_or_else(|error| panic!("flight {P_FLIGHT} T-f: cannot load Fighter Pack template: {error}"));
+    crate::flights::configure_aircraft(&mut source, &crate::flights::FlightConfig {
+        flight_count: 1,
+        max_in_flight: P_PACK_AIRCRAFT,
+        type_ids: vec!["f80c10".into()],
+        type_skills: vec![P_PACK_SKILL],
+        country: COUNTRY_USA,
+        ..crate::flights::FlightConfig::default()
+    }).unwrap_or_else(|error| panic!("flight {P_FLIGHT} T-f: configure_aircraft failed: {error}"));
+    // Complete the app's normal generation path: rebuild NodeGates for one
+    // pack group, retaining the generated orders and per-aircraft cleanup.
+    let pack = crate::pack::generate_pack(&source, 1)
+        .unwrap_or_else(|error| panic!("flight {P_FLIGHT} T-f: generate_pack failed: {error}"));
+    validate_p_pack(&pack, "frozen T-f input");
+    pack
+}
+
+fn validate_p_pack(pack: &Il2Entity, name: &str) {
+    let defaults = crate::flights::FlightConfig::default();
+    let node = |node_name: &str| probe_node_id(pack, P_FLIGHT, name, node_name);
+    let death = node(TEMPLATE_DEATH_COUNT);
+    let cooldown = node(TEMPLATE_COOLDOWN);
+    let input = node(PACK_RANDOMIZER_INPUT);
+    let spawn = node(PACK_SPAWN);
+    let planes = block_ids(pack, "Plane");
+    let entities = block_ids(pack, "MCU_TR_Entity");
+    assert_eq!(planes.len(), P_PACK_AIRCRAFT as usize,
+        "flight {P_FLIGHT} {name}: expected {P_PACK_AIRCRAFT} Plane blocks");
+    assert_eq!(entities.len(), P_PACK_AIRCRAFT as usize,
+        "flight {P_FLIGHT} {name}: expected {P_PACK_AIRCRAFT} aircraft entities");
+    assert_eq!(by_id(pack, death).property("Counter"), Some(entities.len().to_string().as_str()),
+        "flight {P_FLIGHT} {name}: DeathCount must count every aircraft entity");
+    assert_eq!(by_id(pack, death).property("Dropcount"), Some(P_PACK_DEATH_COUNT_RESET), "flight {P_FLIGHT} {name}: DeathCount reset");
+    assert_eq!(by_id(pack, death).targets, [cooldown], "flight {P_FLIGHT} {name}: DeathCount starts COOLDOWN");
+    assert_eq!(by_id(pack, cooldown).property("Time"), Some(defaults.cooldown.to_string().as_str()),
+        "flight {P_FLIGHT} {name}: COOLDOWN time");
+    assert_eq!(by_id(pack, cooldown).targets, [input], "flight {P_FLIGHT} {name}: replacement must not need a zone/player");
+    assert_eq!(by_id(pack, input).targets,
+        [node(PACK_CLOSE_INPUT), node(PACK_WAIT_FOR_OUTPUT), node(PACK_RANDOM_FLIGHT)],
+        "flight {P_FLIGHT} {name}: replacement randomizer changed");
+    assert_eq!(by_id(pack, node(PACK_RANDOM_FLIGHT)).property("Random"), Some(P_PACK_RANDOM_PERCENT),
+        "flight {P_FLIGHT} {name}: single flight must always be selected");
+    assert_eq!(by_id(pack, node(PACK_RANDOM_FLIGHT)).targets, [node(PACK_RANDOMIZER_OUTPUT)],
+        "flight {P_FLIGHT} {name}: missing randomizer output");
+    assert_eq!(by_id(pack, node(PACK_RANDOMIZER_OUTPUT)).targets, [spawn], "flight {P_FLIGHT} {name}: missing replacement Spawn 1");
+    assert_eq!(by_id(pack, spawn).objects, entities, "flight {P_FLIGHT} {name}: Spawn 1 aircraft");
+    assert_eq!(by_id(pack, node(TEMPLATE_SPAWN_UNITS)).targets, [input], "flight {P_FLIGHT} {name}: bring-up");
+    for (seat, &entity) in entities.iter().enumerate() {
+        let n = seat + 1;
+        let delay = node(&format!("Delay Delete {n}"));
+        let done = node(&format!("Mission Complete {n}"));
+        let cleanup = node(&format!("CLEANUP {n}"));
+        assert!(by_id(pack, entity).targets.is_empty(), "flight {P_FLIGHT} {name}: aircraft {n} must be Independent");
+        let events = probe_events(by_id(pack, entity));
+        assert_eq!(events.iter().filter(|&&(event, _)| event == EVENT_KILLED).copied().collect::<Vec<_>>(),
+            [(EVENT_KILLED, delay)], "flight {P_FLIGHT} {name}: aircraft {n} missing 0016 death hook");
+        assert_eq!(events.iter().filter(|&&(event, _)| event == EVENT_PLANE_BINGO_FUEL).copied().collect::<Vec<_>>(),
+            [(EVENT_PLANE_BINGO_FUEL, done)], "flight {P_FLIGHT} {name}: aircraft {n} missing event 7 hook");
+        assert_eq!(by_id(pack, done).targets, [cleanup], "flight {P_FLIGHT} {name}: aircraft {n} Mission Complete");
+        assert_eq!(by_id(pack, cleanup).targets,
+            [node(&format!("Force Complete {n}")), node(&format!("RTB DELAY {n}")), delay],
+            "flight {P_FLIGHT} {name}: aircraft {n} CLEANUP");
+        assert_eq!(by_id(pack, delay).property("Time"), Some(defaults.delete_orders.to_string().as_str()),
+            "flight {P_FLIGHT} {name}: aircraft {n} clean-up delay");
+        assert_eq!(by_id(pack, delay).targets, [node(&format!("Deactivate {n}")), death],
+            "flight {P_FLIGHT} {name}: aircraft {n} clean-up count");
+    }
+}
+
+fn current_b_aircraft(row: &BingoAircraftRow) -> Il2Entity {
+    let name = row.name;
+    let unit = bundled_catalog().into_iter()
+        .find(|unit| unit.kind == UnitKind::Plane && crate::model_spec::script_id(&unit.script) == row.script)
+        .unwrap_or_else(|| panic!("flight {P_FLIGHT} T-b {name}: bundled catalog missing plane script {}", row.script));
+    let mut seat = TemplateSeat::new(unit);
+    seat.role = FlightRole::Independent;
+    apply_plane_start(&mut seat, PlaneStart::Air);
+    generate_template(&TemplateOptions {
+        name: name.into(),
+        seats: vec![seat],
+        bring_up: BringUp::Activate,
+        ..TemplateOptions::default()
+    }).unwrap_or_else(|error| panic!("flight {P_FLIGHT} T-b {name} ({}): generate_template failed: {error}", row.script))
+}
+
+fn build_fighter_count(p: &mut Probe) {
+    let cell = p.cell.unwrap_or_else(|| panic!("flight {P_FLIGHT}: missing T-f cell"));
+    let close = id(&p.root, &format!("{} CLOSE", cell.key));
+    for row in P_FIGHTERS {
+        let name = row.name;
+        let context = format!("flight {P_FLIGHT} T-f {name}");
+        let mut wrapper = group(name, &mut p.next_id);
+        let mut copy = frozen_probe_group(P_FLIGHT, name, P_INPUT_DIR, P_PACK_FILE, row.centre_km, &mut p.next_id);
+        validate_p_pack(&copy, name);
+        let planes = block_ids(&copy, "Plane");
+        let entities = block_ids(&copy, "MCU_TR_Entity");
+        let death = probe_node_id(&copy, P_FLIGHT, name, TEMPLATE_DEATH_COUNT);
+        for (seat, &entity) in entities.iter().enumerate() {
+            let n = seat + 1;
+            if row.change.removes_event7_hooks() {
+                let done = probe_node_id(&copy, P_FLIGHT, name, &format!("Mission Complete {n}"));
+                remove_probe_event_hook(&mut copy, entity, (EVENT_PLANE_BINGO_FUEL, done), &context);
+            }
+            if row.change.counts_deaths_directly() {
+                let delay = probe_node_id(&copy, P_FLIGHT, name, &format!("Delay Delete {n}"));
+                retarget_probe_event_hook(&mut copy, entity, (EVENT_KILLED, delay), death, &context);
+            }
+        }
+        wrapper.children.push(copy);
+        let group_id = p.start_group_at(wrapper, TEMPLATE_SPAWN_UNITS, cell.arm_s);
+        let mut damage_commands = Vec::new();
+        for ((plane, entity), suffix) in planes.into_iter().zip(entities.iter().copied()).zip(FOUR_SHIP_SUFFIXES) {
+            let label = format!("{name}{suffix}");
+            by_id_mut(&mut p.root, plane).set_name(&label);
+            p.listen_aircraft_events(&label, entity, close, &[EVENT_KILLED]);
+            damage_commands.push(p.damage_command(&format!("{label} DAMAGE"), entity, DamageLevel::Complete));
+        }
+        // One timer per row, all four Independent aircraft killed on that tick.
+        p.at(&format!("{name} DAMAGE AT"), P_KILL_S, &damage_commands);
+        for output in [TEMPLATE_DEATH_COUNT, TEMPLATE_COOLDOWN] {
+            let source = probe_node_id(by_id(&p.root, group_id), P_FLIGHT, name, output);
+            p.observe(source, &format!("{name} {output} fired"));
+        }
+        // Keep observations after the shared timer to preserve node and locale IDs.
+        for n in 1..=entities.len() {
+            let output = format!("Delay Delete {n}");
+            let source = probe_node_id(by_id(&p.root, group_id), P_FLIGHT, name, &output);
+            p.observe(source, &format!("{name} {output} fired"));
+        }
+        p.icon(&format!("{} {name}", cell.key), row.centre_km, COALITION_NATO);
+    }
+}
+
+fn build_bingo_aircraft(p: &mut Probe) {
+    let cell = p.cell.unwrap_or_else(|| panic!("flight {P_FLIGHT}: missing T-b cell"));
+    let close = id(&p.root, &format!("{} CLOSE", cell.key));
+    for row in B_AIRCRAFT {
+        let name = row.name;
+        let copy = frozen_probe_group(P_FLIGHT, name, P_INPUT_DIR, &format!("{name}.Group"), row.centre_km, &mut p.next_id);
+        let (plane, entity) = single_aircraft(&copy, &format!("flight {P_FLIGHT} T-b {name}"));
+        probe_node_id(&copy, P_FLIGHT, name, TEMPLATE_MISSION_BEGIN);
+        p.start_group_at(copy, TEMPLATE_MISSION_BEGIN, cell.arm_s);
+        by_id_mut(&mut p.root, plane).set_name(name);
+        p.listen_aircraft_events(name, entity, close, &B_EVENT_TYPES);
+        p.icon(&format!("{} {name}", cell.key), row.centre_km, COALITION_NATO);
+    }
+}
+
 fn build(flight: Flight) -> Probe {
     let mut p = Probe::new(flight);
     for &cell in flight.sheet() {
         p.start_cell(cell);
-        match cell.key {
-            "T-a1" => build_a1(&mut p),
-            "T-e" => build_e(&mut p),
-            "T-f" => build_f(&mut p),
-            "T-t" => build_tt(&mut p),
-            "T-j" => build_j(&mut p),
-            "T-z" => build_z(&mut p),
-            "T-c" => build_c(&mut p),
-            "T-n" => build_n(&mut p, NVariant::Tn),
-            "T-n2" => build_n(&mut p, NVariant::Tn2),
-            "Y-N" => build_y(&mut p, Side::Nato),
-            "Y-D" => build_y(&mut p, Side::Dprk),
-            "T-g2" => build_g(&mut p),
-            "T-d" => build_d(&mut p),
-            "T-d2" => build_d2(&mut p),
-            "T-d3" => build_d3(&mut p),
-            "T-d4" => build_d4(&mut p),
-            "T-r" => build_r(&mut p),
-            "T-v" => build_v(&mut p),
-            "T-w" => build_w(&mut p),
-            "T-u" => build_u(&mut p),
-            "T-x" => build_x(&mut p),
-            "T-y" => build_larger_rtb(&mut p),
-            _ => panic!("unknown probe cell {}", cell.key),
+        match (flight, cell.key) {
+            (_, "T-a1") => build_a1(&mut p),
+            (_, "T-e") => build_e(&mut p),
+            (Flight::OneP, "T-f") => build_fighter_count(&mut p),
+            (Flight::Zero, "T-f") => build_f(&mut p),
+            (_, "T-t") => build_tt(&mut p),
+            (_, "T-j") => build_j(&mut p),
+            (_, "T-z") => build_z(&mut p),
+            (_, "T-c") => build_c(&mut p),
+            (_, "T-n") => build_n(&mut p, NVariant::Tn),
+            (_, "T-n2") => build_n(&mut p, NVariant::Tn2),
+            (_, "Y-N") => build_y(&mut p, Side::Nato),
+            (_, "Y-D") => build_y(&mut p, Side::Dprk),
+            (_, "T-g2") => build_g(&mut p),
+            (_, "T-d") => build_d(&mut p),
+            (_, "T-d2") => build_d2(&mut p),
+            (_, "T-d3") => build_d3(&mut p),
+            (_, "T-d4") => build_d4(&mut p),
+            (_, "T-r") => build_r(&mut p),
+            (_, "T-v") => build_v(&mut p),
+            (_, "T-w") => build_w(&mut p),
+            (_, "T-u") => build_u(&mut p),
+            (_, "T-x") => build_x(&mut p),
+            (_, "T-y") => build_larger_rtb(&mut p),
+            (_, "T-h") => build_upstream_rows(&mut p, P_FLIGHT, H_GROUPS),
+            (_, "T-b") => build_bingo_aircraft(&mut p),
+            _ => panic!("{}: unknown probe cell {}", flight.stem(), cell.key),
         }
     }
     p.cues(flight);
@@ -3249,6 +3647,9 @@ pub(crate) fn generate_probe_1l() -> Il2Entity {
 }
 pub(crate) fn generate_probe_1m() -> Il2Entity {
     build(Flight::OneM).root
+}
+pub(crate) fn generate_probe_1p() -> Il2Entity {
+    build(Flight::OneP).root
 }
 
 fn serialize_probe(root: &Il2Entity) -> String {
@@ -3477,6 +3878,51 @@ fn flight1m_frozen_inputs_match_current_generator() {
 #[ignore = "writes target/p14 probe files"]
 fn write_p14_probe_1m() {
     write_probe(Flight::OneM, TraceCarrier::default());
+}
+
+#[test]
+#[ignore = "freezes flight 1P inputs once; never overwrite"]
+fn freeze_flight1p_inputs() {
+    use std::io::Write;
+
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(P_INPUT_DIR);
+    let files: Vec<_> = std::iter::once(P_PACK_FILE.to_string())
+        .chain(B_AIRCRAFT.iter().map(|row| format!("{}.Group", row.name))).collect();
+    // Preflight the whole set before generating or writing any input.
+    for file in &files {
+        let path = dir.join(file);
+        assert!(!path.exists(), "flight {P_FLIGHT} {file}: refusing to overwrite {}", path.display());
+    }
+    let inputs: Vec<_> = std::iter::once(current_p_pack())
+        .chain(B_AIRCRAFT.iter().map(current_b_aircraft)).collect();
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|error| panic!("flight {P_FLIGHT}: cannot create {}: {error}", dir.display()));
+    for (file, generated) in files.iter().zip(inputs) {
+        let path = dir.join(file);
+        let mut output = std::fs::File::create_new(&path)
+            .unwrap_or_else(|error| panic!("flight {P_FLIGHT} {file}: cannot create {}: {error}", path.display()));
+        output.write_all(serialize_group(&generated).as_bytes())
+            .unwrap_or_else(|error| panic!("flight {P_FLIGHT} {file}: cannot write {}: {error}", path.display()));
+    }
+}
+
+#[test]
+fn flight1p_frozen_inputs_match_current_generators() {
+    let inputs = std::iter::once((P_PACK_FILE.to_string(), current_p_pack()))
+        .chain(B_AIRCRAFT.iter().map(|row| (format!("{}.Group", row.name), current_b_aircraft(row))));
+    for (file, generated) in inputs {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(P_INPUT_DIR).join(&file);
+        let frozen = std::fs::read(&path)
+            .unwrap_or_else(|error| panic!("flight {P_FLIGHT} {file}: cannot read {}: {error}", path.display()));
+        assert_eq!(serialize_group(&generated).as_bytes(), frozen,
+            "flight {P_FLIGHT} {file}: current generator differs from frozen input");
+    }
+}
+
+#[test]
+#[ignore = "writes target/p14 probe files"]
+fn write_p14_probe_1p() {
+    write_probe(Flight::OneP, TraceCarrier::default());
 }
 
 fn number(node: &Il2Entity, property: &str) -> f64 {
@@ -3754,6 +4200,7 @@ fn probe_files_parse_and_links_resolve() {
         (Flight::OneK, generate_probe_1k()),
         (Flight::OneL, generate_probe_1l()),
         (Flight::OneM, generate_probe_1m()),
+        (Flight::OneP, generate_probe_1p()),
     ] {
         let (traced, _) = build(flight).traced(TraceCarrier::default());
         for root in [root, traced] {
@@ -3946,7 +4393,8 @@ fn probe_blocks_match_shipped_shapes() {
                 .map(|line| line.split_once(':').unwrap().0.parse().unwrap())
                 .collect();
             let mut used_ids = BTreeSet::new();
-            let generated_planes: Vec<_> = ["T-w", "T-x"].into_iter()
+            // Flight 0's T-f contains no Plane blocks.
+            let generated_planes: Vec<_> = ["T-w", "T-x", "T-f"].into_iter()
                 .filter_map(|name| root.find_by_name(name))
                 .flat_map(|cell| block_ids(cell, "Plane")).collect();
             root.for_each(&mut |node| {
@@ -4996,7 +5444,7 @@ fn m_plane_named<'a>(root: &'a Il2Entity, label: &str) -> &'a Il2Entity {
     planes[0]
 }
 
-fn assert_m_listener(root: &Il2Entity, entity: i32, label: &str, event_type: i32) -> i32 {
+fn assert_m_listener(flight: &str, root: &Il2Entity, entity: i32, label: &str, event_type: i32) -> i32 {
     let subtitle = named(root, &format!("{label} ev{event_type}"));
     assert_eq!(subtitle.block_type, "MCU_TR_Subtitle");
     let target = subtitle.index.unwrap();
@@ -5007,7 +5455,7 @@ fn assert_m_listener(root: &Il2Entity, entity: i32, label: &str, event_type: i32
             matching += 1;
         }
     });
-    assert_eq!(matching, 1, "flight 1M {label}: one ev{event_type} listener");
+    assert_eq!(matching, 1, "flight {flight} {label}: one ev{event_type} listener");
     target
 }
 
@@ -5139,7 +5587,7 @@ fn assert_upstream_probe(root: &Il2Entity) {
                 .filter(|&event| removed_hooks == 0 || event != 7)
                 .map(|event| (event, id(copy, home))).collect();
             for event_type in aborts.into_iter().chain([13, 5]) {
-                let subtitle = assert_m_listener(root, *entity, label, event_type);
+                let subtitle = assert_m_listener("1M", root, *entity, label, event_type);
                 expected.push((event_type, subtitle));
                 listeners.push(subtitle);
             }
@@ -5224,7 +5672,7 @@ fn assert_generated_fix_probe(root: &Il2Entity) {
             assert_eq!(plane.property("NumberInFormation"), Some("0"));
             assert_eq!(number(plane, "YPos"), 3050.0);
             assert!(by_id(copy, entity).targets.is_empty());
-            listeners.push(assert_m_listener(root, entity, label, 13));
+            listeners.push(assert_m_listener("1M", root, entity, label, 13));
             close.push(assert_m_close(root, label, entity));
         }
         for &output in outputs {
@@ -5487,9 +5935,402 @@ fn assert_repeated_timer_probe(zero: &Il2Entity, one_m: &Il2Entity) {
         [id(copy, "J1"), id(copy, "J2"), id(copy, "J3"), id(copy, "J4"), id(copy, "J5")]);
 }
 
+fn p_fixture(directory: &str, file: &str) -> Il2Entity {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(directory).join(file);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("flight {P_FLIGHT} {file}: cannot read {}: {error}", path.display()));
+    parse_group_file(&text)
+        .unwrap_or_else(|error| panic!("flight {P_FLIGHT} {file}: cannot parse {}: {error}", path.display()))
+}
+
+fn probe_events(entity: &Il2Entity) -> Vec<(i32, i32)> {
+    let mut events = Vec::new();
+    entity.for_each(&mut |event| {
+        if let Some(hook) = read_event(event) { events.push(hook); }
+    });
+    events
+}
+
+fn assert_home_fix_probe(root: &Il2Entity) {
+    let cell = named(root, "T-h");
+    assert_eq!(cell.count_block_type("Plane"), 16);
+    assert_eq!(cell.count_block_type("MCU_TR_Entity"), 16);
+    assert_eq!(cell.count_block_type("MCU_Icon"), 4);
+    assert_eq!(cell.count_block_type("MCU_Counter"), 2);
+    assert_eq!(cell.count_block_type("MCU_Delete"), 20);
+    assert_eq!(cell.count_block_type("OnEvent"), 156);
+    let mut close = vec![id(root, "T-h CLOSE OFF")];
+    for (name, centre, file, labels, aborts, gate_name, home_targets) in [
+        ("H1", (50.0, 20.0), "Upstream_Strike_DPRK_Il10_4ship.Group", ["H1a", "H1b", "H1c", "H1d"],
+            &[9, 3, 1, 7][..], None, &["Force Complete - High", "WP 2"][..]),
+        ("H2", (50.0, 60.0), "Upstream_Strike_DPRK_Il10_4ship.Group", ["H2a", "H2b", "H2c", "H2d"],
+            &[9, 3, 1, 7][..], Some("Go Home Once"), &["Force Complete - High", "WP 2"][..]),
+        ("H3", (50.0, 100.0), "Upstream_Strike_DPRK_Il10_4ship.Group", ["H3a", "H3b", "H3c", "H3d"],
+            &[9, 3, 1, 7][..], None, &["WP 2"][..]),
+        ("H4", (130.0, 20.0), "Upstream_Strike_NATO_F80C_4ship.Group", ["H4a", "H4b", "H4c", "H4d"],
+            &[9, 3, 1][..], Some("Go Home Once"), &["Force Complete - High", "WP 2"][..]),
+    ] {
+        let source = p_fixture("src/testdata/p14_probe_inputs/upstream_a31ad0a", file);
+        let wrapper = named(cell, name);
+        assert_eq!(wrapper.children.len(), 1, "flight {P_FLIGHT} {name}: source wrapper");
+        let copy = &wrapper.children[0];
+        assert_eq!(copy.name(), Some("Unit Template"));
+        assert_eq!(named(copy, "Zone IN").pos_xz(), Some(world(centre)));
+        assert_at(root, &format!("{name} START"), 60.0, &[id(copy, "MISSION BEGIN")]);
+        assert_m_icon(root, &format!("T-h {name}"), centre);
+        let home = id(copy, "Goto WP 2");
+        let abort_target = gate_name.map_or(home, |gate| id(copy, gate));
+        if let Some(gate) = gate_name {
+            assert_counter(copy, gate, 1, 0);
+            assert_eq!(named(copy, gate).targets, [home]);
+            assert!(named(copy, gate).objects.is_empty());
+            assert!(named(copy, "Logic").children.contains(named(copy, gate)));
+        } else {
+            assert!(copy.find_by_name("Go Home Once").is_none());
+        }
+        let planes = block_ids(copy, "Plane");
+        let entities = block_ids(copy, "MCU_TR_Entity");
+        assert_eq!(planes.len(), 4);
+        assert_eq!(entities.len(), 4);
+        let mut listeners = Vec::new();
+        for ((&plane, &entity), label) in planes.iter().zip(&entities).zip(labels) {
+            assert_eq!(by_id(copy, plane).name(), Some(label));
+            assert_eq!(by_id(copy, entity).name(), Some("Plane entity"));
+            assert_eq!(number(by_id(copy, plane), "LinkTrId"), f64::from(entity));
+            let mut expected: Vec<_> = aborts.iter().map(|&event| (event, abort_target)).collect();
+            for event in [9, 3, 1, 7, 13, 5] {
+                let subtitle = assert_m_listener(P_FLIGHT, root, entity, label, event);
+                expected.push((event, subtitle));
+                listeners.push(subtitle);
+            }
+            assert_eq!(probe_events(by_id(copy, entity)), expected, "flight {P_FLIGHT} {label}: abort hooks and listeners");
+            close.push(assert_m_close(root, label, entity));
+        }
+        for output in ["Formation 1", "Goto WP 1", "AttackArea 1", "OnAreaAttacked 1",
+            "Goto WP 2", "Mission Complete 1", "MISSION END", "DELAYED END ORDERS"] {
+            let timer = named(copy, output);
+            assert_eq!(timer.block_type, "MCU_Timer");
+            let text = format!("{name} {output} fired");
+            assert_observation(root, timer.index.unwrap(), &text);
+            listeners.push(id(root, &text));
+        }
+        assert_eq!(listeners.len(), 32);
+        let mut targets: Vec<_> = home_targets.iter().map(|target| id(copy, target)).collect();
+        targets.push(id(root, &format!("{name} Goto WP 2 fired")));
+        assert_eq!(by_id(copy, home).targets, targets);
+        // Only abort events are gated. The order report retains its original home link.
+        assert_eq!(named(copy, "OnAreaAttacked 1").targets,
+            [home, id(root, &format!("{name} OnAreaAttacked 1 fired"))]);
+        assert_eq!(named(copy, "Trigger Delete").objects, planes,
+            "flight {P_FLIGHT} {name}: upstream Delete still lists Plane blocks");
+        assert_eq!(named(copy, "Deactivate Units").objects, entities);
+        assert_no_autonomous_m_output(root, copy, &listeners);
+
+        // Undo the added gate independently of the builder, then undo the
+        // shared placement/listeners. Every other source field must survive.
+        let mut ungated = copy.clone();
+        if let Some(gate) = gate_name {
+            let gate_id = id(copy, gate);
+            let mut restored_hooks = 0;
+            ungated.for_each_mut(&mut |event| {
+                if read_event(event).is_some_and(|(_, target)| target == gate_id) {
+                    event.set_property("TarId", home.to_string());
+                    restored_hooks += 1;
+                }
+            });
+            assert_eq!(restored_hooks, 4 * aborts.len());
+            remove_ids(&mut ungated, &HashSet::from([gate_id]));
+        }
+        let restored = restore_m_frozen_copy(&ungated, &source, centre, &listeners);
+        let mut expected = source.clone();
+        let source_home = id(&expected, "Goto WP 2");
+        let source_targets = home_targets.iter().map(|target| id(&expected, target)).collect();
+        by_id_mut(&mut expected, source_home).set_targets(source_targets);
+        let before = expected.count_block_type("OnEvent");
+        expected.for_each_mut(&mut |node| node.children.retain(|event| {
+            !read_event(event).is_some_and(|(kind, target)| target == source_home && !aborts.contains(&kind))
+        }));
+        assert_eq!(before - expected.count_block_type("OnEvent"), 4 * (4 - aborts.len()));
+        assert_eq!(restored, expected, "flight {P_FLIGHT} {name}: source differs beyond the table's change");
+    }
+    assert_at(root, "T-h CLOSE", 960.0, &close);
+}
+
+fn assert_fighter_count_probe(root: &Il2Entity) {
+    let cell = named(root, "T-f");
+    let source = p_fixture("src/testdata/p14_probe_inputs/flight1p", "FighterPack_F80C_4ship.Group");
+    assert_eq!(cell.count_block_type("Plane"), 12);
+    assert_eq!(cell.count_block_type("MCU_TR_Entity"), 12);
+    assert_eq!(cell.count_block_type("MCU_Icon"), 3);
+    assert_eq!(cell.count_block_type("MCU_CMD_Damage"), 12);
+    assert_eq!(cell.count_block_type("MCU_Delete"), 15);
+    assert_eq!(cell.count_block_type("OnEvent"), 64);
+    let mut close = vec![id(root, "T-f CLOSE OFF")];
+    for (name, centre, labels, aborts, death_targets) in [
+        ("F1", (90.0, 20.0), ["F1a", "F1b", "F1c", "F1d"], &[3, 1, 8, 7][..],
+            ["Delay Delete 1", "Delay Delete 2", "Delay Delete 3", "Delay Delete 4"]),
+        ("F2", (90.0, 60.0), ["F2a", "F2b", "F2c", "F2d"], &[3, 1, 8][..],
+            ["Delay Delete 1", "Delay Delete 2", "Delay Delete 3", "Delay Delete 4"]),
+        ("F3", (90.0, 100.0), ["F3a", "F3b", "F3c", "F3d"], &[3, 1, 8][..], ["DeathCount"; 4]),
+    ] {
+        let wrapper = named(cell, name);
+        assert_eq!(wrapper.children.len(), 1);
+        let copy = &wrapper.children[0];
+        assert_eq!(named(copy, "Zone IN").pos_xz(), Some(world(centre)));
+        assert_at(root, &format!("{name} START"), 60.0, &[id(copy, "SPAWN UNITS")]);
+        assert_m_icon(root, &format!("T-f {name}"), centre);
+        assert_counter(copy, "DeathCount", 4, 1);
+        assert_eq!(number(named(copy, "COOLDOWN"), "Time"), 180.0);
+        assert_eq!(named(copy, "DeathCount").targets,
+            [id(copy, "COOLDOWN"), id(root, &format!("{name} DeathCount fired"))]);
+        assert_eq!(named(copy, "COOLDOWN").targets,
+            [id(copy, "Randomizer:INPUT"), id(root, &format!("{name} COOLDOWN fired"))]);
+        let planes = block_ids(copy, "Plane");
+        let entities = block_ids(copy, "MCU_TR_Entity");
+        assert_eq!(planes.len(), 4);
+        assert_eq!(entities.len(), 4);
+        assert_eq!(named(copy, "Spawn 1").objects, entities);
+        let mut listeners = Vec::new();
+        let mut commands = Vec::new();
+        for (seat, ((&plane, &entity), (label, death_target))) in
+            planes.iter().zip(&entities).zip(labels.into_iter().zip(death_targets)).enumerate() {
+            let n = seat + 1;
+            let plane = by_id(copy, plane);
+            assert_eq!(plane.name(), Some(label));
+            assert_eq!(plane.property("Script"), Some("\"LuaScripts\\WorldObjects\\Planes\\f80c10.txt\""));
+            assert_eq!(plane.property("Country"), Some("601"));
+            assert_eq!(plane.property("AiRTBDecision"), Some("0"));
+            assert_eq!(plane.property("NumberInFormation"), Some("0"));
+            assert!(by_id(copy, entity).targets.is_empty(), "flight {P_FLIGHT} {label}: Independent seat");
+            let done = id(copy, &format!("Mission Complete {n}"));
+            let delay = id(copy, &format!("Delay Delete {n}"));
+            let target = id(copy, death_target);
+            let listener = assert_m_listener(P_FLIGHT, root, entity, label, 13);
+            listeners.push(listener);
+            let mut expected: Vec<_> = aborts.iter().map(|&event| (event, done)).collect();
+            expected.extend([(13, target), (13, listener)]);
+            assert_eq!(probe_events(by_id(copy, entity)), expected, "flight {P_FLIGHT} {label}: exact hooks");
+            assert_eq!(by_id(copy, done).targets, [id(copy, &format!("CLEANUP {n}"))]);
+            assert_eq!(number(by_id(copy, delay), "Time"), 60.0);
+            assert_eq!(by_id(copy, delay).targets, [id(copy, &format!("Deactivate {n}")),
+                id(copy, "DeathCount"), id(root, &format!("{name} Delay Delete {n} fired"))]);
+            assert_eq!(named(copy, &format!("Deactivate {n}")).objects, [entity]);
+            close.push(assert_m_close(root, label, entity));
+            let damage = named(root, &format!("{label} DAMAGE"));
+            assert_eq!(damage.block_type, "MCU_CMD_Damage");
+            assert_eq!(damage.property("Damage"), Some("2"));
+            assert_eq!(damage.property("Type"), Some("1"));
+            assert_eq!(damage.objects, [entity]);
+            assert!(damage.targets.is_empty());
+            commands.push(damage.index.unwrap());
+            let mut inputs = Vec::new();
+            root.for_each(&mut |node| {
+                if node.targets.contains(&damage.index.unwrap()) { inputs.push(node.index.unwrap()); }
+            });
+            assert_eq!(inputs, [id(root, &format!("{name} DAMAGE AT"))], "flight {P_FLIGHT} {label}: shared 03:00 timer");
+        }
+        assert_at(root, &format!("{name} DAMAGE AT"), 180.0, &commands);
+        for output in ["DeathCount", "COOLDOWN", "Delay Delete 1", "Delay Delete 2", "Delay Delete 3", "Delay Delete 4"] {
+            let text = format!("{name} {output} fired");
+            assert_observation(root, id(copy, output), &text);
+            listeners.push(id(root, &text));
+        }
+        assert_no_autonomous_m_output(root, copy, &listeners);
+        let restored = restore_m_frozen_copy(copy, &source, centre, &listeners);
+        let mut expected = source.clone();
+        let before = expected.count_block_type("OnEvent");
+        for (entity, death_target) in block_ids(&expected, "MCU_TR_Entity").into_iter().zip(death_targets) {
+            let target = id(&expected, death_target);
+            by_id_mut(&mut expected, entity).for_each_mut(&mut |node| {
+                node.children.retain(|event| !read_event(event).is_some_and(|(kind, _)| kind == 7 && !aborts.contains(&kind)));
+                if read_event(node).is_some_and(|(kind, _)| kind == 13) {
+                    node.set_property("TarId", target.to_string());
+                }
+            });
+        }
+        assert_eq!(before - expected.count_block_type("OnEvent"), 4 * (4 - aborts.len()));
+        assert_eq!(restored, expected, "flight {P_FLIGHT} {name}: no changes beyond event 7 removal and death retargeting");
+    }
+    assert_at(root, "T-f CLOSE", 960.0, &close);
+}
+
+fn assert_bingo_aircraft_probe(root: &Il2Entity) {
+    let cell = named(root, "T-b");
+    assert_eq!(cell.count_block_type("Plane"), 12);
+    assert_eq!(cell.count_block_type("MCU_TR_Entity"), 12);
+    assert_eq!(cell.count_block_type("MCU_Icon"), 12);
+    assert_eq!(cell.count_block_type("MCU_Delete"), 12);
+    assert_eq!(cell.count_block_type("MCU_CMD_Damage"), 0);
+    assert_eq!(cell.count_block_type("MCU_Waypoint"), 0);
+    assert_eq!(cell.count_block_type("OnEvent"), 60);
+    let mut close = vec![id(root, "T-b CLOSE OFF")];
+    for (name, centre, script, country) in [
+        ("B1", (10.0, 20.0), "f80c10", "601"),
+        ("B2", (10.0, 28.0), "f84e", "601"),
+        ("B3", (10.0, 36.0), "f86a5", "601"),
+        ("B4", (10.0, 44.0), "f51d", "601"),
+        ("B5", (10.0, 52.0), "b29", "601"),
+        ("B6", (10.0, 60.0), "c47b", "601"),
+        ("B7", (10.0, 68.0), "mig15bis", "503"),
+        ("B8", (10.0, 76.0), "la11", "503"),
+        ("B9", (10.0, 84.0), "yak9p", "503"),
+        ("B10", (10.0, 92.0), "il10", "503"),
+        ("B11", (10.0, 100.0), "tu2", "503"),
+        ("B12", (10.0, 108.0), "li2t", "503"),
+    ] {
+        let copy = named(cell, name);
+        assert!(cell.children.contains(copy));
+        let source = p_fixture("src/testdata/p14_probe_inputs/flight1p", &format!("{name}.Group"));
+        let (plane, entity) = single_aircraft(copy, &format!("flight {P_FLIGHT} T-b {name}"));
+        let plane = by_id(copy, plane);
+        assert_eq!(plane.name(), Some(name));
+        assert_eq!(crate::model_spec::script_id(plane.property("Script").unwrap()), script);
+        assert_eq!(plane.property("Country"), Some(country));
+        assert_eq!(plane.property("StartType"), Some("0"));
+        assert_eq!(plane.property("NumberInFormation"), Some("0"));
+        assert_eq!(number(plane, "YPos"), 1500.0);
+        assert_eq!(number(plane, "Fuel"), 1.0);
+        assert_eq!(plane.pos_xz(), Some(world(centre)));
+        assert!(by_id(copy, entity).targets.is_empty());
+        assert_at(root, &format!("{name} START"), 60.0, &[id(copy, "MISSION BEGIN")]);
+        assert_eq!(named(copy, "Activate Units").objects, [entity]);
+        assert!(named(copy, "Waypoints").children.is_empty());
+        assert!(copy.find_by_name("Trigger Delete").is_none());
+        assert!(copy.find_by_name("DELETE DELAY").is_none());
+        let listeners: Vec<_> = [7, 8, 9, 13, 5].into_iter()
+            .map(|event| assert_m_listener(P_FLIGHT, root, entity, name, event)).collect();
+        assert_eq!(probe_events(by_id(copy, entity)), [7, 8, 9, 13, 5].into_iter().zip(listeners.iter().copied()).collect::<Vec<_>>());
+        close.push(assert_m_close(root, name, entity));
+        assert_m_icon(root, &format!("T-b {name}"), centre);
+        assert_no_autonomous_m_output(root, copy, &listeners);
+        assert_eq!(restore_m_frozen_copy(copy, &source, centre, &listeners), source,
+            "flight {P_FLIGHT} {name}: generated aircraft changed beyond placement, names and listeners");
+    }
+    assert_at(root, "T-b CLOSE", 960.0, &close);
+}
+
+#[test]
+fn flight1p_clock_only_starts_kills_and_closes_the_table_rows() {
+    use super::testkit::{TICKS_PER_SECOND, WalkerConfig, WalkerInput, walk};
+
+    let root = generate_probe_1p();
+    let log = walk(&root, WalkerConfig::default(), &WalkerInput {
+        until: 960 * TICKS_PER_SECOND,
+        ..WalkerInput::default()
+    });
+    let mut expected = Vec::new();
+    for label in ["F1a", "F1b", "F1c", "F1d", "F2a", "F2b", "F2c", "F2d", "F3a", "F3b", "F3c", "F3d"] {
+        expected.push((180 * TICKS_PER_SECOND, id(&root, &format!("{label} DAMAGE"))));
+    }
+    for label in ["H1a", "H1b", "H1c", "H1d", "H2a", "H2b", "H2c", "H2d",
+        "H3a", "H3b", "H3c", "H3d", "H4a", "H4b", "H4c", "H4d",
+        "F1a", "F1b", "F1c", "F1d", "F2a", "F2b", "F2c", "F2d", "F3a", "F3b", "F3c", "F3d",
+        "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12"] {
+        expected.push((960 * TICKS_PER_SECOND, id(&root, &format!("{label} CLOSE DELETE"))));
+    }
+    let mut actual: Vec<_> = log.pulses.iter().filter_map(|pulse| {
+        matches!(by_id(&root, pulse.index).block_type.as_str(), "MCU_Delete" | "MCU_CMD_Damage")
+            .then_some((pulse.t, pulse.index))
+    }).collect();
+    actual.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(actual, expected, "flight {P_FLIGHT}: exactly twelve clocked kills and forty individual closes");
+    for (names, bring_up, seconds) in [
+        (&["H1", "H2", "H3", "H4", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12"][..], "Activate Units", 60.5),
+        (&["F1", "F2", "F3"][..], "Spawn 1", 61.0),
+    ] {
+        for name in names {
+            let index = id(named(&root, name), bring_up);
+            assert_eq!(log.pulses.iter().filter(|pulse| pulse.index == index).map(|pulse| pulse.t).collect::<Vec<_>>(),
+                [(seconds * TICKS_PER_SECOND as f64).round() as u64], "flight {P_FLIGHT} {name}: only one clocked bring-up");
+        }
+    }
+    for zone in block_ids(&root, "MCU_CheckZone") {
+        assert!(log.pulses.iter().all(|pulse| pulse.index != zone), "flight {P_FLIGHT}: zone {zone} must never be pulsed");
+    }
+}
+
+#[test]
+fn flight1p_home_gate_passes_only_the_first_abort() {
+    use super::testkit::{TICKS_PER_SECOND, WalkerConfig, WalkerInput, walk};
+
+    let root = generate_probe_1p();
+    let mut input = WalkerInput { until: 300 * TICKS_PER_SECOND, ..WalkerInput::default() };
+    for name in ["H1", "H2", "H3", "H4"] {
+        let copy = named(&root, name);
+        let entities = block_ids(copy, "MCU_TR_Entity");
+        for (entity, event, seconds) in [(entities[0], 9, 240), (entities[1], 3, 242)] {
+            let target = probe_events(by_id(copy, entity)).into_iter().find(|&(kind, target)| {
+                kind == event && by_id(&root, target).block_type != "MCU_TR_Subtitle"
+            }).unwrap().1;
+            input.pulses.push((seconds * TICKS_PER_SECOND, target.into()));
+        }
+    }
+    let log = walk(&root, WalkerConfig::default(), &input);
+    for (name, expected_seconds) in [
+        ("H1", &[240.5, 242.5][..]), ("H2", &[240.5][..]),
+        ("H3", &[240.5, 242.5][..]), ("H4", &[240.5][..]),
+    ] {
+        let home = id(named(&root, name), "Goto WP 2");
+        assert_eq!(log.pulses.iter().filter(|pulse| pulse.index == home).map(|pulse| pulse.t).collect::<Vec<_>>(),
+            expected_seconds.iter().map(|seconds| (seconds * TICKS_PER_SECOND as f64).round() as u64).collect::<Vec<_>>(),
+            "flight {P_FLIGHT} {name}: repeated aborts");
+    }
+}
+
+#[test]
+fn flight1p_fighter_count_and_replacement_need_no_zone_or_player() {
+    use super::testkit::{TICKS_PER_SECOND, WalkerConfig, WalkerInput, walk};
+
+    let root = generate_probe_1p();
+    let mut input = WalkerInput { until: 500 * TICKS_PER_SECOND, ..WalkerInput::default() };
+    for name in ["F2", "F3"] {
+        let copy = named(&root, name);
+        for (seat, entity) in block_ids(copy, "MCU_TR_Entity").into_iter().enumerate() {
+            input.kills.push((180 * TICKS_PER_SECOND, entity.into()));
+            // A killed aircraft also reports wounded/critical damage. Model
+            // two such inputs 0.1 and 0.2 s later: Mission Complete + CLEANUP
+            // restart Delay Delete. F2 counts once about 60 s after the kills;
+            // F3 counts at the kills and again about 60 s later (0012 alone).
+            let done = id(copy, &format!("Mission Complete {}", seat + 1));
+            input.pulses.extend([(180 * TICKS_PER_SECOND + 2, done.into()), (180 * TICKS_PER_SECOND + 4, done.into())]);
+        }
+    }
+    // F1's suspected event 7 is a supplied event, not a simulated game fact.
+    // No synthetic kills on its already deactivated first wave.
+    let f1 = named(&root, "F1");
+    for entity in block_ids(f1, "MCU_TR_Entity") {
+        let target = probe_events(by_id(f1, entity)).into_iter().find(|&(event, _)| event == 7).unwrap().1;
+        input.pulses.push((63 * TICKS_PER_SECOND, target.into()));
+    }
+    let log = walk(&root, WalkerConfig::default(), &input);
+    for (name, output, expected_seconds) in [
+        ("F1", "DeathCount", &[123.6][..]),
+        ("F1", "COOLDOWN", &[303.6][..]),
+        ("F1", "Spawn 1", &[61.0, 304.1][..]),
+        ("F2", "DeathCount", &[240.8][..]),
+        ("F2", "COOLDOWN", &[420.8][..]),
+        ("F2", "Spawn 1", &[61.0, 421.3][..]),
+        ("F3", "DeathCount", &[180.0, 240.8][..]),
+        // The second count restarts the same 180 s cooldown, so this control
+        // has two counts but one replacement in the scripted interval.
+        ("F3", "COOLDOWN", &[420.8][..]),
+        ("F3", "Spawn 1", &[61.0, 421.3][..]),
+    ] {
+        let node = id(named(&root, name), output);
+        assert_eq!(log.pulses.iter().filter(|pulse| pulse.index == node).map(|pulse| pulse.t).collect::<Vec<_>>(),
+            expected_seconds.iter().map(|seconds| (seconds * TICKS_PER_SECOND as f64).round() as u64).collect::<Vec<_>>(),
+            "flight {P_FLIGHT} {name}: {output}");
+    }
+    for zone in block_ids(&root, "MCU_CheckZone") {
+        assert!(log.pulses.iter().all(|pulse| pulse.index != zone), "flight {P_FLIGHT}: replacement requires no zone");
+    }
+}
+
 #[test]
 fn probe_cells_match_the_table() {
     let zero = generate_probe_0();
+    assert_eq!(named(&zero, "T-f").count_block_type("Plane"), 0);
     let one_a = generate_probe_1a();
     let one_g = generate_probe_1g();
     let one_n = generate_probe_1n();
@@ -5499,6 +6340,7 @@ fn probe_cells_match_the_table() {
     let one_k = generate_probe_1k();
     let one_l = generate_probe_1l();
     let one_m = generate_probe_1m();
+    let one_p = generate_probe_1p();
     assert_eq!(zero.count_block_type("Plane"), 4);
     assert_eq!(one_a.count_block_type("Plane"), 0);
     assert_eq!(one_g.count_block_type("Plane"), 10);
@@ -5512,6 +6354,13 @@ fn probe_cells_match_the_table() {
     assert_generated_fix_probe(&one_m);
     assert_larger_rtb_probe(&one_m);
     assert_repeated_timer_probe(&zero, &one_m);
+    assert_home_fix_probe(&one_p);
+    assert_fighter_count_probe(&one_p);
+    assert_bingo_aircraft_probe(&one_p);
+    assert_eq!(one_p.count_block_type("Plane"), 40);
+    assert_eq!(one_p.count_block_type("MCU_Delete"), 47);
+    assert_eq!(one_p.count_block_type("MCU_CMD_Damage"), 12);
+    assert_eq!(one_p.count_block_type("MCU_Icon"), 19);
 
     for (name, coalition) in [("ZA1", "[2]"), ("ZA2", "[1]")] {
         assert_zone(&zero, name, 12_000.0, true, coalition, (0.0, 60.0));
@@ -5718,11 +6567,11 @@ fn probe_cells_match_the_table() {
     );
 
     assert_eq!(zero.count_block_type("MCU_TR_MissionObjective"), 5);
-    for root in [&zero, &one_a, &one_n, &one_d, &one_g, &one_h, &one_j, &one_k, &one_l, &one_m] {
+    for root in [&zero, &one_a, &one_n, &one_d, &one_g, &one_h, &one_j, &one_k, &one_l, &one_m, &one_p] {
         assert!(root.find_by_name("T-o").is_none());
         assert!(root.find_by_name("P14 DPRK SPAWN").is_none());
     }
-    for root in [&one_a, &one_n, &one_d, &one_g, &one_h, &one_j, &one_k, &one_l, &one_m] {
+    for root in [&one_a, &one_n, &one_d, &one_g, &one_h, &one_j, &one_k, &one_l, &one_m, &one_p] {
         assert_eq!(root.count_block_type("MCU_TR_MissionObjective"), 0);
     }
 
@@ -6185,6 +7034,9 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::OneM, "T-x", (10.0, 60.0), 60.0, 960.0),
         (Flight::OneM, "T-y", (50.0, 20.0), 60.0, 960.0),
         (Flight::OneM, "T-j", (0.0, 5.0), 540.0, 600.0),
+        (Flight::OneP, "T-h", (50.0, 20.0), 60.0, 960.0),
+        (Flight::OneP, "T-f", (90.0, 20.0), 60.0, 960.0),
+        (Flight::OneP, "T-b", (10.0, 20.0), 60.0, 960.0),
     ];
     let expected_cues = [
         (
@@ -6303,6 +7155,16 @@ fn probe_run_sheets_match_the_tables() {
             Flight::OneM,
             840.0,
             "Flight 1M done. End the mission normally",
+        ),
+        (
+            Flight::OneP,
+            0.0,
+            "1P: no flying needed. Stay on the ground at K14 until 14:00",
+        ),
+        (
+            Flight::OneP,
+            840.0,
+            "Flight 1P done. End the mission normally",
         ),
     ];
     assert_eq!(CUES.len(), expected_cues.len());
@@ -6486,7 +7348,7 @@ fn probe_run_sheets_match_the_tables() {
 
 #[test]
 fn probe_spawn_lists_match_the_run_sheets() {
-    for flight in [Flight::Zero, Flight::OneA, Flight::OneG, Flight::OneH, Flight::OneJ, Flight::OneK, Flight::OneL, Flight::OneM] {
+    for flight in [Flight::Zero, Flight::OneA, Flight::OneG, Flight::OneH, Flight::OneJ, Flight::OneK, Flight::OneL, Flight::OneM, Flight::OneP] {
         assert!(flight.spawns().is_empty());
         assert_eq!(spawn_json(flight), "[]\n");
     }
@@ -6789,6 +7651,7 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
         (Flight::OneK, 30, 30, 28, 0, 30),
         (Flight::OneL, 78, 39, 23, 0, 78),
         (Flight::OneM, 185, 85, 35, 0, 185),
+        (Flight::OneP, 220, 92, 40, 0, 220),
     ] {
         let probe = build(flight);
         let plain = probe.root.clone();
@@ -6939,6 +7802,11 @@ fn probe_traced_every_subtitle_source_has_a_breadcrumb() {
                             block_ids(named(&plain, name), "MCU_TR_Entity").contains(&source_id)) =>
                             &[1, 3, 5, 7, 9, 13],
                         Flight::OneM => &[13],
+                        Flight::OneP if block_ids(named(&plain, "T-h"), "MCU_TR_Entity").contains(&source_id) =>
+                            &[1, 3, 5, 7, 9, 13],
+                        Flight::OneP if block_ids(named(&plain, "T-b"), "MCU_TR_Entity").contains(&source_id) =>
+                            &[5, 7, 8, 9, 13],
+                        Flight::OneP => &[13],
                         _ => panic!("unexpected entity observation in {flight:?}"),
                     };
                     assert_eq!(
