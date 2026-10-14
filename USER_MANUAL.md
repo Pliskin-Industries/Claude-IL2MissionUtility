@@ -179,7 +179,7 @@ These names are created on generate so NodeGates can clone the group. Do not ren
 
 - Group **`Randomizer`** — equal-odds waterfall at **0.5 s** steps (`Random i:pct%` → `Out i` → `Spawn i`). 100 ms is too tight for IL-2.
 - **`Spawn 1` … `Spawn N`** — one spawner per flight.
-- **`DeathCount`** — one counter per flight; a full wipe starts **COOLDOWN**, which pulses the randomizer so a new flight can appear while the player is still inside.
+- **`DeathCount`** — one counter per flight; a full wipe starts **COOLDOWN**, which pulses the randomizer so a new flight can appear while the player is still inside. A lost aircraft is counted once, when its clean-up timer runs out.
 - **`CLEANUP n`** — Mission Complete for **plane n** only: Force Complete → **RTB DELAY n** → **RTB Plane n** (same point as `RTB - N`), and **Delay Delete n** → deactivate that plane and tick that flight’s **DeathCount**. The rest of the flight keeps flying. When the whole slot is gone, DeathCount starts **COOLDOWN**.
 
 **NodeGates timers** (pattern copied from group 1)

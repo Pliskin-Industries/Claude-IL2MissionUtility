@@ -413,7 +413,6 @@ fn install_pack_logic(
         }
     }
 
-    patch_plane_links(group, &flights, &spawners, &death_ids, old_spawn_id, old_death_id)?;
     install_plane_ends(
         group,
         &entity_ids,
@@ -427,6 +426,7 @@ fn install_pack_logic(
         cfg.delete_orders,
         &mut next_id,
     )?;
+    patch_plane_links(group, &flights, &spawners, old_spawn_id, old_death_id)?;
 
     let mut enable = clone_mcu(&proto_act, &mut next_id, "Enable Spawner");
     enable.set_targets(vec![zone_in_id]);
@@ -743,24 +743,26 @@ fn patch_plane_links(
     group: &mut Il2Entity,
     flights: &[BuiltFlight],
     spawners: &[Il2Entity],
-    death_ids: &[i32],
     old_spawn_id: i32,
     old_death_id: i32,
 ) -> Result<(), String> {
-    let Some(units) = group.find_by_name_mut("Units") else {
-        return Ok(());
-    };
+    let group_name = group.name().unwrap_or("unnamed group").to_owned();
+    let mut seat = 0;
     for (f, flight) in flights.iter().enumerate() {
-        let death_id = *death_ids.get(f).ok_or("DeathCount missing Index")?;
-        let spawner_id = spawners[f].index.ok_or("Spawner missing Index")?;
-        for node in units.children.iter_mut() {
-            if node.block_type != "MCU_TR_Entity" {
-                continue;
-            }
-            let Some(id) = node.index else { continue };
-            if !flight.entity_ids.contains(&id) {
-                continue;
-            }
+        let flight_number = f + 1;
+        let spawner_id = spawners[f].index
+            .ok_or_else(|| format!("{group_name} flight {flight_number}: Spawn {flight_number} missing Index"))?;
+        for &id in &flight.entity_ids {
+            seat += 1;
+            let context = format!("{group_name} flight {flight_number} plane {seat} entity {id}");
+            let delay_id = group.find_by_name(&format!("Delay Delete {seat}"))
+                .and_then(|timer| timer.index)
+                .ok_or_else(|| format!("{context}: Delay Delete {seat} missing timer or Index"))?;
+            let node = group.find_by_name_mut("Units")
+                .and_then(|units| units.children.iter_mut().find(|node| {
+                    node.block_type == "MCU_TR_Entity" && node.index == Some(id)
+                }))
+                .ok_or_else(|| format!("{context}: missing entity in Units"))?;
             let death_event = node
                 .children
                 .iter_mut()
@@ -772,10 +774,12 @@ fn patch_plane_links(
                 })
                 .ok_or_else(|| {
                     format!(
-                        "plane entity {id} is missing OnKilled (13) targeting DeathCount {old_death_id}"
+                        "{context}: missing OnKilled (13) targeting DeathCount {old_death_id}"
                     )
                 })?;
-            death_event.set_property("TarId", death_id.to_string());
+            // Decision 0016: a restarted cleanup timer fires once, so it is the
+            // aircraft's only feed to DeathCount, including after a kill.
+            death_event.set_property("TarId", delay_id.to_string());
             replace_nested_id(node, "OnReport", "CmdId", old_spawn_id, spawner_id);
         }
     }
@@ -1515,57 +1519,93 @@ mod tests {
     }
 
     #[test]
-    fn on_killed_targets_each_flights_death_count() {
+    fn on_killed_counts_each_aircraft_once_through_its_cleanup_timer() {
         let root = configured(FlightConfig {
             flight_count: 3,
             max_in_flight: 3,
             type_ids: vec!["f51d".into()],
             ..FlightConfig::default()
         });
-        let g1 = root.find_by_name("Group 1").unwrap();
-        let deaths: Vec<_> = g1
-            .find_by_name("Logic")
-            .unwrap()
-            .children
-            .iter()
-            .filter(|node| node.name() == Some("DeathCount"))
-            .collect();
-        assert_eq!(deaths.len(), 3);
-        let units = g1.find_by_name("Units").unwrap();
-        let mut seat = 0;
-        for (flight, size) in [3, 2, 1].into_iter().enumerate() {
-            let death = deaths[flight];
-            assert_eq!(
-                death.property("Counter").unwrap().parse::<usize>().unwrap(),
-                size
-            );
-            let spawner = g1.find_by_name(&format!("Spawn {}", flight + 1)).unwrap();
-            assert_eq!(spawner.objects.len(), size);
-            for entity_id in &spawner.objects {
-                let entity = units
-                    .children
-                    .iter()
-                    .find(|node| node.index == Some(*entity_id))
-                    .unwrap();
-                let mut events = Vec::new();
-                collect_blocks(entity, "OnEvent", &mut events);
-                let killed: Vec<_> = events
-                    .iter()
-                    .filter(|event| event.property("Type") == Some("13"))
-                    .collect();
-                assert_eq!(killed.len(), 1, "entity {entity_id} needs one OnKilled (13)");
-                assert_eq!(
-                    killed[0].property("TarId").unwrap().parse::<i32>().unwrap(),
-                    death.index.unwrap()
-                );
-                assert!(events.iter().all(|event| event.property("Type") != Some("4")));
-                seat += 1;
-                // The separate cleanup feed stays until decision 0016 is resolved.
-                let delay = g1.find_by_name(&format!("Delay Delete {seat}")).unwrap();
-                assert!(delay.targets.contains(&death.index.unwrap()));
+        let pack = generate_pack(&root, 2).expect("fighter pack");
+        let mut death_ids = Vec::new();
+        pack.for_each(&mut |node| {
+            if node.name() == Some("DeathCount") {
+                death_ids.push(node.index.unwrap());
             }
+        });
+        assert_eq!(death_ids.len(), 6);
+        for name in ["Group 1", "Group 2"] {
+            let group = pack.find_by_name(name).expect("missing fighter group");
+            let deaths: Vec<_> = group
+                .find_by_name("Logic")
+                .unwrap()
+                .children
+                .iter()
+                .filter(|node| node.name() == Some("DeathCount"))
+                .collect();
+            assert_eq!(deaths.len(), 3, "{name}: one DeathCount per flight");
+            assert_eq!(group.count_block_type("Plane"), 6);
+            let units = group.find_by_name("Units").unwrap();
+            let mut seat = 0;
+            for (flight, size) in [3, 2, 1].into_iter().enumerate() {
+                let death = deaths[flight];
+                assert_eq!(
+                    death.property("Counter").unwrap().parse::<usize>().unwrap(),
+                    size
+                );
+                let spawner = group.find_by_name(&format!("Spawn {}", flight + 1)).unwrap();
+                assert_eq!(spawner.objects.len(), size);
+                for entity_id in &spawner.objects {
+                    seat += 1;
+                    let context = format!("{name} flight {} plane {seat} entity {entity_id}", flight + 1);
+                    let entity = units
+                        .children
+                        .iter()
+                        .find(|node| node.index == Some(*entity_id))
+                        .unwrap_or_else(|| panic!("{context}: missing entity"));
+                    let delay = group.find_by_name(&format!("Delay Delete {seat}")).unwrap();
+                    let deact = group.find_by_name(&format!("Deactivate {seat}")).unwrap();
+                    let cleanup = group.find_by_name(&format!("CLEANUP {seat}")).unwrap();
+                    let complete = group.find_by_name(&format!("Mission Complete {seat}")).unwrap();
+                    let mut event_nodes = Vec::new();
+                    collect_blocks(entity, "OnEvent", &mut event_nodes);
+                    let events: Vec<_> = event_nodes
+                        .iter()
+                        .map(|event| crate::template::read_event(event).expect("valid OnEvent"))
+                        .collect();
+                    let killed: Vec<_> = events.iter().copied().filter(|(kind, _)| *kind == 13).collect();
+                    assert_eq!(killed, [(13, delay.index.unwrap())], "{context}: one death feed");
+                    assert!(events.iter().all(|(kind, _)| *kind != 4), "{context}: no legacy death event");
+                    assert_eq!(delay.block_type, "MCU_Timer");
+                    assert_eq!(delay.property("Time"), Some("60"));
+                    assert_eq!(
+                        delay.targets,
+                        [deact.index.unwrap(), death.index.unwrap()],
+                        "{context}: timer deactivates and counts only this aircraft"
+                    );
+                    assert_eq!(deact.objects, [*entity_id], "{context}: own Deactivate");
+                    assert!(cleanup.targets.contains(&delay.index.unwrap()));
+                    assert_eq!(complete.targets, [cleanup.index.unwrap()]);
+                    for event_type in [1, 3, 7, 8] {
+                        let hooks: Vec<_> = events.iter().copied()
+                            .filter(|(kind, _)| *kind == event_type).collect();
+                        assert_eq!(
+                            hooks, [(event_type, complete.index.unwrap())],
+                            "{context}: event {event_type} keeps its CLEANUP hook"
+                        );
+                    }
+                }
+            }
+            assert_eq!(seat, 6, "{name}: every aircraft checked");
         }
-        assert_eq!(seat, 6);
+        pack.for_each(&mut |node| {
+            if let Some((kind, target)) = crate::template::read_event(node) {
+                assert!(
+                    !death_ids.contains(&target),
+                    "event {kind} must not target DeathCount {target} directly"
+                );
+            }
+        });
     }
 
     #[test]
