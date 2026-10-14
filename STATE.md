@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-14, after flights 1K, 1L and 1M and the fixes for decisions 0012, 0013/0014 and 0015.
+> Last updated: 2026-10-14, end of session. **The next session starts with `handoff/sessions/2026-10-14-handoff-flight-1n.md`.**
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -40,7 +40,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
   - A destroyed aircraft raises event 13, never 4 (every kind of loss tried). A Delete must list entities; one that lists the units' own block indexes removes nothing.
   - With `AiRTBDecision = 1`, all aircraft of a damaged formation but one stop answering commands and fly home. With 0 they stay controllable.
   - Upstream's new strike and CAP: the F-80C and F-86A raise event 7 (bingo fuel) 3 s after activation and go home at once; the Il-10 strike attacks but never gets home when its go-home timer fires more than once.
-- **Fixed and merged (decisions 0012, 0013/0014, 0015, accepted by the user 2026-10-13):** aircraft death events are 13; Spawn-mode `Trigger Delete` lists entities and Activate mode writes no Delete; Air Tasking places aircraft with `AiRTBDecision = 0` and gives placed copies a working Delete. Flight 1M flew the generated output and confirmed each. **Not to be released until decision 0016 is settled:** with 0012 alone, Fighter Pack would count every kill twice.
+- **Fixed and merged (decisions 0012, 0013/0014, 0015, accepted by the user 2026-10-13):** aircraft death events are 13; Spawn-mode `Trigger Delete` lists entities and Activate mode writes no Delete; Air Tasking places aircraft with `AiRTBDecision = 0` and gives placed copies a working Delete. Flight 1M flew the generated output and confirmed each. **Not to be released until decision 0016 (accepted, not yet built) is in:** with 0012 alone, Fighter Pack would count every kill twice.
 - **An issue for the upstream author is drafted, not sent:** `handoff/upstream-issue-draft.md`. It waits on flight 1N for the go-home fix, then a `/hfe-mayer` pass, then the user's word.
 - **The game updated to 1.005 (`261013`) on 2026-10-13.** Its `MissionResaver.exe` crashes on every mission; build probes with `--no-resave`. Leaving a client-hosted server: see `docs/il2-loader-and-log-facts.md`.
 - **Aircraft ceilings are documented figures since 2026-10-13** (`src/model_spec.rs`; research in `docs/historical-reference/aircraft-service-ceilings.md`, with the game's own figures beside them).
@@ -48,19 +48,19 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 ## Waiting on the user
 
-0. **Decision 0016 (`Proposed`): Fighter Pack counts each aircraft once.** Recommended: point each aircraft's death event at its own clean-up timer. It blocks releasing the 0012 fix.
-1. **Flight 1N:** three copies of upstream's Il-10 strike (as written; with a once-only gate on the go-home step; without the Force Complete), and a Fighter Pack flight if 0016 is accepted. Proposed, not built.
-2. **The upstream issue:** sending it, after 1N and the `/hfe-mayer` pass.
-3. **The six built-in sorties** (`TemplateExamples/Historical1950/`) still carry the old Delete list. Air Tasking now corrects it on the copies it places; whether to change the files is open.
+0. **Nothing blocks the next step.** The user accepted decision 0016 and approved flight 1N on 2026-10-14. The next session builds 0016, builds flight 1N and flies it (asking for the screen first).
+1. **The upstream issue:** whether to post it, after flight 1N and a `/hfe-mayer` pass.
+2. **Fighter Pack's own event 7 hook** (bingo fuel sends the flight home): suspected to make every jet Fighter Pack flight go home right after it spawns. Flight 1N tests it; a decision follows if it is confirmed.
+3. **The six built-in sorties** (`TemplateExamples/Historical1950/`) still carry the old Delete list. Air Tasking corrects it on the copies it places; whether to change the files is open.
 4. **Upstream overlap:** upstream now places strikes and CAPs on Map targets. Proposed: Air Tasking schedules and budgets those instead of placing its own; to be planned before the upstream merge.
 5. **Older items:** whether objective breadcrumbs show as map markers; the 2026-10-03 next-step list; plan §10 item 23.
 
 ## Next steps (proposed order)
 
-1. Settle 0016, build it, and fly flight 1N.
-2. Finish the upstream issue and send it when the user says.
+1. Decision 0016 (Astra, job 1 of `handoff/P14-step-0k-codex-prompts.md`), then flight 1N (job 2), then fly it. Detail: `handoff/sessions/2026-10-14-handoff-flight-1n.md`.
+2. Finish the upstream issue and post it when the user says.
 3. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-4. Settle step 3 (`codex/p14-3`, held): losses on event 13; its own clean-up with entity Deletes; sortie templates with or without a Delete chain.
+4. Settle step 3 (`codex/p14-3`, held): losses on event 13; its own clean-up with entity Deletes; sortie templates with or without a Delete chain; no abort on event 7.
 5. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 
 ## Traps
