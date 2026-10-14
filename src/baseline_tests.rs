@@ -397,8 +397,8 @@ fn trace_off_changes_nothing() {
             fingerprint = (fingerprint ^ u64::from(byte)).wrapping_mul(0x100000001b3);
         }
     }
-    // Decisions 0013/0014: Spawn Delete entity links; no Activate Delete chain.
-    assert_eq!(fingerprint, 0x27a298ac30ff583d);
+    // Decision 0016: Fighter Pack death events target each aircraft's Delay Delete.
+    assert_eq!(fingerprint, 0xb5edbca97b0ede83);
 
     fn check_source(dir: &Path) {
         for entry in std::fs::read_dir(dir).unwrap() {
