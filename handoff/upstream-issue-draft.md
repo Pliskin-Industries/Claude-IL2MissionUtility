@@ -1,6 +1,6 @@
-# DRAFT, not sent. Issue for `eszyman/IL2MissionUtility`
+# Issue for `eszyman/IL2MissionUtility` (posted)
 
-> Status: draft, updated 2026-10-14 after flight 1P (the plan's "flight 1N"), which confirmed section 3's fix. `/hfe-mayer` pass done 2026-10-14. Do not post until the user says so.
+> Status: draft, updated 2026-10-14 after flight 1P (the plan's "flight 1N"), which confirmed section 3's fix. `/hfe-mayer` pass done 2026-10-14. **Posted 2026-10-14 with the user's go-ahead: https://github.com/eszyman/IL2MissionUtility/issues/1** (from gh account `GhengisPliskinAutomata`). This file is the posted text; follow-ups go on the issue.
 
 ---
 

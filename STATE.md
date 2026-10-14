@@ -43,14 +43,14 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 ## Waiting on the user
 
-1. **The upstream issue** (`handoff/upstream-issue-draft.md`): updated with flight 1P's results, the Fighter Pack change (0016) added to its section 1, and the `/hfe-mayer` pass done. **Ready to post when the user says.** Nothing is sent without that.
+1. **The upstream issue is posted** (2026-10-14, https://github.com/eszyman/IL2MissionUtility/issues/1; text in `handoff/upstream-issue-draft.md`). Waiting on the upstream author's reply; offering patches for 1 to 3 is the next step if they want them.
 2. **The six built-in sorties** (`TemplateExamples/Historical1950/`) still carry the old Delete list. Air Tasking corrects it on the copies it places; whether to change the files is open.
 3. **Upstream overlap:** upstream now places strikes and CAPs on Map targets. Proposed: Air Tasking schedules and budgets those instead of placing its own; to be planned before the upstream merge.
 4. **Older items:** whether objective breadcrumbs show as map markers; the 2026-10-03 next-step list; plan §10 item 23.
 
 ## Next steps (proposed order)
 
-1. Post the upstream issue when the user says.
+1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
 2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
 3. Settle step 3 (`codex/p14-3`, held), as listed above.
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
