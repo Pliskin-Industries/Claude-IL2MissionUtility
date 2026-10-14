@@ -10,11 +10,11 @@ Hi. I use the fork at `Pliskin-Industries/Claude-IL2MissionUtility`. While build
 
 Game version 1.005 (`261013`), dogfight server hosted from the client, AI aircraft only.
 
-| # | Problem | Proposed fix | Flown with the fix |
-|---|---|---|---|
-| 1 | Aircraft never raise event 4, so `DeathCount` never counts them | death event 13 for aircraft; in Fighter Pack, point it at each aircraft's `Delay Delete n` | yes |
-| 2 | `Trigger Delete` lists Plane block indexes, which the game ignores | Spawn mode: list entities. Activate mode: write no Delete | yes |
-| 3 | Jet strikes and CAPs abort on event 7 at start; a go-home step that fires twice leaves the flight with no orders | no abort on event 7; a once-only counter before the go-home timer | yes |
+In short, I found three problems, and each fix below has been flown and works:
+
+1. **Repeat spawns never repeat for aircraft.** A unit's entity can send a pulse to another MCU when something happens to it; the `OnEvent` `Type` number says what. Event 4 is `OnPlaneDestroyed`, offered for aircraft only. Event 13 is `OnKilled`, which every unit has, aircraft included. The app's death counter listens for event 4 on aircraft, and the game never raises it: a dead aircraft raises 13. Switching aircraft to 13 fixes it. Fighter Pack needs one more change with it, or every kill counts twice.
+2. **Finished groups are never deleted.** `Trigger Delete` names the units' own blocks, which the game ignores; it needs their entities. In Activate mode the Delete should not be written at all, because the group must come back.
+3. **Jet strikes and CAPs go home as soon as they start, and the Il-10 strike never gets home.** The jets raise event 7 (bingo fuel) seconds after activation, and the files treat it as "go home". Separately, when the go-home step fires more than once, the flight is left with no orders. Dropping event 7 as an abort, and letting the go-home step fire only once per flight, fixes both.
 
 ## 1. A destroyed aircraft raises event 13, never event 4
 
