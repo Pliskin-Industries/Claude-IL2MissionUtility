@@ -77,4 +77,7 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **Log records:** `AType:18` bail-out; `AType:31` an aircraft meets the ground (crash or landing); `AType:27` with a crash; `AType:26` stores dropped.
 - **A Damage command aimed at a unit's entity reaches a spawned copy.** A deactivated wave of a spawner stays in the end-of-mission list under the same name as the live wave.
 - **Probe groups made by `generate_template` keep the app's key order in their `Plane` blocks** (`Index`, `LinkTrId`, `Name`), not the shipped order the other probe blocks use, because flight 1L tests what the app writes. `probe_blocks_match_shipped_shapes` exempts them by index.
+- **Event 7 ("bingo fuel") fires on the F-80C and the F-86A-5 about 3 s after activation, with full tanks** (flights 1L and 1M, air starts at 1,500 and 3,050 m). The Il-10 did not raise it. Do not send a flight home on event 7.
+- **A timer that sends `Force Complete` and a waypoint together must fire only once per flight** (flight 1M). When it fired a second time while the flight was already on that waypoint, the flight was left with no orders.
+- **With `AiRTBDecision = 1`, all aircraft of a damaged formation but one stop answering commands** (flight 1M: three of a 4-ship).
 

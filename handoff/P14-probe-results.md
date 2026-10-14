@@ -323,6 +323,54 @@ Other facts from this run:
 - `AType:18` is a bail-out (`BOTID` is the pilot). `AType:31` is written when an aircraft meets the ground, crashing or landing; `AType:27` came with the two crashes and not with the landings.
 - An aircraft with no orders stays within 2 km of where it was spawned.
 
+## Flight 1M (upstream's strike and CAP; the fixes as generated) — 2026-10-14, two runs
+
+Step 0j probe `P14_Probe_1M_traced` (`handoff/p14-probes/flight1m/`), built as `P14_Probe_1M_20261013` without the resaver, hosted by the game client on the second PC (game `261013`). Nobody spawned. The game showed "#31: Master server response timeout" while loading; the local server ran normally.
+
+| Run | Session | Ended | Logs |
+|---|---|---|---|
+| 1 | `2026-10-14_09-20-47` | left at 13:08 | `src/testdata/missionlog/real_16/` (36 files) |
+| 2 | `2026-10-14_09-37-32` | the server reloaded the mission as run 1 was left; it ran unattended for 93 minutes and was left then. Only its first 16 minutes are read (the cells close at 16:00) | `real_17/` (185 files) |
+
+### Cell T-u: upstream's own strike and CAP (commit `a31ad0a`)
+
+Every plane in these files carries `AiRTBDecision = 0`, `Fuel = 1`, an air start at 1,500 m, and abort hooks that send the flight home.
+
+| Group | Run 1 | Run 2 | Result |
+|---|---|---|---|
+| U1, F-80C strike as written | event 7 (bingo fuel) on all four at 01:03.7; `Goto WP 2` (home) at 01:04.2; `AttackArea` never; all four still flying at 13:08 | the same: event 7 at 01:03.6, home at 01:04.1; then two aircraft died at 01:41.8 with no enemy near | **the strike turns for home 3.6 s after it starts and never attacks** |
+| U3, the same strike without its four event 7 hooks | event 7 still raised at 01:03.6 (no hook); `AttackArea` 02:28.4; out of bombs (9) on all four 03:20.2 to 03:20.7; home once at 03:21.2; `Mission Complete` 05:52.4; `MISSION END` 05:52.5 | the same within a few seconds; `Mission Complete` 05:48.9 | control: without the event 7 abort the strike works as designed |
+| U2, Il-10 strike as written | no event 7. `AttackArea` 03:03.6. Out of bombs on all four 04:00.9 to 04:01.5; `Goto WP 2` fired at 04:02.0, again at 04:06.3 (U2d critical damage) and 05:34.9 (U2c critical damage; its crew bailed out and it crashed at 05:57). **Never reached home:** the three survivors were 2.5 km from the target at 800 m at 13:08 | no event 7. Out of bombs 04:01.4 to 04:02.2; `Goto WP 2` fired at 04:02.2 and 04:02.7. No `Mission Complete` before the 16:00 close | **the Il-10 strike attacks but does not go home** |
+| U4, F-86A CAP as written | event 7 on all four at 01:03.6; `Goto WP 5` (home) at 01:04.1; two aircraft died at 01:53 with no enemy near | the same; two died at 01:52.7 | **the CAP turns for home at once** |
+| U5, the same CAP without its event 7 hooks | event 7 raised, no hook; patrol under way (`Goto WP 2` at 01:27.4) | the same | control: the CAP patrols |
+
+**Reading.**
+- **Event 7 fires on the jets (F-80C, F-86A) 3.1 s after they are activated, with full tanks, and never on the Il-10.** Upstream's strike and CAP treat it as "go home", so every jet strike and jet CAP aborts at once. Why the game raises it is not known.
+- **The go-home step fails when it fires more than once.** Each abort event pulses one timer, `Goto WP 2`, which sends `Force Complete - High` and the home waypoint to the lead. The F-80 control's four "out of bombs" arrived within 0.5 s, the timer fired once, and the flight went home and completed, twice. The Il-10s' arrived over about a second, the timer fired two or three times, and the flight never reached home, twice. The likely mechanism (a reading): the second firing's Force Complete ends the home waypoint the flight is already flying to, and sending the same waypoint again does not restart it, so the flight is left with no orders and stays where it is (flight 1L: an aircraft with no orders stays within 2 km).
+- **The sudden abort may cause collisions:** the aborted F-86 CAP lost two aircraft about 49 s after its abort in both runs, and the aborted F-80 strike lost two 38 s after it in run 2, each time with no enemy near. That two aircraft collided is a reading from the timing; it was not watched.
+
+### Cell T-x: the changed generator, as generated
+
+| Group | Run 1 | Run 2 | Result |
+|---|---|---|---|
+| X1, repeat spawn | wave 1 killed 03:00.1; `DeathCount` 03:00.1; `COOLDOWN` 04:00.1; wave 2 killed 06:00.1; again; wave 3 in the end-of-mission list | the same | **0012 confirmed as generated** |
+| X2, repeat spawn, clean-up then respawn | clean-up 03:00; new wave from 04:00.6; killed 06:00.1; **one X2a and one X2b in the end-of-mission list** | the same events | **0014, Spawn mode, confirmed:** the finished wave is gone (flight 1L's unfixed W3 left two of each) |
+| X3, Activate mode | no `DELETE DELAY` or `Trigger Delete` in the file; clean-up 03:00; `MISSION BEGIN` again 04:00; both died to the detector 06:00.1 | the same | **0014, Activate mode, confirmed:** the group comes back |
+
+### Cell T-y: return to base, larger groups (run 1; run 2 the same in the events)
+
+| Row | What happened | Result |
+|---|---|---|
+| Y1, 4-ship placed by `place_air_sortie` (`AiRTBDecision = 0`), level 1 damage, Delete of all four at 05:00 | no event at 05:30, none in the end-of-mission list | **0015 confirmed for a 4-ship:** all four removed |
+| Y2, the same 4-ship with `AiRTBDecision = 1` | all four dropped their stores 02:49 to 03:08. At 05:00 the Delete removed Y2d only. Y2a, Y2b and Y2c answered neither the Delete nor the 05:30 detector, flew to K14; Y2c touched down at 12:30 | with the setting on, **three of four** stop answering |
+| Y3, one aircraft, `AiRTBDecision = 1` | dropped its stores at 03:06; removed by the Delete at 05:00 | a lone damaged aircraft stays reachable |
+
+So in a damaged formation with `AiRTBDecision = 1`, all aircraft but one stop answering commands (pairs: one of two, flights 1K and 1L; 4-ship: three of four; single: none). Which one stays reachable varies.
+
+### Cell T-j: timers on game 1.005
+
+J5 (a 10 s timer re-triggered at 5 s) fired once, at 09:15.0, 15 s after its first trigger, in both runs. J1 to J3 never fired. **The same as game 1.004 (flight 0):** a re-triggered running timer restarts and fires once. Decision 0016 rests on this.
+
 ## Step 0 after the flights of 2026-10-12 and 2026-10-13
 
 | Risk | Answer | From |
@@ -332,9 +380,10 @@ Other facts from this run:
 | g | **changed:** a lost aircraft raises event 13 (and 0, 2), never 4; Delete raises none | flight 1G |
 | n | AI F-80Cs on the built-in template: 733 km/h, against the plan's 732 | flights 1N, 1D |
 | country filter (decision 0008, option 4) | works on both sides, for AI and players; country 602 is usable for NATO AI | flights 1N, 1D |
-| new | **with `AiRTBDecision = 1`, one aircraft of a damaged pair stops answering Delete, Deactivate and Damage commands**, flies home, lands and is removed by the game. With `AiRTBDecision = 0` both stay on task and can be deleted | flights 1G, 1K, 1L |
+| new | **with `AiRTBDecision = 1`, all but one aircraft of a damaged formation stop answering Delete, Deactivate and Damage commands** (one of two, three of four), fly home, land and are removed by the game. With `AiRTBDecision = 0` every aircraft stays on task and can be deleted (pair and 4-ship) | flights 1G, 1K, 1L, 1M |
 | g, again | event 13 fires for every kind of loss tried (command, gunfire, collision, crash, fuel and bail-out); event 4 never. In `generate_template`'s respawn loop the counter only works on 13 | flights 1G, 1K, 1L |
-| new | `Trigger Delete` with entities: fine in Spawn mode, ends the group for good in Activate mode | flight 1L |
+| new | `Trigger Delete` with entities: fine in Spawn mode, ends the group for good in Activate mode. The fixed generator (decisions 0012, 0014) works as generated | flights 1L, 1M |
+| upstream | event 7 fires on the F-80C and F-86A 3 s after activation; upstream's strike and CAP abort on it at once. A go-home step that fires twice leaves the flight with no orders | flight 1M |
 | new | a dead aircraft in a Delete's list is harmless; a Delete removes the aircraft it names, not the formation | flights 1J, 1K |
 | new | a Delete that lists Plane indexes (as Template Builder and the built-in sorties write it) removes nothing; a Delete that lists entities works | flight 1H |
 | new | a Damage command aimed at one aircraft kills its whole formation | flight 1H |
