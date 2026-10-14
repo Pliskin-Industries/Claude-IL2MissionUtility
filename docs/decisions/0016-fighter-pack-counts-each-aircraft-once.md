@@ -1,8 +1,8 @@
 # 0016. Fighter Pack counts each aircraft once
 
-- **Status:** Proposed
+- **Status:** Accepted (option B)
 - **Date:** 2026-10-13
-- **Decided by:** open; the user decides. Finding and recommendation by Claude.
+- **Decided by:** the user, 2026-10-14 ("0016 acceptable"). Finding and recommendation by Claude.
 
 ## Context
 In a Fighter Pack flight every aircraft `n` feeds its flight's `DeathCount` twice (`flights.rs`, `install_pack_logic`):
@@ -27,7 +27,7 @@ It also explains why Fighter Pack worked before 0012: the death event never fire
 | When a death is counted | at once | after the clean-up delay | at once |
 
 ## Decision
-None yet. Claude recommends B.
+**Option B.** Each aircraft's death event targets its own `Delay Delete n` timer instead of `DeathCount`. Built and flown in plan step 0k (flight 1N); the event 13 fix (0012) is not released before this one.
 
 ## Consequences
 - Under B a replacement flight comes later by the clean-up delay (60 s by default) when its trigger was a death. The cooldown before a replacement is already minutes.
