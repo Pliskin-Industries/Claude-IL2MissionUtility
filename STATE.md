@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-14, after decision 0017 (step 3 scoped).
+> Last updated: 2026-10-14, after step 3b was built and reviewed (decision 0017).
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -20,7 +20,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | `main` | `Claude-IL2MissionUtility` | v0.6.0 plus the P14 plan. 3 ahead and 1 behind `origin/main`. |
 | `claude/p14-air-tasking` | `Claude-IL2MissionUtility-fix` | **The active branch.** P14 steps 1a, 1, 1b, 0T, 0b, 2 and the probe steps 0e to 0k, plus the fixes for decisions 0012 to 0016 (they change what Template Builder and Fighter Pack generate). Not pushed. |
 | `codex/p14-3` | `Claude-IL2MissionUtility-0t` | P14 step 3, built before flight 0; superseded by `codex/p14-3b`. |
-| `codex/p14-3b` | `Claude-IL2MissionUtility-3b` | P14 step 3 being settled to decision 0017 (Astra). Not merged. |
+| `codex/p14-3b` | `Claude-IL2MissionUtility-3b` | P14 step 3 settled to decision 0017 (`129bf0d`), reviewed. Not merged: waits for flight 2. |
 | `trial/upstream-merge` | `Claude-IL2MissionUtility-merge` | Uncommitted trial merge of upstream. Do not build on it. |
 | `trial/upstream-strike-files` | `Claude-IL2MissionUtility-up` | A checkout of upstream `a31ad0a` with one ignored test that writes its strike and CAP files. Never pushed or merged. |
 | `codex/fix-0016`, `codex/p14-0k` and the older `codex/*` branches | `Claude-IL2MissionUtility-0e` (on `codex/p14-0k`), `-0b` | Already merged. Leftover worktrees. |
@@ -39,7 +39,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
   - the F-80C strike without its event 7 hooks completes;
   - **event 7 at activation is not a property of the type:** twelve single aircraft as Template Builder writes them, and the Fighter Pack F-80Cs, did not raise it. Upstream's F-80C strike and F-86A CAP did. The cause is not known;
   - Fighter Pack's event 7 hook did **not** send the flight home, so no decision is needed for it for now.
-- **Step 3 is being settled on `codex/p14-3b`** (worktree `Claude-IL2MissionUtility-3b`): the held `codex/p14-3` merged onto the active branch, then rebuilt by Astra to decision 0017 (2026-10-14): Activate-mode templates only, the shell writes its own entity Delete, losses on event 13 only (`Latch` removed), the `// P14 G0` lines settled, Probe 2 (flight 2) with crash cell T-l. Prompt: `handoff/P14-step-3b-codex-prompt.md`. Then a full review, flight 2, and a `--no-ff` merge.
+- **Step 3 is built on `codex/p14-3b`** (worktree `Claude-IL2MissionUtility-3b`, `129bf0d`), to decision 0017: Activate-mode templates only, the shell writes its own entity Delete, losses on event 13 only, the `// P14 G0` lines settled. Standards and spec reviews done; all ten findings fixed (prompts: `handoff/P14-step-3b-codex-prompt.md`, `…-review-fixes-codex-prompt.md`). On that branch: 629 passed, 0 failed, 21 ignored; 69 / 251 warnings; the 44 flown probe files byte-identical. **Next: fly flight 2** (`write_p14_probe_2`: sorties T-s1 and T-s2, budget cells T-k and T-k1, no-damage loss T-l1; about 46 min, no pilot), plus the load file; then merge `--no-ff` into `claude/p14-air-tasking`.
 - **The game is 1.005 (`261013`).** Its `MissionResaver.exe` crashes on every mission; build probes with `--no-resave`. How to run a no-pilot probe on this PC: `handoff/sessions/2026-10-14-handoff-flight-1n.md` ("Flying a no-pilot probe") and `handoff/sessions/2026-10-13-delete-probes.md`.
 
 ## Waiting on the user
@@ -53,7 +53,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
 2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-3. Settle step 3 (`codex/p14-3b`, decision 0017), as listed above; fly flight 2.
+3. Fly flight 2 and record it in `handoff/P14-probe-results.md`; merge `codex/p14-3b`.
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 5. Optional probes, if they matter later: the go-home timer without Force Complete when it fires more than once (1P's H3 did not test it), and what makes the game raise event 7 at activation.
 
