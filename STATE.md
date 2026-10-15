@@ -61,7 +61,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
 2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-3. Merge `codex/p14-3b` / `codex/p14-2c` (user); decide on flight 2D (formation density, without server overload) from the options note.
+3. Merge `codex/p14-3b` / `codex/p14-2c` / `codex/p14-2d` (user). **Fly flight 2D** (built and checked on `codex/p14-2d`, `b82cd9e`; design in `handoff/sessions/2026-10-15-hvar-empty-target.md`, "Flight 2D design"): build `P14_Probe_2D_<date>` from `target/p14/P14_Probe_2D_traced.Group` with `--no-resave`, fly three runs with Tacview, note when "server overload" first shows. Waits for the user to say the screen is free.
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 5. Optional probes, if they matter later: the go-home timer without Force Complete when it fires more than once (1P's H3 did not test it), and what makes the game raise event 7 at activation.
 

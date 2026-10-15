@@ -120,7 +120,9 @@ So options A, A′, B and C (the order) and the weight hypothesis are set aside.
 
 Proposed next probe (flight 2D, not built): the same empty targets with `FormationDensity` 0, 1 and 2 (and, if useful, Pairs), with few enough aircraft that the server shows no overload message (first find that count with one short run), flown twice with Tacview. Count close passes under 20 m and collisions per variant.
 
-## Flight 2D design (proposed 2026-10-15; waits for the user's go-ahead)
+## Flight 2D design (built 2026-10-15 on `codex/p14-2d`, `b82cd9e`; not flown)
+
+Built by Astra from `handoff/P14-flight-2d-codex-prompt.md` and reviewed. Checks: `cargo test` 651 passed, 0 failed, 23 ignored (baseline 645 / 0 / 22); build 69 and clippy 251 warnings, both at baseline; flown probe files unchanged and regenerating byte for byte; the writer writes `target/p14/P14_Probe_2D*` (no spawn: `[]`); `build_probe_mission.py --no-resave` exits 0, with 1,559 unique indices and 2,571 resolved references. Run sheet: `target/p14/P14_Probe_2D_schedule.md` (regenerate with `cargo test --offline write_p14_probe_2d -- --ignored`). The start cue reads "Note the first time the server overload message shows" (no apostrophes: the loader rejects them in Group names).
 
 **What `FormationDensity` means.** The repository does not say. The game's own editor does: `game\bin\editor\IL2Editor.exe` holds the Formation command's labels "Formation Density:" and the list **Dense, Safe, Loose**, right after the formation-type names. By the list's order, 0 = Dense, 1 = Safe, 2 = Loose (inference from the order; not checked in the editor's window). The spacing each gives in metres is not known; flight 2D measures it from Tacview. The repository's own files use 1 for bombers (`BomberMissions/DPRK Bombers - Small Formation.Group`, Heavy Wedge) and 1–2 for vehicle columns; Template Builder writes 0 for every air formation.
 
