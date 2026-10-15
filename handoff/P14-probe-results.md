@@ -58,7 +58,7 @@ All times below are mission time from Mission Begin.
 | q (J4, via E7) | relay latches as written |
 | t1–t6 | `TraceCarrier::Objective(C0/S0)`, tick rate 50/s, offset 3 |
 | a (flight 0 part) | **AI counts.** Per the 0d table the D30 warning becomes an error unless the user decides otherwise (§10 item 15). Flight 1A's ZA4 still to fly. |
-| z | not confirmed: `PresenceCheckImpl::Closer0Race` is **not** available as a fallback for c. |
+| z | not confirmed: `PresenceCheckImpl::Closer0Race` is **not** available as a fallback for c. **Revisited 2026-10-14 (flight 2, decision 0018):** cell T-z switched Z1 on and pulsed it in the same tick, from one timer (`T-z ARM`); flight 2's Zone Out, switched on and pulsed 0.1 s later, fired at once when empty. The T-z result is most likely the same-tick order, not the zone. |
 
 **Gate G0: passed.** No "build stops" row fired (J2 confirmed; J4 confirmed with E7).
 
@@ -464,7 +464,7 @@ So event 13 fires for a crash with no damage and no attacker. The crash was an i
 
 ### Open
 
-1. **Zone Out on an empty target (needs the user).** As built, a sortie whose target has no enemy aircraft within 35 km ends on arrival. Either that is intended (a sortie only stays while there is something to fight), or Zone Out should only end a sortie after an enemy has been seen inside it, which costs MCUs. Flight 2 could not test the on-station part of the shell either way: a re-fly needs an enemy AI flight over each target (AI aircraft trigger check zones, flight 0).
+1. **Zone Out on an empty target. Ruled 2026-10-14, decision 0018:** a sortie stays on station at an empty target; Zone Out ends it only after an enemy has been seen inside (the template's Zone IN is kept for that). Flight 2B re-flies the sortie cells. The original note: As built, a sortie whose target has no enemy aircraft within 35 km ends on arrival. Either that is intended (a sortie only stays while there is something to fight), or Zone Out should only end a sortie after an enemy has been seen inside it, which costs MCUs. Flight 2 could not test the on-station part of the shell either way: a re-fly needs an enemy AI flight over each target (AI aircraft trigger check zones, flight 0).
 2. **The load file** (24 copies per side) was not flown here: this PC is a test bed, not the real host. It went to the upstream author, who hosts the server: https://github.com/eszyman/IL2MissionUtility/issues/2 (mission text log and Tacview recording requested).
 
 ## Step 0 after the flights of 2026-10-12 to 2026-10-14

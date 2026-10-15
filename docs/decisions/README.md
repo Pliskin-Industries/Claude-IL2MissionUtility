@@ -53,5 +53,6 @@ What this makes easier, harder or necessary.
 | [0015](0015-air-tasking-sorties-keep-ai-rtb-decision-off.md) | Air Tasking writes its sortie aircraft with `AiRTBDecision = 0` | Accepted |
 | [0016](0016-fighter-pack-counts-each-aircraft-once.md) | Fighter Pack counts each aircraft once | Accepted |
 | [0017](0017-step-3-activate-mode-own-delete-event-13.md) | Step 3 settles on Activate-mode sorties, its own Delete and event 13 | Accepted |
+| [0018](0018-zone-out-only-after-an-enemy-is-seen.md) | A sortie's Zone Out ends it only after an enemy has been seen inside | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
