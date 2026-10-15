@@ -18,15 +18,15 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | Branch | Worktree folder | Holds |
 |---|---|---|
 | `main` | `Claude-IL2MissionUtility` | v0.6.0 plus the P14 plan. 3 ahead and 1 behind `origin/main`. |
-| `claude/p14-air-tasking` | `Claude-IL2MissionUtility-fix` | **The active branch.** P14 steps 1a, 1, 1b, 0T, 0b, 2 and the probe steps 0e to 0k, plus the fixes for decisions 0012 to 0016 (they change what Template Builder and Fighter Pack generate). Not pushed. |
-| `codex/p14-3` | `Claude-IL2MissionUtility-0t` | P14 step 3, built before flight 0; superseded by `codex/p14-3b`. |
-| `codex/p14-3b` | `Claude-IL2MissionUtility-3b` | P14 step 3: decisions 0017 and 0018, reviewed; flights 2 and 2B flown. Not merged: waits for the user. |
+| `claude/p14-air-tasking` | `Claude-IL2MissionUtility-fix` | **The active branch.** P14 steps 1a, 1, 1b, 0T, 0b, 2, **3** (merged 2026-10-15, `51b2327`) and the probe steps 0e to 0k, plus the fixes for decisions 0012 to 0016 (they change what Template Builder and Fighter Pack generate). Not pushed. |
+| `codex/p14-3` | `Claude-IL2MissionUtility-0t` | P14 step 3 as first built, before flight 0; superseded and merged through `codex/p14-3b`. A leftover worktree. |
+| `codex/p14-3b` | `Claude-IL2MissionUtility-3b` | P14 step 3 (decisions 0017, 0018), flown as flights 2 and 2B. Merged into the active branch 2026-10-15. A leftover worktree. |
 | `trial/upstream-merge` | `Claude-IL2MissionUtility-merge` | Uncommitted trial merge of upstream. Do not build on it. |
 | `trial/upstream-strike-files` | `Claude-IL2MissionUtility-up` | A checkout of upstream `a31ad0a` with one ignored test that writes its strike and CAP files. Never pushed or merged. |
 | `codex/fix-0016`, `codex/p14-0k` and the older `codex/*` branches | `Claude-IL2MissionUtility-0e` (on `codex/p14-0k`), `-0b` | Already merged. Leftover worktrees. |
 | `claude/docs-layout-trial` | `Claude-IL2MissionUtility-docs` | This document layout. Merged 2026-10-10. A leftover worktree. |
 
-Last recorded test run on the active branch: 577 passed, 0 failed, 19 ignored (`cargo test --offline`, 2026-10-14, after step 0k). Warnings on 2026-10-14: 69 build, 251 clippy. Probe writers: 11; the 44 flown probe files of flights 0 to 1P regenerate byte for byte. Record each new run on this line.
+Last recorded test run on the active branch: 638 passed, 0 failed, 21 ignored (`cargo test --offline`, 2026-10-15, after merging step 3). Warnings: 69 build, 251 clippy. The 48 flown probe files of flights 0 to 1P and 2B regenerate byte for byte; flight 2's files are frozen (decision 0018). Record each new run on this line.
 
 ## In progress: P14 Air Tasking (issues #28, #29)
 
@@ -48,7 +48,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 ## Waiting on the user
 
-0. **Merge `codex/p14-3b` into `claude/p14-air-tasking`?** Step 3 has flown three times (flight 2; flight 2B runs 1 and 2). Open from it: HVAR losses over an empty target, and what the aircraft do on station and during the extension. A Tacview recording needs the host inside the mission (press Spectate), not yet tried.
+0. **Step 3 is merged** (2026-10-15). Open from it, in its own session ("Why HVAR sorties crash over an empty target"): HVAR flights lose aircraft while working an empty target at 370 to 410 m, and a Tacview recording still needs a recorded track.
 1. **The load test is with the upstream author:** https://github.com/eszyman/IL2MissionUtility/issues/2 (posted 2026-10-14; mission text log and Tacview recording requested). The text names the rebuilt file `P14_Load_3_20261014` (decision 0018 shell, 48 check zones per side); **the zip attached to the issue is still the old `P14_Load_2` and must be replaced** with `target/p14/missions/P14_Load_3_20261014/P14_Load_3_20261014.zip` (step 3b worktree). This PC is a test bed: its load numbers are not used.
 2. **The upstream issue is posted** (2026-10-14, https://github.com/eszyman/IL2MissionUtility/issues/1; text in `handoff/upstream-issue-draft.md`). Waiting on the upstream author's reply; offering patches for 1 to 3 is the next step if they want them.
 3. **The six built-in sorties** (`TemplateExamples/Historical1950/`) still carry the old Delete list. Air Tasking removes it from the copies it places and writes its own (decision 0017); whether to change the files is open.
@@ -57,9 +57,9 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 ## Next steps (proposed order)
 
-1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
-2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-3. Merge `codex/p14-3b` (user); decide whether to re-fly T-s1 with Tacview on to see the HVAR crashes and the extension.
+1. Upstream: the author fixed issue #1's three bugs and was asked to publish them and close it (2026-10-15). When they land, merge upstream and drop our copies of those fixes.
+2. Merge upstream (8 commits ahead before the author's fixes, including the strike and CAP missions and a large `template.rs` rewrite).
+3. Settle the HVAR empty-target behaviour from the follow-up session's options note.
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 5. Optional probes, if they matter later: the go-home timer without Force Complete when it fires more than once (1P's H3 did not test it), and what makes the game raise event 7 at activation.
 
