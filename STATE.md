@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-14, after step 3b was built and reviewed (decision 0017).
+> Last updated: 2026-10-14, after flight 2 (step 3b in the game).
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -20,7 +20,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | `main` | `Claude-IL2MissionUtility` | v0.6.0 plus the P14 plan. 3 ahead and 1 behind `origin/main`. |
 | `claude/p14-air-tasking` | `Claude-IL2MissionUtility-fix` | **The active branch.** P14 steps 1a, 1, 1b, 0T, 0b, 2 and the probe steps 0e to 0k, plus the fixes for decisions 0012 to 0016 (they change what Template Builder and Fighter Pack generate). Not pushed. |
 | `codex/p14-3` | `Claude-IL2MissionUtility-0t` | P14 step 3, built before flight 0; superseded by `codex/p14-3b`. |
-| `codex/p14-3b` | `Claude-IL2MissionUtility-3b` | P14 step 3 settled to decision 0017 (`129bf0d`), reviewed. Not merged: waits for flight 2. |
+| `codex/p14-3b` | `Claude-IL2MissionUtility-3b` | P14 step 3 settled to decision 0017 (`129bf0d`), reviewed, flown as flight 2. Not merged: waits for the Zone Out ruling. |
 | `trial/upstream-merge` | `Claude-IL2MissionUtility-merge` | Uncommitted trial merge of upstream. Do not build on it. |
 | `trial/upstream-strike-files` | `Claude-IL2MissionUtility-up` | A checkout of upstream `a31ad0a` with one ignored test that writes its strike and CAP files. Never pushed or merged. |
 | `codex/fix-0016`, `codex/p14-0k` and the older `codex/*` branches | `Claude-IL2MissionUtility-0e` (on `codex/p14-0k`), `-0b` | Already merged. Leftover worktrees. |
@@ -39,21 +39,23 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
   - the F-80C strike without its event 7 hooks completes;
   - **event 7 at activation is not a property of the type:** twelve single aircraft as Template Builder writes them, and the Fighter Pack F-80Cs, did not raise it. Upstream's F-80C strike and F-86A CAP did. The cause is not known;
   - Fighter Pack's event 7 hook did **not** send the flight home, so no decision is needed for it for now.
-- **Step 3 is built on `codex/p14-3b`** (worktree `Claude-IL2MissionUtility-3b`, `129bf0d`), to decision 0017: Activate-mode templates only, the shell writes its own entity Delete, losses on event 13 only, the `// P14 G0` lines settled. Standards and spec reviews done; all ten findings fixed (prompts: `handoff/P14-step-3b-codex-prompt.md`, `…-review-fixes-codex-prompt.md`). On that branch: 629 passed, 0 failed, 21 ignored; 69 / 251 warnings; the 44 flown probe files byte-identical. **Next: fly flight 2** (`write_p14_probe_2`: sorties T-s1 and T-s2, budget cells T-k and T-k1, no-damage loss T-l1; about 46 min, no pilot), plus the load file; then merge `--no-ff` into `claude/p14-air-tasking`.
+- **Step 3 is built on `codex/p14-3b`** (worktree `Claude-IL2MissionUtility-3b`, `129bf0d`), to decision 0017, reviewed, and **flown as flight 2** (2026-10-14; `handoff/P14-probe-results.md`, "Flight 2"; logs `src/testdata/missionlog/real_19/`). The budget works in the game at N = 2 and N = 1; the shell's own Delete removes the aircraft 60.6 s after `DONE HUB`; event 13 fires once for a crash with no damage. **But both sorties ended at WP 1 arrival:** Zone Out fires at once when no enemy aircraft is within 35 km of the target. That needs a ruling (below) before the merge, and the on-station part (attack, extension, RTB) is still unflown. On that branch: 629 passed, 0 failed, 21 ignored; 69 / 251 warnings; flown probe files (flight 2 now frozen in `handoff/p14-probes/flight2/`) byte-identical.
 - **The game is 1.005 (`261013`).** Its `MissionResaver.exe` crashes on every mission; build probes with `--no-resave`. How to run a no-pilot probe on this PC: `handoff/sessions/2026-10-14-handoff-flight-1n.md` ("Flying a no-pilot probe") and `handoff/sessions/2026-10-13-delete-probes.md`.
 
 ## Waiting on the user
 
-1. **The upstream issue is posted** (2026-10-14, https://github.com/eszyman/IL2MissionUtility/issues/1; text in `handoff/upstream-issue-draft.md`). Waiting on the upstream author's reply; offering patches for 1 to 3 is the next step if they want them.
-2. **The six built-in sorties** (`TemplateExamples/Historical1950/`) still carry the old Delete list. Air Tasking removes it from the copies it places and writes its own (decision 0017); whether to change the files is open.
-3. **Upstream overlap:** upstream now places strikes and CAPs on Map targets. Proposed: Air Tasking schedules and budgets those instead of placing its own; to be planned before the upstream merge.
-4. **Older items:** whether objective breadcrumbs show as map markers; the 2026-10-03 next-step list; plan §10 item 23.
+0. **Zone Out on an empty target (flight 2):** should a sortie whose target has no enemy within 35 km end on arrival (as built), or only after an enemy has been seen there? Then re-fly the sortie cells with an enemy AI flight over each target.
+1. **The load test is with the upstream author:** https://github.com/eszyman/IL2MissionUtility/issues/2 (posted 2026-10-14; the user attaches the zip; mission text log and Tacview recording requested). This PC is a test bed: its load numbers are not used.
+2. **The upstream issue is posted** (2026-10-14, https://github.com/eszyman/IL2MissionUtility/issues/1; text in `handoff/upstream-issue-draft.md`). Waiting on the upstream author's reply; offering patches for 1 to 3 is the next step if they want them.
+3. **The six built-in sorties** (`TemplateExamples/Historical1950/`) still carry the old Delete list. Air Tasking removes it from the copies it places and writes its own (decision 0017); whether to change the files is open.
+4. **Upstream overlap:** upstream now places strikes and CAPs on Map targets. Proposed: Air Tasking schedules and budgets those instead of placing its own; to be planned before the upstream merge.
+5. **Older items:** whether objective breadcrumbs show as map markers; the 2026-10-03 next-step list; plan §10 item 23.
 
 ## Next steps (proposed order)
 
 1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
 2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-3. Fly flight 2 and record it in `handoff/P14-probe-results.md`; merge `codex/p14-3b`.
+3. Rule on Zone Out (above); change the shell if needed; re-fly the sortie cells with an enemy AI flight over each target; merge `codex/p14-3b`.
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 5. Optional probes, if they matter later: the go-home timer without Force Complete when it fires more than once (1P's H3 did not test it), and what makes the game raise event 7 at activation.
 
