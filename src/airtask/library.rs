@@ -1,11 +1,10 @@
-//! The six bundled sorties and the deliberately bounded S1--S7 wiring contract.
+//! The six bundled sorties and the bounded Activate-only wiring contract.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use super::{AirRole, AirSide, AirSortie, SortieSource};
 use crate::ast::Il2Entity;
-use crate::template::{EntityEvent, read_event};
 use crate::{in_theatre, model_spec, parser, weapon_range};
 
 pub(crate) const BUILTINS: [(&str, &str); 6] = [
@@ -43,14 +42,11 @@ pub enum TestedShape {
     S2,
     S3,
     S4,
-    S5,
-    S6,
     S7,
 }
 
-/// S5/S6 use the supported S1--S4 routes in Spawn mode. S7 adds RTB to a
-/// supported base route; neither modifier relaxes the route's contract.
-pub const ACCEPTED_SHAPES: [(TestedShape, &str); 7] = [
+/// S7 adds RTB to a supported Activate route (decision 0017).
+pub const ACCEPTED_SHAPES: [(TestedShape, &str); 5] = [
     (TestedShape::S1, "Activate: one lead, one AttackArea"),
     (
         TestedShape::S2,
@@ -64,23 +60,8 @@ pub const ACCEPTED_SHAPES: [(TestedShape, &str); 7] = [
         TestedShape::S4,
         "Activate: two attack leads sharing one waypoint",
     ),
-    (
-        TestedShape::S5,
-        "Spawn: a supported S1--S4 route, Repeat off",
-    ),
-    (
-        TestedShape::S6,
-        "Spawn: a supported S1--S4 route, Repeat on",
-    ),
-    (TestedShape::S7, "S1--S6 with RTB on some or all leads"),
+    (TestedShape::S7, "S1--S4 with RTB on some or all leads"),
 ];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SortieMode {
-    Activate,
-    Spawn,
-    Repeat,
-}
 
 /// All MCU and plane references are indexes, independent of names and groups.
 /// `planes` and `leads` are entity ids in Plane file order; `plane_objects`
@@ -88,7 +69,6 @@ pub enum SortieMode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SortieShape {
     pub kind: TestedShape,
-    pub mode: SortieMode,
     pub side: AirSide,
     pub planes: Vec<i32>,
     pub leads: Vec<i32>,
@@ -109,8 +89,6 @@ pub struct SortieShape {
     pub delete_timer: Option<i32>,
     pub delete: Option<i32>,
     pub mission_complete_timers: Vec<i32>,
-    /// (plane entity, DeathCount) pairs, all OnKilled (OnEvent Type 13).
-    pub repeat_kill_events: Vec<(i32, i32)>,
     pub rtb_waypoints: BTreeMap<i32, i32>,
     pub rtb_timer: Option<i32>,
     pub models: Vec<String>,
@@ -126,13 +104,10 @@ pub(crate) const MULTIPLE_WAYPOINTS: &str = "Air Tasking supports only one path 
 const LAST_ATTACK: &str =
     "Air Tasking needs the attack order to be the last order before Mission Complete";
 const HOOKS: &str = "Air Tasking does not support event or report hooks yet";
-// Decision 0012, flight 1L: legacy event 4 never advances the repeat counter.
-const LEGACY_REPEAT_DEATH: &str = "Air Tasking Repeat needs OnKilled (13) into DeathCount; OnPlaneDestroyed (4) does not count aircraft deaths";
-const REPEAT_DEATH: &str =
-    "Air Tasking Repeat needs one OnKilled (13) event into DeathCount per plane";
+const ACTIVATE_MODE: &str = "Air Tasking needs an Activate-mode template";
 pub(crate) const REGENERATE_TEMPLATE: &str = "Load the template in Template Builder, correct the reported options or links, and press Generate again.";
 const PLANES_ONLY: &str = "Air Tasking supports plane units only";
-const UNTESTED: &str = "Air Tasking supports only tested sortie shapes S1-S7";
+const UNTESTED: &str = "Air Tasking supports only tested sortie shapes S1-S4 and S7";
 
 pub fn builtin_library() -> Vec<AirSortie> {
     BUILTINS
@@ -427,53 +402,15 @@ fn zone_side(zone: &Il2Entity) -> Result<AirSide, String> {
     }
 }
 
-fn inspect_hooks(
-    g: &Graph<'_>,
-    planes: &[i32],
-    death: Option<i32>,
-) -> Result<Vec<(i32, i32)>, String> {
-    let mut events = Vec::new();
-    let mut allowed = BTreeSet::new();
-    for &entity in planes {
-        for wrapper in &g.indexed[&entity].children {
-            if wrapper.block_type != "OnEvents" {
-                continue;
-            }
-            for event in &wrapper.children {
-                let Some((event_type, target)) = read_event(event) else {
-                    return Err(HOOKS.into());
-                };
-                if death == Some(target) && event_type == EntityEvent::OnPlaneDestroyed.type_id() {
-                    return Err(LEGACY_REPEAT_DEATH.into());
-                }
-                if event_type != EntityEvent::OnKilled.type_id() || Some(target) != death {
-                    return Err(HOOKS.into());
-                }
-                allowed.insert(event as *const Il2Entity);
-                events.push((entity, target));
-            }
-        }
+fn inspect_hooks(g: &Graph<'_>) -> Result<(), String> {
+    if g.all.iter().any(|node| {
+        matches!(node.block_type.as_str(), "OnEvent" | "OnReport")
+            || (matches!(node.block_type.as_str(), "OnEvents" | "OnReports")
+                && !node.children.is_empty())
+    }) {
+        return Err(HOOKS.into());
     }
-    for &node in &g.all {
-        if node.block_type == "OnReport"
-            || (node.block_type == "OnReports" && !node.children.is_empty())
-            || (node.block_type == "OnEvent" && !allowed.contains(&(node as *const Il2Entity)))
-        {
-            return Err(HOOKS.into());
-        }
-    }
-    if death.is_some()
-        && (events.len() != planes.len()
-            || events
-                .iter()
-                .map(|pair| pair.0)
-                .collect::<BTreeSet<_>>()
-                .len()
-                != planes.len())
-    {
-        return Err(REPEAT_DEATH.into());
-    }
-    Ok(events)
+    Ok(())
 }
 
 struct Lifecycle<'a> {
@@ -493,8 +430,6 @@ struct Lifecycle<'a> {
     deactivate: &'a Il2Entity,
     delete_chain: Option<(&'a Il2Entity, &'a Il2Entity)>,
     rtb_timer: Option<&'a Il2Entity>,
-    death: Option<&'a Il2Entity>,
-    spawner: Option<i32>,
 }
 
 fn inspect_lifecycle(
@@ -516,59 +451,20 @@ fn inspect_lifecycle(
         "Zone IN Activate",
         g.incoming(id(p.zone_in), "MCU_Activate"),
     )?;
-    let mut in_targets = vec![
+    let in_targets = vec![
         id(deact_in),
         id(p.react_out),
         id(p.pulse_out),
         id(p.bring_up),
     ];
-    let mut out_targets = vec![id(deact_out), id(p.end)];
-    if let Some(death) = p.death {
-        if number(death, "Counter")? != planes.len() as f64 || !is(death, "Dropcount", "1") {
-            return Err(format!("{UNTESTED}: unsupported repeat kill counter"));
-        }
-        let cooldown = one("repeat cooldown", g.targets(death, "MCU_Timer"))?;
-        let on = one(
-            "repeat counter Activate",
-            g.incoming(id(death), "MCU_Activate"),
-        )?;
-        let off = one(
-            "repeat counter Deactivate",
-            g.incoming(id(death), "MCU_Deactivate"),
-        )?;
-        let modifier = one(
-            "repeat counter reset",
-            g.incoming(id(death), "MCU_ModifierSetVal"),
-        )?;
-        let reset = one("repeat reset timer", g.incoming(id(modifier), "MCU_Timer"))?;
-        if ["ParamIndex", "Data0", "Data1", "Data2", "Data3"]
-            .iter()
-            .any(|key| !is(modifier, key, "0"))
-        {
-            return Err(format!("{UNTESTED}: unsupported repeat reset value"));
-        }
-        in_targets.push(id(on));
-        out_targets.extend([id(off), id(react_in), id(p.pulse_in), id(reset)]);
-        g.check(death, &[id(cooldown)], &[])?;
-        g.check(
-            cooldown,
-            &[p.spawner.expect("repeat mode has a Spawner")],
-            &[],
-        )?;
-        for node in [on, off, modifier] {
-            g.check(node, &[id(death)], &[])?;
-        }
-        g.check(reset, &[id(modifier)], &[])?;
-    } else {
-        let cooldown = one(
-            "cooldown timer",
-            g.targets(p.zone_out, "MCU_Timer")
-                .into_iter()
-                .filter(|node| id(node) != id(p.end)),
-        )?;
-        out_targets.push(id(cooldown));
-        g.check(cooldown, &[id(react_in), id(p.pulse_in)], &[])?;
-    }
+    let cooldown = one(
+        "cooldown timer",
+        g.targets(p.zone_out, "MCU_Timer")
+            .into_iter()
+            .filter(|node| id(node) != id(p.end)),
+    )?;
+    let out_targets = vec![id(deact_out), id(p.end), id(cooldown)];
+    g.check(cooldown, &[id(react_in), id(p.pulse_in)], &[])?;
     g.check(p.begin, &[id(p.pulse_in)], &[])?;
     g.check(p.pulse_in, &[id(p.zone_in)], &[])?;
     g.check(p.pulse_out, &[id(p.zone_out)], &[])?;
@@ -694,13 +590,20 @@ fn inspect(root: &Il2Entity) -> Result<SortieShape, String> {
         g.incoming(id(zone_out), "MCU_Timer"),
     )?;
     let has_planes = |node: &&Il2Entity| node.objects.iter().any(|entity| planes.contains(entity));
+    // Decision 0017: refuse the counter-to-Spawner path before hook inspection,
+    // including Repeat templates whose OnKilled hooks are otherwise valid.
+    let bring_up_timers = g.targets(zone_in, "MCU_Timer");
+    if bring_up_timers.iter().any(|node| {
+        g.targets(node, "MCU_Counter")
+            .iter()
+            .any(|counter| !g.targets(counter, "MCU_Spawner").is_empty())
+    }) {
+        return Err(ACTIVATE_MODE.into());
+    }
     let bring_up = one(
         "bring-up timer",
-        g.targets(zone_in, "MCU_Timer").into_iter().filter(|node| {
+        bring_up_timers.into_iter().filter(|node| {
             g.targets(node, "MCU_Activate").iter().any(has_planes)
-                || g.targets(node, "MCU_Counter")
-                    .iter()
-                    .any(|counter| g.targets(counter, "MCU_Spawner").iter().any(has_planes))
         }),
     )?;
     let end = one(
@@ -743,36 +646,10 @@ fn inspect(root: &Il2Entity) -> Result<SortieShape, String> {
     }
 
     let after = one("after-bring-up timer", g.targets(bring_up, "MCU_Timer"))?;
-    let (mode, bring_command, spawner) = if !g.targets(bring_up, "MCU_Activate").is_empty() {
-        let activate = one("unit Activate", g.targets(bring_up, "MCU_Activate"))?;
-        g.check(activate, &[], &planes)?;
-        (SortieMode::Activate, id(activate), None)
-    } else {
-        let counter = one("spawn counter", g.targets(bring_up, "MCU_Counter"))?;
-        let spawn = one("Spawner", g.targets(counter, "MCU_Spawner"))?;
-        if !is(counter, "Counter", "1") || !is(spawn, "SpawnAtMe", "0") {
-            return Err(format!("{UNTESTED}: unsupported spawn counter or Spawner"));
-        }
-        let mode = match counter.property("Dropcount") {
-            Some("0") => SortieMode::Spawn,
-            Some("1") => SortieMode::Repeat,
-            _ => return Err(format!("{UNTESTED}: unsupported spawn counter reset")),
-        };
-        g.check(counter, &[id(spawn)], &[])?;
-        g.check(spawn, &[], &planes)?;
-        (mode, id(counter), Some(id(spawn)))
-    };
-    let death = if mode == SortieMode::Repeat {
-        Some(one(
-            "repeat kill counter",
-            g.kind("MCU_Counter")
-                .into_iter()
-                .filter(|node| id(node) != bring_command),
-        )?)
-    } else {
-        None
-    };
-    let repeat_kill_events = inspect_hooks(&g, &planes, death.map(id))?;
+    let activate = one("unit Activate", g.targets(bring_up, "MCU_Activate"))?;
+    g.check(activate, &[], &planes)?;
+    let bring_command = id(activate);
+    inspect_hooks(&g)?;
 
     // RTB is an end-orders branch, never a label. This also works after rename.
     let rtb_timers = g.targets(end_orders, "MCU_Timer");
@@ -870,15 +747,10 @@ fn inspect(root: &Il2Entity) -> Result<SortieShape, String> {
             ));
         }
     };
-    let mode_shape = match mode {
-        SortieMode::Activate => base,
-        SortieMode::Spawn => TestedShape::S5,
-        SortieMode::Repeat => TestedShape::S6,
-    };
     let kind = if rtb_timer.is_some() {
         TestedShape::S7
     } else {
-        mode_shape
+        base
     };
 
     let mut wp_attacks = Vec::new();
@@ -959,8 +831,6 @@ fn inspect(root: &Il2Entity) -> Result<SortieShape, String> {
             deactivate,
             delete_chain,
             rtb_timer,
-            death,
-            spawner,
         },
         &planes,
         &leads,
@@ -1020,7 +890,6 @@ fn inspect(root: &Il2Entity) -> Result<SortieShape, String> {
         .collect();
     Ok(SortieShape {
         kind,
-        mode,
         side,
         planes,
         leads,
@@ -1041,7 +910,6 @@ fn inspect(root: &Il2Entity) -> Result<SortieShape, String> {
         delete_timer: delete_chain.map(|(timer, _)| id(timer)),
         delete: delete_chain.map(|(_, delete)| id(delete)),
         mission_complete_timers: used_complete,
-        repeat_kill_events,
         rtb_waypoints,
         rtb_timer: rtb_timer.map(id),
         models,
@@ -1120,12 +988,15 @@ pub(crate) mod tests {
                     opts.seats[0].orders.push(order(OrderKind::RtbOnZoneOut));
                 }
             }
-            TestedShape::S5 | TestedShape::S6 => {
-                opts.bring_up = BringUp::Spawn;
-                opts.allow_multiple_spawns = shape == TestedShape::S6;
-            }
         }
         opts
+    }
+
+    fn spawn_options() -> TemplateOptions {
+        TemplateOptions {
+            bring_up: BringUp::Spawn,
+            ..options(TestedShape::S1)
+        }
     }
 
     pub(crate) fn generate(opts: &TemplateOptions) -> Il2Entity {
@@ -1150,8 +1021,7 @@ pub(crate) mod tests {
         units.children.rotate_left(half);
     }
 
-    // One row per shape, with all supported mode/RTB/Formation variants in its
-    // row. No accepted-shape tag can be added without this table changing too.
+    // Every accepted route, with and without Formation and each RTB combination.
     fn shape_cases() -> Vec<(TestedShape, Vec<Il2Entity>)> {
         use TestedShape::*;
         let mut swapped = builtin(3);
@@ -1161,8 +1031,6 @@ pub(crate) mod tests {
             (S2, vec![builtin(0)]),
             (S3, vec![builtin(3), swapped]),
             (S4, vec![builtin(4), builtin(5)]),
-            (S5, Vec::new()),
-            (S6, Vec::new()),
             (S7, Vec::new()),
         ];
         for (slot, base) in [S1, S2, S3, S4].into_iter().enumerate() {
@@ -1174,38 +1042,21 @@ pub(crate) mod tests {
                             .retain(|order| order.kind != OrderKind::Formation);
                     }
                 }
-                for mode in [SortieMode::Activate, SortieMode::Spawn, SortieMode::Repeat] {
-                    opts.bring_up = if mode == SortieMode::Activate {
-                        BringUp::Activate
-                    } else {
-                        BringUp::Spawn
-                    };
-                    opts.allow_multiple_spawns = mode == SortieMode::Repeat;
-                    let mode_slot = match mode {
-                        SortieMode::Activate => slot,
-                        SortieMode::Spawn => 4,
-                        SortieMode::Repeat => 5,
-                    };
-                    rows[mode_slot].1.push(generate(&opts));
-                    if base == S3 {
-                        let mut swapped = generate(&opts);
-                        swap_flights(&mut swapped);
-                        rows[mode_slot].1.push(swapped);
-                    }
-                    let masks = if opts.seats.len() == 1 {
-                        vec![1]
-                    } else {
-                        vec![1, 2, 3]
-                    };
-                    for mask in masks {
-                        let mut rtb = opts.clone();
-                        for (n, seat) in rtb.seats.iter_mut().enumerate() {
-                            if mask & (1 << n) != 0 {
-                                seat.orders.push(order(OrderKind::RtbOnZoneOut));
-                            }
+                rows[slot].1.push(generate(&opts));
+                if base == S3 {
+                    let mut swapped = generate(&opts);
+                    swap_flights(&mut swapped);
+                    rows[slot].1.push(swapped);
+                }
+                let masks = if opts.seats.len() == 1 { vec![1] } else { vec![1, 2, 3] };
+                for mask in masks {
+                    let mut rtb = opts.clone();
+                    for (n, seat) in rtb.seats.iter_mut().enumerate() {
+                        if mask & (1 << n) != 0 {
+                            seat.orders.push(order(OrderKind::RtbOnZoneOut));
                         }
-                        rows[6].1.push(generate(&rtb));
                     }
+                    rows[4].1.push(generate(&rtb));
                 }
             }
         }
@@ -1215,7 +1066,7 @@ pub(crate) mod tests {
         for seat in &mut shared.seats {
             seat.orders.push(order(OrderKind::RtbOnZoneOut));
         }
-        rows[6].1.push(generate(&shared));
+        rows[4].1.push(generate(&shared));
         rows
     }
 
@@ -1283,8 +1134,17 @@ pub(crate) mod tests {
 
     #[test]
     fn inspect_sortie_accepts_cleanup_without_delete() {
-        for kind in [TestedShape::S1, TestedShape::S5, TestedShape::S6] {
-            let mut generated = generate(&options(kind));
+        let mut cases = vec![
+            (Some(TestedShape::S1), options(TestedShape::S1)),
+            (Some(TestedShape::S7), options(TestedShape::S7)),
+        ];
+        for repeat in [false, true] {
+            let mut opts = spawn_options();
+            opts.allow_multiple_spawns = repeat;
+            cases.push((None, opts));
+        }
+        for (kind, opts) in cases {
+            let mut generated = generate(&opts);
             let deactivate = generated
                 .find_by_name("Deactivate Units")
                 .unwrap()
@@ -1299,6 +1159,15 @@ pub(crate) mod tests {
                     remove(&mut generated, index);
                 }
             }
+            let Some(kind) = kind else {
+                assert_eq!(
+                    inspect_sortie(&generated).unwrap_err(),
+                    [
+                        "Air Tasking needs an Activate-mode template. Load the template in Template Builder, correct the reported options or links, and press Generate again."
+                    ]
+                );
+                continue;
+            };
             let shape = inspect_sortie(&generated).unwrap();
             assert_eq!(shape.delete, None);
             assert_eq!(shape.delete_timer, None);
@@ -1361,9 +1230,13 @@ pub(crate) mod tests {
             invalid.find_by_name_mut("Trigger Delete").unwrap().set_objects(objects);
             assert!(inspect_sortie(&invalid).is_err());
         }
-        for kind in [TestedShape::S5, TestedShape::S6] {
-            let generated = template::generate_template(&options(kind)).unwrap();
-            assert_eq!(inspect_sortie(&generated).unwrap().kind, kind);
+        for repeat in [false, true] {
+            let mut opts = spawn_options();
+            opts.allow_multiple_spawns = repeat;
+            let generated = template::generate_template(&opts).unwrap();
+            assert_eq!(inspect_sortie(&generated).unwrap_err(), [
+                "Air Tasking needs an Activate-mode template. Load the template in Template Builder, correct the reported options or links, and press Generate again."
+            ]);
         }
     }
 
@@ -1408,18 +1281,21 @@ pub(crate) mod tests {
         let mut roots = vec![
             builtin(1),
             generate(&options(TestedShape::S7)),
-            generate(&options(TestedShape::S6)),
         ];
+        let mut spawn = spawn_options();
+        spawn.allow_multiple_spawns = true;
+        roots.push(generate(&spawn));
         for root in &mut roots {
-            let expected = inspect_sortie(root).unwrap();
+            let expected = inspect_sortie(root);
             root.for_each_mut(&mut |node| node.set_name("X"));
-            assert_eq!(inspect_sortie(root).unwrap(), expected);
+            assert_eq!(inspect_sortie(root), expected);
         }
     }
 
     #[test]
-    fn inspect_sortie_accepts_on_killed_repeat_events() {
-        let mut opts = options(TestedShape::S6);
+    fn inspect_sortie_refuses_on_killed_repeat_events() {
+        let mut opts = spawn_options();
+        opts.allow_multiple_spawns = true;
         opts.seats.push(opts.seats[0].clone());
         let mut root = generate(&opts);
         let mut events = 0;
@@ -1430,18 +1306,19 @@ pub(crate) mod tests {
             }
         });
         assert_eq!(events, 2);
-        let shape = inspect_sortie(&root).unwrap();
-        assert_eq!(shape.mode, SortieMode::Repeat);
-        let death = root.find_by_name("DeathCount").unwrap().index.unwrap();
         assert_eq!(
-            shape.repeat_kill_events,
-            shape.planes.iter().map(|&entity| (entity, death)).collect::<Vec<_>>()
+            inspect_sortie(&root).unwrap_err(),
+            [
+                "Air Tasking needs an Activate-mode template. Load the template in Template Builder, correct the reported options or links, and press Generate again."
+            ]
         );
     }
 
     #[test]
     fn inspect_sortie_refuses_legacy_on_plane_destroyed_repeat_events() {
-        let mut root = generate(&options(TestedShape::S6));
+        let mut opts = spawn_options();
+        opts.allow_multiple_spawns = true;
+        let mut root = generate(&opts);
         let mut events = 0;
         root.for_each_mut(&mut |node| {
             if node.block_type == "OnEvent" {
@@ -1453,7 +1330,7 @@ pub(crate) mod tests {
         assert_eq!(
             inspect_sortie(&root).unwrap_err(),
             [
-                "Air Tasking Repeat needs OnKilled (13) into DeathCount; OnPlaneDestroyed (4) does not count aircraft deaths. Load the template in Template Builder, correct the reported options or links, and press Generate again."
+                "Air Tasking needs an Activate-mode template. Load the template in Template Builder, correct the reported options or links, and press Generate again."
             ]
         );
     }
@@ -1467,33 +1344,21 @@ pub(crate) mod tests {
                 let shape =
                     inspect_sortie(&root).unwrap_or_else(|errors| panic!("{kind:?}: {errors:?}"));
                 assert_eq!(shape.kind, kind);
-                if shape.mode != SortieMode::Activate {
-                    assert_eq!(
-                        by_id(&root, shape.bring_up_timer).name(),
-                        Some("SPAWN UNITS")
-                    );
-                }
-                assert_eq!(
-                    shape.repeat_kill_events.len(),
-                    if shape.mode == SortieMode::Repeat {
-                        shape.planes.len()
-                    } else {
-                        0
-                    }
-                );
-                for &(entity, target) in &shape.repeat_kill_events {
-                    let events: Vec<_> = nodes(by_id(&root, entity))
-                        .into_iter()
-                        .filter(|node| node.block_type == "OnEvent")
-                        .collect();
-                    assert_eq!(events.len(), 1);
-                    assert_eq!(events[0].property("Type"), Some("13"));
-                    assert_eq!(
-                        events[0].property("TarId").unwrap().parse::<i32>().unwrap(),
-                        target
-                    );
-                }
+                assert_eq!(root.count_block_type("OnEvent"), 0);
             }
+        }
+    }
+
+    #[test]
+    fn inspect_sortie_refuses_spawn_mode() {
+        for repeat in [false, true] {
+            let mut opts = spawn_options();
+            opts.allow_multiple_spawns = repeat;
+            let root = generate(&opts);
+            assert_eq!(root.count_block_type("Plane"), 1);
+            assert_eq!(inspect_sortie(&root).unwrap_err(), [
+                "Air Tasking needs an Activate-mode template. Load the template in Template Builder, correct the reported options or links, and press Generate again."
+            ]);
         }
     }
 
@@ -1641,9 +1506,9 @@ pub(crate) mod tests {
         non_group.block_type = "Airfield".into();
         assert_eq!(
             inspect_sortie(&non_group).unwrap_err(),
-            [format!(
-                "{UNTESTED}: the sortie must be a Group. Load the template in Template Builder, correct the reported options or links, and press Generate again."
-            )]
+            [
+                "Air Tasking supports only tested sortie shapes S1-S4 and S7: the sortie must be a Group. Load the template in Template Builder, correct the reported options or links, and press Generate again."
+            ]
         );
         let mut extra_end = generate(&options(TestedShape::S1));
         let end = extra_end

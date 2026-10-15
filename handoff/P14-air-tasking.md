@@ -44,7 +44,7 @@ There are six built-in templates, all Template Builder output:
 - One pool and one budget shared by both front ends.
 - A 7th rail tab **Air Tasking** and a 5th Map dock tab **Air**.
 - Date filtering from a new in-theatre table keyed on `model_spec` ids.
-- Built-in library of the six files, plus user templates added from disk (U18). v1 accepts a user template only if it has one of the tested shapes S1–S7 (§3.2, U21, D39); every other template is refused with a message.
+- Built-in library of the six files, plus user templates added from disk (U18). v1 accepts an Activate-mode user template only if it has one of the tested shapes S1–S4 or S7 (§3.2, U21, D39, decision 0017); every other template is refused with a message.
 - Export inside Map's Generate Base Map, and as a standalone file from the Air Tasking tab.
 - Step 0: generated in-game MCU probe missions that settle the risk register. All are flown **solo** (U14): flight 0 (automated cells and the trace test), flight 1A (NATO) and flight 1B (DPRK).
 - Step 0T, built **before** the probe flights (U12): **trace builds** (breadcrumb MCUs that write a line to the server's text mission log when a chosen MCU fires, plus a `.trace.json` sidecar) and the **replay core** of R4 P10 (parse `missionReport*.txt`, timeline, fired / never fired, unobserved successors, templates that never spawned; a Markdown report from a CLI). The probe flights test both. The replay UI (Trace checkbox, report view, Map overlay) is step 9T, before the step 11 acceptance flight.
@@ -149,7 +149,7 @@ There are six built-in templates, all Template Builder output:
 | D36 | Totals and limits | `airtask::totals` counts what the plan adds: copies, aircraft, MCUs and check zones. The Air Tasking tab shows them. `validate` warns (orange) above **96 aircraft, 1500 MCUs or 40 check zones**. | U13. The limits are estimates; set them from the Probe 2 load check (§10 item 18). |
 | D37 | "Else" branches | Where the condition is a state that something else switches (an area's HOT / COLD), a consumer pulses a pair of relays, one in each set, and exactly one passes. A race timer (D11) is used only where the pulse itself causes the condition (zone refusal, chance roll, presence check). | A pair costs 2 MCUs and no delay. A race costs 3 or 4 MCUs and 1–2 s. |
 | D38 | Release point | A copy leaves the head count when its aircraft are deleted: the template's delete timer switches the copy's flag off and starts a recount. The zone cooldown still starts at `DONE HUB`. | U22: a hard limit on the aircraft that exist. The second review showed that a release at `DONE HUB` gives no fixed limit, because ended flights fly home for 60 s while replacements start. Cost: 1 MCU per copy (`SNjj LANDED`). |
-| D39 | User template acceptance | `library::inspect_sortie` finds the template's parts by wiring and accepts only the tested shapes S1–S7 (§3.2). Every refusal has its own message and its own test. The **navigation lead** is the first lead, in file order, that has a path waypoint. | U18, U21. Template Builder can write many shapes; three review rounds each found one that the rules mishandled. A short list of tested shapes ends that. A shape is added later by adding its test. |
+| D39 | User template acceptance | `library::inspect_sortie` finds the template's parts by wiring and accepts only Activate-mode S1–S4 and S7 (§3.2, decision 0017). Every refusal has its own message and its own test. The **navigation lead** is the first lead, in file order, that has a path waypoint. | U18, U21. Template Builder can write many shapes; three review rounds each found one that the rules mishandled. A short list of tested shapes ends that. A shape is added later by adding its test. |
 | D40 | Cruise calibration | The measured F-80C cruise (cell T-n) is a P14 constant, `timing::F80_CRUISE_OVERRIDE_KMH: Option<f64>`. `model_spec` is not changed. | Changing `model_spec` would change Template Builder's suggested waypoint speed and so its output (review finding C10, CLAUDE.md). |
 | D41 | Locale ids of user templates | P14 uses the existing first-wins merge (`locale.rs` `LocaleTable::merge`), as the Army Generator does. `validate` warns when two templates in the pool carry different text under one id. | Re-numbering locale ids is a separate feature. |
 
@@ -253,24 +253,23 @@ Index merge: each placed copy goes through `duplicate::duplicate_template(copy, 
 
 ### 3.2 Sortie shell (START in, DONE out exactly once)
 
-New `src/airtask/shell.rs`: `wrap_sortie(root, prefix: &str, shape: &SortieShape, spec: &ShellSpec, next_id: &mut i32) -> ShellIds`. It is written generically so R3 F4 can later call it with the prefix `EXT`. `ShellSpec` carries T_attack, T_final, T_ext, the target, the copy's census delay (§3.3), and the `ZoneOutImpl` and `LossesImpl` strategies.
+New `src/airtask/shell.rs`: `wrap_sortie(root, prefix: &str, shape: &SortieShape, spec: &ShellSpec, next_id: &mut i32) -> Result<ShellIds, String>`. It is written generically so R3 F4 can later call it with the prefix `EXT`. `ShellSpec` carries T_attack, T_final, T_ext, the target, the copy's census delay (§3.3), and the `ZoneOutImpl` and `LossesImpl` strategies.
 
 **Finding the template's parts (U18, D39).** Every part is found by its wiring, never by its name. `library::inspect_sortie(root) -> Result<SortieShape, Vec<String>>` (§5) does the lookup once, for loading, `validate` and generation alike:
 
 | Part | How it is found | Template Builder's name |
 |---|---|---|
 | Zone IN | The `MCU_CheckZone` with `Closer = 1` that the template's `MCU_TR_MissionBegin` reaches through one timer | `Zone IN` |
-| **Bring-up timer** | The `MCU_Timer` among Zone IN's Targets whose own Targets hold an `MCU_Activate` with plane entities in its Objects, or an `MCU_Counter` that targets an `MCU_Spawner` with plane entities in its Objects | `MISSION BEGIN` (Activate mode), `SPAWN UNITS` (Spawn mode); `template.rs` `bring_up_name` |
+| **Bring-up timer** | The `MCU_Timer` among Zone IN's Targets whose own Targets hold an `MCU_Activate` with plane entities in its Objects | `MISSION BEGIN` (Activate mode); a counter into a Spawner is refused (decision 0017) |
 | Zone Out | The `MCU_CheckZone` with `Closer = 0` | `Zone Out` |
 | Zone Out arming pair | The `MCU_Activate` and the `MCU_Timer` that target Zone Out | `Zone Out ReActivate`, `PULSE OUT` |
 | **End timer** | The `MCU_Timer` among Zone Out's Targets that reaches an `MCU_CMD_ForceComplete` within two links | `MISSION END` |
-| **Delete timer** | The `MCU_Timer` that targets the `MCU_Delete` | `DELETE DELAY` |
+| **Optional template Delete chain** | The `MCU_Timer` that targets the sole `MCU_Delete`; both are removed by the shell | `DELETE DELAY`, `Trigger Delete`; regenerated Activate templates have neither |
 | Mission Complete timers | Every `MCU_Timer` that targets the end timer | `Mission Complete n` |
 | **Attack timer of a lead** | The `MCU_Timer` that targets an `MCU_CMD_AttackArea` whose Objects hold that lead's entity, **and** targets a Mission Complete timer. A branch belongs to a lead through the Objects of its command, so two leads that share one waypoint are told apart (Il-10, Yak) | `AttackArea n` (in AirAlert the second of the two, timer 39) |
-| Repeat-mode kill events | Every `OnEvents` entry of a plane's `MCU_TR_Entity` whose target is an `MCU_Counter` | type 4 → `DeathCount` |
 | Template RTB | Every `MCU_Waypoint` that `mapnet::is_rtb_waypoint` accepts, and the timer that targets them | `RTB n`, `RTB DELAY` |
 
-**Accepted shapes (U21, D39).** v1 accepts a template only if it has one of the shapes below. Each shape has a test that builds it, wraps it and walks it (step 2 and step 3). Every other template is refused with a message that names what is not supported. This is a deliberate limit: Template Builder can write many shapes, and three review rounds each found a shape the rules mishandled.
+**Accepted shapes (U21, D39).** v1 accepts Activate-mode templates with shapes S1–S4 or S7 only (decision 0017). Each shape has a test that builds it, wraps it and walks it (step 2 and step 3). Every other template is refused with a message that names what is not supported. This is a deliberate limit: Template Builder can write many shapes, and three review rounds each found a shape the rules mishandled.
 
 | # | Shape | Example |
 |---|---|---|
@@ -278,39 +277,38 @@ New `src/airtask/shell.rs`: `wrap_sortie(root, prefix: &str, shape: &SortieShape
 | S2 | One lead, two AttackAreas in a chain | AirAlert |
 | S3 | A strike lead and an escort lead with Cover and no waypoint, in either file order | ArmedRecon |
 | S4 | Two leads that share one waypoint, each with its own AttackArea | Yak, Il-10 |
-| S5 | Spawn mode, Repeat off | written by `generate_template` in the test |
-| S6 | Spawn mode, Repeat on (the sweep cuts the respawn loop) | written by `generate_template` in the test |
-| S7 | Any of S1–S6 with its own RTB on every lead, or on some leads | written by `generate_template` in the test |
+| S7 | Any of S1–S4 on Activate mode with its own RTB on every lead, or on some leads | written by `generate_template` in the test |
 
 **Refused, each with its own message and test:**
+- Spawn mode, Repeat off or on: "Air Tasking needs an Activate-mode template", followed by `REGENERATE_TEMPLATE`;
 - a part of the table above is missing or is found twice;
 - a unit that is not a plane;
 - no lead has a path waypoint, or a lead has more than one (D26);
 - the navigation lead has no attack timer (no AttackArea, or a step such as a time-on-target delay between the attack order and Mission Complete). Message: "Air Tasking needs the attack order to be the last order before Mission Complete";
-- an event hook or a report hook (`OnEvents` / `OnReports`), other than the repeat-mode kill events. Message: "Air Tasking does not support event or report hooks yet";
+- an event hook or a report hook (`OnEvents` / `OnReports`). Message: "Air Tasking does not support event or report hooks yet";
 - a waypoint speed that stays at 150 km/h or less (§3.1 step 7).
 
 **Stripped from the copy.** `recon::silence_clone_starts` (`recon.rs` ≈1681, made `pub(crate)`) sets `Enabled=0` and empties the Targets of the `MCU_TR_MissionBegin`. IL-2 still runs Mission Begin when `Enabled=0` (comment at `recon.rs` ≈1680). The side's own Mission Begin (§3.0) is the only one that starts anything.
 
 Then the shell cuts the template's own start and end logic, in this order:
-1. Replace Zone Out's Targets with `[SNjj DONE HUB]` (below).
+1. Keep Zone IN and replace its Targets with Zone Out's arming pair, cutting its old bring-up and self-deactivation links. Replace Zone Out's Targets with `[SNjj DONE HUB]` (below, decision 0018).
 2. Delete every Mission Complete timer (the single `SNjj ON STATION` replaces them, D9).
-3. Delete the repeat-mode kill events. The shell attaches its own (`LOSSES`). An accepted template has no other event or report hook.
-4. **Orphan sweep.** Delete every logic MCU (`MCU_Timer`, `MCU_Activate`, `MCU_Deactivate`, `MCU_Counter`, `MCU_ModifierSetVal`, `MCU_CheckZone`) that no pulse link or state link reaches from one of the roots: the bring-up timer, every waypoint, Zone Out, its arming pair and the end timer. Repeat the sweep until nothing more is deleted, then drop every link to a deleted MCU.
-   - For the six built-ins the sweep removes `ENABLE / PULSE IN`, `Zone IN`, both `Self Deactivate`, `Zone In ReActivate` and `COOLDOWN`.
-   - For a repeat-mode template it also removes `DeathCount`, its Activate and Deactivate, `Reset Counter` and `Modifier Set Value`. A copy runs once (D12), so the template's own respawn loop is not wanted. `SpawnCount` and the Spawner stay: one pulse makes one spawn.
+3. Remove the optional template delete timer and `MCU_Delete`, and all links to them. The shell writes its own chain whether or not the input had one. Accepted templates have no event or report hooks; the shell attaches only type 13 into `LOSSES`.
+4. **Orphan sweep.** Delete every logic MCU (`MCU_Timer`, `MCU_Activate`, `MCU_Deactivate`, `MCU_Counter`, `MCU_ModifierSetVal`, `MCU_CheckZone`) that no pulse link or state link reaches from one of the roots: the bring-up timer, every waypoint, Zone IN, Zone Out, its arming pair and the end timer. Repeat the sweep until nothing more is deleted, then drop every link to a deleted MCU.
+   - For the six built-ins the sweep removes `ENABLE / PULSE IN`, both `Self Deactivate`, `Zone In ReActivate` and `COOLDOWN`. Zone IN stays.
 
 **Kept and rewired:**
 - Zone Out is re-centred on the target (radius unchanged, 35 km) and its Targets are replaced with `[SNjj DONE HUB]`.
-- The Zone Out arming pair is kept. **New edge:** the navigation lead's `WP 1` → the arming pair. (Zone IN used to fire them; it is deleted.)
+- Zone IN is kept under its template name, like Zone Out. It is re-centred on the target with Zone Out's 35 km radius; `Closer = 1` and `PlaneCoalitions` stay unchanged. Its only Targets are Zone Out's Activate and 0.1 s pulse timer.
+- **The navigation lead's `WP 1` pulses Zone IN**, which arms Zone Out only after an enemy is seen (decision 0018). Zone IN is absent from `SideLogic.init_off`, and nothing in the copy deactivates it. WP 1 no longer targets the arming pair.
 - **After the cut, the end timer has exactly one inbound link, from `SNjj DONE HUB`.** If another link into it is left, `wrap_sortie` returns an error and the template is refused.
-- **ON STATION starts from the navigation lead's attack timer.** Its edge to the Mission Complete timer is replaced by → `SNjj ON STATION IN` (latch) → `SNjj ON STATION`. Other leads' attack timers keep their AttackArea commands and simply lose their Mission Complete target. Only the navigation lead's timer feeds ON STATION, so a shared WP 1 cannot send two same-tick pulses into the latch (risk q). That timer itself can be pulsed twice: in AirAlert, `WP 1` targets both 37 and 39, and 37 (0.5 s) also targets 39, so 39 is pulsed at WP 1 and again 0.5 s later. The `ON STATION IN` latch passes only the first of those, so `ON STATION` starts exactly once per sortie under every re-trigger behaviour (risk p). The template's own edges are left as they are (D28). An attack timer has `Time = 0.5`, so `ON STATION` starts 0.5 s after WP 1 is reached.
-- **The delete timer gets three more targets** (D38): `SNjj LANDED`, `BUD s MARK` and `BUD s CHECK`. So the copy leaves the budget in the same tick its aircraft are deleted.
+- **ON STATION starts from the navigation lead's attack timer.** Its edge to the Mission Complete timer is replaced by → `SNjj ON STATION IN` (latch) → `SNjj ON STATION`. Other leads' attack timers keep their AttackArea commands and simply lose their Mission Complete target. Only the navigation lead's timer feeds ON STATION, so a shared WP 1 cannot send two same-tick pulses into the latch (risk q). That timer itself can be pulsed twice: in AirAlert, `WP 1` targets both 37 and 39, and 37 (0.5 s) also targets 39, so 39 is pulsed at WP 1 and again 0.5 s later. The `ON STATION IN` latch passes only the first of those, so `ON STATION` starts exactly once per sortie under every re-trigger behaviour (risk p). The template's own edges are left as they are (D28). An attack timer has `Time = 0.5`, so HVAR starts `ON STATION` 0.5 s after WP 1. AirAlert starts it 0.5 to 1.0 s after WP 1 across the three walker re-trigger modes: Restart can postpone timer 39 to +1.0 s. Its two AttackAreas still supply 1080 s of on-station time.
+- **The shell owns `SNjj DELETE DELAY` (0.5 s) and `SNjj DELETE`.** `DELAYED END ORDERS` targets the new delay in place of the optional template chain. The delay targets `SNjj DELETE` and `SNjj LANDED`; its registration in `SideLogic.budget_events` adds `BUD s MARK` and `BUD s CHECK` through the budget builder. Delete Objects list every plane entity, including escorts (flight 1P, decision 0017). The copy leaves the budget in the tick its aircraft are deleted.
 
 ```
  ENii COPY r (copy pointer, §3.7) ─► SNjj START
  SNjj START (relay; it is also the copy's gate: it is in the side's gate set and is open while the budget has room, §3.3)
-   ├─► bring-up timer (0.5 s) ─► Activate Units (or SpawnCount ─► Spawner), AFTER BRING UP ─► Formation n ─► Goto WP 1 ─► WP 1
+   ├─► bring-up timer (0.5 s) ─► Activate Units, AFTER BRING UP ─► Formation n ─► Goto WP 1 ─► WP 1
    ├─► SNjj HARD STOP (timer, T_final) ────────────────────────────────────────────────────────────────────►┐
    ├─► SNjj STARTED ON  (MCU_Activate: SNjj FLYING, and ENii COPY r+1 if there is one)                       │
    ├─► SNjj STARTED OFF (MCU_Deactivate: ENii COPY r)                                                        │
@@ -319,7 +317,7 @@ Then the shell cuts the template's own start and end logic, in this order:
    └─► (last copy only) ENii EXHAUSTED                                                                       │
                                                                                                              │
  WP 1 (navigation lead's) ─► attack timers (unchanged) ─► AttackArea cmd (on target)                         │
-                          └─► Zone Out arming pair ─► Zone Out                        (new edge)             │
+                          └─► Zone IN (enemy seen) ─► Zone Out arming pair ─► Zone Out                      │
  navigation lead's attack timer ─► SNjj ON STATION IN (latch) ─► SNjj ON STATION (timer, T_attack)           │
                                                                                                              │
  End of on-station time (D31, D32):                                                                          │
@@ -327,43 +325,44 @@ Then the shell cuts the template's own start and end logic, in this order:
                    └► SNjj COLD (relay in the area's COLD set, §3.5) ──────────────────────────────────────►│
  Other DONE causes:                                                                                          │
    each Plane entity OnEvent Type 13 ► SNjj LOSSES (Counter = planes, Dropcount 0 = fire once, stay) ──────►│
-   Zone Out (Closer 0, 35 km, at target; armed on WP 1 arrival) ───────────────────────────────────────────►│
+   Zone Out (Closer 0, 35 km, at target; armed only after Zone IN fires) ──────────────────────────────────►│
                                                                                                              ▼
  SNjj DONE HUB (latch; active from mission start; used once)
    ├─► SNjj DONE HUB OFF (MCU_Deactivate: SNjj DONE HUB)
    ├─► ZNii WAITING (if the entry has a zone trigger, §3.8)
    └─► end timer ─► MISSION END ORDERS (0.05 s) ─► Force Complete - High, RTB DELAY ─► RTB n
-                 └► DELAYED END ORDERS (60 s) ─► Deactivate Units, delete timer (0.5 s)
- delete timer ─► Trigger Delete                                          <- the aircraft are gone
+                 └► DELAYED END ORDERS (60 s) ─► Deactivate Units, SNjj DELETE DELAY (0.5 s)
+ SNjj DELETE DELAY ─► SNjj DELETE                                        <- the aircraft are gone
               ├► SNjj LANDED (MCU_Deactivate: SNjj FLYING)               <- the copy leaves the head count (D38)
               └► BUD s MARK, BUD s CHECK (§3.3)                          <- and the side recounts
 ```
 
-**MCUs the shell adds per copy: 17, plus one `RTB n` waypoint per lead that has none.** They are `START`, `HARD STOP`, `STARTED ON`, `STARTED OFF`, `ON STATION IN` and its Deactivate, `ON STATION`, `HOT`, `COLD`, `EXTEND`, `LOSSES`, `DONE HUB`, `DONE HUB OFF`, `FLYING`, `LANDED`, `RTB DELAY`, and the copy's `ENii COPY r` relay. A template that brings its own RTB timer keeps it (§3.1 step 6), and the shell then adds 16. The shell removes 7 or 8 template MCUs. Earlier drafts added about 38 per copy (U13).
+**MCUs the shell adds per copy: 19, plus one `RTB n` waypoint per lead that has none.** They are `START`, `HARD STOP`, `STARTED ON`, `STARTED OFF`, `ON STATION IN`, `ON STATION IN OFF`, `ON STATION`, `HOT`, `COLD`, `EXTEND`, `LOSSES`, `DONE HUB`, `DONE HUB OFF`, `FLYING`, `LANDED`, the new `DELETE DELAY` and `DELETE`, `RTB DELAY`, and the assembly's `ENii COPY r` relay. `wrap_sortie` itself adds 17; placement and assembly provide the last two. A template with its own RTB timer keeps it and receives 18, plus any missing RTB waypoints. The HVAR fixture removes 8 template MCUs; the generated S7 fixture without a Delete chain removes 7. Keeping Zone IN adds no new MCU: it removes one fewer. HVAR holds 43 MCUs (42 without Zone IN), and S7 holds 47 (46 without Zone IN), including the fixture copy pointer and missing RTB waypoint. Every wrapped built-in has two check zones, both at the target with the same radius.
 
 Notes:
+- **Empty targets stay on station.** Zone IN waits for an enemy; only after it fires can Zone Out end the sortie. An empty target reaches COLD at the end of on-station time or extends once through HOT. AI aircraft also count as seen. Keeping Zone IN means 48 check zones per side in the 24-copy load file, 96 total (decision 0018).
 - **One decision point.** Only `ON STATION` reaches the `HOT` / `COLD` pair, and `ON STATION` starts once, so the extension needs no latch. `HARD STOP` goes straight to `DONE HUB`.
 - **`START` closes itself in the tick it passes a pulse** (`START` → `BUD s CHECK` → `BUD s SHUT`). This is the latch idiom: a relay whose own output switches it off still fires all its targets. Probe J4 tests a latch, and risk q covers it.
 - **HOT and COLD are never both off** (§3.5, make-before-break), so the end-of-station pulse always reaches `DONE HUB` or `EXTEND`. For 0.05 s at each change both are on. A pulse in that window reaches both: `COLD` ends the sortie at once and the later `EXTEND` pulse finds the hub closed. That is accepted.
-- **Two moments, two names.** "DONE" is the `DONE HUB` pulse: the sortie stops attacking and turns for home, and the zone cooldown starts. "Deleted" is the delete timer's pulse, about 60.6 s later (`MISSION END` 0.1 s + `DELAYED END ORDERS` 60 s + the delete timer 0.5 s): the aircraft are gone and the copy leaves the head count (D38). Tests and the step 11 checks name which of the two they measure.
+- **Two moments, two names.** "DONE" is the `DONE HUB` pulse: the sortie stops attacking and turns for home, and the zone cooldown starts. "Deleted" is `SNjj DELETE DELAY`'s pulse, about 60.6 s later (`MISSION END` 0.1 s + `DELAYED END ORDERS` 60 s + `SNjj DELETE DELAY` 0.5 s): the aircraft are gone and the copy leaves the head count (D38). Tests and the step 11 checks name which of the two they measure.
 - A copy is used for one run only (D12). `DONE HUB` never needs re-arming.
-- Kill events that arrive after `Trigger Delete` (if Delete raises them, risk g) reach a closed hub and do nothing.
+- Delete does not raise event 13 in the flown controls (flights 1G/1P). Any late loss event reaches a closed hub.
 - **Dropcount convention.** The codebase uses `Dropcount = 1` for a counter that resets after firing and can fire again (`template.rs` `SpawnCount` `drop = i32::from(repeat)`, `DeathCount` 1 in repeat mode; `flights.rs` `DeathCount` 1), and `Dropcount = 0` for one that fires once and stays. `LOSSES` (used once per copy) is `Dropcount 0`. `BUD s COUNT` (§3.3) fires at every full recount, so it is `Dropcount 1`.
-- `SNjj LOSSES` needs `attach_event(entity, 13, losses_idx)` (type 13, not 4: flight 1G showed that a lost aircraft raises 13 once and never 4; decision 0011) (`template.rs` `attach_event`) on each plane's `MCU_TR_Entity`. The escort lead's planes count too. Fallback for risk g is `LossesImpl::Latch` (§8 step 0d).
-- **Spawn-mode templates (risk u; shapes S5, S6).** Whether kill events, `Deactivate Units` and `Trigger Delete` act on planes made by an `MCU_Spawner` is UNVERIFIED. Probe 2 (step 3) flies one. If it fails, `inspect_sortie` refuses Spawn-mode templates with the message "Air Tasking needs an Activate-mode template".
+- `SNjj LOSSES` needs `attach_event(entity, 13, losses_idx)` (type 13, not 4: flight 1G showed that a lost aircraft raises 13 once and never 4; decision 0011) (`template.rs` `attach_event`) on each plane's `MCU_TR_Entity`. The escort lead's planes count too. No other OnEvent or OnReport is written: no event-7 abort and no 4/2/0 latch (decisions 0011/0015/0017). A crash without damage remains for flight 2; the hard stop still ends the sortie.
+- **Spawn-mode templates (risk u; former shapes S5/S6) are refused.** Activation after respawn can retain a broken entity association (flight 1L V2, decision 0013). Decision 0017 keeps Air Tasking on Activate mode; flight 2 has no Spawn sortie.
 - The end timer is no longer reachable from anywhere except `DONE HUB`. A test asserts this.
 
 ### 3.3 Air budget: a head count (at most N active per side; U20)
 
 **Why not a running total.** Earlier drafts kept a level per side: add one at each launch, subtract one at each end. Each change took 0.1 s. A second end that arrived inside that 0.1 s found no active relay and was lost, and the level stayed one too high for the rest of the mission (review finding C1). Two sorties on one objective share a Zone Out, so one player leaving or dying ends both in the same tick. The fault was the normal case, not a rare one.
 
-**The head count keeps no total.** The truth is one flag per copy, and only that copy switches its own flag. The side counts the flags again after every launch and every end.
+**The head count keeps no total.** The truth is one flag per copy, and only that copy switches its own flag. The side counts the flags again after every launch and every deletion.
 
 **Per copy** (inside the copy's own `Logic` group):
 - `SNjj START` is the copy's **gate**: it is a relay in the side's gate set, and a request passes it only while the gate is open (§3.2). The budget adds no gate MCU of its own.
 - `SNjj FLYING`: an `MCU_Timer` with `Time = 0.05·q` s, where q is the copy's 1-based order on its side. It is active from `START` until the copy's aircraft are deleted (`SNjj LANDED`, §3.2), and inactive otherwise (it is in `SideLogic.init_off`).
 
-**Per side** (subgroup `Budget` of the side's Logic group). An **event** is a pulse from any `SNjj START`, from any copy's delete timer, or from `BUD s AGAIN`. Each of them targets `BUD s MARK` and `BUD s CHECK`:
+**Per side** (subgroup `Budget` of the side's Logic group). An **event** is a pulse from any `SNjj START`, from any copy's `SNjj DELETE DELAY`, or from `BUD s AGAIN`. Each of them targets `BUD s MARK` and `BUD s CHECK`:
 
 ```
  event ─► BUD s MARK (MCU_Activate: BUD s AGAIN)
@@ -387,12 +386,12 @@ Notes:
 - **`BUD s AGAIN`** makes sure no event is missed. `MARK` switches it on at every event. The recount that the event starts switches it off 0.02 s later, before the flags are read at 0.05 s. An event that arrives later in the recount switches it on again, and the end of the recount then starts one more recount.
 - **`BUD s OPEN` also re-activates the `START` relay of a copy that has already flown.** That does no harm: a request reaches a `START` only through its `ENii COPY r` relay, and that relay is off for good once the copy has started.
 - **N = 1 needs no counter.** When a side's budget is 1, every `SNjj FLYING` targets `BUD s STAY SHUT` directly, and `ZERO` and `COUNT` are left out. The builder does this whether or not counters work in game.
-- **The links into another builder's MCUs** (each `START` and each delete timer → `MARK` and `CHECK`) are not written by editing those MCUs. The budget builder pushes them to `SideLogic.links` (§3.0).
+- **The links into another builder's MCUs** (each `START` and each `SNjj DELETE DELAY` → `MARK` and `CHECK`) are not written by editing those MCUs. The budget builder pushes them to `SideLogic.links` (§3.0).
 - **16 MCUs per side for N ≥ 2, 14 for N = 1, and 2 per copy** (`FLYING`, `LANDED`). Earlier drafts used 6 + 2N per copy.
 
 **Worked cases.**
 1. *Launch with room.* Budget 2, one sortie flying. A request passes `SN07 START`, which pulses `MARK` and `CHECK`. The gates shut at once. The census finds two flags, `COUNT` fires at the second, and the gates stay shut.
-2. *Two sorties are deleted in one tick.* Both `LANDED` switches take their own flags off, and both delete timers pulse `CHECK`. The first pulse starts a recount and closes `CHECK`; the second is dropped. The census runs 0.05 s later and finds no flag. The gates reopen at `T_count`.
+2. *Two sorties are deleted in one tick.* Both `LANDED` switches take their own flags off, and both `SNjj DELETE DELAY` timers pulse `CHECK`. The first pulse starts a recount and closes `CHECK`; the second is dropped. The census runs 0.05 s later and finds no flag. The gates reopen at `T_count`.
 3. *A deletion during a recount.* The flag goes off, but the census may already have read it. `AGAIN` is on, so a second recount starts 0.05 s after the first ends and reads the true state.
 4. *A request during a recount.* The gates are shut, so the request is dropped. A clock slot stays quiet (D17). A zone trigger starts its cooldown (U8, §3.8).
 
@@ -789,7 +788,7 @@ impl Default for TotalsLimits { fn default() -> Self { Self { aircraft: 96, mcus
 // ThresholdImpl::ComplexTrigger and CounterResetImpl are reserved for step 12 (§3.9); v1 builders accept only ZoneOnly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum ThresholdImpl    { #[default] ZoneOnly, ComplexTrigger }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum ZoneOutImpl      { #[default] CheckZone, Watchdog }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum LossesImpl       { #[default] Type13, Latch }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum LossesImpl       { #[default] Type13 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum CounterResetImpl { #[default] SetVal, Ring }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum RandomImpl       { #[default] InMission, Seeded }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum BudgetImpl       { #[default] HeadCount, SingleSlot }      // §3.3
@@ -1080,7 +1079,7 @@ The D30 AI-trigger check, the slot-window cap warning, the totals warning (D36) 
 - **Warnings.** This is a binary crate with no `lib.rs` (`main.rs` header), so new code is `dead_code` until `ui.rs` calls it. The step 1 skeleton therefore puts a temporary `#![allow(dead_code)] // P14: removed in step 9` at the top of `airtask/mod.rs` (it covers the submodules) and `in_theatre.rs`, and an item-level `#[allow(dead_code)] // P14` on each new helper outside those modules (`rotate_tree`, `snap_air_attack_areas`, `timer_random`, `MapAirPack`, and the `FrontOptions.air_packs` field if needed). `trace.rs` gets a module-level `#![allow(dead_code)] // P14: removed in step 9T` (its only non-test caller is the 9T UI); `missionlog.rs` is reachable through the CLI and needs an allow only on items the CLI does not use, removed in 9T. Test-only modules (`testkit`, `probe`, `baseline_tests`) are `#[cfg(test)]` and need none. With those in place, warnings must not rise above the recorded baseline at any step. Step 9 removes every `// P14` allow once the code is reachable from `main` (9T removes the `trace.rs` / `missionlog.rs` ones); step 10's acceptance greps that none remain.
 - The baseline-fixture test (§7) must stay green.
 - **Every acceptance line is a named test.** The names are given below. Walker scenarios live next to the builder they test.
-- **MCU counts are pinned (U13).** Each builder has one test that counts the MCUs and check zones it adds (`shell_adds_17_mcus_per_copy`, `budget_structure`, `threshold_has_23_mcus_and_2_check_zones`, `clock_mcu_counts`, `zone_has_17_mcus_per_entry`). If a step needs more, it says so in its stop report, and the number in §3 and in the test change together.
+  - **MCU counts are pinned (U13).** Each builder has one test that counts the MCUs and check zones it adds (`shell_adds_19_mcus_per_copy`, `budget_structure`, `threshold_has_23_mcus_and_2_check_zones`, `clock_mcu_counts`, `zone_has_17_mcus_per_entry`). If a step needs more, it says so in its stop report, and the number in §3 and in the test change together.
 - Stop after each step and list the changes (CLAUDE.md phase rhythm).
 - Never `git add -A`. `.gitattributes * -text` stays.
 
@@ -1179,7 +1178,7 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 | r: E7 (0) | Step 3 (budget) | `CensusImpl::SameTick` may be chosen (shorter recount) | `CensusImpl::Spaced` (the default), if E9 is confirmed | No |
 | E9 (0) | Step 3 (budget) | `CensusImpl::Spaced`: pulses 0.05 s apart are counted one by one | If E7 is confirmed, use `CensusImpl::SameTick`. If E7 and E9 both fail, a counter cannot take the census: `BudgetImpl::SingleSlot` (budget 1 per side, no counter) | No |
 | f (0) | Steps 5, 6 | `RandomImpl::InMission` | `RandomImpl::Seeded` (§3.7) | No |
-| g (1G) | Step 3 (LOSSES) | `LossesImpl::Type13` (flight 1G) | `LossesImpl::Latch`: per-plane once-gate fed by types 4, 2 and 0 → LOSSES. If no kill event fires at all, LOSSES is left out; on-station end, Zone Out and the hard stop still end the sortie | No |
+| g (1G; flight 2 T-l for a crash without damage) | Step 3 (LOSSES) | `LossesImpl::Type13` only (decisions 0011/0017); no 4/2/0 latch | If a crash raises no type 13, on-station end, Zone Out and the hard stop still end the sortie | No |
 | h (1A) | Step 4 | INNER is deactivated as written | INNER's output goes through a relay `THsaa INNER GATE`, and `INNER OFF` / `INNER ON` switch that relay | No |
 | j: J2 (0) | Steps 3–6 (every relay gate) | D11 as written | A pulse into an inactive relay is replayed when the relay is activated. Every gate in the design, and in the shipped Fighter Pack, then misfires | **Yes, before step 3** |
 | j: J1 (0) | Steps 3–6 | Either outcome is handled: the `… OUT` relays cover "runs on" | — | No |
@@ -1189,13 +1188,14 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 | n (1A) | §4 timing | 732 km/h stays | The measured speed becomes the P14 cruise override (§4.1) | No |
 | t1–t6 (0) | Step 0T defaults, step 9T, step 11 | `TraceCarrier::Objective` with the silent, logged `ObjectiveStyle` from T4; the tick rate fitted from the cue breadcrumbs | `Spawn` carrier if objectives log once only or not at all, or show on screen; debug subtitles only if neither carrier logs (the replay still reports spawns, kills and never-spawned groups) | No |
 | k (Probe 2) | Step 3 | `BudgetImpl::HeadCount` | `BudgetImpl::SingleSlot` | No |
-| u, v (Probe 2) | Step 3 | Spawn-mode templates are accepted; the extension needs no new order | Spawn-mode templates are refused (§3.2); the shell adds `SNjj RENEW`, so the order is given again when the extension starts, and not after the sortie has ended (§3.4) | No |
+| u (decision 0017) | Step 3 | Activate-mode templates only; Spawn/Repeat templates (former S5/S6) are refused (§3.2) | No Spawn sortie in flight 2; risk u must be settled before support can be reconsidered | No |
+| v (flight 2) | Step 3 | The extension needs no new order | If the order needs renewing, the shell adds `SNjj RENEW`, so the order is given again when the extension starts, and not after the sortie has ended (§3.4) | No |
 | b, d | Step 12 | — | — | — |
 
-- Every builder whose fallback is a strategy enum (`ZoneOutImpl`, `LossesImpl`, `RandomImpl`, `BudgetImpl`, `CensusImpl`, `PresenceCheckImpl`) takes it from `AirPlan.strategies`. **Each variant of these enums, primary and fallback, gets its own structural test and at least one walker scenario** (names in the steps below).
+- Every builder whose fallback is a strategy enum (`ZoneOutImpl`, `RandomImpl`, `BudgetImpl`, `CensusImpl`, `PresenceCheckImpl`) takes it from `AirPlan.strategies`. **Each variant of these enums, primary and fallback, gets its own structural test and at least one walker scenario** (names in the steps below). `LossesImpl` also comes from the plan but has only `Type13` (decision 0017).
 - The h, p and q fallbacks are **not** strategy variants: they are small local code changes made after the probe results, only if a result calls for them. The walker already runs every scenario under `ReverseTargets` and all three re-trigger modes, so the cases they guard are exercised before then.
 - **A "build stops" row means: stop, write the result into `handoff/P14-probe-results.md`, and ask the user.** Do not invent a new fallback during the build.
-- **Gates (§10).** Step 3 starts after the flight 0 results are in. Step 4 starts after the flight 1A results are in. Step 2 has no engine assumptions and does not wait. Result g (flight 1B) only chooses the `LossesImpl` default; step 3 builds and tests both variants, so it does not wait for flight 1B.
+- **Gates (§10).** Step 3 starts after the flight 0 results are in. Step 4 starts after the flight 1A results are in. Step 2 has no engine assumptions and does not wait. Flight 1G settled result g on event 13; step 3 builds only `LossesImpl::Type13` (decisions 0011/0017). Flight 2 T-l checks a crash without damage.
 - **How many times did it fire? (second review R4-3, third review T12.)** A `Counter(2)` readout proves "fired twice in one tick" only if counters count same-tick pulses one by one (E7). So the J4 and E8 results are read like this: if E7 is confirmed, the `≥2` readouts decide. If E7 is not confirmed, the trace log decides, but only if T-t **T7** showed that **one** breadcrumb fired twice in one tick writes two lines. (T3 is not enough: it fires two different breadcrumbs.) If neither holds, q is recorded as **not settled**: the build keeps the relay latches, which are the pattern every shipped template uses, and the manual says that same-tick double pulses are unverified.
 
 ### Step 0e. Probes reshaped for an autopilot pilot — S–M. Branch `codex/p14-0e`
@@ -1684,7 +1684,7 @@ Inputs: scripted tracks (coalition, list of (t, x, z)), forced pulses (node name
 - `library_builtins_load_with_side_and_roles`: all six load; side and role detection match the §5 table.
 - `inspect_sortie_finds_the_parts_by_wiring`: for each of the six, the ids it returns are the MCUs that Template Builder names `Zone IN`, `MISSION BEGIN`, `Zone Out`, `Zone Out ReActivate`, `PULSE OUT`, `MISSION END`, `DELETE DELAY` and every `Mission Complete n`; and the navigation lead's attack timer is 37 for HVAR, CloseSupport and ArmedRecon, **39 for AirAlert**, and the branch whose AttackArea command holds entity 7 for Yak and Il-10 (third review, T1).
 - `inspect_sortie_does_not_read_names`: with every MCU of the HVAR copy renamed to `X`, it returns the same ids.
-- `inspect_sortie_accepts_each_tested_shape`: table-driven over S1–S7 (§3.2). S1–S4 are the six built-ins, S3 also with its two flights swapped in file order. S5, S6 and S7 are written by `generate_template` in the test: Spawn mode with Repeat off; Spawn mode with Repeat on; RTB on every lead; RTB on one of two leads. For a Spawn-mode template the bring-up timer is the one named `SPAWN UNITS`.
+- `inspect_sortie_accepts_each_tested_shape`: table-driven over Activate-mode S1–S4 and S7 (§3.2, decision 0017). S1–S4 are the six built-ins, S3 also with its two flights swapped in file order. Generated cases cover Formation off/on and RTB on every lead or on one of two leads (S7). `inspect_sortie_refuses_spawn_mode` generates single-plane Spawn templates with Repeat off/on and checks the Activate-mode refusal; S5/S6 are not accepted.
 - `inspect_sortie_refusals`: table-driven, one row per refusal of §3.2, each with its message: no Zone Out; two Closer 0 zones; a vehicle among the units; no lead with a waypoint; two path waypoints on a lead; no AttackArea on the navigation lead; a time-on-target step between the attack order and Mission Complete; a BingoFuel → Force Complete event hook; an order started by a report hook. Each template is written by `generate_template` in the test, so the test follows what Template Builder can write.
 - `inspect_sortie_accepts_nothing_untested`: the accepted-shape table in `library.rs` and the rows of `inspect_sortie_accepts_each_tested_shape` have the same length (U21).
 - `inspect_sortie_escort_first_picks_the_second_lead`: Armed Recon with its two flights swapped in file order: the navigation lead is the strike lead.
@@ -1705,31 +1705,32 @@ Inputs: scripted tracks (coalition, list of (t, x, z)), forced pulses (node name
 
 ### Step 3. Sortie shell, budget and assembly — M–L. Branch `claude/p14-shell`
 
-**Files:** `src/airtask/shell.rs`, `src/airtask/budget.rs`, `src/airtask/assemble.rs`.
+**Files:** `src/airtask/shell.rs`, `src/airtask/budget.rs`, `src/airtask/assemble.rs`; decision 0017 also updates `library.rs` refusals and `probe.rs` flight 2.
 
 **Depends on:** steps 1, 1b and 2, and the **flight 0 results** (gate G0, §10). Strategy enums: `ZoneOutImpl`, `LossesImpl`, `BudgetImpl`, `CensusImpl`. Owns `AT s *`, the side's `Translator Mission Begin` (`emit_side_logic`), the per-entry copy pointer (§3.7) and `BUD s *` (§3.3). `budget::build_side` reads the gates, flags and events that `assemble_side` registered in `SideLogic`; its own tests fill them with stand-in relays.
 
 **Acceptance, structural (table-driven over all six built-ins, each placed and wrapped as copy `SN01`/`SD01`):**
-- `shell_strips_zone_in_and_start` : the MCUs that Template Builder names `Zone IN`, `ENABLE / PULSE IN`, `COOLDOWN`, `Zone In ReActivate`, both `Self Deactivate` and every `Mission Complete n` are gone. `Translator Mission Begin` has `Enabled 0` and no Targets. `assert_links_resolve` passes, so no link to a deleted MCU is left.
+- `shell_keeps_zone_in_and_strips_start`: Zone IN is retained under its template name. `ENABLE / PULSE IN`, `COOLDOWN`, `Zone In ReActivate`, both `Self Deactivate` and every `Mission Complete n` are gone. `Translator Mission Begin` has `Enabled 0` and no Targets. `assert_links_resolve` passes, so no link to a deleted MCU is left.
 - `shell_end_timer_only_from_done_hub`: the end timer (`MISSION END`) has exactly one inbound link: `DONE HUB`.
 - `shell_done_hub_inputs`: `DONE HUB` receives exactly `HARD STOP`, `COLD`, `EXTEND`, `LOSSES` and `Zone Out`, and targets `DONE HUB OFF`, which deactivates `DONE HUB` only.
-- `shell_delete_timer_releases_the_budget`: the delete timer targets `Trigger Delete` and `SNjj LANDED`, which deactivates `FLYING`; the delete timer is registered in `SideLogic.budget_events` (D38, U22).
+- `shell_delete_timer_releases_the_budget`: `SNjj DELETE DELAY` targets `SNjj DELETE` (Objects = every plane entity) and `SNjj LANDED`, which deactivates `FLYING`; the shell delay is registered in `SideLogic.budget_events` (D38, U22).
 - `shell_one_on_station_per_sortie`: exactly one `ON STATION`, `Time` = T_attack per file (1080 / 600 / 900 / 1200 / 300 / 600), targeted only by `ON STATION IN` (a latch), which is targeted only by the navigation lead's attack timer (for AirAlert, timer 39, not 37; for Yak and Il-10, the branch of entity 7, not the other lead's).
 - `shell_on_station_with_the_escort_first`: Armed Recon with its two flights swapped in file order: `ON STATION IN` is fed by the strike lead's on-target timer (second review, R4-4).
-- `shell_wp1_arms_zone_out`: the navigation lead's `WP 1` targets the Zone Out arming pair. `Zone Out` is centred on the target.
+- `shell_wp1_pulses_zone_in`: the navigation lead's `WP 1` targets Zone IN, and only Zone IN targets Zone Out's arming pair. Both zones are at the target with radius 35 km, Closer 1 / 0 and their unchanged enemy coalition filters. Zone IN is not initialized off and no Deactivate in the emitted copy targets it.
 - `shell_losses_counts_every_plane`: `LOSSES` Counter = 4 / 4 / 4 / 4 / 4 / 8, and the number of `OnEvent Type 13 → LOSSES` equals the plane count (the Armed Recon escort included).
-- `shell_end_of_station_pair`: `ON STATION` targets exactly `SNjj HOT` and `SNjj COLD`; `HOT` targets `EXTEND`; `COLD` and `EXTEND` target `DONE HUB`; both relays are registered in `SideLogic.hot_consumers` / `cold_consumers` under the copy's area. The copy contains no check zone except Zone Out.
+- `shell_end_of_station_pair`: `ON STATION` targets exactly `SNjj HOT` and `SNjj COLD`; `HOT` targets `EXTEND`; `COLD` and `EXTEND` target `DONE HUB`; both relays are registered in `SideLogic.hot_consumers` / `cold_consumers` under the copy's area. The copy contains exactly two check zones: Zone IN and Zone Out.
 - `shell_timing_values`: HVAR at clock distance: `HARD STOP.Time = 2100` (300 + 600 + 600 + 600); Armed Recon at clock distance: `2700`; `EXTEND.Time = 600`.
 - `shell_start_is_the_gate`: `ENii COPY r` targets `SNjj START` directly and there is no `GATE` MCU; `START` is registered in `SideLogic.gates` and `SideLogic.budget_events`; `START` targets the bring-up timer, `HARD STOP`, `STARTED ON` and `STARTED OFF`; `STARTED ON` activates `FLYING`. The shell writes no link to a `BUD`, `EN` or `ZN` MCU: those come through `SideLogic.links`.
-- `shell_adds_17_mcus_per_copy`: the wrapped HVAR copy has 17 more MCUs than the stripped one, plus one `RTB 1` waypoint (U13; a change in this number must be deliberate). A template with its own RTB timer gets 16 (`shell_keeps_template_rtb_timer`).
-- `shell_delete_timer_still_targets_delete`.
-- `shell_wraps_a_spawn_mode_template`: a single-plane Spawn-mode template written by `generate_template` in the test is wrapped; `START` targets the timer named `SPAWN UNITS`.
-- `shell_sweeps_repeat_mode_machinery`: a Spawn-mode, repeat-mode template written by `generate_template` in the test is wrapped: `DeathCount`, `DeathCount ReActivate`, `DeathCount Deactivate`, `Reset Counter`, `Modifier Set Value` and `COOLDOWN` are gone; `SpawnCount` and `Trigger Spawner` stay; no plane entity has an `OnEvents` entry except the shell's type 4 → `LOSSES`.
+- `shell_adds_19_mcus_per_copy`: HVAR removes 8 template MCUs and adds 19 plus one `RTB 1` waypoint, for 43 total (42 without Zone IN). `shell_keeps_template_rtb_timer`: generated S7 removes 7 and adds 18 plus the missing lead's RTB waypoint, for 47 total (46 without Zone IN).
+- `shell_replaces_the_template_delete_chain`: a built-in with a chain and a regenerated Activate template without one each end with exactly one `SNjj DELETE` and no dangling link.
+- `shell_does_not_reuse_removed_delete_chain_indexes`: a template whose Delete chain owns its highest indexes, wrapped with a stale allocator, leaves every shell-added index outside the removed chain's range.
+- `shell_writes_only_the_losses_hooks`: every entity has exactly one type 13 into LOSSES, and no other event or report hook, across all six built-ins.
+- `inspect_sortie_refuses_spawn_mode`: generated single-plane Spawn templates, Repeat off and on, receive the Activate-mode refusal. The step 2 repeat acceptance test becomes `inspect_sortie_refuses_on_killed_repeat_events`.
 - `shell_orphan_sweep_keeps_everything_reachable`: for each built-in, every order timer, command, waypoint, `Activate Units`, `AFTER BRING UP`, the end chain and the Zone Out arming pair are still there.
 - `shell_refuses_a_second_link_into_the_end_timer`.
-- Variants: `shell_zone_out_watchdog_structure`, `shell_losses_latch_counts_each_plane_once_across_types_4_2_0`.
+- Variant: `shell_zone_out_watchdog_structure`; the 4/2/0 losses latch is removed.
 - `assemble_copy_pointer_structure`: per entry (including a `Zone`-only entry), `ENii COPY 1..runs` each target a distinct `SNjj START`; copy r's `STARTED OFF` deactivates `COPY r` and its `STARTED ON` activates `COPY r+1`; the last copy's `START` targets `ENii EXHAUSTED`; `COPY r` for r ≥ 2 is in `SideLogic.init_off`; `SideCopies` returns the `COPY` and `EXHAUSTED` ids.
-- `assemble_emit_side_logic`: `Translator Mission Begin` targets exactly `SideLogic.mission_begin` plus `AT s INIT` (0.5 s), and `AT s INIT OFF` lists exactly `SideLogic.init_off`; each `SNjj HOT` / `COLD` is registered under its area; each `SNjj START`, `FLYING` and delete timer is registered for the budget.
+- `assemble_emit_side_logic`: `Translator Mission Begin` targets exactly `SideLogic.mission_begin` plus `AT s INIT` (0.5 s), and `AT s INIT OFF` lists exactly `SideLogic.init_off`; each `SNjj HOT` / `COLD` is registered under its area; each `SNjj START`, `FLYING` and shell `DELETE DELAY` is registered for the budget.
 - `assemble_applies_links`: for each pair in `SideLogic.links`, the MCU `from` has `to` in its Targets after `emit_side_logic`, wherever in the side's trees `from` lives; a pair whose `from` does not exist is an error, not a silent skip.
 - `assemble_exhausted_is_one_deactivate_per_entry`: `ENii EXHAUSTED` is an `MCU_Deactivate`; the last copy's `START` targets it; for a `Both` entry its target list holds the clock's three relays and the zone's three.
 
@@ -1739,8 +1740,13 @@ Inputs: scripted tracks (coalition, list of (t, x, z)), forced pulses (node name
 - Variants: `budget_single_slot_structure` (`BudgetImpl::SingleSlot` forces N = 1 on both sides, whatever the plan says) and `budget_census_same_tick_structure` (every `FLYING.Time = 0`, `END.Time = 0.2`).
 
 **Acceptance, walker scenarios** (each also run with `ReverseTargets` and with the three re-trigger modes):
+- `shell_empty_target_stays_on_station`: no enemy, HVAR DONE from COLD at WP 1 + 0.5 + 600 s, never at arrival.
+- `shell_enemy_present_at_arrival_then_leaves`: enemy already inside, leaves at WP 1 + 180 s; Zone IN fires at arrival, Zone Out ends the sortie when it leaves.
+- `shell_enemy_arrives_after_then_leaves`: enemy inside from WP 1 + 120 to +300 s; Zone IN waits, then Zone Out ends the sortie at departure (plus game reaction time).
+- `shell_hot_empty_target_extends_once`: no enemy, HOT; DONE from EXTEND after one 600 s extension.
 - `shell_done_fires_once_when_on_station_end_and_zone_out_coincide`: `DONE HUB` passes one pulse and the end timer starts once.
-- `shell_losses_all_planes_triggers_done`.
+- `shell_losses_all_planes_triggers_done`: walker kills every aircraft through event 13, including Armed Recon escorts; DONE HUB passes once.
+- `shell_deletion_frees_the_budget`: DONE at t, Delete at t + 60.6 s, FLYING remains on until deletion, and a later request starts.
 - `shell_cold_area_ends_at_on_station_end`: `DONE HUB` at T_attack after the attack timer fires (for HVAR that is WP 1 arrival + 0.5 s + 600 s); the delete timer fires 60.6 s later, and only then is `FLYING` off.
 - `shell_hot_area_extends_once_then_ends`: `DONE HUB` 600 s after the end of on-station time, even if the area is still HOT; the later hard stop finds the hub closed.
 - `shell_late_flight_ends_at_hard_stop` (WP 1 never reached): `DONE HUB` at `START` + T_final.
@@ -1757,20 +1763,30 @@ Inputs: scripted tracks (coalition, list of (t, x, z)), forced pulses (node name
 - `assemble_side_numbers_copies_and_uses_spawn_rule`: one copy per run per eligible entry, jj unique per side, `Zone`/`Both` copies at 30 km ± 1 m, `Clock` copies at v_wp·M ± 1 m.
 - `walker_every_deactivated_out_has_a_rearm_or_is_single_use` passes on the wrapped copies and on the budget.
 
-**Needs the user in game: Probe 2 (solo, automated, about 40 min; P may stay on the ground).** The ignored test `write_p14_sortie_probe` (in `shell.rs` under `#[cfg(test)]`; `probe.rs` belongs to 0b) writes one traced file with:
-- one placed **HVAR** sortie and one placed **AirAlert** sortie, each started by a timer (60 s and 90 s), each with an area whose state a timer switches HOT at 10 min, and each with subtitles on `START`, `DONE HUB`, `EXTEND` and `Trigger Delete`;
-- one placed single-plane **Spawn-mode** sortie (risk u), started at 120 s;
-- cell **T-k**, built with `budget.rs` (N = 2, 7 stand-in copies, so `T_count` = 0.5 s): requests at t, t + 2 s, t + 4 s and t + 6 s; the two copies that started are deleted in the same tick at t + 30 s; a 5th and a 6th request at t + 32 s and t + 34 s; a 7th at t + 36 s. Every request is more than `T_count` after the one before, so the result does not depend on how the game delivers two pulses in one tick.
-- cell **T-k1** (N = 1): two requests in the same tick at t; a third at t + 5 s; **one** of the copies that started is deleted at t + 20 s; a fourth request at t + 22 s; every other copy that started is deleted at t + 30 s; a fifth request at t + 32 s.
+**Flight 2 was flown and is frozen (decision 0018).** Its four files under `handoff/p14-probes/flight2/` remain the replay evidence. The `write_p14_probe_2` writer is replaced by `write_p14_probe_2b`; the shared writer refuses `Flight::Two`. The flight 2 builder still uses the current shell for structural checks, without regenerating the flown files. `Flight::Two`, `RUN_SHEET_2` and cues keep it in the common probe checks. The retired `write_p14_sortie_probe` is removed.
+- **T-s1**: placed HVAR starts at 60 s, target K14 + (50, 20) km. **T-s2**: placed AirAlert starts at 90 s, target K14 + (50, 60) km. Both use Activate mode, a 300 s nominal transit, 600 s margin and 600 s extension; each stand-in area switches HOT on / COLD off at 600 s. Subtitles and breadcrumbs observe START, DONE HUB, EXTEND and the issuing `SNjj DELETE DELAY` pulse (the Delete command is a sink; it executes in that same tick).
+- **T-l**: `T-l1` is a single independent F-80 at K14 + (-25, +50) km, (80934, 319477), air start at 60 s, heading east (90°), altitude 150 m, Fuel 0, `AiRTBDecision = 0`. Its cruise waypoint is 10 km farther east, (80934, 329477), altitude 150 m, speed 732 km/h from `model_spec`. `assets/combined_terrain.bin` marks both points as land. The start is 55.902 km from K14 and at least 21.577 km from every recorded airfield; the nearest is K-49 Yangsu-ri, (102114, 315358) in `TemplateExamples/K49 DPRK_AB.Group`. The check covered the 39 `AIRFIELDS` markers in `References/landscape_Korea_FullScene.Group`, the three standalone reference airfields and all 25 positioned `Airfield` blocks in `TemplateExamples/`, `References/` and `src/testdata/`. The cruise leg stays at least 15 km from every field, increases the nearest-field clearance to 25.363 km and leads away from K14 (65 km at the waypoint). The nearest other flight 2 aircraft starts over 22 km away. Event 13 feeds a Counter 1 / Dropcount 0 LOSSES; events 2, 0 and 5 have separate observations. No Damage command is present. **T-l2 is omitted:** the WMAP file is a land/water/open mask (`watermap.rs`), and the repository contains no measured elevation for a chosen ridge point.
+- Every aircraft has its own entity-Objects close Delete at 2760 s, following flight 1P. Budget cells close at 220 s and 280 s. The flight's final cue is at 2760 s; end normally after it.
+- cell **T-k**, t = 180 s, built with `budget.rs` (N = 2, 7 stand-in copies, so `T_count` = 0.5 s): requests at t, t + 2 s, t + 4 s and t + 6 s; the two copies that started are deleted in the same tick at t + 30 s; a 5th and a 6th request at t + 32 s and t + 34 s; a 7th at t + 36 s. Every request is more than `T_count` after the one before, so the result does not depend on how the game delivers two pulses in one tick.
+- cell **T-k1** (N = 1, t = 240 s, 5 stand-ins): two requests in the same tick at t; a third at t + 5 s; **one** of the copies that started is deleted at t + 20 s; a fourth request at t + 22 s; every other copy that started is deleted at t + 30 s; a fifth request at t + 32 s.
 
 Check:
 - arrival time against §4.3 (±20 %), that the AttackArea is on the target, the RTB turn, deletion about 60 s after `DONE HUB`, and that "DONE HUB" shows once per sortie;
 - AirAlert's two AttackAreas (D28);
 - what the aircraft do during the extension (risk v);
-- the Spawn-mode sortie starts, and is deleted at its end (risk u);
+- T-l1 receives no Damage command: record whether the fuel-zero crash raises 13, 2, 0 or 5, and whether LOSSES fires once;
 - T-k: the requests at t and t + 2 s start; those at t + 4 s and t + 6 s are dropped; after the two deletions, the 5th and 6th start; the 7th is dropped.
 - T-k1: 1 or 2 start at t (2 is the documented overshoot; the result says how the game delivers two pulses in one tick); the third is dropped. If 2 started, the fourth is dropped too, because one copy still exists. The fifth starts.
-- **load (D36):** the ignored test `write_p14_load_probe` writes a second file, the acceptance plan scaled to 24 copies per side. The user notes the mission load time and the server's tick delay with it loaded and idle, and both go into `handoff/P14-probe-results.md`.
+- **load (D36):** the ignored tests `write_p14_load_probe` and `write_p14_probe_2b` share a plain helper that writes `Flight::Load` (`P14_Load_Probe`) through the common probe writer, once even when both tests run together. It contains the acceptance plan scaled to 24 copies per side (240 idle aircraft, all six built-ins), now with 48 check zones per side. It lives in `probe.rs`. The user notes the mission load time and the server's tick delay with it loaded and idle, and both go into `handoff/P14-probe-results.md`.
+
+The original structural/walker checks remain `flight2_sorties_use_the_shell_lifecycle`, `flight2_budget_requests_follow_the_plan`, `flight2_no_damage_loss_uses_a_once_counter`, `flight2_loss_starts_over_land_away_from_airfields` and `flight2_load_has_24_idle_copies_per_side`. `flown_probes_regenerate_byte_for_byte_except_flight2` compares the 44 files of flights 0–1P byte for byte and explicitly excludes flight 2 under decision 0018. `flight2_frozen_files_parse_and_links_resolve` checks the frozen traced Group, English locale, spawn list and trace map.
+
+**Needs the user in game: flight 2B (automated, 30 min).** `Flight::TwoB`, `generate_probe_2b`, `RUN_SHEET_2B`, cues and the ignored `write_p14_probe_2b` produce `P14_Probe_2B` plain/traced files and `target/p14/P14_Probe_2B_schedule.md`. Four independent NATO sortie cells have targets at K14 + (140, -90), (140, 0), (230, -90), (230, 0) km, all on land, at least 90 km apart and 140 km from K14.
+- T-s1: HVAR START 60 s, empty target, HOT at 600 s; 600 s on station and one 600 s extension. T-s2: AirAlert START 90 s, empty COLD target; 1080 s on station.
+- T-s3: HVAR START 120 s; a two-plane DPRK Yak-9P flight activates at 30 s and is deleted at 586 s. T-s4: HVAR START 150 s; the same enemy pair activates at 556 s and is deleted at 736 s. Those schedules use flight 2's measured transits from START (HVAR 286 s, AirAlert 279 s), predicting WP 1 at 346, 369, 406, 436 s.
+- Enemy pairs have country 503, `AiRTBDecision = 0`, an 8000 m air start and an eight-waypoint orbit 18–22 km from the target and the coincident attack point. The orbit has a 2 km radius, is centred 20 km east of the target, and turns 45° at every waypoint; every straight leg stays at least 18 km from the attack point and inside 30 km of the target. They receive the shipped Behaviour command after 0.1 s with `Engageable = 0`; its retained `Filter = 8` is undocumented in the repository and remains unverified. The Plane property is also 0. No fight is needed.
+- Breadcrumbs cover Zone IN, Zone Out, LOSSES, COLD, EXTEND, HARD STOP, START, WP 1, every attack timer, ON STATION, DONE HUB, DELETE DELAY and the issuing enemy activation/deletion timers. All cells close at 1800 s with one Delete per written aircraft entity and a final cue.
+- New checks: `flight2b_sorties_and_breadcrumbs_match_the_plan`, `flight2b_enemies_are_isolated_and_scheduled`, `flight2b_walks_all_four_outcomes`. The common loader-shape, locale, run-sheet and link checks include 2B.
 
 ### Step 4. Threshold cell — M. Branch `claude/p14-threshold`
 
@@ -1982,7 +1998,7 @@ The repo does not prove any of these in game. The shipped files only show what t
 | d | Complex Trigger filters and events | Per-object "entered alive", country filter | None: 0 hits in samples; only the drop-list in `template.rs` | UNVERIFIED. **Step 12 only**; it needs the user's 12a file and a two-player flight | v1 does not use it |
 | e | Counter reset (Dropcount, ModifierSetVal) | `Dropcount 1` = reset after firing (the codebase convention, §3.2 note); ModifierSetVal clears a partial count (the budget's `COUNT`, §3.3). Step 12 only: a fired `Dropcount 0` counter fires again after a reset (T-e E6) | `template.rs` `DeathCount` / `Reset Counter`, `flights.rs` `DeathCount`, commit `7437c51` | UNVERIFIED (flight 0) | `BudgetImpl::SingleSlot` (budget 1, no counter). Counter ring in step 12 |
 | f | Timer `Random %` rolled on each trigger | Quiet, jitter, waterfall, zone chance | `flights.rs` ≈1010-1013, `recon.rs` ≈1246-1256 | UNVERIFIED (the Fighter Pack already depends on it) | `RandomImpl::Seeded` |
-| g | Kill events per aircraft | **Type 13** once per plane; none on Delete. Type 4 never fires (flight 1G, 2026-10-12; decision 0011) | `handoff/P14-probe-results.md`, flight 1G | VERIFIED for a gun kill and a Damage command; a crash without damage and a bail-out are untested | Per-plane latch on 4 / 2 / 0; the hard stop |
+| g | Kill events per aircraft | Type 13 once per plane; no 4/2/0 latch and no event-7 abort (decisions 0011/0015/0017) | `handoff/P14-probe-results.md`, flights 1G/1P | VERIFIED for gun/Damage loss and fuel-bail-out; crash without damage remains for flight 2 T-l | On-station end, Zone Out and hard stop still end the sortie |
 | h | Deactivating a waiting checkzone cancels it | INNER CLOSE, INNER OFF | `USER_MANUAL.md` ≈203, `flights.rs` ≈905-915 | UNVERIFIED | Gate a downstream relay instead |
 | j | Relay gating; running-timer cancel | D11 relays | recon/flights closers | UNVERIFIED | Explicit clear; OUT relays already cover the cancel case |
 | k | The head count in game | §3.3 | none | UNVERIFIED (Probe 2, cell T-k) | `BudgetImpl::SingleSlot` |
@@ -1999,7 +2015,7 @@ The repo does not prove any of these in game. The shipped files only show what t
 | t5 | Two breadcrumbs in one tick both log | "Unobserved successors" and counts | None | UNVERIFIED (T-t T3) | Report same-tick firings as "at least one" |
 | t6 | The log records everything the video shows (no dropped lines; the last file written on a normal mission end) | Replay is the primary evidence in 0d and step 11 | None | UNVERIFIED (T-t T6) | Video and subtitles stay the evidence; the replay is a cross-check |
 | r | Several pulses into one counter in one tick are counted one by one | Not relied on: the census spaces its pulses 0.05 s apart | none | UNVERIFIED (flight 0, E7) | `CensusImpl::Spaced` is the default |
-| u | Kill events, `Deactivate Units` and `Trigger Delete` act on planes made by an `MCU_Spawner` | Spawn-mode user templates (U18) | `template.rs` Spawn branch | UNVERIFIED (Probe 2) | Refuse Spawn-mode templates with a message |
+| u | Spawn-mode entity association after respawn | Air Tasking accepts Activate-mode S1–S4/S7 only | Flight 1L V2; decisions 0013/0017 | Spawn/Repeat templates refused; no Spawn cell in flight 2 | "Air Tasking needs an Activate-mode template" plus the regeneration guidance |
 | v | What a flight does after its AttackArea `Time` has run out | The extension adds time only | none | UNVERIFIED (Probe 2) | The shell adds `SNjj RENEW`: the attack order is given again when the extension starts, and `DONE HUB OFF` switches it off (§3.4) |
 | w | Mission load time and server tick delay with many inactive copies | The D36 limits | none | UNVERIFIED (Probe 2 load check, step 11) | Lower the limits; a smaller Auto-fill (§10 item 23) |
 | z | An empty `Closer 0` zone fires at once when pulsed | Only the `Closer0Race` fallback | none | UNVERIFIED (flight 0, T-z) | None. If c and z both fail, the build stops at step 4 |

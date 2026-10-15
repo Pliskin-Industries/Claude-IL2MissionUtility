@@ -14,7 +14,7 @@ Step 3 (sortie shell, budget, assembly) was built before flight 0 and held. Merg
 
 What the flights showed that bears on it:
 - A Delete that lists the aircraft's **entities** removed them every time it was flown (flights 1H, 1J, 1L, and 1M with a 4-ship placed by `place_air_sortie`). A dead aircraft in the list is harmless (1J).
-- Event 13 fired exactly once for every kind of loss flown: a Damage command, AI gunfire, a collision, a crash in a fight, and running out of fuel with a bail-out (flights 1G, 1J, 1K, 1N). Event 4 never fired. The one case not flown is a crash with no damage at all.
+- Event 13 fired exactly once for every kind of loss flown: a Damage command, AI gunfire, a collision, a crash in a fight, and running out of fuel with a bail-out (flights 1G, 1J, 1K, 1L). Event 4 never fired. The one case not flown is a crash with no damage at all.
 - Whether kill events, Deactivate and Delete act on aircraft made by an `MCU_Spawner` is not settled for Air Tasking (risk u). The user's experience is that Spawn mode limits formations and orders.
 
 ## Decision

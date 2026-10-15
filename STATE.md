@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-14, after decision 0017 (step 3 scoped).
+> Last updated: 2026-10-15, after flight 2B run 3.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -20,7 +20,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | `main` | `Claude-IL2MissionUtility` | v0.6.0 plus the P14 plan. 3 ahead and 1 behind `origin/main`. |
 | `claude/p14-air-tasking` | `Claude-IL2MissionUtility-fix` | **The active branch.** P14 steps 1a, 1, 1b, 0T, 0b, 2 and the probe steps 0e to 0k, plus the fixes for decisions 0012 to 0016 (they change what Template Builder and Fighter Pack generate). Not pushed. |
 | `codex/p14-3` | `Claude-IL2MissionUtility-0t` | P14 step 3, built before flight 0; superseded by `codex/p14-3b`. |
-| `codex/p14-3b` | `Claude-IL2MissionUtility-3b` | P14 step 3 being settled to decision 0017 (Astra). Not merged. |
+| `codex/p14-3b` | `Claude-IL2MissionUtility-3b` | P14 step 3: decisions 0017 and 0018, reviewed; flights 2 and 2B flown. Not merged: waits for the user. |
 | `trial/upstream-merge` | `Claude-IL2MissionUtility-merge` | Uncommitted trial merge of upstream. Do not build on it. |
 | `trial/upstream-strike-files` | `Claude-IL2MissionUtility-up` | A checkout of upstream `a31ad0a` with one ignored test that writes its strike and CAP files. Never pushed or merged. |
 | `codex/fix-0016`, `codex/p14-0k` and the older `codex/*` branches | `Claude-IL2MissionUtility-0e` (on `codex/p14-0k`), `-0b` | Already merged. Leftover worktrees. |
@@ -39,21 +39,27 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
   - the F-80C strike without its event 7 hooks completes;
   - **event 7 at activation is not a property of the type:** twelve single aircraft as Template Builder writes them, and the Fighter Pack F-80Cs, did not raise it. Upstream's F-80C strike and F-86A CAP did. The cause is not known;
   - Fighter Pack's event 7 hook did **not** send the flight home, so no decision is needed for it for now.
-- **Step 3 is being settled on `codex/p14-3b`** (worktree `Claude-IL2MissionUtility-3b`): the held `codex/p14-3` merged onto the active branch, then rebuilt by Astra to decision 0017 (2026-10-14): Activate-mode templates only, the shell writes its own entity Delete, losses on event 13 only (`Latch` removed), the `// P14 G0` lines settled, Probe 2 (flight 2) with crash cell T-l. Prompt: `handoff/P14-step-3b-codex-prompt.md`. Then a full review, flight 2, and a `--no-ff` merge.
+- **Step 3 is built on `codex/p14-3b`** (worktree `Claude-IL2MissionUtility-3b`, `129bf0d`), to decision 0017, reviewed, and **flown as flight 2** (2026-10-14; `handoff/P14-probe-results.md`, "Flight 2"; logs `src/testdata/missionlog/real_19/`). The budget works in the game at N = 2 and N = 1; the shell's own Delete removes the aircraft 60.6 s after `DONE HUB`; event 13 fires once for a crash with no damage. **But both sorties ended at WP 1 arrival:** Zone Out fires at once when no enemy aircraft is within 35 km of the target. That needs a ruling (below) before the merge, and the on-station part (attack, extension, RTB) is still unflown. On that branch: 629 passed, 0 failed, 21 ignored; 69 / 251 warnings; flown probe files (flight 2 now frozen in `handoff/p14-probes/flight2/`) byte-identical.
+- **Step 3c (decision 0018) is flown as flight 2B** (2026-10-14; `handoff/P14-probe-results.md`, "Flight 2B"; logs `src/testdata/missionlog/real_20/`; flown files frozen in `handoff/p14-probes/flight2b/`). All four paths worked as intended, each `DONE HUB` with a logged cause: empty target HOT → `EXTEND`, empty target COLD → `COLD`, enemy present on arrival or arriving later → Zone Out 0.02 s after the enemy left. **New finding:** T-s1's HVAR 4-ship lost two aircraft to crashes on station over the empty target, no attacker; the cause is unknown. Still unseen: behaviour during the extension (risk v), the attack itself, the RTB turn; this PC records no Tacview (`tacviewrecord = 0`). 638 passed, 0 failed; 48 flown probe files byte-identical.
+- **Flight 2B run 2 (2026-10-15, Tacview on; logs `real_21`):** the logic repeated run 1 to within 0.2 s. HVAR 4-ships over an empty target lost aircraft again (T-s1 two crashes, T-s4 an apparent collision of two wingmen); AirAlert never. **No Tacview was written:** the host stayed on the briefing screen. This PC's `startup.cfg` now has `tacviewrecord = 1` (backup `startup.cfg.bak-20261015`).
+- **Flight 2B run 3 (2026-10-15, host spectating; logs `real_22`):** still no Tacview file (most likely it needs a recorded track, started from a key in flight). T-s1 lost one more HVAR. The end-of-mission list shows the HVARs on station at 370 to 410 m and AirAlert near 1,150 m: the HVAR attack order works an empty target very low, which fits the crashes (inference).
+- **Upstream (eszyman), 2026-10-15:** issue #1: he fixed all three bugs (event 13, Fighter Pack counts once, Delete by entity / none in Activate mode) plus a once-only strike go-home in his working tree; we asked him to publish it upstream and close the issue. Issue #2: he ran the old `P14_Load_2` file (one check zone per copy): SPS 50, tick delay 1.0 idle; all 240 switched-off aircraft present (`handoff/P14-probe-results.md`, "Load test on the upstream author's server").
 - **The game is 1.005 (`261013`).** Its `MissionResaver.exe` crashes on every mission; build probes with `--no-resave`. How to run a no-pilot probe on this PC: `handoff/sessions/2026-10-14-handoff-flight-1n.md` ("Flying a no-pilot probe") and `handoff/sessions/2026-10-13-delete-probes.md`.
 
 ## Waiting on the user
 
-1. **The upstream issue is posted** (2026-10-14, https://github.com/eszyman/IL2MissionUtility/issues/1; text in `handoff/upstream-issue-draft.md`). Waiting on the upstream author's reply; offering patches for 1 to 3 is the next step if they want them.
-2. **The six built-in sorties** (`TemplateExamples/Historical1950/`) still carry the old Delete list. Air Tasking removes it from the copies it places and writes its own (decision 0017); whether to change the files is open.
-3. **Upstream overlap:** upstream now places strikes and CAPs on Map targets. Proposed: Air Tasking schedules and budgets those instead of placing its own; to be planned before the upstream merge.
-4. **Older items:** whether objective breadcrumbs show as map markers; the 2026-10-03 next-step list; plan §10 item 23.
+0. **Merge `codex/p14-3b` into `claude/p14-air-tasking`?** Step 3 has flown three times (flight 2; flight 2B runs 1 and 2). Open from it: HVAR losses over an empty target, and what the aircraft do on station and during the extension. A Tacview recording needs the host inside the mission (press Spectate), not yet tried.
+1. **The load test is with the upstream author:** https://github.com/eszyman/IL2MissionUtility/issues/2 (posted 2026-10-14; mission text log and Tacview recording requested). The text names the rebuilt file `P14_Load_3_20261014` (decision 0018 shell, 48 check zones per side); **the zip attached to the issue is still the old `P14_Load_2` and must be replaced** with `target/p14/missions/P14_Load_3_20261014/P14_Load_3_20261014.zip` (step 3b worktree). This PC is a test bed: its load numbers are not used.
+2. **The upstream issue is posted** (2026-10-14, https://github.com/eszyman/IL2MissionUtility/issues/1; text in `handoff/upstream-issue-draft.md`). Waiting on the upstream author's reply; offering patches for 1 to 3 is the next step if they want them.
+3. **The six built-in sorties** (`TemplateExamples/Historical1950/`) still carry the old Delete list. Air Tasking removes it from the copies it places and writes its own (decision 0017); whether to change the files is open.
+4. **Upstream overlap:** upstream now places strikes and CAPs on Map targets. Proposed: Air Tasking schedules and budgets those instead of placing its own; to be planned before the upstream merge.
+5. **Older items:** whether objective breadcrumbs show as map markers; the 2026-10-03 next-step list; plan §10 item 23.
 
 ## Next steps (proposed order)
 
 1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
 2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-3. Settle step 3 (`codex/p14-3b`, decision 0017), as listed above; fly flight 2.
+3. Merge `codex/p14-3b` (user); decide whether to re-fly T-s1 with Tacview on to see the HVAR crashes and the extension.
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 5. Optional probes, if they matter later: the go-home timer without Force Complete when it fires more than once (1P's H3 did not test it), and what makes the game raise event 7 at activation.
 

@@ -274,7 +274,6 @@ pub enum LossesImpl {
     /// A lost aircraft raises OnEvent 13 once and never 4 (flight 1G, decision 0011).
     #[default]
     Type13,
-    Latch,
 }
 #[allow(dead_code)] // P14 step 12
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -39,6 +39,9 @@ const COMPLEX_TRIGGER: &str =
 const DAMAGE: &str = include_str!("../../TemplateExamples/Reference/CommandDamage_reference.Group");
 const ATTACK_TARGET: &str =
     include_str!("../../TemplateExamples/CorrectedFlightfromTemplate.Group");
+const BEHAVIOUR: &str = include_str!("../../TemplateExamples/DPRK_Scramble.Group");
+const TWO_B_ENEMY: &str =
+    include_str!("../../TemplateExamples/Historical1950/1950_DPRK_Yak_AirfieldRaid_2plus2.Group");
 // Assets and loadout from the first Plane in
 // TemplateExamples/CorrectedFlightfromTemplate.Group (a MiG-15bis).
 const MIG15BIS_PLANE_KEYS: [&str; 8] = [
@@ -107,12 +110,15 @@ pub(crate) enum Flight {
     OneL,
     OneM,
     OneP,
+    Two,
+    TwoB,
+    Load,
 }
 
 impl Flight {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 14] = [
         Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG, Self::OneH, Self::OneJ,
-        Self::OneK, Self::OneL, Self::OneM, Self::OneP,
+        Self::OneK, Self::OneL, Self::OneM, Self::OneP, Self::Two, Self::TwoB, Self::Load,
     ];
 
     fn stem(self) -> &'static str {
@@ -128,6 +134,9 @@ impl Flight {
             Self::OneL => "P14_Probe_1L",
             Self::OneM => "P14_Probe_1M",
             Self::OneP => "P14_Probe_1P",
+            Self::Two => "P14_Probe_2",
+            Self::TwoB => "P14_Probe_2B",
+            Self::Load => "P14_Load_Probe",
         }
     }
 
@@ -144,7 +153,29 @@ impl Flight {
             Self::OneL => RUN_SHEET_1L,
             Self::OneM => RUN_SHEET_1M,
             Self::OneP => RUN_SHEET_1P,
+            Self::Two => RUN_SHEET_2,
+            Self::TwoB => RUN_SHEET_2B,
+            Self::Load => &[],
         }
+    }
+
+    fn is_frozen(self) -> bool {
+        matches!(self, Self::Two)
+    }
+
+    fn regenerates_flown_files(self) -> bool {
+        match self {
+            Self::Load => false,
+            _ => !self.is_frozen(),
+        }
+    }
+
+    fn writes_schedule(self) -> bool {
+        matches!(self, Self::TwoB)
+    }
+
+    fn writes_load_summary(self) -> bool {
+        matches!(self, Self::Load)
     }
 
     fn spawns(self) -> &'static [Spawn] {
@@ -166,7 +197,7 @@ impl Flight {
                 script: "mig15bis",
             }],
             Self::Zero | Self::OneA | Self::OneG | Self::OneH | Self::OneJ | Self::OneK
-                | Self::OneL | Self::OneM | Self::OneP => &[],
+                | Self::OneL | Self::OneM | Self::OneP | Self::Two | Self::TwoB | Self::Load => &[],
         }
     }
 }
@@ -383,6 +414,150 @@ pub(crate) const RUN_SHEET_1P: &[Cell] = &[
     },
 ];
 
+const TWO_CLOSE_S: f64 = 2760.0;
+const TWO_HOT_S: f64 = 600.0;
+const TWO_TRANSIT_S: f64 = 300.0;
+const TWO_MARGIN_S: f64 = 600.0;
+const TWO_EXTENSION_S: f64 = 600.0;
+const LOSS_ALTITUDE_M: f64 = 150.0;
+const LOSS_CRUISE_KM: (f64, f64) = (-25.0, 60.0);
+const SORTIE_PROBE_BUDGET: u8 = 1;
+const SORTIE_PROBE_COPY_ORDER: usize = 1;
+const SORTIE_PROBE_AREA: usize = 1;
+const LOAD_PROBE_BUDGET: u8 = 2;
+
+pub(crate) const RUN_SHEET_2: &[Cell] = &[
+    Cell { key: "T-s1", centre_km: (50.0, 20.0), arm_s: 60.0, close_s: TWO_CLOSE_S },
+    Cell { key: "T-s2", centre_km: (50.0, 60.0), arm_s: 90.0, close_s: TWO_CLOSE_S },
+    Cell { key: "T-k", centre_km: (0.0, 5.0), arm_s: 180.0, close_s: 220.0 },
+    Cell { key: "T-k1", centre_km: (0.0, 5.0), arm_s: 240.0, close_s: 280.0 },
+    // Land in combined_terrain.bin; nearest airfield K-49 is 21.577 km away
+    // (TemplateExamples/K49 DPRK_AB.Group; FullScene AIRFIELDS checked too).
+    Cell { key: "T-l", centre_km: (-25.0, 50.0), arm_s: 60.0, close_s: TWO_CLOSE_S },
+];
+
+struct SortieProbe {
+    cell: &'static str,
+    file: &'static str,
+    prefix: &'static str,
+}
+const TWO_SORTIES: &[SortieProbe] = &[
+    SortieProbe { cell: "T-s1", file: "1950_US_F80_HVAR_Strike_4ship.Group", prefix: "SN01" },
+    SortieProbe { cell: "T-s2", file: "1950_US_F80_AirAlert_4ship.Group", prefix: "SN02" },
+];
+
+const TWO_B_CLOSE_S: f64 = 1800.0;
+// Measured from START in flight 2, not the 300 s placement distance.
+const TWO_B_HVAR_TRANSIT_S: f64 = 286.0;
+const TWO_B_AIRALERT_TRANSIT_S: f64 = 279.0;
+const TWO_B_ENEMY_ALTITUDE_M: f64 = 8000.0;
+const TWO_B_BEHAVIOUR_DELAY_S: f64 = 0.1;
+const TWO_B_ORDERS_DELAY_S: f64 = 0.5;
+const TWO_B_ENEMY_AIRCRAFT: usize = 2;
+const TWO_B_ENEMY_ROTATION_DEG: f64 = 22.5;
+const TWO_B_ORBIT_PRIORITY: &str = "2";
+const TWO_B_TRACK_COALITION: i32 = 1;
+const TWO_B_TRACK_OUTSIDE_OFFSET_M: f64 = 40_000.0;
+// A regular octagon, radius 2 km, centred 20 km east of the target.
+// Its 45-degree turns and 18 km inner waypoint leave room for AI tracking.
+const TWO_B_ORBIT_OFFSETS_KM: &[(f64, f64)] = &[
+    (0.0, 18.0), (std::f64::consts::SQRT_2, 20.0 - std::f64::consts::SQRT_2),
+    (2.0, 20.0), (std::f64::consts::SQRT_2, 20.0 + std::f64::consts::SQRT_2),
+    (0.0, 22.0), (-std::f64::consts::SQRT_2, 20.0 + std::f64::consts::SQRT_2),
+    (-2.0, 20.0), (-std::f64::consts::SQRT_2, 20.0 - std::f64::consts::SQRT_2),
+];
+
+pub(crate) const RUN_SHEET_2B: &[Cell] = &[
+    Cell { key: "T-s1", centre_km: (140.0, -90.0), arm_s: 60.0, close_s: TWO_B_CLOSE_S },
+    Cell { key: "T-s2", centre_km: (140.0, 0.0), arm_s: 90.0, close_s: TWO_B_CLOSE_S },
+    Cell { key: "T-s3", centre_km: (230.0, -90.0), arm_s: 120.0, close_s: TWO_B_CLOSE_S },
+    Cell { key: "T-s4", centre_km: (230.0, 0.0), arm_s: 150.0, close_s: TWO_B_CLOSE_S },
+];
+
+struct EnemyWindow {
+    activate_s: f64,
+    delete_s: f64,
+}
+const TWO_B_PRESENT_ENEMY: EnemyWindow = EnemyWindow {
+    activate_s: 30.0,
+    delete_s: RUN_SHEET_2B[2].arm_s + TWO_B_HVAR_TRANSIT_S + 180.0,
+};
+const TWO_B_LATE_ENEMY: EnemyWindow = EnemyWindow {
+    activate_s: RUN_SHEET_2B[3].arm_s + TWO_B_HVAR_TRANSIT_S + 120.0,
+    delete_s: RUN_SHEET_2B[3].arm_s + TWO_B_HVAR_TRANSIT_S + 300.0,
+};
+struct SortieReflight {
+    sortie: SortieProbe,
+    measured_transit_s: f64,
+    hot_at_s: Option<f64>,
+    enemy: Option<EnemyWindow>,
+}
+const TWO_B_SORTIES: &[SortieReflight] = &[
+    SortieReflight {
+        sortie: SortieProbe { cell: "T-s1", file: "1950_US_F80_HVAR_Strike_4ship.Group", prefix: "SN01" },
+        measured_transit_s: TWO_B_HVAR_TRANSIT_S, hot_at_s: Some(TWO_HOT_S), enemy: None,
+    },
+    SortieReflight {
+        sortie: SortieProbe { cell: "T-s2", file: "1950_US_F80_AirAlert_4ship.Group", prefix: "SN02" },
+        measured_transit_s: TWO_B_AIRALERT_TRANSIT_S, hot_at_s: None, enemy: None,
+    },
+    SortieReflight {
+        sortie: SortieProbe { cell: "T-s3", file: "1950_US_F80_HVAR_Strike_4ship.Group", prefix: "SN03" },
+        measured_transit_s: TWO_B_HVAR_TRANSIT_S, hot_at_s: None,
+        enemy: Some(TWO_B_PRESENT_ENEMY),
+    },
+    SortieReflight {
+        sortie: SortieProbe { cell: "T-s4", file: "1950_US_F80_HVAR_Strike_4ship.Group", prefix: "SN04" },
+        measured_transit_s: TWO_B_HVAR_TRANSIT_S, hot_at_s: None,
+        enemy: Some(TWO_B_LATE_ENEMY),
+    },
+];
+
+struct BudgetRequest {
+    copy: usize,
+    offset_s: f64,
+}
+struct BudgetDeletion {
+    offset_s: f64,
+    copies: &'static [usize],
+}
+struct BudgetProbe {
+    cell: &'static str,
+    limit: u8,
+    copies: usize,
+    requests: &'static [BudgetRequest],
+    deletions: &'static [BudgetDeletion],
+}
+const TWO_BUDGETS: &[BudgetProbe] = &[
+    BudgetProbe {
+        cell: "T-k", limit: 2, copies: 7,
+        requests: &[
+            BudgetRequest { copy: 1, offset_s: 0.0 },
+            BudgetRequest { copy: 2, offset_s: 2.0 },
+            BudgetRequest { copy: 3, offset_s: 4.0 },
+            BudgetRequest { copy: 4, offset_s: 6.0 },
+            BudgetRequest { copy: 5, offset_s: 32.0 },
+            BudgetRequest { copy: 6, offset_s: 34.0 },
+            BudgetRequest { copy: 7, offset_s: 36.0 },
+        ],
+        deletions: &[BudgetDeletion { offset_s: 30.0, copies: &[1, 2] }],
+    },
+    BudgetProbe {
+        cell: "T-k1", limit: 1, copies: 5,
+        requests: &[
+            BudgetRequest { copy: 1, offset_s: 0.0 },
+            BudgetRequest { copy: 2, offset_s: 0.0 },
+            BudgetRequest { copy: 3, offset_s: 5.0 },
+            BudgetRequest { copy: 4, offset_s: 22.0 },
+            BudgetRequest { copy: 5, offset_s: 32.0 },
+        ],
+        deletions: &[
+            BudgetDeletion { offset_s: 20.0, copies: &[1] },
+            BudgetDeletion { offset_s: 30.0, copies: &[2, 3, 4] },
+        ],
+    },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Cue {
     pub flight: Flight,
@@ -546,6 +721,25 @@ pub(crate) const CUES: &[Cue] = &[
         time_s: P_DONE_S,
         text: "Flight 1P done. End the mission normally",
     },
+    Cue {
+        flight: Flight::Two, time_s: 0.0,
+        text: "Flight 2: stay on the ground at K14 until 46:00. Do not damage the AI",
+    },
+    Cue { flight: Flight::Two, time_s: 180.0, text: "T-k: seven requests, budget 2" },
+    Cue { flight: Flight::Two, time_s: 240.0, text: "T-k1: simultaneous requests, budget 1" },
+    Cue { flight: Flight::Two, time_s: TWO_HOT_S, text: "T-s1 and T-s2 areas now HOT" },
+    Cue { flight: Flight::Two, time_s: TWO_CLOSE_S, text: "Flight 2 closed. End the mission normally" },
+    Cue { flight: Flight::TwoB, time_s: 0.0, text: "Flight 2B: stay at K14 until 30:00. Do not approach the four AI cells" },
+    Cue { flight: Flight::TwoB, time_s: TWO_B_PRESENT_ENEMY.activate_s, text: "T-s3 enemy pair activated on its high altitude orbit" },
+    Cue { flight: Flight::TwoB, time_s: RUN_SHEET_2B[0].arm_s, text: "T-s1 HVAR starts. Empty target, HOT at 10:00, expect one extension" },
+    Cue { flight: Flight::TwoB, time_s: RUN_SHEET_2B[1].arm_s, text: "T-s2 AirAlert starts. Empty target stays COLD, expect 1080 s on station" },
+    Cue { flight: Flight::TwoB, time_s: RUN_SHEET_2B[2].arm_s, text: "T-s3 HVAR starts. Enemy already inside, delete at 09:46" },
+    Cue { flight: Flight::TwoB, time_s: RUN_SHEET_2B[3].arm_s, text: "T-s4 HVAR starts. Enemy appears at 09:16, delete at 12:16" },
+    Cue { flight: Flight::TwoB, time_s: TWO_B_LATE_ENEMY.activate_s, text: "T-s4 enemy pair activated. Expect Zone IN now" },
+    Cue { flight: Flight::TwoB, time_s: TWO_B_PRESENT_ENEMY.delete_s, text: "T-s3 enemy pair deleted. Expect Zone Out then DONE HUB" },
+    Cue { flight: Flight::TwoB, time_s: TWO_HOT_S, text: "T-s1 area now HOT. T-s2, T-s3 and T-s4 stay COLD" },
+    Cue { flight: Flight::TwoB, time_s: TWO_B_LATE_ENEMY.delete_s, text: "T-s4 enemy pair deleted. Expect Zone Out then DONE HUB" },
+    Cue { flight: Flight::TwoB, time_s: TWO_B_CLOSE_S, text: "Flight 2B closed. Every aircraft has a Delete. End the mission normally" },
 ];
 
 const A1_START_KM: (f64, f64) = (-30.0, 60.0);
@@ -1607,17 +1801,32 @@ fn reference_block(block: &str) -> &'static Il2Entity {
     static COMPLEX_TRIGGER_NODE: OnceLock<Il2Entity> = OnceLock::new();
     static DAMAGE_NODE: OnceLock<Il2Entity> = OnceLock::new();
     static ATTACK_TARGET_NODE: OnceLock<Il2Entity> = OnceLock::new();
-    let (src, cached) = match block {
-        "MCU_TR_ComplexTrigger" => (COMPLEX_TRIGGER, &COMPLEX_TRIGGER_NODE),
-        "MCU_CMD_Damage" => (DAMAGE, &DAMAGE_NODE),
-        "MCU_CMD_AttackTarget" => (ATTACK_TARGET, &ATTACK_TARGET_NODE),
+    static BEHAVIOUR_NODE: OnceLock<Il2Entity> = OnceLock::new();
+    let (src, cached, expected_count) = match block {
+        "MCU_TR_ComplexTrigger" => (COMPLEX_TRIGGER, &COMPLEX_TRIGGER_NODE, 1),
+        "MCU_CMD_Damage" => (DAMAGE, &DAMAGE_NODE, 1),
+        "MCU_CMD_AttackTarget" => (ATTACK_TARGET, &ATTACK_TARGET_NODE, 1),
+        // DPRK_Scramble has one identical command per formation.
+        "MCU_CMD_Behaviour" => (BEHAVIOUR, &BEHAVIOUR_NODE, 2),
         _ => panic!("unknown probe reference {block}"),
     };
     cached.get_or_init(|| {
         let reference = crate::parser::parse_il2_document(src).expect("probe MCU reference parses");
         let ids = block_ids(&reference, block);
-        assert_eq!(ids.len(), 1, "one reference {block}");
-        by_id(&reference, ids[0]).clone()
+        assert_eq!(ids.len(), expected_count, "probe reference {block}: expected {expected_count} copies");
+        let first = by_id(&reference, ids[0]);
+        for &other in &ids[1..] {
+            for (key, value) in &first.properties {
+                // Identity, links and editor placement may differ per copy.
+                if matches!(key.as_str(), "Index" | "Name" | "Desc" | "Targets" | "Objects"
+                    | "XPos" | "YPos" | "ZPos" | "XOri" | "YOri" | "ZOri") {
+                    continue;
+                }
+                assert_eq!(by_id(&reference, other).property(key), Some(value.as_str()),
+                    "probe reference {block}: copies disagree on {key}");
+            }
+        }
+        first.clone()
     })
 }
 
@@ -3581,11 +3790,324 @@ fn build_bingo_aircraft(p: &mut Probe) {
     }
 }
 
+fn build_sortie_probe(p: &mut Probe) {
+    let cell = p.cell.expect("flight 2 sortie cell");
+    let row = TWO_SORTIES.iter().find(|row| row.cell == cell.key)
+        .unwrap_or_else(|| panic!("flight 2 {}: missing sortie row", cell.key));
+    let (shape, shell) = add_sortie_probe(p, row);
+    p.close_node(shape.zone_in);
+    p.close_node(shape.zone_out);
+    p.switch_at("MCU_Activate", &format!("{} AREA HOT ON", cell.key), TWO_HOT_S, &[shell.hot]);
+    p.switch_at("MCU_Deactivate", &format!("{} AREA COLD OFF", cell.key), TWO_HOT_S, &[shell.cold]);
+    let extend = id(&p.root, &format!("{} EXTEND", row.prefix));
+    for (source, suffix) in [
+        (shell.start, "START"), (shell.done_hub, "DONE HUB"), (extend, "EXTEND"),
+        // Delete is a command sink; observe its issuing timer at the same instant.
+        (shell.delete_timer, "DELETE"),
+    ] {
+        p.observe(source, &format!("{} {suffix}", cell.key));
+    }
+    let close = id(&p.root, &format!("{} CLOSE", cell.key));
+    for (seat, &entity) in shape.planes.iter().enumerate() {
+        let delete = p.delete(&format!("{} aircraft {} CLOSE DELETE", cell.key, seat + 1), &[entity]);
+        p.link(close, delete);
+    }
+    p.icon(cell.key, cell.centre_km, COALITION_NATO);
+}
+
+fn add_sortie_probe(p: &mut Probe, row: &SortieProbe) -> (super::library::SortieShape, super::shell::ShellIds) {
+    use super::library::{BUILTINS, inspect_sortie};
+    use super::place::{SortiePlacement, place_air_sortie};
+    use super::shell::{ShellSpec, wrap_sortie};
+    use super::{AirSide, SideLogic, Strategies};
+
+    let context = format!("{} {} ({})", p.root.name().unwrap_or("<unnamed flight>"), row.cell, row.file);
+    let cell = p.cell.unwrap_or_else(|| panic!("{context}: missing sortie cell"));
+    let text = BUILTINS.iter().find(|(file, _)| *file == row.file)
+        .unwrap_or_else(|| panic!("{context}: missing built-in sortie")).1;
+    let mut copy = parse_group_file(text).unwrap_or_else(|e| panic!("{context}: built-in sortie failed to parse: {e}"));
+    let facts = inspect_sortie(&copy).unwrap_or_else(|e| panic!("{context}: source shape: {e:?}"));
+    let target = world(cell.centre_km);
+    place_air_sortie(&mut copy, &SortiePlacement {
+        target,
+        heading_deg: 0.0,
+        spawn_dist_m: facts.wp_speed_kmh / 3.6 * TWO_TRANSIT_S,
+        rtb: K14_ORIGIN,
+    }).unwrap_or_else(|e| panic!("{context}: placement: {e}"));
+    let (mut copy, _) = crate::duplicate::duplicate_template(&copy, &mut p.next_id);
+    copy.set_name(&format!("{} sortie", cell.key));
+    let shape = inspect_sortie(&copy).unwrap_or_else(|e| panic!("{context}: placed shape: {e:?}"));
+    let strategies = Strategies::default();
+    let shell = wrap_sortie(&mut copy, row.prefix, &shape, &ShellSpec {
+        attack_time_s: shape.attack_time_s,
+        final_time_s: TWO_TRANSIT_S + shape.attack_time_s + TWO_MARGIN_S + TWO_EXTENSION_S,
+        extension_s: TWO_EXTENSION_S,
+        target,
+        census_delay_s: super::budget::census_delay(strategies.census, SORTIE_PROBE_COPY_ORDER),
+        zone_out: strategies.zone_out,
+        losses: strategies.losses,
+    }, &mut p.next_id).unwrap_or_else(|e| panic!("{context}: shell: {e}"));
+    let mut logic = SideLogic::default();
+    shell.register(SORTIE_PROBE_AREA, &mut logic);
+    copy.children.extend(super::budget::build_side(
+        AirSide::Nato, SORTIE_PROBE_BUDGET, &mut logic, &strategies, &mut p.next_id,
+    ));
+    let init = super::assemble::emit_side_logic(
+        AirSide::Nato, &logic, std::slice::from_mut(&mut copy), &mut p.next_id,
+    ).unwrap_or_else(|e| panic!("{context}: side logic: {e}"));
+    copy.children.extend(init);
+    p.add(copy);
+    p.link(p.arm, shell.start);
+    (shape, shell)
+}
+
+fn build_sortie_reflight(p: &mut Probe) {
+    let cell = p.cell.expect("flight 2B sortie cell");
+    let row = TWO_B_SORTIES.iter().find(|row| row.sortie.cell == cell.key)
+        .unwrap_or_else(|| panic!("flight 2B {}: missing sortie row", cell.key));
+    let (shape, shell) = add_sortie_probe(p, &row.sortie);
+    let prefix = row.sortie.prefix;
+    for suffix in ["START", "LOSSES", "COLD", "EXTEND", "HARD STOP", "ON STATION", "DONE HUB", "DELETE DELAY"] {
+        let source = id(&p.root, &format!("{prefix} {suffix}"));
+        p.observe(source, &format!("{} {suffix}", cell.key));
+        p.close_node(source);
+    }
+    for (source, suffix) in [
+        (shape.zone_in, "Zone IN"), (shape.zone_out, "Zone Out"),
+        (shape.path_waypoints[&shape.navigation_lead], "WP 1"),
+    ] {
+        p.observe(source, &format!("{} {suffix}", cell.key));
+        p.close_node(source);
+    }
+    // AirAlert has two chained attack timers; inspect_sortie identifies only
+    // the final timer of each lead. Trace every timer issuing an AttackArea.
+    let copy = named(&p.root, &format!("{} sortie", cell.key));
+    let attacks: BTreeSet<_> = block_ids(copy, "MCU_CMD_AttackArea").into_iter().collect();
+    let timers: Vec<_> = block_ids(copy, "MCU_Timer").into_iter().filter(|&index| {
+        by_id(copy, index).targets.iter().any(|target| attacks.contains(target))
+    }).collect();
+    for source in timers {
+        let name = by_id(&p.root, source).name().unwrap_or_else(|| {
+            panic!("flight 2B {}: attack timer {source} missing Name", cell.key)
+        }).to_owned();
+        p.observe(source, &format!("{} {name}", cell.key));
+        p.close_node(source);
+    }
+    if let Some(time_s) = row.hot_at_s {
+        p.switch_at("MCU_Activate", &format!("{} AREA HOT ON", cell.key), time_s, &[shell.hot]);
+        p.switch_at("MCU_Deactivate", &format!("{} AREA COLD OFF", cell.key), time_s, &[shell.cold]);
+    }
+    if let Some(enemy) = &row.enemy {
+        build_reflight_enemy(p, enemy);
+    }
+    let close = id(&p.root, &format!("{} CLOSE", cell.key));
+    // Include inactive and already-deleted aircraft: one entity per command,
+    // covering every Plane still written in this cell, enemies included.
+    for (seat, entity) in block_ids(named(&p.root, cell.key), "MCU_TR_Entity").into_iter().enumerate() {
+        let delete = p.delete(&format!("{} aircraft {} CLOSE DELETE", cell.key, seat + 1), &[entity]);
+        p.link(close, delete);
+    }
+    p.sources.push(p.source(close, None, Some(cell.close_s)));
+    p.icon(cell.key, cell.centre_km, COALITION_NATO);
+}
+
+fn build_reflight_enemy(p: &mut Probe, window: &EnemyWindow) {
+    let cell = p.cell.expect("flight 2B enemy cell");
+    let name = format!("{} enemy", cell.key);
+    let context = format!("flight 2B {name}");
+    let source = parse_group_file(TWO_B_ENEMY)
+        .unwrap_or_else(|e| panic!("{context}: built-in Yak source failed to parse: {e}"));
+    let shape = super::library::inspect_sortie(&source)
+        .unwrap_or_else(|e| panic!("{context}: Yak template shape {e:?}"));
+    let pair = shape.planes.get(..TWO_B_ENEMY_AIRCRAFT)
+        .unwrap_or_else(|| panic!("{context}: missing {TWO_B_ENEMY_AIRCRAFT}-aircraft pair"));
+    assert_eq!(pair[0], shape.navigation_lead, "{context}: first pair must have the navigation lead");
+    let mut flight = source.clone();
+    flight.set_name(&name);
+    flight.children = pair.iter().flat_map(|&entity| [
+        by_id(&source, shape.plane_objects[&entity]).clone(), by_id(&source, entity).clone(),
+    ]).collect();
+    let start_offset = TWO_B_ORBIT_OFFSETS_KM[0];
+    let start = world((cell.centre_km.0 + start_offset.0, cell.centre_km.1 + start_offset.1));
+    let pivot = by_id(&flight, shape.plane_objects[&pair[0]]).pos_xz()
+        .unwrap_or_else(|| panic!("{context}: navigation lead Plane missing XPos/ZPos"));
+    crate::placement::rotate_tree(&mut flight, pivot, TWO_B_ENEMY_ROTATION_DEG);
+    crate::placement::move_anchor_to(&mut flight, pivot, start);
+    flight.for_each_mut(&mut |node| {
+        if matches!(node.block_type.as_str(), "Plane" | "MCU_TR_Entity") {
+            node.set_property("YPos", format!("{TWO_B_ENEMY_ALTITUDE_M:.3}"));
+        }
+        if node.block_type == "Plane" {
+            node.set_property("Country", COUNTRY_DPRK.to_string());
+            node.set_property("StartType", PlaneStart::Air.as_i32().to_string());
+            node.set_property("AiRTBDecision", AiRtbDecision::Disabled.property());
+            // Also set the shipped Plane property: Filter's meaning is not
+            // documented in the repository, so do not depend on it alone.
+            node.set_property("Engageable", "0");
+        }
+    });
+    let (flight, _) = crate::duplicate::duplicate_template(&flight, &mut p.next_id);
+    let entities = block_ids(&flight, "MCU_TR_Entity");
+    let lead = *entities.first()
+        .unwrap_or_else(|| panic!("{context}: missing lead MCU_TR_Entity after duplication"));
+    p.add(flight);
+    let activate = p.control("MCU_Activate", &format!("{name} ACTIVATE"), &[]);
+    by_id_mut(&mut p.root, activate).set_objects(entities.clone());
+    let mut behaviour = p.reference_mcu("MCU_CMD_Behaviour", &format!("{name} NON TARGETABLE"));
+    // Shipped Filter = 8 is retained. Neither template.rs nor the repository's
+    // docs/reference files say what it selects; its effect remains unverified.
+    behaviour.set_property("Engageable", "0");
+    behaviour.set_objects(entities.clone());
+    let behaviour = p.add(behaviour);
+    let behaviour_delay = p.relay(&format!("{name} BEHAVIOUR DELAY"), TWO_B_BEHAVIOUR_DELAY_S);
+    p.link(behaviour_delay, behaviour);
+    let formation_id = *block_ids(&source, "MCU_CMD_Formation").first()
+        .unwrap_or_else(|| panic!("{context}: Yak template missing MCU_CMD_Formation"));
+    let mut formation = crate::recon::clone_named(
+        by_id(&source, formation_id),
+        &mut p.next_id, &format!("{name} FORMATION"),
+    );
+    formation.set_objects(vec![lead]);
+    formation.set_targets(vec![]);
+    let formation = p.add(formation);
+    let wp_source = by_id(&source, shape.path_waypoints[&shape.navigation_lead]);
+    let waypoints: Vec<_> = TWO_B_ORBIT_OFFSETS_KM.iter().enumerate().map(|(i, offset)| {
+        let mut wp = crate::recon::clone_named(wp_source, &mut p.next_id, &format!("{name} ORBIT {}", i + 1));
+        let point = world((cell.centre_km.0 + offset.0, cell.centre_km.1 + offset.1));
+        wp.set_property("XPos", format!("{:.3}", point.0));
+        wp.set_property("ZPos", format!("{:.3}", point.1));
+        wp.set_property("YPos", format!("{TWO_B_ENEMY_ALTITUDE_M:.3}"));
+        wp.set_property("Priority", TWO_B_ORBIT_PRIORITY);
+        wp.set_objects(vec![lead]);
+        wp.set_targets(vec![]);
+        p.add(wp)
+    }).collect();
+    for (i, &wp) in waypoints.iter().enumerate() {
+        p.link(wp, waypoints[(i + 1) % waypoints.len()]);
+        p.close_node(wp);
+    }
+    let orders = p.relay(&format!("{name} ORBIT DELAY"), TWO_B_ORDERS_DELAY_S);
+    by_id_mut(&mut p.root, orders).set_targets(vec![formation, waypoints[1]]);
+    let start = p.at(&format!("{name} ACTIVATE AT"), window.activate_s, &[activate, behaviour_delay, orders]);
+    p.observe(start, &format!("{} enemy ACTIVATE", cell.key));
+    let deletes: Vec<_> = entities.iter().enumerate().map(|(i, &entity)| {
+        p.delete(&format!("{name} {} DELETE", i + 1), &[entity])
+    }).collect();
+    let delete = p.at(&format!("{name} DELETE AT"), window.delete_s, &deletes);
+    p.observe(delete, &format!("{} enemy DELETE", cell.key));
+    for source in [behaviour_delay, orders] {
+        p.sources.push(p.source(source, None, None));
+    }
+}
+
+fn build_budget_probe(p: &mut Probe) {
+    let cell = p.cell.expect("flight 2 budget cell");
+    let row = TWO_BUDGETS.iter().find(|row| row.cell == cell.key)
+        .unwrap_or_else(|| panic!("flight 2 {}: missing budget row", cell.key));
+    let h = super::budget::tests::harness(
+        super::AirSide::Nato, row.limit, row.copies, super::Strategies::default(),
+    );
+    let (mut tree, map) = crate::duplicate::duplicate_template(&h.root, &mut p.next_id);
+    tree.set_name(&format!("{} stand-ins", cell.key));
+    let (x, z) = p.position();
+    tree.for_each_mut(&mut |node| {
+        if node.block_type.starts_with("MCU_") {
+            if let Some(name) = node.name() {
+                node.set_name(&format!("{} {name}", cell.key));
+            }
+            node.set_property("XPos", format!("{x:.3}"));
+            node.set_property("ZPos", format!("{z:.3}"));
+        }
+    });
+    p.add(tree);
+    for request in row.requests {
+        let source = p.at(
+            &format!("{} REQUEST {} AT", cell.key, request.copy),
+            cell.arm_s + request.offset_s,
+            &[map[&h.requests[request.copy - 1]]],
+        );
+        p.observe(source, &format!("{} request {}", cell.key, request.copy));
+    }
+    for (step, deletion) in row.deletions.iter().enumerate() {
+        let targets: Vec<_> = deletion.copies.iter().map(|&copy| map[&h.deletions[copy - 1]]).collect();
+        p.at(&format!("{} DELETIONS {} AT", cell.key, step + 1), cell.arm_s + deletion.offset_s, &targets);
+    }
+    for (seat, (&gate, &deletion)) in h.gates.iter().zip(&h.deletions).enumerate() {
+        p.observe(map[&gate], &format!("{} copy {} START", cell.key, seat + 1));
+        p.observe(map[&deletion], &format!("{} copy {} deleted", cell.key, seat + 1));
+        p.close_node(map[&gate]);
+    }
+    for &flag in &h.flags {
+        p.sources.push(p.source(map[&flag], None, None));
+        p.close_node(map[&flag]);
+    }
+    for suffix in ["CHECK", "CENSUS", "COUNT", "END", "REOPEN OUT", "AGAIN"] {
+        if let Some(index) = p.root.find_by_name(&format!("{} BUD N {suffix}", cell.key)).and_then(|node| node.index) {
+            p.sources.push(p.source(index, None, None));
+        }
+    }
+}
+
+fn build_no_damage_loss(p: &mut Probe) {
+    let cell = p.cell.expect("flight 2 no-damage loss cell");
+    let start = world(cell.centre_km);
+    let exit = world(LOSS_CRUISE_KM);
+    assert!(crate::watermap::TerrainMap::builtin().expect("Korea terrain mask").is_land_xz(start.0, start.1),
+        "T-l1: fuel-zero start must be over land");
+    // This repository has a WMAP land/water mask, not a measured ridge height.
+    // No T-l2 is generated until a point with a sourced elevation is available.
+    let mut flight = probe_flight(HVAR, 1, start, exit, &mut p.next_id);
+    let mut wp = crate::recon::clone_named(
+        by_id(&flight, block_ids(&flight, "MCU_Waypoint")[0]), &mut p.next_id, "T-l1 CRUISE",
+    );
+    wp.set_targets(vec![]);
+    let mut plane = by_id(&flight, block_ids(&flight, "Plane")[0]).clone();
+    let entity = by_id(&flight, block_ids(&flight, "MCU_TR_Entity")[0]).clone();
+    let entity_id = entity.index.expect("T-l1 entity Index");
+    let plane_id = plane.index.expect("T-l1 Plane Index");
+    let cruise = crate::model_spec::spec_for(plane.property("Script").unwrap())
+        .and_then(|spec| spec.cruise_kmh).expect("T-l1 F-80 cruise speed");
+    plane.set_property("YPos", format!("{LOSS_ALTITUDE_M:.3}"));
+    plane.set_property("Fuel", "0");
+    plane.set_property("AiRTBDecision", AiRtbDecision::Disabled.property());
+    let heading = crate::placement::heading_toward(start, exit);
+    plane.set_property("YOri", format!("{heading:.3}"));
+    flight.set_name("T-l1 flight");
+    flight.children = vec![plane, entity];
+    p.add(flight);
+    let activate = p.control("MCU_Activate", "T-l1 ACTIVATE", &[]);
+    by_id_mut(&mut p.root, activate).set_objects(vec![entity_id]);
+    wp.set_property("XPos", format!("{:.3}", exit.0));
+    wp.set_property("ZPos", format!("{:.3}", exit.1));
+    wp.set_property("YPos", format!("{LOSS_ALTITUDE_M:.3}"));
+    wp.set_property("Speed", format!("{cruise:.0}"));
+    wp.set_objects(vec![entity_id]);
+    let wp = p.add(wp);
+    let orders = p.relay("T-l1 CRUISE DELAY", 0.5);
+    p.link(orders, wp);
+    p.link(p.arm, activate);
+    p.link(p.arm, orders);
+    let losses = p.count("T-l1 LOSSES", 1, 0);
+    attach_event(by_id_mut(&mut p.root, entity_id), EVENT_KILLED, losses);
+    p.observe(losses, "T-l1 ev13 LOSSES");
+    let close = id(&p.root, "T-l CLOSE");
+    p.watch_aircraft_events("T-l1", plane_id, entity_id, close,
+        &[EVENT_PLANE_CRASHED, EVENT_PILOT_KILLED, EVENT_PLANE_LANDED]);
+    p.icon("T-l1 fuel zero", cell.centre_km, COALITION_NATO);
+}
+
 fn build(flight: Flight) -> Probe {
+    if flight == Flight::Load {
+        return build_load_probe();
+    }
     let mut p = Probe::new(flight);
     for &cell in flight.sheet() {
         p.start_cell(cell);
         match (flight, cell.key) {
+            (Flight::TwoB, _) => build_sortie_reflight(&mut p),
+            (Flight::Two, "T-s1" | "T-s2") => build_sortie_probe(&mut p),
+            (Flight::Two, "T-k" | "T-k1") => build_budget_probe(&mut p),
+            (Flight::Two, "T-l") => build_no_damage_loss(&mut p),
             (_, "T-a1") => build_a1(&mut p),
             (_, "T-e") => build_e(&mut p),
             (Flight::OneP, "T-f") => build_fighter_count(&mut p),
@@ -3652,6 +4174,130 @@ pub(crate) fn generate_probe_1p() -> Il2Entity {
     build(Flight::OneP).root
 }
 
+pub(crate) fn generate_probe_2() -> Il2Entity {
+    build(Flight::Two).root
+}
+
+pub(crate) fn generate_probe_2b() -> Il2Entity {
+    build(Flight::TwoB).root
+}
+
+fn reflight_walk_input(root: &Il2Entity) -> super::testkit::WalkerInput {
+    use super::shell::test_support::ticks;
+    use super::testkit::{ScriptedTrack, WalkerInput};
+    let mut input = WalkerInput { until: ticks(TWO_B_CLOSE_S), ..WalkerInput::default() };
+    for (cell, row) in RUN_SHEET_2B.iter().zip(TWO_B_SORTIES) {
+        let copy = named(root, &format!("{} sortie", cell.key));
+        input.arrivals.push((ticks(cell.arm_s + row.measured_transit_s), id(copy, "WP 1").into()));
+        if let Some(enemy) = &row.enemy {
+            let target = world(cell.centre_km);
+            input.tracks.push(ScriptedTrack {
+                coalition: TWO_B_TRACK_COALITION,
+                // Deletion is modeled by moving the last sample outside the
+                // zone; the walker does not simulate aircraft existence.
+                samples: (enemy.activate_s as u32..=enemy.delete_s as u32).map(|second| {
+                    let point = if f64::from(second) == enemy.delete_s {
+                        (target.0, target.1 + TWO_B_TRACK_OUTSIDE_OFFSET_M)
+                    } else {
+                        let offset = TWO_B_ORBIT_OFFSETS_KM[0];
+                        (target.0 + offset.0 * 1000.0, target.1 + offset.1 * 1000.0)
+                    };
+                    (ticks(f64::from(second)), point.0, point.1)
+                }).collect(),
+            });
+        }
+    }
+    input
+}
+
+fn write_reflight_schedule(root: &Il2Entity) {
+    use std::fmt::Write as _;
+    use super::testkit::{DeactivateRunningTimer, TICKS_PER_SECOND, WalkerConfig, walk};
+    let mut report = format!("# Flight 2B run sheet\n\nStay at K14 until {TWO_B_CLOSE_S} s. No player or combat is needed.\n\n\
+WP 1 predictions use flight 2's measured START-to-WP transits: HVAR {TWO_B_HVAR_TRANSIT_S} s, AirAlert {TWO_B_AIRALERT_TRANSIT_S} s. Placement still uses the same {TWO_TRANSIT_S} s distance as flight 2. These are predictions, not measured flight 2B arrivals.\n\n\
+| Cell | START s | Predicted WP 1 s | On station s | Area | Enemy activate/delete s | Expected DONE source |\n\
+|---|---:|---:|---:|---|---|---|\n");
+    for (cell, row) in RUN_SHEET_2B.iter().zip(TWO_B_SORTIES) {
+        let copy = named(root, &format!("{} sortie", cell.key));
+        let station = number(named(copy, &format!("{} ON STATION", row.sortie.prefix)), "Time");
+        let enemy = row.enemy.as_ref().map_or_else(|| "none".into(), |enemy| format!("{} / {}", enemy.activate_s, enemy.delete_s));
+        let area = row.hot_at_s.map_or_else(|| "COLD".into(), |time| format!("HOT at {time} s"));
+        let done = if row.enemy.is_some() { "Zone Out".into() }
+            else if row.hot_at_s.is_some() { format!("EXTEND, once after {TWO_EXTENSION_S} s") }
+            else { "COLD".into() };
+        writeln!(report, "| {} | {} | {} | {station} | {area} | {enemy} | {done} |",
+            cell.key, cell.arm_s, cell.arm_s + row.measured_transit_s).unwrap();
+    }
+    report.push_str("\nHVAR ON STATION starts at WP 1 + 0.5 s. AirAlert retains both attack timers: its ON STATION latch starts at WP 1 + 0.5 to 1.0 s across the three re-trigger modes (Restart below gives +1.0 s). Each Delete follows DONE by 60.6 s. Zone reaction time in the game is measured by the breadcrumbs.\n\n");
+    report.push_str("## Positions (X, Z in metres)\n\n");
+    for cell in RUN_SHEET_2B {
+        let target = world(cell.centre_km);
+        writeln!(report, "- {} target ({:.3}, {:.3}), {:.3} km from K14.", cell.key, target.0, target.1,
+            (target.0 - K14_ORIGIN.0).hypot(target.1 - K14_ORIGIN.1) / 1000.0).unwrap();
+        let cell_root = named(root, cell.key);
+        if let Some(enemy) = cell_root.find_by_name(&format!("{} enemy", cell.key)) {
+            let context = format!("flight 2B {} schedule", cell.key);
+            let copy = named(cell_root, &format!("{} sortie", cell.key));
+            let attack = *block_ids(copy, "MCU_CMD_AttackArea").first()
+                .unwrap_or_else(|| panic!("{context}: sortie missing MCU_CMD_AttackArea"));
+            let attack_point = by_id(copy, attack).pos_xz()
+                .unwrap_or_else(|| panic!("{context}: AttackArea {attack} missing XPos/ZPos"));
+            for plane in block_ids(enemy, "Plane") {
+                let node = by_id(enemy, plane);
+                let point = node.pos_xz()
+                    .unwrap_or_else(|| panic!("{context}: enemy Plane {plane} missing XPos/ZPos"));
+                writeln!(report, "  - Enemy Plane {plane}: ({:.3}, {:.3}), altitude {TWO_B_ENEMY_ALTITUDE_M} m, {:.3} km from target.", point.0, point.1,
+                    (point.0 - target.0).hypot(point.1 - target.1) / 1000.0).unwrap();
+            }
+            let offsets = TWO_B_ORBIT_OFFSETS_KM;
+            for (i, offset) in offsets.iter().enumerate() {
+                let seat = i + 1;
+                let wp = named(cell_root, &format!("{} enemy ORBIT {seat}", cell.key));
+                let point = wp.pos_xz()
+                    .unwrap_or_else(|| panic!("{context}: enemy ORBIT {seat} missing XPos/ZPos"));
+                let previous = offsets[(i + offsets.len() - 1) % offsets.len()];
+                let next = offsets[(i + 1) % offsets.len()];
+                let incoming = (offset.1 - previous.1).atan2(offset.0 - previous.0);
+                let outgoing = (next.1 - offset.1).atan2(next.0 - offset.0);
+                let turn = (outgoing - incoming).to_degrees().rem_euclid(360.0);
+                writeln!(report, "  - Orbit {seat}: ({:.3}, {:.3}), altitude {TWO_B_ENEMY_ALTITUDE_M} m, {:.3} km from attack point, {:.3} km from target, {:.1} degree turn.",
+                    point.0, point.1,
+                    (point.0 - attack_point.0).hypot(point.1 - attack_point.1) / 1000.0,
+                    (point.0 - target.0).hypot(point.1 - target.1) / 1000.0, turn.min(360.0 - turn)).unwrap();
+            }
+        }
+    }
+    for (i, a) in RUN_SHEET_2B.iter().enumerate() {
+        for b in &RUN_SHEET_2B[i + 1..] {
+            writeln!(report, "- {} to {}: {:.3} km.", a.key, b.key,
+                (a.centre_km.0 - b.centre_km.0).hypot(a.centre_km.1 - b.centre_km.1)).unwrap();
+        }
+    }
+    let (inner_km, outer_km) = TWO_B_ORBIT_OFFSETS_KM.iter().map(|(x, z)| x.hypot(*z))
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(inner, outer), radius| (inner.min(radius), outer.max(radius)));
+    let orbit_loop = (2..=TWO_B_ORBIT_OFFSETS_KM.len()).chain([1, 2])
+        .map(|seat| seat.to_string()).collect::<Vec<_>>().join(" -> ");
+    writeln!(report, "\n## Enemy orders\n\nEach Yak-9P pair has country {COUNTRY_DPRK}, AiRTBDecision {}, air start at {TWO_B_ENEMY_ALTITUDE_M} m and Plane Engageable 0. Activation issues Behaviour after {TWO_B_BEHAVIOUR_DELAY_S} s and formation plus ORBIT 2 after {TWO_B_ORDERS_DELAY_S} s. The waypoint loop is {orbit_loop}, at the shipped 500 km/h, Priority {TWO_B_ORBIT_PRIORITY}. Waypoint arrivals depend on flight dynamics and have no absolute scheduled time. The route is {inner_km:.1} to {outer_km:.1} km from the attack point; actual tracking is a flight check.\n\nThe Behaviour block is copied from DPRK_Scramble.Group. Filter 8 is retained but its selection is undocumented and unverified; Engageable is set to 0 on the command and on the aircraft.\n",
+        AiRtbDecision::Disabled.property()).unwrap();
+    for cell in RUN_SHEET_2B {
+        if let Some(node) = root.find_by_name(&format!("{} enemy NON TARGETABLE", cell.key)) {
+            writeln!(report, "```text\n{}\n```", serialize_group(node)).unwrap();
+        }
+    }
+    writeln!(report, "\n## Predicted pulse and command schedule\n\nWalker schedule in time order, including initialization, budget, subtitles and close commands. Uses Restart, normal target order and timer cancellation, with scripted sortie arrivals and enemy presence. Timer entries are expiry/output times; waypoints are listed both when ordered and when scripted arrivals pulse them. Aircraft dynamics and repeated enemy orbit arrivals are not modeled. Later COLD or HARD STOP inputs find a closed DONE HUB. All cells close at {TWO_B_CLOSE_S} s with one Delete per written aircraft entity and the final cue.\n\n| Time s | Index | Type | Name |\n|---:|---:|---|---|").unwrap();
+    let log = walk(root, WalkerConfig {
+        deactivate_running_timer: DeactivateRunningTimer::Cancels, ..WalkerConfig::default()
+    }, &reflight_walk_input(root));
+    for pulse in log.pulses {
+        writeln!(report, "| {:.2} | {} | {} | {} |", pulse.t as f64 / TICKS_PER_SECOND as f64, pulse.index,
+            by_id(root, pulse.index).block_type, pulse.name).unwrap();
+    }
+    let path = Path::new("target/p14").join(format!("{}_schedule.md", Flight::TwoB.stem()));
+    std::fs::write(&path, report).expect("write flight 2B run sheet and schedule");
+    use std::io::Write as _;
+    writeln!(std::io::stdout().lock(), "WROTE {}", path.display()).unwrap();
+}
+
 fn serialize_probe(root: &Il2Entity) -> String {
     let mut exported = root.clone();
     exported.for_each_mut(&mut |node| {
@@ -3666,6 +4312,9 @@ fn serialize_probe(root: &Il2Entity) -> String {
 }
 
 fn write_probe(flight: Flight, carrier: TraceCarrier) {
+    // Decision 0018: flight 2 is flown evidence. Its builder uses the current
+    // shell for tests, but must never regenerate the frozen flight's artifacts.
+    assert!(!flight.is_frozen(), "decision 0018: {} is frozen; write flight 2B", flight.stem());
     let dir = Path::new("target/p14");
     std::fs::create_dir_all(dir).expect("create target/p14");
     let probe = build(flight);
@@ -3683,7 +4332,7 @@ fn write_probe(flight: Flight, carrier: TraceCarrier) {
             .expect("write probe spawn list");
     }
     let sidecar = traced.with_extension("trace.json");
-    if let Err(error) = trace::write_trace_sidecar(&sidecar, &map) {
+    let written_sidecar = if let Err(error) = trace::write_trace_sidecar(&sidecar, &map) {
         // libtest captures println/eprintln on passing tests. Write directly so
         // the required --ignored command reports sidecar errors without --nocapture.
         use std::io::Write;
@@ -3693,7 +4342,10 @@ fn write_probe(flight: Flight, carrier: TraceCarrier) {
             sidecar.display()
         )
         .expect("report trace sidecar error");
-    }
+        None
+    } else {
+        Some(sidecar)
+    };
     for path in [
         &plain,
         &traced,
@@ -3728,10 +4380,9 @@ fn write_probe(flight: Flight, carrier: TraceCarrier) {
         traced.clone(),
         plain.with_extension("eng"),
         traced.with_extension("eng"),
-        sidecar,
         plain.with_extension("spawns.json"),
         traced.with_extension("spawns.json"),
-    ] {
+    ].into_iter().chain(written_sidecar) {
         writeln!(
             report,
             "WROTE {} ({} bytes)",
@@ -3741,6 +4392,22 @@ fn write_probe(flight: Flight, carrier: TraceCarrier) {
         .unwrap();
     }
     std::io::Write::write_all(&mut std::io::stdout().lock(), report.as_bytes()).unwrap();
+    if flight.writes_schedule() {
+        write_reflight_schedule(&plain_root);
+    }
+    if flight.writes_load_summary() {
+        let mut report = String::new();
+        for side in ["DPRK", "NATO"] {
+            let groups: Vec<_> = ["Logic", "Sorties"].into_iter()
+                .map(|suffix| named(&plain_root, &format!("Air Tasking {side} {suffix}"))).collect();
+            let mcus: usize = groups.iter().map(|group| super::shell::test_support::mcus(group)).sum();
+            let zones: usize = groups.iter().map(|group| group.count_block_type("MCU_CheckZone")).sum();
+            let sources = map.entries.iter().filter(|entry| entry.group_path.iter()
+                .any(|part| part == &format!("Air Tasking {side} Sorties"))).count();
+            writeln!(report, "LOAD {side}: {mcus} MCUs, {zones} check zones, {sources} side trace objectives").unwrap();
+        }
+        std::io::Write::write_all(&mut std::io::stdout().lock(), report.as_bytes()).unwrap();
+    }
 }
 
 #[test]
@@ -3923,6 +4590,561 @@ fn flight1p_frozen_inputs_match_current_generators() {
 #[ignore = "writes target/p14 probe files"]
 fn write_p14_probe_1p() {
     write_probe(Flight::OneP, TraceCarrier::default());
+}
+
+#[test]
+#[ignore = "writes target/p14 flight 2B, its run sheet, and load files"]
+fn write_p14_probe_2b() {
+    // Flight 0 and decision 0007: default Objective carrier, C0/S0.
+    write_probe(Flight::TwoB, TraceCarrier::default());
+    write_load_probe();
+}
+
+fn build_load_probe() -> Probe {
+    use super::assemble::{assemble_side, emit_side_logic};
+    use super::library::builtin_library;
+    use super::{AirBudget, AirContext, AirPlan, AirSide, PoolEntry, SideLogic, TargetRef, TriggerMode};
+
+    struct LoadEntry {
+        file: &'static str,
+        area: usize,
+        mode: TriggerMode,
+    }
+    const ENTRIES: &[LoadEntry] = &[
+        LoadEntry { file: "1950_US_F80_AirAlert_4ship.Group", area: 0, mode: TriggerMode::Clock },
+        LoadEntry { file: "1950_US_F80_HVAR_Strike_4ship.Group", area: 1, mode: TriggerMode::Clock },
+        LoadEntry { file: "1950_US_F51_CloseSupport_4ship.Group", area: 0, mode: TriggerMode::Zone },
+        LoadEntry { file: "1950_US_F51_ArmedRecon_2plus2.Group", area: 1, mode: TriggerMode::Both },
+        LoadEntry { file: "1950_DPRK_Yak_AirfieldRaid_2plus2.Group", area: 0, mode: TriggerMode::Zone },
+        LoadEntry { file: "1950_DPRK_Il10_KimpoAttack_2x4.Group", area: 1, mode: TriggerMode::Both },
+        // Two DPRK entries repeated, with six runs each, reach 24 copies per side.
+        LoadEntry { file: "1950_DPRK_Yak_AirfieldRaid_2plus2.Group", area: 0, mode: TriggerMode::Zone },
+        LoadEntry { file: "1950_DPRK_Il10_KimpoAttack_2x4.Group", area: 1, mode: TriggerMode::Both },
+    ];
+    const RUNS: u8 = 6;
+    let nato = [(150_000.0, 250_000.0), (155_000.0, 280_000.0)];
+    let dprk = [(180_000.0, 250_000.0), (185_000.0, 280_000.0)];
+    let ctx = AirContext {
+        nato_objectives: &nato,
+        east_objectives: &dprk,
+        ..super::assemble::tests::context()
+    };
+    let mut plan = AirPlan {
+        library: builtin_library(), budget: AirBudget::default(), seed: 7, ..AirPlan::default()
+    };
+    for row in ENTRIES {
+        let sortie = plan.library.iter().find(|sortie| sortie.id == format!("builtin:{}", row.file))
+            .unwrap_or_else(|| panic!("load probe: missing {}", row.file));
+        let target = match sortie.side { AirSide::Nato => nato[row.area], AirSide::Dprk => dprk[row.area] };
+        let mut entry = PoolEntry::new(sortie.id.clone(), TargetRef::Objective { side: sortie.side, xz: target });
+        entry.mode = row.mode;
+        entry.runs = RUNS;
+        plan.pool.push(entry);
+    }
+    let mut p = Probe::new(Flight::Load);
+    for side in [AirSide::Dprk, AirSide::Nato] {
+        let mut logic = SideLogic::default();
+        let mut copies = assemble_side(side, &plan, &ctx, &mut logic, &mut p.next_id)
+            .unwrap_or_else(|e| panic!("load probe {side:?}: {e}"));
+        assert_eq!(logic.gates.len(), 24, "load probe {side:?}");
+        copies.trees[0].children.extend(super::budget::build_side(
+            side, LOAD_PROBE_BUDGET, &mut logic, &plan.strategies, &mut p.next_id,
+        ));
+        let init = emit_side_logic(side, &logic, &mut copies.trees, &mut p.next_id)
+            .unwrap_or_else(|e| panic!("load probe {side:?}: {e}"));
+        copies.trees[0].children.extend(init);
+        p.root.children.extend(copies.trees);
+        for entry in copies.entries {
+            for copy in entry.copies {
+                for index in [copy.shell.start, copy.shell.done_hub, copy.shell.delete_timer] {
+                    p.sources.push(p.source(index, None, None));
+                }
+            }
+        }
+    }
+    let cue = p.at("LOAD PROBE READY", 1.0, &[]);
+    p.observe(cue, "P14 load probe: 24 copies per side, idle. Record load time and server tick delay");
+    p
+}
+
+#[test]
+#[ignore = "writes target/p14 load file with 24 copies per side"]
+fn write_p14_load_probe() {
+    write_load_probe();
+}
+
+fn write_load_probe() {
+    // Both ignored entry points may run together under write_p14_.
+    static WRITTEN: OnceLock<()> = OnceLock::new();
+    WRITTEN.get_or_init(|| write_probe(Flight::Load, TraceCarrier::default()));
+}
+
+#[test]
+fn flight2_frozen_files_parse_and_links_resolve() {
+    // The four flown files are the traced Group, English, spawn list and map;
+    // no plain Group was archived for flight 2.
+    let stem = "P14_Probe_2_traced";
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/flight2").join(stem);
+    let root = parse_group_file(&std::fs::read_to_string(path.with_extension("Group")).unwrap()).unwrap();
+    super::testkit::assert_links_resolve(&root);
+    let mut indexes = Vec::new();
+    root.collect_indexes(&mut indexes);
+    let unique: BTreeSet<_> = indexes.iter().copied().collect();
+    assert_eq!(unique.len(), indexes.len(), "{stem}: duplicate Index");
+    let english = std::fs::read(path.with_extension("eng")).unwrap();
+    let locale = crate::locale::parse_locale(&crate::locale::decode_locale_bytes(&english).unwrap());
+    root.for_each(&mut |node| {
+        for key in ["LinkTrId", "MisObjID", "TarId", "CmdId"] {
+            if let Some(value) = node.property(key) {
+                assert!(unique.contains(&value.parse::<i32>().unwrap()), "{stem}: unresolved {key}={value}");
+            }
+        }
+        for key in ["LCName", "LCDesc", "LCText"] {
+            if let Some(value) = node.property(key) {
+                let value = value.parse::<i32>().unwrap();
+                assert!(value == 0 || locale.get(value).is_some(), "{stem}: missing locale {value}");
+            }
+        }
+    });
+    assert_eq!(root.count_block_type("Plane"), 9);
+    let map = trace::read_trace_sidecar(&path.with_extension("trace.json")).unwrap();
+    assert!(!map.entries.is_empty());
+    for entry in &map.entries {
+        assert!(unique.contains(&entry.source_index), "{stem}: missing trace source {}", entry.source_index);
+        assert!(unique.contains(&entry.breadcrumb_index), "{stem}: missing breadcrumb {}", entry.breadcrumb_index);
+    }
+    for edge in &map.edges {
+        assert!(unique.contains(&edge.from) && unique.contains(&edge.to), "{stem}: unresolved trace edge");
+    }
+    assert_eq!(std::fs::read_to_string(path.with_extension("spawns.json")).unwrap().trim(), "[]");
+}
+
+#[test]
+fn flown_probes_regenerate_byte_for_byte_except_flight2() {
+    use std::collections::BTreeMap;
+    let scratch = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/p14/step3c-byte-check");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let mut compared = 0;
+    for flight in Flight::ALL {
+        // Decision 0018 freezes flight 2's flown files: the current shell
+        // intentionally changes its builder. Load is unflown; flight 2B flew
+        // 2026-10-14 and must regenerate its flown files.
+        if !flight.regenerates_flown_files() {
+            continue;
+        }
+        let p = build(flight);
+        let plain = p.root.clone();
+        let (traced, map) = p.traced(TraceCarrier::default());
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes").join(format!("flight{}",
+            flight.stem().strip_prefix("P14_Probe_").unwrap().to_lowercase()));
+        let mut generated = BTreeMap::new();
+        for (suffix, root) in [("", plain), ("_traced", traced)] {
+            let stem = format!("{}{suffix}", flight.stem());
+            generated.insert(format!("{stem}.Group"), serialize_probe(&root).into_bytes());
+            let english = crate::locale::encode_locale_utf16le(&crate::locale::serialize_locale(&p14_probe_locale(&root)));
+            generated.insert(format!("{stem}.eng"), english);
+            generated.insert(format!("{stem}.spawns.json"), spawn_json(flight).into_bytes());
+        }
+        let sidecar_name = format!("{}_traced.trace.json", flight.stem());
+        let sidecar = scratch.join(&sidecar_name);
+        trace::write_trace_sidecar(&sidecar, &map).unwrap();
+        generated.insert(sidecar_name, std::fs::read(sidecar).unwrap());
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|extension| extension == "md") {
+                continue;
+            }
+            let name = path.file_name().unwrap().to_str().unwrap();
+            let expected = generated.get(name).unwrap_or_else(|| panic!("{}: no generated artifact", path.display()));
+            assert_eq!(&std::fs::read(&path).unwrap(), expected, "{}", path.display());
+            compared += 1;
+        }
+    }
+    // Flights 0 to 1P (44 files) and flight 2B (4 files, flown 2026-10-14).
+    assert_eq!(compared, 48);
+}
+
+#[test]
+fn flight2b_sorties_and_breadcrumbs_match_the_plan() {
+    let p = build(Flight::TwoB);
+    assert_eq!(p.root.name(), Some("P14_Probe_2B"));
+    assert_eq!(p.root.count_block_type("Plane"), 20);
+    assert_eq!(p.root.count_block_type("MCU_CheckZone"), 8);
+    assert_eq!(p.root.count_block_type("MCU_Spawner"), 0);
+    assert_eq!(p.root.count_block_type("MCU_CMD_Damage"), 0);
+    let terrain = crate::watermap::TerrainMap::builtin().unwrap();
+    let targets = [(245_934.0, 179_477.0), (245_934.0, 269_477.0), (335_934.0, 179_477.0), (335_934.0, 269_477.0)];
+    let (traced, map) = build(Flight::TwoB).traced(TraceCarrier::default());
+    super::testkit::assert_links_resolve(&traced);
+    for (cell, prefix, start_s, station_s, target) in [
+        ("T-s1", "SN01", 60.0, 600.0, targets[0]),
+        ("T-s2", "SN02", 90.0, 1080.0, targets[1]),
+        ("T-s3", "SN03", 120.0, 600.0, targets[2]),
+        ("T-s4", "SN04", 150.0, 600.0, targets[3]),
+    ] {
+        let copy = named(&p.root, &format!("{cell} sortie"));
+        assert_at(&p.root, &format!("{cell} ARM"), start_s, &[id(copy, &format!("{prefix} START"))]);
+        assert_eq!(number(named(copy, &format!("{prefix} ON STATION")), "Time"), station_s);
+        assert_eq!(number(named(copy, &format!("{prefix} EXTEND")), "Time"), 600.0);
+        assert_eq!(copy.count_block_type("MCU_CheckZone"), 2);
+        assert!(terrain.is_land_xz(target.0, target.1), "{cell}: target over water");
+        assert!((target.0 - 105_934.0).hypot(target.1 - 269_477.0) >= 80_000.0);
+        let zone_in = named(copy, "Zone IN");
+        let zone_out = named(copy, "Zone Out");
+        for (zone, closer) in [(zone_in, "1"), (zone_out, "0")] {
+            assert_eq!(zone.pos_xz(), Some(target));
+            assert_eq!(number(zone, "Zone"), 35_000.0);
+            assert_eq!(zone.property("Closer"), Some(closer));
+            assert_eq!(zone.property("PlaneCoalitions"), Some("[1]"));
+        }
+        assert!(named(copy, "WP 1").targets.contains(&zone_in.index.unwrap()));
+        assert!(!named(copy, "WP 1").targets.contains(&id(copy, "PULSE OUT")));
+        let arm_targets: Vec<_> = zone_in.targets.iter().copied()
+            .filter(|&target| by_id(&p.root, target).block_type != "MCU_TR_Subtitle").collect();
+        assert_eq!(arm_targets, [id(copy, "Zone Out ReActivate"), id(copy, "PULSE OUT")]);
+        let attacks: BTreeSet<_> = block_ids(copy, "MCU_CMD_AttackArea").into_iter().collect();
+        assert_eq!(attacks.len(), if cell == "T-s2" { 2 } else { 1 });
+        let mut sources = vec![zone_in.index.unwrap(), zone_out.index.unwrap(), id(copy, "WP 1")];
+        sources.extend(block_ids(copy, "MCU_Timer").into_iter().filter(|&index|
+            by_id(copy, index).targets.iter().any(|target| attacks.contains(target))));
+        for suffix in ["START", "LOSSES", "COLD", "EXTEND", "HARD STOP", "ON STATION", "DONE HUB", "DELETE DELAY"] {
+            sources.push(id(copy, &format!("{prefix} {suffix}")));
+        }
+        for source in sources {
+            assert_eq!(map.entries.iter().filter(|entry| entry.source_index == source).count(), 1,
+                "flight 2B {cell}: missing or duplicate breadcrumb for {}", by_id(&p.root, source).name()
+                    .unwrap_or_else(|| panic!("flight 2B {cell}: trace source {source} missing Name")));
+        }
+        let cell_root = named(&p.root, cell);
+        let close = named(cell_root, &format!("{cell} CLOSE"));
+        assert_eq!(number(close, "Time"), 1800.0);
+        let deletes: Vec<_> = close.targets.iter().map(|&target| by_id(&p.root, target))
+            .filter(|node| node.block_type == "MCU_Delete").collect();
+        let entities = block_ids(cell_root, "MCU_TR_Entity");
+        assert_eq!(deletes.len(), entities.len());
+        for entity in entities {
+            assert_eq!(deletes.iter().filter(|delete| delete.objects == [entity]).count(), 1, "{cell}: entity {entity}");
+        }
+    }
+    for (i, a) in targets.iter().enumerate() {
+        for b in &targets[i + 1..] {
+            assert!((a.0 - b.0).hypot(a.1 - b.1) >= 80_000.0);
+        }
+    }
+    assert_switch(&p.root, "T-s1 AREA HOT ON", "MCU_Activate", 600.0, &[id(&p.root, "SN01 HOT")]);
+    assert_switch(&p.root, "T-s1 AREA COLD OFF", "MCU_Deactivate", 600.0, &[id(&p.root, "SN01 COLD")]);
+    for cell in ["T-s2", "T-s3", "T-s4"] {
+        assert!(p.root.find_by_name(&format!("{cell} AREA HOT ON")).is_none());
+    }
+}
+
+#[test]
+fn flight2b_enemies_are_isolated_and_scheduled() {
+    let root = generate_probe_2b();
+    let (_, map) = build(Flight::TwoB).traced(TraceCarrier::default());
+    for (cell, target, activate_s, delete_s) in [
+        ("T-s3", (335_934.0, 179_477.0), 30.0, 586.0),
+        ("T-s4", (335_934.0, 269_477.0), 556.0, 736.0),
+    ] {
+        let name = format!("{cell} enemy");
+        let flight = named(&root, &name);
+        assert_eq!(flight.count_block_type("Plane"), 2);
+        assert_eq!(flight.count_block_type("MCU_CMD_AttackArea"), 0);
+        let entities = block_ids(flight, "MCU_TR_Entity");
+        let sortie = named(&root, &format!("{cell} sortie"));
+        let attacks: Vec<_> = block_ids(sortie, "MCU_CMD_AttackArea").into_iter().map(|index| {
+            by_id(sortie, index).pos_xz()
+                .unwrap_or_else(|| panic!("flight 2B {cell}: AttackArea {index} missing XPos/ZPos"))
+        }).collect();
+        assert_eq!(attacks, [target], "flight 2B {cell}: attack point must be on target");
+        for plane in block_ids(flight, "Plane") {
+            let node = by_id(flight, plane);
+            assert_eq!(crate::model_spec::script_id(node.property("Script").unwrap()), "yak9p");
+            for (key, value) in [("Country", "503"), ("AiRTBDecision", "0"), ("StartType", "0"), ("Engageable", "0")] {
+                assert_eq!(node.property(key), Some(value), "{name}: {key}");
+            }
+            assert_eq!(number(node, "YPos"), 8000.0);
+            let position = node.pos_xz()
+                .unwrap_or_else(|| panic!("flight 2B {cell}: enemy Plane {plane} missing XPos/ZPos"));
+            assert!((17_000.0..30_000.0).contains(&(position.0 - target.0).hypot(position.1 - target.1)));
+            assert_eq!(number(node, "YOri"), 22.5);
+        }
+        assert_eq!(by_id(flight, entities[1]).targets, [entities[0]]);
+        assert_eq!(named(&root, &format!("{name} ACTIVATE")).objects, entities);
+        let behaviour = named(&root, &format!("{name} NON TARGETABLE"));
+        assert_eq!(behaviour.block_type, "MCU_CMD_Behaviour");
+        assert_eq!(behaviour.objects, entities);
+        let reference = reference_block("MCU_CMD_Behaviour");
+        for key in ["Filter", "Vulnerable", "LimitAmmo", "AILevel", "Country", "FloatParam"] {
+            assert_eq!(behaviour.property(key), reference.property(key), "{name}: shipped {key}");
+        }
+        assert_eq!(behaviour.property("Filter"), Some("8"));
+        assert_eq!(behaviour.property("Engageable"), Some("0"));
+        let behaviour_delay = named(&root, &format!("{name} BEHAVIOUR DELAY"));
+        assert_eq!(number(behaviour_delay, "Time"), 0.1);
+        assert_eq!(behaviour_delay.targets, [behaviour.index.unwrap()]);
+        let orders = named(&root, &format!("{name} ORBIT DELAY"));
+        assert_eq!(number(orders, "Time"), 0.5);
+        assert_eq!(orders.targets, [id(&root, &format!("{name} FORMATION")), id(&root, &format!("{name} ORBIT 2"))]);
+        let offsets = [
+            (0.0, 18_000.0), (1414.214, 18_585.786), (2000.0, 20_000.0), (1414.214, 21_414.214),
+            (0.0, 22_000.0), (-1414.214, 21_414.214), (-2000.0, 20_000.0), (-1414.214, 18_585.786),
+        ];
+        let points: Vec<_> = (1..=8).map(|seat| {
+            named(&root, &format!("{name} ORBIT {seat}")).pos_xz()
+                .unwrap_or_else(|| panic!("flight 2B {cell}: enemy ORBIT {seat} missing XPos/ZPos"))
+        }).collect();
+        for (i, offset) in offsets.into_iter().enumerate() {
+            let wp = named(&root, &format!("{name} ORBIT {}", i + 1));
+            let point = points[i];
+            assert!((point.0 - target.0 - offset.0).abs() < 0.001);
+            assert!((point.1 - target.1 - offset.1).abs() < 0.001);
+            assert!((point.0 - target.0).hypot(point.1 - target.1) < 30_000.0,
+                "flight 2B {cell}: ORBIT {} outside target margin", i + 1);
+            let previous = points[(i + points.len() - 1) % points.len()];
+            let next = points[(i + 1) % points.len()];
+            let incoming = (point.0 - previous.0, point.1 - previous.1);
+            let outgoing = (next.0 - point.0, next.1 - point.1);
+            let turn = ((incoming.0 * outgoing.0 + incoming.1 * outgoing.1)
+                / (incoming.0.hypot(incoming.1) * outgoing.0.hypot(outgoing.1))).clamp(-1.0, 1.0).acos().to_degrees();
+            assert!(turn < 90.0 && (turn - 45.0).abs() < 0.001,
+                "flight 2B {cell}: ORBIT {} turn is {turn} degrees", i + 1);
+            for attack in &attacks {
+                assert!((point.0 - attack.0).hypot(point.1 - attack.1) >= 17_000.0,
+                    "flight 2B {cell}: ORBIT {} inside attack margin", i + 1);
+                // Pin the whole straight leg, not only its two endpoints.
+                let along = (((attack.0 - point.0) * outgoing.0 + (attack.1 - point.1) * outgoing.1)
+                    / (outgoing.0 * outgoing.0 + outgoing.1 * outgoing.1)).clamp(0.0, 1.0);
+                let nearest = (point.0 + along * outgoing.0, point.1 + along * outgoing.1);
+                assert!((nearest.0 - attack.0).hypot(nearest.1 - attack.1) >= 18_000.0,
+                    "flight 2B {cell}: ORBIT {} leg inside attack margin", i + 1);
+            }
+            assert_eq!(number(wp, "YPos"), 8000.0);
+            assert_eq!(number(wp, "Speed"), 500.0);
+            assert_eq!(wp.property("Priority"), Some("2"));
+            assert_eq!(wp.objects, [entities[0]]);
+            assert_eq!(wp.targets, [id(&root, &format!("{name} ORBIT {}", (i + 1) % 8 + 1))]);
+        }
+        let start = named(&root, &format!("{name} ACTIVATE AT"));
+        assert_eq!(number(start, "Time"), activate_s);
+        for target in [id(&root, &format!("{name} ACTIVATE")), behaviour_delay.index.unwrap(), orders.index.unwrap()] {
+            assert!(start.targets.contains(&target));
+        }
+        let delete = named(&root, &format!("{name} DELETE AT"));
+        assert_eq!(number(delete, "Time"), delete_s);
+        let commands: Vec<_> = delete.targets.iter().map(|&index| by_id(&root, index))
+            .filter(|node| node.block_type == "MCU_Delete").collect();
+        assert_eq!(commands.len(), 2);
+        for entity in entities {
+            assert_eq!(commands.iter().filter(|node| node.objects == [entity]).count(), 1);
+        }
+        for source in [start, delete] {
+            assert_eq!(map.entries.iter().filter(|entry| Some(entry.source_index) == source.index).count(), 1);
+        }
+    }
+}
+
+#[test]
+fn flight2b_walks_all_four_outcomes() {
+    use super::shell::test_support::{configs, ticks, times};
+    let root = generate_probe_2b();
+    for config in configs() {
+        let log = super::testkit::walk(&root, config, &reflight_walk_input(&root));
+        for (prefix, done_s) in [("SN01", 1546.5), ("SN03", 586.0), ("SN04", 736.0)] {
+            assert_eq!(times(&log, id(&root, &format!("{prefix} DONE HUB"))), [ticks(done_s)]);
+        }
+        let cold = times(&log, id(&root, "SN02 COLD"));
+        assert_eq!(cold.len(), 1);
+        assert!([ticks(1449.5), ticks(1450.0)].contains(&cold[0]));
+        assert_eq!(times(&log, id(&root, "SN02 DONE HUB")), cold);
+        assert_eq!(times(&log, id(&root, "SN01 EXTEND")), [ticks(1546.5)]);
+        for (cell, seen_s, gone_s) in [("T-s3", 406.0, 586.0), ("T-s4", 556.0, 736.0)] {
+            let copy = named(&root, &format!("{cell} sortie"));
+            assert_eq!(times(&log, id(copy, "Zone IN")), [ticks(seen_s)]);
+            assert_eq!(times(&log, id(copy, "Zone Out")), [ticks(gone_s)]);
+        }
+        for cell in ["T-s1", "T-s2"] {
+            let copy = named(&root, &format!("{cell} sortie"));
+            assert!(times(&log, id(copy, "Zone IN")).is_empty());
+            assert!(times(&log, id(copy, "Zone Out")).is_empty());
+        }
+    }
+}
+
+#[test]
+fn flight2_sorties_use_the_shell_lifecycle() {
+    let root = generate_probe_2();
+    assert_eq!(root.count_block_type("Plane"), 9);
+    assert_eq!(root.count_block_type("MCU_Spawner"), 0);
+    assert_eq!(root.count_block_type("MCU_CMD_Damage"), 0);
+    for (cell, prefix, start_s, attack_s, final_s) in [
+        ("T-s1", "SN01", 60.0, 600.0, 2100.0),
+        ("T-s2", "SN02", 90.0, 1080.0, 2580.0),
+    ] {
+        let copy = named(&root, &format!("{cell} sortie"));
+        let entities = block_ids(copy, "MCU_TR_Entity");
+        assert_eq!(entities.len(), 4);
+        let losses = id(copy, &format!("{prefix} LOSSES"));
+        assert_counter(copy, &format!("{prefix} LOSSES"), 4, 0);
+        for entity in &entities {
+            assert_eq!(probe_events(by_id(copy, *entity)), [(13, losses)]);
+        }
+        for plane in block_ids(copy, "Plane") {
+            assert_eq!(by_id(copy, plane).property("AiRTBDecision"), Some("0"));
+        }
+        let start = id(copy, &format!("{prefix} START"));
+        assert_at(&root, &format!("{cell} ARM"), start_s, &[start]);
+        assert_eq!(number(named(copy, &format!("{prefix} ON STATION")), "Time"), attack_s);
+        assert_eq!(number(named(copy, &format!("{prefix} HARD STOP")), "Time"), final_s);
+        let delete = named(copy, &format!("{prefix} DELETE"));
+        assert_eq!(delete.objects, entities);
+        assert_eq!(copy.count_block_type("MCU_Delete"), 1);
+        assert!(copy.find_by_name("Trigger Delete").is_none());
+        assert_eq!(number(named(copy, &format!("{prefix} DELETE DELAY")), "Time"), 0.5);
+        assert!(named(copy, &format!("{prefix} DELETE DELAY")).targets.contains(&id(copy, "BUD N MARK")));
+        assert!(named(copy, &format!("{prefix} DELETE DELAY")).targets.contains(&id(copy, "BUD N CHECK")));
+        for suffix in ["START", "DONE HUB", "EXTEND"] {
+            assert_observation(&root, id(copy, &format!("{prefix} {suffix}")), &format!("{cell} {suffix}"));
+        }
+        assert_observation(&root, id(copy, &format!("{prefix} DELETE DELAY")), &format!("{cell} DELETE"));
+        assert_switch(&root, &format!("{cell} AREA HOT ON"), "MCU_Activate", 600.0, &[id(copy, &format!("{prefix} HOT"))]);
+        assert_switch(&root, &format!("{cell} AREA COLD OFF"), "MCU_Deactivate", 600.0, &[id(copy, &format!("{prefix} COLD"))]);
+        let close = named(&root, &format!("{cell} CLOSE"));
+        for (seat, entity) in entities.iter().enumerate() {
+            let cleanup = named(&root, &format!("{cell} aircraft {} CLOSE DELETE", seat + 1));
+            assert_eq!(cleanup.objects, [*entity]);
+            assert!(close.targets.contains(&cleanup.index.unwrap()));
+        }
+    }
+}
+
+#[test]
+fn flight2_budget_requests_follow_the_plan() {
+    use super::shell::test_support::{ticks, times};
+    use super::testkit::{SameTickDelivery, WalkerConfig, WalkerInput, walk};
+    let root = generate_probe_2();
+    for (cell, requests, deletions) in [
+        ("T-k", vec![180.0, 182.0, 184.0, 186.0, 212.0, 214.0, 216.0], vec![(210.0, vec![1, 2])]),
+        ("T-k1", vec![240.0, 240.0, 245.0, 262.0, 272.0], vec![(260.0, vec![1]), (270.0, vec![2, 3, 4])]),
+    ] {
+        for (seat, time) in requests.into_iter().enumerate() {
+            let timer = named(&root, &format!("{cell} REQUEST {} AT", seat + 1));
+            assert_eq!(number(timer, "Time"), time);
+            assert_eq!(timer.targets[0], id(&root, &format!("{cell} SN{:02} REQUEST", seat + 1)));
+        }
+        for (step, (time, copies)) in deletions.into_iter().enumerate() {
+            assert_at(&root, &format!("{cell} DELETIONS {} AT", step + 1), time,
+                &copies.into_iter().map(|copy| id(&root, &format!("{cell} SN{copy:02} DELETE TIMER"))).collect::<Vec<_>>());
+        }
+    }
+    for delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+        let log = walk(&root, WalkerConfig { same_tick_delivery: delivery, ..WalkerConfig::default() },
+            &WalkerInput { until: ticks(280.0), ..WalkerInput::default() });
+        for (seat, expected) in [vec![180.0], vec![182.0], vec![], vec![], vec![212.0], vec![214.0], vec![]].into_iter().enumerate() {
+            assert_eq!(times(&log, id(&root, &format!("T-k SN{:02} START", seat + 1))),
+                expected.into_iter().map(ticks).collect::<Vec<_>>());
+        }
+        assert_eq!(times(&log, id(&root, "T-k1 SN01 START")), [ticks(240.0)]);
+        assert_eq!(times(&log, id(&root, "T-k1 SN02 START")).len(), usize::from(delivery == SameTickDelivery::Batched));
+        assert!(times(&log, id(&root, "T-k1 SN03 START")).is_empty());
+        assert_eq!(times(&log, id(&root, "T-k1 SN04 START")).len(), usize::from(delivery == SameTickDelivery::DepthFirst));
+        assert_eq!(times(&log, id(&root, "T-k1 SN05 START")), [ticks(272.0)]);
+    }
+}
+
+#[test]
+fn flight2_no_damage_loss_uses_a_once_counter() {
+    use super::shell::test_support::{ticks, times};
+    use super::testkit::{WalkerConfig, WalkerInput, walk};
+    let p = build(Flight::Two);
+    let plane = named(&p.root, "T-l1");
+    assert_eq!(plane.pos_xz(), Some((80_934.0, 319_477.0)));
+    assert_eq!(number(plane, "YOri"), 90.0);
+    assert_eq!(number(plane, "YPos"), 150.0);
+    assert_eq!(number(plane, "Fuel"), 0.0);
+    assert_eq!(plane.property("StartType"), Some("0"));
+    assert_eq!(plane.property("AiRTBDecision"), Some("0"));
+    assert_eq!(number(named(&p.root, "T-l1 CRUISE"), "Speed"), 732.0);
+    assert_eq!(named(&p.root, "T-l1 CRUISE").pos_xz(), Some((80_934.0, 329_477.0)));
+    assert_counter(&p.root, "T-l1 LOSSES", 1, 0);
+    let entity = named(&p.root, "T-l1 entity");
+    assert!(entity.targets.is_empty());
+    let events = probe_events(entity);
+    assert_eq!(events.iter().map(|event| event.0).collect::<Vec<_>>(), [13, 2, 0, 5]);
+    let losses = id(&p.root, "T-l1 LOSSES");
+    assert_eq!(events[0].1, losses);
+    assert_eq!(named(&p.root, "T-l1 CLOSE DELETE").objects, [entity.index.unwrap()]);
+    assert!(p.root.find_by_name("T-l2").is_none());
+    assert_eq!(p.root.count_block_type("MCU_CMD_Damage"), 0);
+    let log = walk(&p.root, WalkerConfig::default(), &WalkerInput {
+        until: ticks(61.0), kills: vec![(ticks(60.75), entity.index.unwrap().into())], ..WalkerInput::default()
+    });
+    assert_eq!(times(&log, losses), [ticks(60.75)]);
+    let (traced, map) = p.traced(TraceCarrier::default());
+    assert!(map.entries.iter().any(|entry| entry.source_index == losses));
+    super::testkit::assert_links_resolve(&traced);
+}
+
+#[test]
+fn flight2_loss_starts_over_land_away_from_airfields() {
+    let root = generate_probe_2();
+    let plane = named(&root, "T-l1");
+    let start = plane.pos_xz().unwrap();
+    let exit = named(&root, "T-l1 CRUISE").pos_xz().unwrap();
+    let terrain = crate::watermap::TerrainMap::builtin().unwrap();
+    assert!(terrain.is_land_xz(start.0, start.1));
+    assert!(terrain.is_land_xz(exit.0, exit.1));
+    let catalog = crate::mapload::load_catalog().unwrap();
+    let mut airfields: Vec<_> = catalog.airfields()
+        .map(|field| (field.name.clone(), (field.x, field.z))).collect();
+    assert!(!airfields.is_empty());
+    // The K-49 Airfield block is slightly nearer than its FullScene marker.
+    let k49 = crate::parser::parse_il2_document(include_str!("../../TemplateExamples/K49 DPRK_AB.Group")).unwrap();
+    k49.for_each(&mut |node| {
+        if node.block_type == "Airfield" {
+            airfields.push((node.name().unwrap().to_owned(), node.pos_xz().unwrap()));
+        }
+    });
+    airfields.push(("K14 probe origin".into(), (105_934.0, 269_477.0)));
+    let distance = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1);
+    let leg = (exit.0 - start.0, exit.1 - start.1);
+    for (name, field) in &airfields {
+        let along = (((field.0 - start.0) * leg.0 + (field.1 - start.1) * leg.1)
+            / (leg.0 * leg.0 + leg.1 * leg.1)).clamp(0.0, 1.0);
+        let nearest = (start.0 + along * leg.0, start.1 + along * leg.1);
+        assert!(distance(nearest, *field) >= 15_000.0, "T-l1 cruise leg approaches {name}");
+    }
+    let nearest_start = airfields.iter().map(|(_, field)| distance(start, *field)).fold(f64::INFINITY, f64::min);
+    let nearest_exit = airfields.iter().map(|(_, field)| distance(exit, *field)).fold(f64::INFINITY, f64::min);
+    assert!(nearest_exit > nearest_start, "T-l1 must cruise away from nearby airfields");
+    assert!(distance(exit, (105_934.0, 269_477.0)) > distance(start, (105_934.0, 269_477.0)));
+    for other in block_ids(&root, "Plane").into_iter().filter(|index| Some(*index) != plane.index) {
+        assert!(distance(start, by_id(&root, other).pos_xz().unwrap()) >= 15_000.0,
+            "T-l1 starts near flight 2 aircraft {other}");
+    }
+}
+
+#[test]
+fn flight2_load_has_24_idle_copies_per_side() {
+    use super::shell::test_support::ticks;
+    use super::testkit::{WalkerConfig, WalkerInput, walk};
+    let p = build(Flight::Load);
+    assert_eq!(p.root.name(), Some("P14_Load_Probe"));
+    assert_eq!(Flight::Load.stem(), "P14_Load_Probe");
+    assert_eq!(p.root.count_block_type("Plane"), 240);
+    for side in ["N", "D"] {
+        for copy in 1..=24 {
+            assert!(p.root.find_by_name(&format!("S{side}{copy:02} START")).is_some());
+        }
+        assert!(p.root.find_by_name(&format!("S{side}25 START")).is_none());
+    }
+    let log = walk(&p.root, WalkerConfig::default(), &WalkerInput { until: ticks(10.0), ..WalkerInput::default() });
+    assert!(!log.pulses.iter().any(|pulse| pulse.name.ends_with(" START")));
+    let (traced, _) = p.traced(TraceCarrier::default());
+    super::testkit::assert_links_resolve(&traced);
+    let mut indexes = Vec::new();
+    traced.collect_indexes(&mut indexes);
+    assert_eq!(indexes.iter().collect::<BTreeSet<_>>().len(), indexes.len());
 }
 
 fn number(node: &Il2Entity, property: &str) -> f64 {
@@ -4201,6 +5423,9 @@ fn probe_files_parse_and_links_resolve() {
         (Flight::OneL, generate_probe_1l()),
         (Flight::OneM, generate_probe_1m()),
         (Flight::OneP, generate_probe_1p()),
+        (Flight::Two, generate_probe_2()),
+        (Flight::TwoB, generate_probe_2b()),
+        (Flight::Load, build(Flight::Load).root),
     ] {
         let (traced, _) = build(flight).traced(TraceCarrier::default());
         for root in [root, traced] {
@@ -4333,6 +5558,7 @@ fn probe_blocks_match_shipped_shapes() {
         "MCU_TR_ComplexTrigger",
         "MCU_CMD_Damage",
         "MCU_CMD_AttackTarget",
+        "MCU_CMD_Behaviour",
     ]
     .into_iter()
     .map(|block| (block, reference_block(block)))
@@ -7037,6 +8263,15 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::OneP, "T-h", (50.0, 20.0), 60.0, 960.0),
         (Flight::OneP, "T-f", (90.0, 20.0), 60.0, 960.0),
         (Flight::OneP, "T-b", (10.0, 20.0), 60.0, 960.0),
+        (Flight::Two, "T-s1", (50.0, 20.0), 60.0, 2760.0),
+        (Flight::Two, "T-s2", (50.0, 60.0), 90.0, 2760.0),
+        (Flight::Two, "T-k", (0.0, 5.0), 180.0, 220.0),
+        (Flight::Two, "T-k1", (0.0, 5.0), 240.0, 280.0),
+        (Flight::Two, "T-l", (-25.0, 50.0), 60.0, 2760.0),
+        (Flight::TwoB, "T-s1", (140.0, -90.0), 60.0, 1800.0),
+        (Flight::TwoB, "T-s2", (140.0, 0.0), 90.0, 1800.0),
+        (Flight::TwoB, "T-s3", (230.0, -90.0), 120.0, 1800.0),
+        (Flight::TwoB, "T-s4", (230.0, 0.0), 150.0, 1800.0),
     ];
     let expected_cues = [
         (
@@ -7166,6 +8401,22 @@ fn probe_run_sheets_match_the_tables() {
             840.0,
             "Flight 1P done. End the mission normally",
         ),
+        (Flight::Two, 0.0, "Flight 2: stay on the ground at K14 until 46:00. Do not damage the AI"),
+        (Flight::Two, 180.0, "T-k: seven requests, budget 2"),
+        (Flight::Two, 240.0, "T-k1: simultaneous requests, budget 1"),
+        (Flight::Two, 600.0, "T-s1 and T-s2 areas now HOT"),
+        (Flight::Two, 2760.0, "Flight 2 closed. End the mission normally"),
+        (Flight::TwoB, 0.0, "Flight 2B: stay at K14 until 30:00. Do not approach the four AI cells"),
+        (Flight::TwoB, 30.0, "T-s3 enemy pair activated on its high altitude orbit"),
+        (Flight::TwoB, 60.0, "T-s1 HVAR starts. Empty target, HOT at 10:00, expect one extension"),
+        (Flight::TwoB, 90.0, "T-s2 AirAlert starts. Empty target stays COLD, expect 1080 s on station"),
+        (Flight::TwoB, 120.0, "T-s3 HVAR starts. Enemy already inside, delete at 09:46"),
+        (Flight::TwoB, 150.0, "T-s4 HVAR starts. Enemy appears at 09:16, delete at 12:16"),
+        (Flight::TwoB, 556.0, "T-s4 enemy pair activated. Expect Zone IN now"),
+        (Flight::TwoB, 586.0, "T-s3 enemy pair deleted. Expect Zone Out then DONE HUB"),
+        (Flight::TwoB, 600.0, "T-s1 area now HOT. T-s2, T-s3 and T-s4 stay COLD"),
+        (Flight::TwoB, 736.0, "T-s4 enemy pair deleted. Expect Zone Out then DONE HUB"),
+        (Flight::TwoB, 1800.0, "Flight 2B closed. Every aircraft has a Delete. End the mission normally"),
     ];
     assert_eq!(CUES.len(), expected_cues.len());
     for (&cue, &(flight, time_s, text)) in CUES.iter().zip(&expected_cues) {
@@ -7348,7 +8599,7 @@ fn probe_run_sheets_match_the_tables() {
 
 #[test]
 fn probe_spawn_lists_match_the_run_sheets() {
-    for flight in [Flight::Zero, Flight::OneA, Flight::OneG, Flight::OneH, Flight::OneJ, Flight::OneK, Flight::OneL, Flight::OneM, Flight::OneP] {
+    for flight in [Flight::Zero, Flight::OneA, Flight::OneG, Flight::OneH, Flight::OneJ, Flight::OneK, Flight::OneL, Flight::OneM, Flight::OneP, Flight::Two, Flight::TwoB, Flight::Load] {
         assert!(flight.spawns().is_empty());
         assert_eq!(spawn_json(flight), "[]\n");
     }

@@ -99,6 +99,32 @@ and pack naming (`country_pack_tag`, `linked_fighter_pack_name`,
 `fighter_pack_filename` — USSR/DPRK/PRC/USA from the country code).
 **Fighter Pack, Template, Map.**
 
+### `airtask/shell.rs` — one-use Activate sortie shells
+`wrap_sortie` wraps an inspected and placed copy with START / DONE HUB,
+on-station timing, HOT/COLD extension, a FLYING budget flag, and one OnKilled
+(13) hook per aircraft into LOSSES. It replaces any template Delete chain
+with its own 0.5 s DELETE DELAY and entity-linked DELETE, then registers
+lifecycle events in `SideLogic`. `ShellSpec` supplies timing and strategy
+choices; `ShellIds` supplies cross-builder connection points. Decisions 0017/0018.
+WP 1 pulses the retained Zone IN at the target; only an enemy seen there arms
+Zone Out. Both zones use Zone Out's radius. Empty targets complete their
+on-station time, then COLD ends the sortie or HOT extends it once.
+**Air Tasking generation.**
+
+### `airtask/budget.rs` — per-side live-copy census
+`build_side` builds the head-count budget and records cross-builder edges
+in `SideLogic.links`. START and shell DELETE DELAY request recounts; FLYING
+flags remain on until deletion. `census_delay` and `recount_time` keep the
+census spacing consistent with assembly. There are 16 MCUs at N ≥ 2 and
+14 at N = 1 (no COUNT or ZERO). **Air Tasking generation.**
+
+### `airtask/assemble.rs` — copies, pointers and side initialization
+`assemble_side` places and duplicates eligible Activate templates, wraps
+each copy, registers its shell and wires one-use copy pointers and entry
+exhaustion. `emit_side_logic` applies deferred links and writes the side's
+Mission Begin / INIT / INIT OFF. `SideCopies` returns copy and entry ids
+for later front-end builders. **Air Tasking generation.**
+
 ### `airfield.rs` — SP airfield → multiplayer
 `inspect_airfield` / `AirfieldInfo` (player planes, checkzones to
 unlink, strip count, vehicles/AI planes/blocks) and `clean_airfield`
