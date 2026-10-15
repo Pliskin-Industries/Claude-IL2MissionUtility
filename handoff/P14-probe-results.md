@@ -498,6 +498,17 @@ The same mission file, hosted again after `tacviewrecord = 1` was set in this PC
   - T-s2 (AirAlert) and T-s3 lost nothing, in either run.
 - **Across both runs:** of five HVAR 4-ships held on an AttackArea over an empty target for more than 2 minutes, three lost two aircraft each, between 2 and 4.1 minutes after arriving; none was shot at. The cause is not in the text log. It concerns the built-in HVAR sortie's attack order over nothing to attack, which decision 0018 now makes common; the same order is in the HVAR template outside Air Tasking.
 
+### Flight 2B, run 3 — 2026-10-15, session `2026-10-15_02-43-19`, host spectating
+
+The same mission file. This time the host pressed **Spectate** and watched from inside the mission, to get a Tacview recording; it left at 12:16 (mission end 15:47.6, so the end-of-mission list is a snapshot taken while the sortie cells were still on station). Logs: `src/testdata/missionlog/real_22/` (34 files).
+
+- **No Tacview file again**, with `tacviewrecord = 1`, the server's TacView box ticked and the host spectating. In IL-2 the `.acmi` is most likely written only together with a recorded track, which is started from a key in flight; untested.
+- **T-s1 (HVAR) lost one aircraft:** Red 12 destroyed at 07:27.9 at 1,415 m, 101 s after arriving, no attacker; the pilot bailed out at 07:35.4 and the aircraft hit the ground at 07:46.9.
+- **Where the sorties were on station** (end-of-mission list, 15:47.6):
+  - T-s1's three remaining HVAR F-80Cs at **366 to 408 m**, about 3.5 km south of their target;
+  - T-s2's four AirAlert F-80Cs at about **1,140 to 1,165 m**, within 2.6 km of theirs.
+- **Reading (inference):** on an AttackArea over an empty target the HVAR flight works the area at a few hundred metres over hilly ground, low and close together, which fits the ground impacts and the one apparent collision seen in runs 1 and 2. AirAlert stays near 1,150 m and has lost nothing in three runs. A track recording would show it directly.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -535,7 +546,7 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | new | a sortie whose target has no enemy aircraft within 35 km ends at WP 1 arrival (Zone Out fires at once); the shell's own Delete removes all its aircraft 60.6 s after `DONE HUB` | flight 2 |
 | g, again | event 13 fires once for a crash with no damage and no attacker (event 2 first); events 0 and 5 do not | flight 2 |
 | new | decision 0018 works on all four paths: an empty target holds a sortie for its on-station time (`COLD` ends it, `HOT` extends it once); an enemy seen on arrival or later arms Zone Out, which ends the sortie 0.02 s after the enemy is gone | flight 2B |
-| new | HVAR F-80C 4-ships on an AttackArea over an empty target: three of five lost two aircraft each, 2 to 4.1 minutes after arriving, with no attacker (ground impacts, and one apparent collision between wingmen); AirAlert lost none. The cause is not known | flight 2B, runs 1 and 2 |
-| new | a host that stays on the briefing screen writes no Tacview recording, even with `tacviewrecord = 1` and the server's TacView box ticked | flight 2B run 2; upstream load test |
+| new | HVAR F-80C 4-ships on an AttackArea over an empty target lose aircraft with no attacker: in three runs, four of seven such flights lost one or two, 1.7 to 4.1 minutes after arriving (ground impacts, one apparent wingman collision). On station they fly at 370 to 410 m; AirAlert stays near 1,150 m and lost none. The cause is inferred, not seen | flight 2B, runs 1 to 3 |
+| new | no Tacview recording is written by a host on the briefing screen or spectating, even with `tacviewrecord = 1` and the server's TacView box ticked; a recorded track is probably needed | flight 2B runs 2 and 3; upstream load test |
 
 Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.
