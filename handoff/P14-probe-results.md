@@ -465,7 +465,7 @@ So event 13 fires for a crash with no damage and no attacker. The crash was an i
 ### Open
 
 1. **Zone Out on an empty target. Ruled 2026-10-14, decision 0018:** a sortie stays on station at an empty target; Zone Out ends it only after an enemy has been seen inside (the template's Zone IN is kept for that). Flight 2B re-flies the sortie cells. The original note: As built, a sortie whose target has no enemy aircraft within 35 km ends on arrival. Either that is intended (a sortie only stays while there is something to fight), or Zone Out should only end a sortie after an enemy has been seen inside it, which costs MCUs. Flight 2 could not test the on-station part of the shell either way: a re-fly needs an enemy AI flight over each target (AI aircraft trigger check zones, flight 0).
-2. **The load file** (24 copies per side) was not flown here: this PC is a test bed, not the real host. It went to the upstream author, who hosts the server: https://github.com/eszyman/IL2MissionUtility/issues/2 (mission text log and Tacview recording requested).
+2. **The load file** (24 copies per side) was not flown here: this PC is a test bed, not the real host. It went to the upstream author, who hosts the server: https://github.com/eszyman/IL2MissionUtility/issues/2 (mission text log and Tacview recording requested). **Run 2026-10-14 on the old `P14_Load_2` file; see "Load test on the upstream author's server".**
 
 ## Flight 2B (decision 0018: Zone Out only after an enemy is seen) — 2026-10-14, session `2026-10-14_23-34-26`
 
@@ -485,6 +485,32 @@ Step 3c probe `P14_Probe_2B_traced` (`handoff/p14-probes/flight2b/`), built from
 - **Deletion works:** no sortie or enemy aircraft is in the end-of-mission list.
 - **New: T-s1 lost two of its four F-80Cs on station with no enemy and no attacker.** Red 12 was destroyed at 09:19.0 at 247 m (its pilot bailed out at 09:20.8; the aircraft hit the ground at 09:25.1). Red 13 was destroyed at 09:55.7 at 28.6 m, on the ground. That is 3.5 and 4.1 minutes after arriving, while the AttackArea order was active over an empty target. The other HVARs were on station 3 minutes (T-s3) and 5 minutes (T-s4) with no loss. The cause is not known: the text log has no aircraft positions, and this PC records no Tacview (`tacviewrecord = 0`). Two losses of four did not reach `LOSSES` (Counter 4), as designed.
 - **Still not seen:** what the aircraft do during the extension (risk v), whether they really attack anything on an empty AttackArea, and the turn for home. These need a Tacview recording.
+
+### Flight 2B, run 2 — 2026-10-15, session `2026-10-15_00-47-19`, Tacview on
+
+The same mission file, hosted again after `tacviewrecord = 1` was set in this PC's `startup.cfg` (the original is kept as `startup.cfg.bak-20261015`) and the server's "TacView record" box was ticked. Nobody spawned. Logs: `src/testdata/missionlog/real_21/` (67 files). Replay against the frozen flight 2B files: no dead links.
+
+- **No Tacview file was written.** The host stayed on the briefing screen, as the upstream author's server did (issue #2: no `.acmi` either). A recording most likely needs the host inside the mission (Spectate); untested.
+- **The logic repeated run 1 to within 0.2 s on every path:** T-s1 `EXTEND` → `DONE HUB` 25:47.2; T-s2 `COLD` → `DONE HUB` 24:10.1; T-s3 Zone IN 06:46.1, Zone Out → `DONE HUB` 09:46.02; T-s4 Zone IN 09:16.04, Zone Out → `DONE HUB` 12:16.02; each `DELETE DELAY` 60.6 s later. No enemy and no sortie aircraft left at the end.
+- **HVAR losses again, no attacker:**
+  - T-s1: Red 11 destroyed at 08:00.0 at 652 m and Red 12 at 08:11.8 at 181 m, both over land about 11 km north of the target, 133 and 145 s after arriving. Both hit the ground.
+  - T-s4: Red 11 and Red 12 destroyed **in the same tick at the same point** (09:15.1, 1,382 m, 12 km north of the target), 119 s after arriving and 0.9 s before the enemy pair appeared. That reads as a mid-air collision between the two; one wreck hit the ground at 09:26.3.
+  - T-s2 (AirAlert) and T-s3 lost nothing, in either run.
+- **Across both runs:** of five HVAR 4-ships held on an AttackArea over an empty target for more than 2 minutes, three lost two aircraft each, between 2 and 4.1 minutes after arriving; none was shot at. The cause is not in the text log. It concerns the built-in HVAR sortie's attack order over nothing to attack, which decision 0018 now makes common; the same order is in the HVAR template outside Air Tasking.
+
+## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
+
+Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
+
+| Measure | Result |
+|---|---|
+| Load | the mission loaded; no load time was reported |
+| Server, idle (06:00, nobody in) | SPS 50.0, tick delay 1.0 |
+| Server, one player in (from 05:59 to the end, 10:33) | tick delay "raises when a player is in the server" (his screenshot); SPS not reported as dropping |
+| Copies in the mission | all 240 aircraft are in the end-of-mission list, at (0, 0, 0): switched off and present, as Activate mode intends |
+| Tacview | none: not installed on the server at the time, or the server only spectated (his note) |
+
+**Reading:** 240 switched-off aircraft and their logic cost an idle server nothing measurable. The rise with a player is the normal cost of a player, not shown to differ from an empty mission. Not measured: the same with two check zones per copy, and with sorties flying.
 
 ## Step 0 after the flights of 2026-10-12 to 2026-10-14
 
@@ -509,6 +535,7 @@ Step 3c probe `P14_Probe_2B_traced` (`handoff/p14-probes/flight2b/`), built from
 | new | a sortie whose target has no enemy aircraft within 35 km ends at WP 1 arrival (Zone Out fires at once); the shell's own Delete removes all its aircraft 60.6 s after `DONE HUB` | flight 2 |
 | g, again | event 13 fires once for a crash with no damage and no attacker (event 2 first); events 0 and 5 do not | flight 2 |
 | new | decision 0018 works on all four paths: an empty target holds a sortie for its on-station time (`COLD` ends it, `HOT` extends it once); an enemy seen on arrival or later arms Zone Out, which ends the sortie 0.02 s after the enemy is gone | flight 2B |
-| new | an HVAR F-80C 4-ship on an AttackArea over an empty target lost two aircraft to crashes in its first 4 minutes on station, with no attacker; the cause is not known | flight 2B |
+| new | HVAR F-80C 4-ships on an AttackArea over an empty target: three of five lost two aircraft each, 2 to 4.1 minutes after arriving, with no attacker (ground impacts, and one apparent collision between wingmen); AirAlert lost none. The cause is not known | flight 2B, runs 1 and 2 |
+| new | a host that stays on the briefing screen writes no Tacview recording, even with `tacviewrecord = 1` and the server's TacView box ticked | flight 2B run 2; upstream load test |
 
 Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.
