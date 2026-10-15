@@ -89,3 +89,11 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **Fighter Pack aircraft are separate formations** (`FlightRole::Independent` in `flights.rs`), so a Damage command on the lead would reach only the lead (flight 1H: a Damage command acts on one formation). Read from the code; flight 1P used one Damage command per aircraft and did not test it.
 - **With `AiRTBDecision = 1`, all aircraft of a damaged formation but one stop answering commands** (flight 1M: three of a 4-ship).
 
+
+## Found on 2026-10-15 (flight 2C, game 1.005)
+
+- **The game rewrites `data\startup.cfg` when it exits.** An edit made while the game runs is lost. Close the game normally (a window-close request), edit, start it, and check the file again.
+- **Tacview from a client-hosted server:** `tacviewrecord = 1` under `[KEY = track_record]`, the server's "TacView record" box ticked, press Spectate, then **LCtrl+R** (action `record` in `data\input\current.map`). A red icon shows top right. `data\Tracks\` gets a `.acmi` and a `.trk` (about 750 MB for 15 minutes) named for the load time; both close when the mission ends. The `.acmi` held all 48 AI aircraft, not only those near the camera. Its `ReferenceTime` is the game time when recording began; mission seconds = that minus the mission's `GTime`, plus the `#` time. ACMI object ids are the log's `OBJID`s in hexadecimal.
+- **The spectator camera did not answer F2, Shift+F2 or LAlt+F2** on this PC; it stayed at its first view. Recording did not need it.
+- **Server overload:** with 48 AI aircraft flying, the test-bed PC showed "Multiplayer server overload" all mission and mission time ran at about 0.4× wall time. Every MCU still fired at its mission time to the tick. Plan wall time from the breadcrumbs, not from the mission clock.
+- **The results screen gives about 10 s before the next load.** A Leave Server pressed after that starts another run of the same mission; leave from its briefing screen.

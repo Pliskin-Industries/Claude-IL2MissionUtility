@@ -101,3 +101,21 @@ Pass: an `.acmi` showing C0's flight path and heights through the loss window.
 
 - Tacview, "User Guide – IL-2 Sturmovik": https://tacview.fandom.com/wiki/User_Guide_–_IL‑2_Sturmovik?oldid=710 (seen through a search summary; the page itself refused the fetch)
 - IL-2 forum, "Tacview – understand what happened during your last flight", page 3: https://forum.il2sturmovik.com/topic/68918-tacview-–-understand-what-happened-during-your-last-flight/page/3
+
+## After flight 2C (flown 2026-10-15, two runs, Tacview)
+
+Results: `handoff/P14-probe-results.md`, "Flight 2C". In short:
+
+- Every variant (HVAR, no rockets, fix A′, AirAlert) came down from 3,050 m to a few hundred metres above the ground and held an altitude set by the target's place. Flight 2B's height difference was the two targets, not the orders.
+- Every loss seen with Tacview (7 aircraft, run 2; none in run 1) was a **collision inside a formation**, in gentle turns, in transit, in the descent and on station. The no-rocket cell lost the most. Wingmen came within 20 m of each other in all four variants.
+- MCU timing held to the tick under server overload (mission time at 0.4× wall time). The overload may make the AI fly worse; that is not measured.
+
+So options A, A′, B and C (the order) and the weight hypothesis are set aside. What is left:
+
+| | Option | Where | MCUs | Open |
+|---|---|---|---|---|
+| G | **A looser formation** in the built-in templates' Formation command (`FormationDensity` 1 or 2 instead of 0, or another `FormationType`) | template files | 0 | What each density value means is not in the repository. Template Builder writes 0 for every air formation (`template.rs`, `air_form`), so a generator change would change its output files: a ruling for the user |
+| H | **Fewer aircraft per server**, if the overload causes the collisions | mission size | 0 | Needs a run without the overload message to compare |
+| I | **Accept**: the AI's own formation flying; `LOSSES` already ends a sortie that loses every aircraft | none | 0 | Losses continue at an unknown rate on a healthy server |
+
+Proposed next probe (flight 2D, not built): the same empty targets with `FormationDensity` 0, 1 and 2 (and, if useful, Pairs), with few enough aircraft that the server shows no overload message (first find that count with one short run), flown twice with Tacview. Count close passes under 20 m and collisions per variant.

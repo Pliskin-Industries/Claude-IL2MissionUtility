@@ -509,6 +509,69 @@ The same mission file. This time the host pressed **Spectate** and watched from 
   - T-s2's four AirAlert F-80Cs at about **1,140 to 1,165 m**, within 2.6 km of theirs.
 - **Reading (inference):** on an AttackArea over an empty target the HVAR flight works the area at a few hundred metres over hilly ground, low and close together, which fits the ground impacts and the one apparent collision seen in runs 1 and 2. AirAlert stays near 1,150 m and has lost nothing in three runs. A track recording would show it directly.
 
+## Flight 2C (why sorties lose aircraft over an empty target) — 2026-10-15, two runs, Tacview recorded
+
+Probe `P14_Probe_2C_traced` (`handoff/p14-probes/flight2c/`; design in `handoff/sessions/2026-10-15-hvar-empty-target.md` §5, prompt `handoff/P14-flight-2c-codex-prompt.md`), built from `codex/p14-2c` (`97ce5a3`) as `P14_Probe_2C_20261015` without the resaver, hosted by the game client on the second PC (game `261013`). Twelve placed sorties on empty targets, area COLD, no enemy: three copies each of **C0** HVAR as shipped, **C1** HVAR with payload 2 (no rockets), **C2** HVAR with fix A′ (ground order 120 s, then an air AttackArea, 5 km, 600 s), **C3** AirAlert as shipped. The host spectated, pressed LCtrl+R, and left at 15:00 so the end-of-mission list kept every live aircraft.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-15_16-51-04` | `src/testdata/missionlog/real_23/` (49 files) | `handoff/tacview/P14_Probe_2C_run1.zip.acmi` (from 02:33) | 15:09.2 |
+| 2 | `2026-10-15_17-27-17` (the server reloaded the mission) | `src/testdata/missionlog/real_24/` (49 files) | `handoff/tacview/P14_Probe_2C_run2.zip.acmi` (from 00:40) | 15:05.7 |
+
+Replay against the frozen files: no dead links in either run. Every unobserved successor is a `COLD`, `HARD STOP` or Zone IN branch that the 15:00 leave or the empty targets cut off, as planned.
+
+### The server was overloaded, and MCU timing was not affected
+
+- The game showed "Multiplayer server overload: erratic plane behavior may occur" for the whole of both runs (48 AI aircraft on this test-bed PC). **Mission time ran at about 0.4× wall time** in run 1 (the log files for the 5 s start steps were written 9 to 11 s apart; 14:30 came at 17:24 for a 16:51 load).
+- **Every traced MCU fired at its predicted mission time:** each `START` on its whole second (60.000 … 115.000 s), every 0.5 s attack timer exactly 0.50 s after its `WP 1`, C2's new 120 s timer at `WP 1` + 120.50 s in all six copies (the walker's Restart prediction), and the 14:30 cue at 870.000 s, in both runs. Overload stretched wall time only.
+- Aircraft behaviour under overload is not known; the losses below may be inflated compared with a healthy server. All four cells shared it.
+
+### Losses
+
+Run 1: **none** in any cell. No aircraft fired a round or a rocket in either run (`BUL:1800`; `RCT:8` on every live HVAR-payload aircraft).
+
+Run 2, every loss with its Tacview state 0.5 s before (no attacker in any; `AType:3 AID:-1`):
+
+| Cell | Destroyed | After `WP 1` | Height above ground | Nearest wingman | Reading |
+|---|---|---|---|---|---|
+| C2a | 01:57.1 | before it (in transit, 27 s after activation) | 2,970 m, bank 30°, pitch +9° | 8 m | collision; the other aircraft flew on |
+| C1a (two) | 06:51.9, same tick | +58 s, descending | 1,610–1,640 m, bank 30°, pitch −5° | 13–18 m, each other | collision |
+| C1b (two) | 08:17.3, same tick | +138 s | 830–850 m, bank 30°, pitch −5° | 16–21 m, each other | collision |
+| C0a | 14:52.0 | +545 s | 340 m, bank 9°, pitch −3° | 11 m | collision; the other aircraft flew on |
+
+- **Every loss in flight 2C was a collision inside a formation**, in a gentle turn, far above the ground. None was a ground impact or a hard pull.
+- **C1 (no rockets) lost the most** (four aircraft, two copies). So the rockets' weight (hypothesis H2) is not the cause.
+- **Close passes (two wingmen within 20 m, counted once per second of Tacview) happened in every variant**: run 1 C0 3, C1 7, C2 10, C3 0; run 2 C0 17, C1 5, C2 24, C3 19. Most came after `WP 1`. AirAlert (C3) lost nothing in 6 copies here and 3 in flight 2B, but came as close as 10 m.
+
+### Height on station
+
+All four variants did the same: at `WP 1` the flight left 3,050 m, came down to a few hundred metres above the ground within about three minutes, then held one altitude (Tacview, every lead in both runs). C2's switch to the air order at `WP 1` + 120.5 s did not make it climb.
+
+| Cell | Variant | Altitude held (both runs) | Height above ground (median on station) |
+|---|---|---|---|
+| C0a | HVAR | 369–385 m | 330–347 m |
+| C0b | HVAR | 816–844 m | 650–719 m |
+| C0c | HVAR | 1,359–1,730 m | 891–1,182 m |
+| C1a | no rockets | 697–986 m | 526–767 m |
+| C1b | no rockets | 647–747 m | 498–580 m |
+| C1c | no rockets | 653–686 m | 616–643 m |
+| C2a | fix A′ | 1,136–1,164 m | 759–781 m |
+| C2b | fix A′ | 855–1,112 m | 567–722 m |
+| C2c | fix A′ | 580–599 m | 543–565 m |
+| C3a | AirAlert | 1,678–1,705 m | 868–906 m |
+| C3b | AirAlert | 1,006–1,340 m | 597–815 m |
+| C3c | AirAlert | 939–1,441 m | 739–1,184 m |
+
+- **The altitude depends on where the target is, not on the template.** C0a sits on flight 2B's T-s1 target and held 370 m, as T-s1 did (366–408 m). C2a (an HVAR) sits on flight 2B's AirAlert target and held 1,150 m, as that AirAlert did (1,140–1,165 m). Flight 2B's "HVARs low, AirAlert high" was the two places.
+- The settled height above ground was 330 to 1,180 m; the lowest point any surviving aircraft reached was 33 m above the ground (an AirAlert in C3c, run 2).
+
+### What this changes (reading)
+
+- Hypotheses H1 (the ground order keeps the flight low) and H2 (the rockets' weight) do not explain the losses: every variant descends the same way, and the no-rocket cell lost the most.
+- H3 (formation) fits every flight 2C loss: wingmen collide in turns, in transit, in the descent and on station. Both templates fly formation 20 (Wedge) at `FormationDensity = 0`, the value Template Builder writes for every air formation. Flight 2B's "destroyed in the air with no damage record" losses fit collisions in which the other aircraft survived; its two ground impacts are not explained.
+- Fix A′ changes nothing seen here and is not proposed any more. Next options in `handoff/sessions/2026-10-15-hvar-empty-target.md`, "After flight 2C".
+- Losses per aircraft-flight were low in run 1 (0 of 48) and higher in run 2 (7 of 48). Two runs are too few to rank the variants.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -546,7 +609,10 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | new | a sortie whose target has no enemy aircraft within 35 km ends at WP 1 arrival (Zone Out fires at once); the shell's own Delete removes all its aircraft 60.6 s after `DONE HUB` | flight 2 |
 | g, again | event 13 fires once for a crash with no damage and no attacker (event 2 first); events 0 and 5 do not | flight 2 |
 | new | decision 0018 works on all four paths: an empty target holds a sortie for its on-station time (`COLD` ends it, `HOT` extends it once); an enemy seen on arrival or later arms Zone Out, which ends the sortie 0.02 s after the enemy is gone | flight 2B |
-| new | HVAR F-80C 4-ships on an AttackArea over an empty target lose aircraft with no attacker: in three runs, four of seven such flights lost one or two, 1.7 to 4.1 minutes after arriving (ground impacts, one apparent wingman collision). On station they fly at 370 to 410 m; AirAlert stays near 1,150 m and lost none. The cause is inferred, not seen | flight 2B, runs 1 to 3 |
-| new | no Tacview recording is written by a host on the briefing screen or spectating, even with `tacviewrecord = 1` and the server's TacView box ticked; a recorded track is probably needed | flight 2B runs 2 and 3; upstream load test |
+| new | HVAR F-80C 4-ships on an AttackArea over an empty target lose aircraft with no attacker: in three runs, four of seven such flights lost one or two, 1.7 to 4.1 minutes after arriving (ground impacts, one apparent wingman collision). On station they fly at 370 to 410 m; AirAlert stays near 1,150 m and lost none. The cause is inferred, not seen. **Revised by flight 2C:** the height came from the target's place, and the losses seen with Tacview were collisions inside the formation | flight 2B, runs 1 to 3 |
+| new | no Tacview recording is written by a host on the briefing screen or spectating, even with `tacviewrecord = 1` and the server's TacView box ticked; a recorded track is probably needed. **Revised by flight 2C:** in runs 2 and 3 `startup.cfg` most likely said 0 (the game rewrites it on exit), and nobody pressed LCtrl+R | flight 2B runs 2 and 3; upstream load test |
+| new | a spectating host records Tacview for the whole mission: `tacviewrecord = 1` set while the game is closed, Spectate, LCtrl+R. The `.acmi` holds every AI aircraft (position, altitude, height above ground) | flight 2C |
+| new | under server overload (mission time at 0.4× wall time) every traced MCU fired at its predicted mission time, to the tick | flight 2C |
+| new | on an AttackArea over an empty target, HVAR, HVAR without rockets, HVAR with an air order after 120 s, and AirAlert all come down from 3,050 m to a few hundred metres above the ground and hold one altitude, set by the target's place. Losses seen with Tacview were all collisions inside a formation, in every phase; the no-rocket cell lost the most | flight 2C, two runs |
 
 Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.
