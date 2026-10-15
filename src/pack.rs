@@ -95,6 +95,35 @@ pub fn inspect_pack(root: &Il2Entity) -> Result<PackInfo, String> {
     })
 }
 
+/// `Group N`'s AttackArea as an offset from that group's Zone IN, plus the
+/// MCU `AttackArea` radius in metres.
+pub fn group_attack_orbit(root: &Il2Entity, slot: u32) -> Option<(f64, f64, f64)> {
+    let name = format!("Group {slot}");
+    let group = root
+        .children
+        .iter()
+        .find(|c| c.block_type == "Group" && c.name() == Some(name.as_str()))?;
+    let (ax, az) = group_anchor_xz(group);
+    let mut found = None;
+    group.for_each(&mut |e| {
+        if found.is_some() || e.block_type != "MCU_CMD_AttackArea" {
+            return;
+        }
+        let radius = e
+            .property("AttackArea")
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        if radius <= 0.0 {
+            return;
+        }
+        let Some((x, z)) = e.pos_xz() else {
+            return;
+        };
+        found = Some((x - ax, z - az, radius));
+    });
+    found
+}
+
 /// Radius of Group 1's `Zone IN` checkzone (metres). Defaults to 16 km.
 pub fn zone_in_radius(root: &Il2Entity) -> f64 {
     root.find_by_name("Zone IN")
@@ -504,6 +533,14 @@ mod tests {
             "../TemplateExamples/Eastern_Fighters_Random_5pack_V6.Group"
         ))
         .expect("parse 5pack")
+    }
+
+    #[test]
+    fn group_1_attack_area_is_a_30km_orbit() {
+        let root = pack3();
+        let (dx, dz, r) = group_attack_orbit(&root, 1).expect("Group 1 AttackArea");
+        assert!((r - 30_000.0).abs() < 1.0, "radius {r}");
+        assert!(dx.abs() + dz.abs() > 1.0, "orbit is offset from Zone IN");
     }
 
     #[test]

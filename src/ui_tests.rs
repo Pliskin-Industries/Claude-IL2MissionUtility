@@ -481,6 +481,10 @@ fn template_mission_menu_adds_a_cap() {
         "CAP closes the diamond"
     );
     assert_eq!(h.app.tpl_seats[0].events.len(), 4);
+    assert!(h.app.tpl_seats[0].events.iter().any(|e| {
+        e.kind == crate::template::EntityEvent::OnKilled
+            && e.then == crate::template::EventThen::AllDestroyed
+    }));
     assert!(h.status().contains("CAP"));
 }
 
@@ -2636,4 +2640,34 @@ fn map_lock_ao_blocks_empty_drag_and_reset() {
     assert!(!h.app.ao_locked);
     h.click("Reset AO");
     assert_eq!(h.app.front_aabb, full);
+}
+
+#[test]
+fn map_ao_resize_and_reset_are_undoable() {
+    let mut h = Harness::new("aoresize");
+    h.tab("Map");
+    h.wait_for_map();
+    let map = h.find("Korea map").rect;
+    let full = h.app.front_aabb;
+    h.drag(
+        map.center() + Vec2::new(-80.0, -40.0),
+        map.center() + Vec2::new(80.0, 40.0),
+    );
+    let resized = h.app.front_aabb;
+    assert_ne!(resized, full, "unlocked drag sets the AO");
+    assert_eq!(h.app.undo_label().as_deref(), Some("Resized AO"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.front_aabb, full, "Ctrl Z restores the AO");
+    assert!(h.app.undo_label().is_none());
+
+    h.drag(
+        map.center() + Vec2::new(-80.0, -40.0),
+        map.center() + Vec2::new(80.0, 40.0),
+    );
+    let resized = h.app.front_aabb;
+    h.click("Reset AO");
+    assert_eq!(h.app.front_aabb, full);
+    assert_eq!(h.app.undo_label().as_deref(), Some("Reset AO"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.front_aabb, resized, "Ctrl Z restores the resized AO");
 }

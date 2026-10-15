@@ -39,15 +39,15 @@ use crate::template::{
     DEFAULT_TIME_ON_TARGET_S, DEFAULT_TIMER_S, EntityEvent, EventHook, EventThen, FlightRole,
     MissionPackage, OrderKind, OrderSpec, OrderTreeNode, PLACEMENT_SPACING, PlaceLayout,
     PlaneStart, TemplateOptions, TemplateSeat, UnitKind as CatalogKind, WAYPOINT_SPACING_M,
-    ZoneCoalition, ZoneMix, append_seat, apply_formation_numbers, apply_mission_package,
-    apply_plane_start, apply_suggested_attack_area, attack_area_range_limit, bundled_catalog,
-    carriage_label, catalog_carriage_scripts, copy_seat_attributes, event_triggers_order,
-    flight_lead_of, formation_label, formations_for, generate_template, goto_timer_name,
-    has_linked_wingmen, insert_goto_waypoint_after, is_follower, lead_indexes, load_catalog,
-    load_catalog_as_user_added, load_template, merge_catalog, mission_path_segments, move_seat,
-    near_visual_range, next_waypoint_number, normalize_order_chain, offset_label,
-    order_chip_detail, order_seat_indexes, order_tree_columns, order_tree_layout,
-    path_waypoint_display_m, place_offset, priority_label, receives_orders,
+    ZoneCoalition, ZoneMix, air_formation_id, append_seat, append_tree_order,
+    apply_formation_numbers, apply_mission_package, apply_plane_start, apply_suggested_attack_area,
+    attack_area_range_limit, bundled_catalog, carriage_label, catalog_carriage_scripts,
+    copy_seat_attributes, event_triggers_order, flight_lead_of, formation_label, formations_for,
+    generate_template, goto_timer_name, has_linked_wingmen, insert_goto_waypoint_after,
+    is_follower, lead_indexes, load_catalog, load_catalog_as_user_added, load_template,
+    merge_catalog, mission_path_segments, move_seat, near_visual_range, next_waypoint_number,
+    normalize_order_chain, offset_label, order_chip_detail, order_seat_indexes, order_tree_columns,
+    order_tree_layout, path_waypoint_display_m, place_offset, priority_label, receives_orders,
     refresh_attack_areas_for_seat, remap_event_then, remap_index_vec, remap_seat_index,
     replace_seat_unit, set_report_following, shift_tree_order, tree_order_can_shift,
     used_waypoint_count, visual_range_m, waypoint_area_m, waypoint_display_altitude,
@@ -129,6 +129,7 @@ fn apply_order_kind(seats: &mut [TemplateSeat], seat: usize, order: usize, k: Or
         CatalogKind::Vehicle
     };
     let was_goto = seats[seat].orders[order].kind == OrderKind::GotoWaypoint;
+    let was_formation = seats[seat].orders[order].kind == OrderKind::Formation;
     let next_wp = next_waypoint_number(seats);
     seats[seat].orders[order].kind = k;
     if k == OrderKind::GotoWaypoint && !was_goto {
@@ -137,9 +138,12 @@ fn apply_order_kind(seats: &mut [TemplateSeat], seat: usize, order: usize, k: Or
     if k == OrderKind::Formation {
         let presets = formations_for(unit_kind);
         let id = seats[seat].orders[order].formation_type;
-        if !presets.iter().any(|p| p.id == id) {
-            seats[seat].orders[order].formation_type =
-                OrderSpec::for_kind(unit_kind).formation_type;
+        if !was_formation || !presets.iter().any(|p| p.id == id) {
+            seats[seat].orders[order].formation_type = if seats[seat].unit.is_air() {
+                air_formation_id(&seats[seat].unit.script)
+            } else {
+                OrderSpec::for_kind(unit_kind).formation_type
+            };
         }
     }
     if k == OrderKind::TimeOnTarget {
@@ -199,7 +203,7 @@ fn tree_mission_menu(ui: &mut egui::Ui, si: usize, add: &mut Option<AddTreeItem>
         ui.label(RichText::new("Aircraft").small().color(c::NEUTRAL_700));
         if ui
             .button("CAP")
-            .on_hover_text("Diamond patrol at low priority until bingo guns, bingo fuel, critical damage, or wounded, then RTB. Replaces this lead's orders.")
+            .on_hover_text("Diamond patrol at low priority until bingo guns, critical damage, or wounded, then RTB. Replaces this lead's orders.")
             .clicked()
         {
             *add = Some(AddTreeItem::Mission {
@@ -210,7 +214,7 @@ fn tree_mission_menu(ui: &mut egui::Ui, si: usize, add: &mut Option<AddTreeItem>
         }
         if ui
             .button("Strike")
-            .on_hover_text("V-Form, 1500 m airstart, IP 8 km, 3 km ground attack for 2 min, then home. Aborts on bingo bombs, critical damage, wounded, or bingo fuel. Turns Zone Out off. Replaces this lead's orders.")
+            .on_hover_text("Formation follows the aircraft: Column - Pairs for fighters, Column - Flights wedge for attack aircraft, Heavy - Wedge for bombers. 1500 m airstart, IP 8 km, 3 km ground attack for 2 min, then home. Time on Target runs with the attack and sends the flight home if OnAreaAttacked does not fire. Aborts on bingo bombs, critical damage, or wounded, once per flight. OnKilled on each attacker ticks ALL DESTROYED, which pulses MISSION END once the flight is gone. Turns Zone Out off. Replaces this lead's orders.")
             .clicked()
         {
             *add = Some(AddTreeItem::Mission {
@@ -859,11 +863,27 @@ fn draw_template_order_chip(
     chip_rect
 }
 
+fn event_chip_detail(then: EventThen) -> &'static str {
+    match then {
+        EventThen::AllDestroyed => "ALL DESTROYED",
+        _ => "",
+    }
+}
+
+fn event_chip_hover(then: EventThen) -> &'static str {
+    match then {
+        EventThen::AllDestroyed => {
+            "Ticks ALL DESTROYED beside this flight's cleanup. The counter pulses MISSION END once, when every attacking aircraft with Then All destroyed is gone."
+        }
+        _ => "",
+    }
+}
+
 fn draw_template_event_chip(
     ui: &mut egui::Ui,
     si: usize,
     ei: usize,
-    kind: EntityEvent,
+    hook: &EventHook,
     selected: bool,
     // Selection is drawn by draw_tree_chip; kept for the shared call shape.
     _selected_fill: Color32,
@@ -877,14 +897,18 @@ fn draw_template_event_chip(
         ui.add_space(TREE_ARROW_SLOT);
         let resp = draw_tree_chip(
             ui,
-            kind.label(),
-            "",
+            hook.kind.label(),
+            event_chip_detail(hook.then),
             event_fill,
             selected,
             true,
             Vec2::new(TREE_CHIP_W, TREE_CHIP_H),
             false,
         );
+        let hover = event_chip_hover(hook.then);
+        if !hover.is_empty() {
+            resp.clone().on_hover_text(hover);
+        }
         if resp.clicked() {
             *clicked = Some(TplSelect::Event {
                 seat: si,
@@ -1249,7 +1273,7 @@ fn draw_tree_node_chip(
                 ui,
                 si,
                 ei,
-                events[ei].kind,
+                &events[ei],
                 selected,
                 selected_fill,
                 event_fill,
@@ -1783,15 +1807,14 @@ impl super::GroupGeneratorApp {
             AddTreeItem::Order { seat: si, kind } => {
                 let unit = self.tpl_seats[si].unit.clone();
                 let next_wp = next_waypoint_number(&self.tpl_seats);
-                self.tpl_seats[si]
-                    .orders
-                    .push(order_spec_for_added_kind(&unit, kind, next_wp));
+                let mut spec = order_spec_for_added_kind(&unit, kind, next_wp);
                 if kind == OrderKind::GotoWaypoint {
-                    if let Some(spec) = self.tpl_seats[si].orders.last_mut() {
-                        spec.priority = self.tpl_wp_priority;
-                    }
+                    spec.priority = self.tpl_wp_priority;
                 }
-                let oi = self.tpl_seats[si].orders.len() - 1;
+                let oi = {
+                    let seat = &mut self.tpl_seats[si];
+                    append_tree_order(&mut seat.orders, &mut seat.events, spec)
+                };
                 if kind == OrderKind::AttackArea {
                     apply_suggested_attack_area(&mut self.tpl_seats, si, oi);
                 }
@@ -2266,7 +2289,7 @@ impl super::GroupGeneratorApp {
                                         ui,
                                         si,
                                         ei,
-                                        self.tpl_seats[si].events[ei].kind,
+                                        &self.tpl_seats[si].events[ei],
                                         selected,
                                         selected_fill,
                                         event_fill,
@@ -2292,7 +2315,7 @@ impl super::GroupGeneratorApp {
                                     ui,
                                     si,
                                     ei,
-                                    self.tpl_seats[si].events[ei].kind,
+                                    &self.tpl_seats[si].events[ei],
                                     selected,
                                     selected_fill,
                                     event_fill,
@@ -3114,7 +3137,7 @@ impl super::GroupGeneratorApp {
             }
             OrderKind::TimeOnTarget => {
                 notes.push((
-                    "Timer pulsed from the waypoint before Attack / AttackArea (not the previous delay). When it expires, the next order in the chain fires. Use this so the flight is updated after hanging on the target.".into(),
+                    "Timer pulsed from the same waypoint as Attack / AttackArea, in parallel (not after the attack delay, and not blocked by OnAreaAttacked). When it expires, the next order fires — the home Goto, even when abort events also Then that Goto. OnAreaAttacked does not always fire; this timer is the failsafe that still sends the flight home.".into(),
                     NoteStyle::Plain,
                 ));
                 field_label(ui, "Time on target");
@@ -3393,11 +3416,13 @@ impl super::GroupGeneratorApp {
                                 .get(order + 1)
                                 .is_some_and(|o| o.kind == k);
                             if ui.selectable_label(selected, k.label()).clicked() {
+                                let script = self.tpl_seats[seat].unit.script.clone();
                                 set_report_following(
                                     &mut self.tpl_seats[seat].orders,
                                     order,
                                     k,
                                     unit_kind,
+                                    &script,
                                 );
                             }
                         }
@@ -3495,6 +3520,11 @@ impl super::GroupGeneratorApp {
                         EventThen::ForceComplete,
                         "Force Complete",
                     );
+                    ui.selectable_value(
+                        &mut self.tpl_seats[seat].events[event].then,
+                        EventThen::AllDestroyed,
+                        "All destroyed",
+                    );
                     for (i, o) in then_orders.iter().enumerate() {
                         ui.selectable_value(
                             &mut self.tpl_seats[seat].events[event].then,
@@ -3508,7 +3538,7 @@ impl super::GroupGeneratorApp {
         show_field_notes(
             ui,
             &[(
-                "OnEvent (TarId only). Links this unit to Force Complete or an order timer.".into(),
+                "OnEvent (TarId only). Force Complete and an order timer link this unit alone. All destroyed ticks the shared ALL DESTROYED counter, which pulses MISSION END once every attacker with that Then is gone.".into(),
                 NoteStyle::Plain,
             )],
         );

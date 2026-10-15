@@ -1,17 +1,20 @@
 //! # mapnet.rs — Korea road & railroad network
 //!
-//! Korea road and railroad polylines (mission-editor SVG) in world X/Z, plus
-//! everything needed to place, drag, and export ground groups parked on
-//! them.
+//! Korea road and railroad polylines (editor `highways.ini` /
+//! `railroads.ini`) in world X/Z, plus everything needed to place, drag,
+//! and export ground groups parked on them.
 //!
-//! SVG X increases east (game Z); SVG Y increases south (game X decreases).
-//! The square is 9984 units across the 499_200 m map, so 50 m per SVG unit
-//! (`svg_to_world`).
+//! Image X increases east (game Z); image Y increases south (game X
+//! decreases). The square is 9984 units across the 499_200 m map, so 50 m
+//! per image unit (`svg_to_world`). `Highways_LaneOffset` is a render
+//! offset and is not applied.
 //!
 //! ## What this owns
-//! * Parsing `assets/roads.svg` / `assets/railroads.svg` into `Network`
+//! * Parsing `assets/gamedata/highways.ini` / `railroads.ini` into `Network`
 //!   (`PolyLine`s with cumulative arc length), lazily via `OnceLock`:
-//!   `roads()`, `railroads()`, `network_for()`.
+//!   `roads()`, `railroads()`, `network_for()`. Bridge tags (`B`, `T`) stay
+//!   on the centerline. `assets/roads.svg` and `assets/railroads.svg` are
+//!   not the network.
 //! * `inspect_route` — detects an authored group that is a single road
 //!   column (perfect-column heuristic) or a train, and extracts a
 //!   `RouteLayout` (behind-unit gaps, ahead MCU_Waypoint hops, Zone IN
@@ -58,6 +61,8 @@
 //! * placement.rs — supplies `heading_toward`, `mix_index`, `move_anchor_to`.
 //!
 //! Unit-tested against the `TemplateExamples/` `.Group` fixtures.
+
+mod ini;
 
 use std::sync::OnceLock;
 
@@ -157,11 +162,11 @@ pub struct Network {
 }
 
 impl Network {
-    fn from_svg(svg: &str) -> Self {
-        let lines = parse_svg_polylines(svg)
+    fn from_editor_ini(text: &str) -> Self {
+        let lines = ini::parse_polylines(text)
             .into_iter()
-            .filter_map(|svg_pts| {
-                let world = svg_pts
+            .filter_map(|image_pts| {
+                let world = image_pts
                     .into_iter()
                     .map(|(sx, sy)| svg_to_world(sx, sy))
                     .collect();
@@ -235,77 +240,25 @@ pub struct NetworkSpot {
 
 pub fn roads() -> &'static Network {
     static N: OnceLock<Network> = OnceLock::new();
-    N.get_or_init(|| Network::from_svg(include_str!("../assets/roads.svg")))
+    N.get_or_init(|| Network::from_editor_ini(include_str!("../assets/gamedata/highways.ini")))
 }
 
 pub fn railroads() -> &'static Network {
     static N: OnceLock<Network> = OnceLock::new();
-    N.get_or_init(|| Network::from_svg(include_str!("../assets/railroads.svg")))
+    N.get_or_init(|| Network::from_editor_ini(include_str!("../assets/gamedata/railroads.ini")))
 }
 
 pub fn network_for(rail: bool) -> &'static Network {
     if rail { railroads() } else { roads() }
 }
 
+/// Image pixel on the 9984 square to world X (north) / Z (east).
+/// Same mapping the mission-editor SVG used: 50 m per image unit,
+/// origin at the top-left.
 pub fn svg_to_world(sx: f64, sy: f64) -> (f64, f64) {
     let z = MAP_MIN + sx * M_PER_SVG;
     let x = MAP_MAX - sy * M_PER_SVG;
     (x, z)
-}
-
-/// Scan `points="…"` attribute bodies. Not a regex — byte search for the key.
-pub fn parse_svg_polylines(svg: &str) -> Vec<Vec<(f64, f64)>> {
-    let bytes = svg.as_bytes();
-    let key = b"points=\"";
-    let mut out = Vec::new();
-    let mut i = 0usize;
-    while i + key.len() < bytes.len() {
-        if bytes[i..].starts_with(key) {
-            i += key.len();
-            let start = i;
-            while i < bytes.len() && bytes[i] != b'"' {
-                i += 1;
-            }
-            let body = &svg[start..i];
-            let pts = parse_point_list(body);
-            if pts.len() >= 2 {
-                out.push(pts);
-            }
-        } else {
-            i += 1;
-        }
-    }
-    out
-}
-
-fn parse_point_list(s: &str) -> Vec<(f64, f64)> {
-    let mut nums = Vec::new();
-    let mut cur = String::new();
-    for c in s.chars() {
-        if c == ',' || c.is_whitespace() {
-            flush_num(&mut cur, &mut nums);
-        } else {
-            cur.push(c);
-        }
-    }
-    flush_num(&mut cur, &mut nums);
-    let mut pts = Vec::with_capacity(nums.len() / 2);
-    let mut i = 0usize;
-    while i + 1 < nums.len() {
-        pts.push((nums[i], nums[i + 1]));
-        i += 2;
-    }
-    pts
-}
-
-fn flush_num(cur: &mut String, nums: &mut Vec<f64>) {
-    if cur.is_empty() {
-        return;
-    }
-    if let Ok(v) = cur.parse::<f64>() {
-        nums.push(v);
-    }
-    cur.clear();
 }
 
 fn closest_on_segment(x: f64, z: f64, a: (f64, f64), b: (f64, f64)) -> (f64, f64, f64) {
@@ -1229,20 +1182,58 @@ mod tests {
     use crate::parser::parse_group_file;
 
     #[test]
-    fn svg_polylines_map_to_korea_world() {
-        let rails = parse_svg_polylines(include_str!("../assets/railroads.svg"));
-        let roads = parse_svg_polylines(include_str!("../assets/roads.svg"));
-        assert!(rails.len() >= 10, "rail polylines {}", rails.len());
-        assert!(roads.len() >= 20, "road polylines {}", roads.len());
+    fn editor_ini_polylines_map_to_korea_world() {
+        let rails = ini::parse_polylines(include_str!("../assets/gamedata/railroads.ini"));
+        let roads_img = ini::parse_polylines(include_str!("../assets/gamedata/highways.ini"));
+        assert_eq!(rails.len(), 382, "rail polylines {}", rails.len());
+        assert_eq!(roads_img.len(), 1477, "road polylines {}", roads_img.len());
         let (sx, sy) = rails[0][0];
         let (x, z) = svg_to_world(sx, sy);
         assert!((z - sx * 50.0).abs() < 0.5);
         assert!((x - (MAP_MAX - sy * 50.0)).abs() < 0.5);
-        assert!(railroads().lines.len() >= 10);
-        assert!(super::roads().lines.len() >= 20);
+        assert_eq!(railroads().lines.len(), 382);
+        assert_eq!(super::roads().lines.len(), 1477);
         let pose = railroads().lines[0].at(0.0).unwrap();
         assert!((pose.0 - x).abs() < 1.0);
         assert!((pose.1 - z).abs() < 1.0);
+    }
+
+    #[test]
+    fn bridge_point_is_on_a_highway_segment() {
+        let x = 165_033.0;
+        let z = 293_247.15;
+        let snap = roads().nearest(x, z).expect("highway network");
+        let d = (snap.x - x).hypot(snap.z - z);
+        assert!(
+            d < 1.0,
+            "bridge point is {d:.3} m from the nearest highways.ini segment (line {})",
+            snap.line
+        );
+
+        let route = RouteLayout {
+            rail: false,
+            behind: vec![40.0],
+            wp_ahead: vec![400.0],
+            zone_in_m: 0.0,
+        };
+        let aabb = WorldAabb::from_corners(80_000.0, 80_000.0, 300_000.0, 300_000.0);
+        let ((px, pz, _, _), pose) =
+            place_route(&route, aabb, 3, 1, &[], |px, pz| aabb.contains(px, pz))
+                .expect("truck column");
+        assert!(
+            !pose.rail,
+            "a truck column must use highways.ini, not railroads.ini"
+        );
+        assert!(
+            std::ptr::eq(network_for(false), roads()),
+            "non-train placement reads the highway network"
+        );
+        let road = roads().lines.get(pose.line).expect("road polyline");
+        let (lx, lz, _) = road.at(pose.lead_dist).expect("lead on the road");
+        assert!(
+            (px - lx).abs() < 1.0 && (pz - lz).abs() < 1.0,
+            "truck lead ({px:.2}, {pz:.2}) left the road centerline ({lx:.2}, {lz:.2})"
+        );
     }
 
     #[test]

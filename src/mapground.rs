@@ -47,6 +47,10 @@ pub const GROUP_DELAY_S: f64 = 0.5;
 /// Fallback when a template has no known gun script.
 pub const ARTY_OBJECTIVE_RADIUS: f64 = UNKNOWN_ARTILLERY_M;
 
+/// Road columns prefer to park this far inside the AO, including their vehicles
+/// and waypoints. No road in that inset falls back to the full box.
+const ROAD_AO_MARGIN_M: f64 = 10_000.0;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GroundKind {
     Armor,
@@ -590,7 +594,16 @@ pub fn place_ground_jobs(
         let mut pending_issue: Option<String> = None;
         if let Some(route) = &job.route {
             let prefer_side = |x: f64, z: f64| aabb.contains(x, z) && allowed(&side, x, z);
-            let placed = mapnet::place_route(route, aabb, opts.seed, i, &used, prefer_side);
+            let placed = if route.rail {
+                None
+            } else {
+                place_road_inside(route, aabb, &side, opts.seed, i, &used)
+            };
+            let placed = if placed.is_some() {
+                placed
+            } else {
+                mapnet::place_route(route, aabb, opts.seed, i, &used, prefer_side)
+            };
             let (placed, issue) = match placed {
                 Some(p) => (Some(p), None),
                 None => {
@@ -972,6 +985,49 @@ fn drop_near(pts: Vec<(f64, f64)>, used: &[(f64, f64)], min_d: f64) -> Vec<(f64,
     pts.into_iter()
         .filter(|&(x, z)| used.iter().all(|&(ux, uz)| dist2(x, z, ux, uz) >= m2))
         .collect()
+}
+
+fn ao_inset(aabb: WorldAabb, margin: f64) -> Option<WorldAabb> {
+    let shrunk = aabb.expanded(-margin);
+    (shrunk.x_min < shrunk.x_max && shrunk.z_min < shrunk.z_max).then_some(shrunk)
+}
+
+/// Lead, vehicles, and waypoints all inside `aabb`.
+fn column_inside(x: f64, z: f64, net: &NetworkSpot, aabb: WorldAabb) -> bool {
+    aabb.contains(x, z)
+        && net.unit_xz.iter().all(|&(px, pz)| aabb.contains(px, pz))
+        && net.waypoints.iter().all(|&(px, pz)| aabb.contains(px, pz))
+}
+
+/// A road column at least [`ROAD_AO_MARGIN_M`] inside the AO, on this side.
+/// Several seeds are tried so a long column can find a stretch that fits.
+fn place_road_inside(
+    route: &RouteLayout,
+    aabb: WorldAabb,
+    side: &LandSide,
+    seed: u64,
+    index: usize,
+    used: &[(f64, f64)],
+) -> Option<((f64, f64, f64, bool), NetworkSpot)> {
+    let inset = ao_inset(aabb, ROAD_AO_MARGIN_M)?;
+    let prefer = |x: f64, z: f64| inset.contains(x, z) && allowed(side, x, z);
+    for k in 0..8u64 {
+        let Some(placed) = mapnet::place_route(
+            route,
+            aabb,
+            seed.wrapping_add(k.wrapping_mul(97)),
+            index,
+            used,
+            &prefer,
+        ) else {
+            continue;
+        };
+        let ((x, z, _, _), net) = &placed;
+        if column_inside(*x, *z, net, inset) {
+            return Some(placed);
+        }
+    }
+    None
 }
 
 enum LandSide {
@@ -1749,6 +1805,13 @@ mod tests {
             "eastern column should sit north of the front unless flagged, x={} issue={:?}",
             s.x,
             s.issue
+        );
+        let inset = aabb.expanded(-ROAD_AO_MARGIN_M);
+        assert!(
+            column_inside(s.x, s.z, net, inset),
+            "truck route should keep a 10 km margin, lead=({}, {})",
+            s.x,
+            s.z
         );
     }
 

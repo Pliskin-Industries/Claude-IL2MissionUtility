@@ -64,8 +64,8 @@ use crate::mapground::{
 use crate::mapnet;
 use crate::mapshipping::{GROUP_DELAY_S, MapShipLayout, START_DELAY_S, ShipSpot, place_ships};
 use crate::pack::{
-    builtin_template, generate_pack_at, group_anchor_xz, is_linked_fighter_pack,
-    linked_group_count, park_rtbs, zone_in_radius,
+    builtin_template, generate_pack_at, group_anchor_xz, group_attack_orbit,
+    is_linked_fighter_pack, linked_group_count, park_rtbs, zone_in_radius,
 };
 use crate::parser::{parse_group_file, parse_il2_document};
 use crate::placement::PlaceOpts;
@@ -79,7 +79,7 @@ use crate::shell;
 use crate::template::{
     STRIKE_IP_M, STRIKE_START_M, StrikePose, StrikeTargetClass, TRAIN_ZONE_IN_M,
     place_flight_attack_areas, place_strike_at, separable_flight_attacks, strike_geometry,
-    strike_ip_toward, strike_pose_from_start, strike_side,
+    strike_ip_toward, strike_layout, strike_pose_from_start, strike_side, take_strike_missions,
 };
 use crate::terrain::HeightStore;
 use crate::theme::{self, c};
@@ -317,6 +317,8 @@ pub(super) struct MapForces {
     /// Drawn lines, only for Clear lines / salients / arrows; restored only when set.
     /// `ui.rs` reads this while settling undo, so the field is visible there.
     pub(super) lines: Option<MapLines>,
+    /// Previous AO box, set when that box was resized or reset.
+    ao: Option<WorldAabb>,
 }
 
 /// What Clear lines / salients / arrows can take away.
@@ -431,9 +433,14 @@ fn preview_dot_style(kind: PreviewKind, in_box: bool) -> (Color32, f32) {
         }
         PreviewKind::LinkedEntity => {
             let color = if in_box {
-                Color32::from_rgb(255, 140, 40) // Remains Orange
+                UNIT_ORANGE
             } else {
-                Color32::from_rgba_unmultiplied(255, 140, 40, 90)
+                Color32::from_rgba_unmultiplied(
+                    UNIT_ORANGE.r(),
+                    UNIT_ORANGE.g(),
+                    UNIT_ORANGE.b(),
+                    90,
+                )
             };
             (color, if in_box { 2.6 } else { 1.8 })
         }
@@ -1555,12 +1562,23 @@ fn draw_reference_overlays(painter: &egui::Painter, rect: Rect) {
     }
 }
 
-const STATUS_WARN: Color32 = Color32::from_rgb(220, 140, 40);
+/// Ring that ties a selected waypoint back to its unit and the rest of
+/// that unit's waypoints. The selected waypoint itself stays yellow.
+const UNIT_ORANGE: Color32 = Color32::from_rgb(255, 140, 40);
+
+/// Unit numbers and waypoint captions. Light and partly transparent, so
+/// the orange rings carry the selection. `draw_map_label` adds the shadow.
+// Unmultiplied (210, 210, 214, 180), stored premultiplied so it can be a const.
+const UNIT_LABEL: Color32 = Color32::from_rgba_premultiplied(148, 148, 151, 180);
+
+/// Right-bottom corner of a unit number, just outside a 26 px icon.
+/// Right-aligned so a second digit grows away from the artwork.
+const UNIT_NUM_AT: Vec2 = Vec2::new(-16.0, 16.0);
 
 /// Map line colours shared by the map and its legend (on screen only).
 const SALIENT_OUTLINE: Color32 = Color32::from_rgb(180, 180, 80);
 
-/// 50 % dark red / near-black, premultiplied (roads.svg / railroads.svg overlays).
+/// 50 % dark red / near-black, premultiplied (editor highway / railroad centerlines).
 const ROAD_LINE: Color32 = Color32::from_rgba_premultiplied(55, 9, 9, 128);
 
 const RAIL_LINE: Color32 = Color32::from_rgba_premultiplied(8, 8, 9, 128);
@@ -1578,6 +1596,11 @@ fn faction_map_color(eastern: bool) -> Color32 {
     if eastern { c::DPRK } else { c::NATO }
 }
 
+/// Fighter AttackArea ring: the side colour, lifted so a 1 px dash reads on terrain.
+fn fighter_orbit_color(eastern: bool) -> Color32 {
+    faction_map_color(eastern).lerp_to_gamma(Color32::WHITE, 0.4)
+}
+
 fn draw_world_line(painter: &egui::Painter, rect: Rect, pts: &[(f64, f64)], stroke: Stroke) {
     for w in pts.windows(2) {
         painter.line_segment(
@@ -1590,19 +1613,41 @@ fn draw_world_line(painter: &egui::Painter, rect: Rect, pts: &[(f64, f64)], stro
     }
 }
 
+/// Stroke the editor centerline. Vertices closer than 0.6 px are folded into
+/// one segment so a dense polyline stays a continuous road or rail, including
+/// bridge spans. Snap geometry is the full polyline.
 fn draw_network_lines(painter: &egui::Painter, rect: Rect, net: &mapnet::Network, stroke: Stroke) {
-    let pad = 8.0_f32;
-    let vis = rect.expand(pad);
+    let vis = rect.intersect(painter.clip_rect()).expand(8.0);
+    if !vis.is_positive() {
+        return;
+    }
     for line in &net.lines {
+        let nw = world_to_pos(rect, line.x_max, line.z_min);
+        let se = world_to_pos(rect, line.x_min, line.z_max);
+        if !vis.intersects(Rect::from_two_pos(nw, se)) {
+            continue;
+        }
+        let mut anchor: Option<Pos2> = None;
         let mut last: Option<Pos2> = None;
         for &(x, z) in &line.pts {
             let p = world_to_pos(rect, x, z);
-            if let Some(prev) = last {
-                if vis.intersects(Rect::from_two_pos(prev, p)) && prev.distance(p) >= 0.6 {
-                    painter.line_segment([prev, p], stroke);
-                }
-            }
             last = Some(p);
+            let Some(prev) = anchor else {
+                anchor = Some(p);
+                continue;
+            };
+            if prev.distance(p) < 0.6 {
+                continue;
+            }
+            if vis.intersects(Rect::from_two_pos(prev, p)) {
+                painter.line_segment([prev, p], stroke);
+            }
+            anchor = Some(p);
+        }
+        if let (Some(prev), Some(end)) = (anchor, last) {
+            if prev.distance(end) >= 0.05 && vis.intersects(Rect::from_two_pos(prev, end)) {
+                painter.line_segment([prev, end], stroke);
+            }
         }
     }
 }
@@ -1669,6 +1714,41 @@ fn draw_dashed_world_line(painter: &egui::Painter, rect: Rect, pts: &[(f64, f64)
                 stroke,
             );
         }
+    }
+}
+
+/// A thin dashed circle in world metres. Dashes stay about 6 px on screen.
+fn draw_dashed_world_circle(
+    painter: &egui::Painter,
+    rect: Rect,
+    x: f64,
+    z: f64,
+    radius_m: f64,
+    color: Color32,
+) {
+    let center = world_to_pos(rect, x, z);
+    let rim = world_to_pos(rect, x, z + radius_m);
+    let r_px = center.distance(rim);
+    if r_px < 4.0 {
+        return;
+    }
+    let dash_px = 6.0_f32;
+    let gap_px = 4.0_f32;
+    let n = ((std::f32::consts::TAU * r_px) / (dash_px + gap_px)).clamp(16.0, 240.0) as usize;
+    let step = std::f32::consts::TAU / n as f32;
+    let sweep = step * (dash_px / (dash_px + gap_px));
+    let stroke = Stroke::new(1.0_f32, color);
+    for i in 0..n {
+        let a0 = i as f32 * step;
+        let a1 = a0 + sweep;
+        let p = |a: f32| {
+            world_to_pos(
+                rect,
+                x + radius_m * f64::from(a.cos()),
+                z + radius_m * f64::from(a.sin()),
+            )
+        };
+        painter.line_segment([p(a0), p(a1)], stroke);
     }
 }
 
@@ -1756,6 +1836,7 @@ impl super::GroupGeneratorApp {
             mission_bank: self.map_mission_bank.clone(),
             missions: self.map_missions.clone(),
             lines: None,
+            ao: None,
         }
     }
 
@@ -1769,6 +1850,11 @@ impl super::GroupGeneratorApp {
             self.attack_drag = None;
             self.front_stroke = None;
             self.clear_redo_stack();
+        }
+        if let Some(ao) = f.ao {
+            self.front_aabb = ao;
+            self.map_drag_uv = None;
+            self.ao_drag_before = None;
         }
         self.map_ships = f.ships;
         self.map_ground_east = f.ground_east;
@@ -1792,6 +1878,7 @@ impl super::GroupGeneratorApp {
         self.ground_heading_drag = None;
         self.wp_drag = None;
         self.wp_selected = None;
+        self.route_focus = None;
         self.fighter_drag = None;
         self.objective_drag = None;
         self.reaim_map_ground();
@@ -1800,6 +1887,19 @@ impl super::GroupGeneratorApp {
     /// Call before a Map Clear / Remove so Ctrl Z can bring the forces back.
     fn record_map_undo(&mut self, label: String) {
         self.map_undo.record(label, self.map_forces());
+        self.map_undo_marks = self.drawn_marks.len();
+        self.map_last = MapAction::Clear;
+    }
+
+    /// Remember `before` as the AO box Ctrl Z should restore. No-op when the
+    /// box did not change. The snapshot keeps the forces as they are now.
+    fn record_ao_undo(&mut self, before: WorldAabb, label: &str) {
+        if before == self.front_aabb {
+            return;
+        }
+        let mut snapshot = self.map_forces();
+        snapshot.ao = Some(before);
+        self.map_undo.record(label, snapshot);
         self.map_undo_marks = self.drawn_marks.len();
         self.map_last = MapAction::Clear;
     }
@@ -2442,6 +2542,7 @@ impl super::GroupGeneratorApp {
         self.cancel_map_stroke();
         self.wp_selected = None;
         self.wp_drag = None;
+        self.route_focus = None;
         // The rest of a cancelled drag must not move the AO from a stale origin.
         self.map_drag_uv = None;
         self.map_drawing_mode = MapDrawingMode::None;
@@ -2889,6 +2990,7 @@ impl super::GroupGeneratorApp {
         self.ground_heading_drag = None;
         self.wp_drag = None;
         self.wp_selected = None;
+        self.route_focus = None;
     }
 
     fn map_forces_tab(&mut self, ui: &mut egui::Ui) {
@@ -3175,6 +3277,7 @@ impl super::GroupGeneratorApp {
                 self.ground_heading_drag = None;
                 self.wp_drag = None;
                 self.wp_selected = None;
+                self.route_focus = None;
             }
         }
         ui.add_space(8.0);
@@ -3976,8 +4079,11 @@ impl super::GroupGeneratorApp {
                             .on_disabled_hover_text("Unlock AO to reset the box")
                             .clicked()
                         {
+                            let before = self.front_aabb;
                             self.front_aabb = WorldAabb::full_map();
                             self.map_drag_uv = None;
+                            self.ao_drag_before = None;
+                            self.record_ao_undo(before, "Reset AO");
                         }
                     });
                     let lock = if self.ao_locked { "Unlock AO" } else { "Lock AO" };
@@ -4027,6 +4133,22 @@ impl super::GroupGeneratorApp {
             self.air_start_tex_east = Some(ctx.load_texture(
                 "air_start_dprk",
                 rasterize_svg(include_bytes!("../../assets/AirStartEastern.svg"), 128),
+                egui::TextureOptions::LINEAR,
+            ));
+        }
+        if self.strike_tex_nato.is_none() {
+            // Authored SVG: nose east of north, blue-green, ring included.
+            self.strike_tex_nato = Some(ctx.load_texture(
+                "nato_strike",
+                rasterize_svg(include_bytes!("../../assets/NATO_Strike.svg"), 128),
+                egui::TextureOptions::LINEAR,
+            ));
+        }
+        if self.strike_tex_east.is_none() {
+            // Authored SVG: nose west of north, red, ring included. No recolor, no turn.
+            self.strike_tex_east = Some(ctx.load_texture(
+                "eastern_strike",
+                rasterize_svg(include_bytes!("../../assets/Eastern_Strike.svg"), 128),
                 egui::TextureOptions::LINEAR,
             ));
         }
@@ -4594,9 +4716,10 @@ impl super::GroupGeneratorApp {
                 }
                 MapDrawingMode::None => {
                     if response.clicked_by(egui::PointerButton::Secondary) {
-                        if self.wp_selected.is_some() {
+                        if self.wp_selected.is_some() || self.route_focus.is_some() {
                             self.wp_selected = None;
                             self.wp_drag = None;
+                            self.route_focus = None;
                         } else if let Some((i, _)) = self.hit_mission(map_rect, pos) {
                             let name = self.map_missions[i].name.clone();
                             self.record_map_undo(format!("Removed {name}"));
@@ -4610,23 +4733,37 @@ impl super::GroupGeneratorApp {
                             .filter(|(h, _)| self.unit_hit_unlocked(h.is_ag()))
                         {
                             self.wp_selected = Some(hit);
+                            self.route_focus = Some(hit.0);
                             self.wp_drag = None;
                             self.ground_drag = None;
                             self.fighter_drag = None;
                             self.ship_drag = None;
                             self.objective_drag = None;
                             self.map_drag_uv = None;
+                        } else if let Some(hit) = self
+                            .hit_ground_spot(map_rect, pos)
+                            .filter(|h| self.unit_hit_unlocked(h.is_ag()))
+                        {
+                            self.route_focus = Some(hit);
+                            self.wp_selected = None;
+                            self.wp_drag = None;
                         } else if self.wp_selected.is_some()
-                            && self.hit_ground_spot(map_rect, pos).is_none()
                             && self.hit_ship_spot(map_rect, pos).is_none()
                             && self.hit_fighter_spot(map_rect, pos).is_none()
                             && self.hit_objective(map_rect, pos).is_none()
+                            && self.hit_air_start(map_rect, pos).is_none()
+                            && self.hit_mission(map_rect, pos).is_none()
                         {
                             if let Some((hit, wi)) = self.wp_selected {
                                 self.snap_ground_wp(hit, wi, x, z);
                             }
                             self.wp_selected = None;
                             self.wp_drag = None;
+                            self.route_focus = None;
+                        } else {
+                            self.wp_selected = None;
+                            self.wp_drag = None;
+                            self.route_focus = None;
                         }
                     }
                     if response.drag_started_by(egui::PointerButton::Primary) {
@@ -4640,6 +4777,7 @@ impl super::GroupGeneratorApp {
                             self.ground_drag = None;
                             self.wp_drag = None;
                             self.wp_selected = None;
+                            self.route_focus = None;
                             self.objective_drag = None;
                             self.map_drag_uv = None;
                         } else if let Some(i) = self.hit_fighter_spot(map_rect, pos) {
@@ -4648,6 +4786,7 @@ impl super::GroupGeneratorApp {
                             self.ground_drag = None;
                             self.wp_drag = None;
                             self.wp_selected = None;
+                            self.route_focus = None;
                             self.objective_drag = None;
                             self.map_drag_uv = None;
                         } else if let Some(hit) = self
@@ -4659,6 +4798,7 @@ impl super::GroupGeneratorApp {
                             self.ground_drag = None;
                             self.wp_drag = None;
                             self.wp_selected = None;
+                            self.route_focus = None;
                             self.objective_drag = None;
                             self.map_drag_uv = None;
                         } else if let Some(hit) = self
@@ -4666,6 +4806,7 @@ impl super::GroupGeneratorApp {
                             .filter(|(h, _)| self.unit_hit_unlocked(h.is_ag()))
                         {
                             self.wp_selected = Some(hit);
+                            self.route_focus = Some(hit.0);
                             self.wp_drag = Some(hit);
                             self.ground_drag = None;
                             self.fighter_drag = None;
@@ -4677,6 +4818,7 @@ impl super::GroupGeneratorApp {
                             .filter(|h| self.unit_hit_unlocked(h.is_ag()))
                         {
                             self.ground_drag = Some(hit);
+                            self.route_focus = Some(hit);
                             self.wp_drag = None;
                             self.wp_selected = None;
                             self.fighter_drag = None;
@@ -4690,6 +4832,7 @@ impl super::GroupGeneratorApp {
                             self.ground_drag = None;
                             self.wp_drag = None;
                             self.wp_selected = None;
+                            self.route_focus = None;
                             self.objective_drag = None;
                             self.map_drag_uv = None;
                         } else if let Some(hit) = self.hit_objective(map_rect, pos) {
@@ -4699,6 +4842,7 @@ impl super::GroupGeneratorApp {
                             self.ground_drag = None;
                             self.wp_drag = None;
                             self.wp_selected = None;
+                            self.route_focus = None;
                             self.map_drag_uv = None;
                         } else if let Some(sel) = self.wp_selected {
                             self.wp_drag = Some(sel);
@@ -4713,6 +4857,10 @@ impl super::GroupGeneratorApp {
                             self.ground_drag = None;
                             self.wp_drag = None;
                             self.objective_drag = None;
+                            self.route_focus = None;
+                            if self.ao_drag_before.is_none() {
+                                self.ao_drag_before = Some(self.front_aabb);
+                            }
                             self.map_drag_uv = Some(uv);
                         }
                     }
@@ -4864,6 +5012,15 @@ impl super::GroupGeneratorApp {
                         }
                     }
                     if response.drag_stopped() {
+                        // A click-and-drag already placed the waypoint. Leave
+                        // reposition mode so the next click does not move it.
+                        // The orange route highlight stays until another click or Esc.
+                        if self.wp_drag.is_some() {
+                            self.wp_selected = None;
+                        }
+                        if let Some(before) = self.ao_drag_before.take() {
+                            self.record_ao_undo(before, "Resized AO");
+                        }
                         self.fighter_drag = None;
                         self.ship_drag = None;
                         self.ground_drag = None;
@@ -5082,9 +5239,9 @@ impl super::GroupGeneratorApp {
                 .ground_spot_mut(hit)
                 .is_some_and(|s| s.network.is_some());
             let hint = if on_network {
-                "Click a road or railroad, any branch · right-click to cancel"
+                "Click a road or railroad, any branch · right-click or Esc to cancel"
             } else {
-                "Click dry land toward the objective · right-click to cancel"
+                "Click dry land toward the objective · right-click or Esc to cancel"
             };
             Some((
                 format!("Place unit {} WP{}", hit.spot_i() + 1, wi + 1),
@@ -5209,6 +5366,19 @@ impl super::GroupGeneratorApp {
             self.fighter_tex_nato.as_ref()
         };
         let size = Vec2::splat(26.0);
+        let ring = fighter_orbit_color(layout.eastern);
+        for spot in &layout.spots {
+            if spot.area_r > 0.0 {
+                draw_dashed_world_circle(
+                    painter,
+                    map_rect,
+                    spot.x + spot.area_dx,
+                    spot.z + spot.area_dz,
+                    spot.area_r,
+                    ring,
+                );
+            }
+        }
         // Paint angle 0: the SVG's diagonal stays (DPRK nose northwest, NATO northeast).
         for spot in &layout.spots {
             let pos = world_to_pos(map_rect, spot.x, spot.z);
@@ -5219,10 +5389,10 @@ impl super::GroupGeneratorApp {
             }
             draw_map_label(
                 painter,
-                pos + Vec2::new(-13.0, 13.0),
+                pos + UNIT_NUM_AT,
                 &spot.wave.to_string(),
-                Color32::WHITE,
-                Align2::LEFT_BOTTOM,
+                UNIT_LABEL,
+                Align2::RIGHT_BOTTOM,
             );
         }
     }
@@ -5261,14 +5431,10 @@ impl super::GroupGeneratorApp {
             };
             draw_map_label(
                 painter,
-                pos + Vec2::new(-13.0, 13.0),
+                pos + UNIT_NUM_AT,
                 &label,
-                if spot.in_ao {
-                    Color32::WHITE
-                } else {
-                    STATUS_WARN
-                },
-                Align2::LEFT_BOTTOM,
+                UNIT_LABEL,
+                Align2::RIGHT_BOTTOM,
             );
             if let Some(dir) = self.dir_tex.as_ref() {
                 let heading = spot.heading_deg.to_radians() as f32;
@@ -5712,8 +5878,22 @@ impl super::GroupGeneratorApp {
                     Align2::LEFT_TOP,
                 );
             }
-            painter.circle_filled(start, 8.0, color);
-            painter.circle_stroke(start, 8.0, Stroke::new(1.5_f32, Color32::WHITE));
+            let strike_tex = if mission.eastern {
+                self.strike_tex_east.as_ref()
+            } else {
+                self.strike_tex_nato.as_ref()
+            };
+            if let Some(tex) = strike_tex {
+                painter.image(
+                    tex.id(),
+                    Rect::from_center_size(start, Vec2::splat(26.0)),
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            } else {
+                painter.circle_filled(start, 8.0, color);
+                painter.circle_stroke(start, 8.0, Stroke::new(1.5_f32, Color32::WHITE));
+            }
             let heading = StrikePose {
                 target_x: mission.target_x,
                 target_z: mission.target_z,
@@ -5724,11 +5904,15 @@ impl super::GroupGeneratorApp {
             }
             .heading_deg()
             .to_radians();
-            let nose = start + Vec2::new(heading.sin() as f32, -heading.cos() as f32) * 16.0;
-            painter.line_segment([start, nose], Stroke::new(2.0_f32, Color32::WHITE));
+            // The icon fills the old circle. The heading tick starts outside it.
+            let dir = Vec2::new(heading.sin() as f32, -heading.cos() as f32);
+            painter.line_segment(
+                [start + dir * 15.0, start + dir * 24.0],
+                Stroke::new(2.0_f32, Color32::WHITE),
+            );
             draw_map_label(
                 painter,
-                start + Vec2::new(-8.0, 10.0),
+                start + Vec2::new(-16.0, 14.0),
                 &mission.name,
                 Color32::WHITE,
                 Align2::RIGHT_TOP,
@@ -5874,6 +6058,10 @@ impl super::GroupGeneratorApp {
             GroundHit::Army { slot, .. } => GroundHit::Army { slot, i },
         };
         for (i, spot) in layout.spots.iter().enumerate() {
+            let unit_hit = hit_for(i);
+            let route_on = self.route_focus == Some(unit_hit)
+                || self.ground_drag == Some(unit_hit)
+                || self.wp_selected.is_some_and(|(hit, _)| hit == unit_hit);
             let wps = spot.path_waypoints();
             if !wps.is_empty() {
                 let wp_color = match &spot.network {
@@ -5883,26 +6071,25 @@ impl super::GroupGeneratorApp {
                 };
                 for (wi, &(wx, wz)) in wps.iter().enumerate() {
                     let wpos = world_to_pos(map_rect, wx, wz);
-                    let selected = self.wp_selected == Some((hit_for(i), wi));
-                    let r = if selected { 7.0 } else { 5.0 };
+                    let selected = self.wp_selected == Some((unit_hit, wi));
+                    // The selected waypoint stays yellow. The rest of its route
+                    // takes the same ring, in orange, so the unit is obvious.
+                    let linked = route_on && !selected;
+                    let r = if selected || linked { 7.0 } else { 5.0 };
                     painter.circle_filled(wpos, r, wp_color);
-                    painter.circle_stroke(
-                        wpos,
-                        r,
-                        Stroke::new(
-                            if selected { 2.0_f32 } else { 1.2_f32 },
-                            if selected {
-                                Color32::from_rgb(255, 255, 120)
-                            } else {
-                                Color32::from_rgb(255, 230, 180)
-                            },
-                        ),
-                    );
+                    let (width, ring) = if selected {
+                        (2.0_f32, Color32::from_rgb(255, 255, 120))
+                    } else if linked {
+                        (2.0_f32, UNIT_ORANGE)
+                    } else {
+                        (1.2_f32, Color32::from_rgb(255, 230, 180))
+                    };
+                    painter.circle_stroke(wpos, r, Stroke::new(width, ring));
                     draw_map_label(
                         painter,
                         wpos + Vec2::new(7.0, -6.0),
                         &format!("{} WP{}", i + 1, wi + 1),
-                        Color32::from_rgb(255, 230, 180),
+                        UNIT_LABEL,
                         Align2::LEFT_BOTTOM,
                     );
                 }
@@ -5926,6 +6113,10 @@ impl super::GroupGeneratorApp {
                     );
                 }
             }
+            if route_on {
+                // Same stroke weight as a selected waypoint, sized to the icon.
+                painter.circle_stroke(pos, 18.0, Stroke::new(2.0_f32, UNIT_ORANGE));
+            }
             let label = if problem {
                 format!("{}!", i + 1)
             } else {
@@ -5933,10 +6124,10 @@ impl super::GroupGeneratorApp {
             };
             draw_map_label(
                 painter,
-                pos + Vec2::new(-13.0, 13.0),
+                pos + UNIT_NUM_AT,
                 &label,
-                if problem { STATUS_WARN } else { Color32::WHITE },
-                Align2::LEFT_BOTTOM,
+                UNIT_LABEL,
+                Align2::RIGHT_BOTTOM,
             );
             if let Some(dir) = self.dir_tex.as_ref() {
                 let heading = spot.heading_deg.to_radians() as f32;
@@ -6143,6 +6334,7 @@ impl super::GroupGeneratorApp {
                     self.ground_heading_drag = None;
                     self.wp_drag = None;
                     self.wp_selected = None;
+                    self.route_focus = None;
                 }
                 Err(err) => {
                     self.status = Status::Error(err);
@@ -6154,6 +6346,7 @@ impl super::GroupGeneratorApp {
         notes.push("Left-drag to move, right-drag to set heading. Click a WP, then click a road, rail, or dry land to place it.".into());
         self.wp_drag = None;
         self.wp_selected = None;
+        self.route_focus = None;
         self.set_place_status(notes, warnings);
     }
 
@@ -6505,6 +6698,7 @@ impl super::GroupGeneratorApp {
         self.ground_heading_drag = None;
         self.wp_drag = None;
         self.wp_selected = None;
+        self.route_focus = None;
         self.set_place_status(notes, warnings);
     }
 
@@ -6732,7 +6926,8 @@ impl super::GroupGeneratorApp {
             self.linked_groups as usize,
             self.fighter_fill,
         ) {
-            Ok(layout) => {
+            Ok(mut layout) => {
+                Self::stamp_fighter_orbits(&mut layout.spots, &template, false);
                 // One fighter layout at a time: placing again replaces it, undoably.
                 if self.map_fighters.is_some() || !self.map_imported_fighters.is_empty() {
                     self.record_map_undo("Replaced the placed fighters".into());
@@ -6812,7 +7007,9 @@ impl super::GroupGeneratorApp {
                 return;
             }
         };
-        let layout = full_pack_spots(&placed.spots, eastern, self.fighter_waves as usize, groups);
+        let mut layout =
+            full_pack_spots(&placed.spots, eastern, self.fighter_waves as usize, groups);
+        Self::stamp_fighter_orbits(&mut layout.spots, &entity, true);
         if layout.spots.is_empty() {
             self.status = Status::Error(format!(
                 "The coalition zone is too small for this {groups}-group pack. Enlarge the AO."
@@ -6866,6 +7063,27 @@ impl super::GroupGeneratorApp {
         self.map_fighters = Some(layout);
         self.map_imported_fighters = imported;
         self.fighter_drag = None;
+    }
+
+    /// `per_slot` uses each Group N's AttackArea. A fresh placement clones Group 1.
+    fn stamp_fighter_orbits(
+        spots: &mut [FighterSpot],
+        root: &crate::ast::Il2Entity,
+        per_slot: bool,
+    ) {
+        let group1 = group_attack_orbit(root, 1);
+        for spot in spots {
+            let orbit = if per_slot {
+                group_attack_orbit(root, spot.slot).or(group1)
+            } else {
+                group1
+            };
+            if let Some((dx, dz, r)) = orbit {
+                spot.area_dx = dx;
+                spot.area_dz = dz;
+                spot.area_r = r;
+            }
+        }
     }
 
     fn load_fighter_template(&self) -> Result<crate::ast::Il2Entity, String> {
@@ -7103,7 +7321,7 @@ impl super::GroupGeneratorApp {
             legend_line(ui, RAIL_LINE, false, "Railroad");
             legend_swatch(ui, Color32::from_rgb(240, 220, 80), "Major battle");
             legend_swatch(ui, Color32::from_rgb(30, 90, 220), "Airfield");
-            legend_swatch(ui, Color32::from_rgb(255, 140, 40), "Linked entity");
+            legend_swatch(ui, UNIT_ORANGE, "Linked entity");
             legend_swatch(ui, BLOCK_DOT, "Block");
         });
     }
@@ -7628,20 +7846,65 @@ impl super::GroupGeneratorApp {
         self.ground_heading_drag = None;
         self.wp_drag = None;
         self.wp_selected = None;
+        self.route_focus = None;
+        self.map_missions.clear();
+        self.mission_drag = None;
+        self.mission_place = None;
+        self.mission_snap.clear();
         let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("BaseMap");
+        let mut strike_n = 0usize;
         for army in imported.armies {
-            let copies = inspect_army_copies(&army.entity);
+            let (eastern, name, entity) = (army.eastern, army.name, army.entity);
+            let entity = match take_strike_missions(entity) {
+                Ok(taken) => {
+                    for group in taken.groups {
+                        let Some(layout) = strike_layout(&group, taken.packed) else {
+                            continue;
+                        };
+                        let attacks = layout
+                            .attacks
+                            .into_iter()
+                            .map(|(ordinal, lead_name, x, z)| FlightAim {
+                                ordinal,
+                                lead_name,
+                                x,
+                                z,
+                                label: "Custom".into(),
+                                class: None,
+                            })
+                            .collect();
+                        self.map_missions.push(PlacedMission {
+                            name: layout.name,
+                            eastern: !layout.western,
+                            root: group,
+                            target_x: layout.target.0,
+                            target_z: layout.target.1,
+                            start_x: layout.start.0,
+                            start_z: layout.start.1,
+                            ip_x: layout.ip.0,
+                            ip_z: layout.ip.1,
+                            target_label: "Custom".into(),
+                            target_class: None,
+                            attacks,
+                        });
+                        strike_n += 1;
+                    }
+                    continue;
+                }
+                Err(entity) => entity,
+            };
+            let copies = inspect_army_copies(&entity);
             if copies.is_empty() {
                 continue;
             }
-            let slot_path = path.with_file_name(format!("{stem}-{}.Group", army.name));
+            let slot_path = path.with_file_name(format!("{stem}-{name}.Group"));
             self.map_armies.push(MapArmySlot {
                 path: slot_path,
-                entity: army.entity,
-                eastern: army.eastern,
+                entity,
+                eastern,
                 reposition: false,
                 copies,
                 ground: None,
@@ -7658,15 +7921,21 @@ impl super::GroupGeneratorApp {
             let eastern = self.map_imported_fighters[0].eastern;
             let mut spots = Vec::new();
             for (pack_i, pack) in self.map_imported_fighters.iter().enumerate() {
+                let mut pack_spots = Vec::new();
                 for (slot_i, &(x, z)) in pack.spots.iter().enumerate() {
-                    spots.push(FighterSpot {
+                    pack_spots.push(FighterSpot {
                         x,
                         z,
                         wave: pack.wave,
                         pack: pack_i as u32,
                         slot: (slot_i + 1) as u32,
+                        area_dx: 0.0,
+                        area_dz: 0.0,
+                        area_r: 0.0,
                     });
                 }
+                Self::stamp_fighter_orbits(&mut pack_spots, &pack.root, true);
+                spots.extend(pack_spots);
             }
             self.map_fighters = Some(MapFighterLayout { eastern, spots });
         }
@@ -7693,6 +7962,12 @@ impl super::GroupGeneratorApp {
             .sum::<usize>();
         if units > 0 {
             parts.push(format!("{units} unit group(s) at exported positions"));
+        }
+        if strike_n > 0 {
+            parts.push(format!(
+                "{strike_n} strike mission{}",
+                if strike_n == 1 { "" } else { "s" }
+            ));
         }
         let fighters = self
             .map_fighters

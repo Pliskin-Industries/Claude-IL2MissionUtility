@@ -3,7 +3,11 @@
 //! Clones each loaded `.Group` as its own plan and wires a NodeGates mutex
 //! so one plan's trigger checkzones close the others; the chosen end timer
 //! (`END`, `MISSION END`, or a timer that pulses Delete/Deactivate on the
-//! template's units) reopens the remaining zones. Multiple `Zone IN` MCUs
+//! template's units) reopens the remaining zones. The same trigger starts a
+//! 3 hour `{n} WINDOW` in NodeGates. If the plan never finishes, that window
+//! pulses the end timer, which cleans the flight up and reopens the other
+//! plans. A normal finish deactivates the window so it cannot fire later.
+//! Multiple `Zone IN` MCUs
 //! in one template (B-29 corridor) count as a single plan. It does not
 //! author unit logic — templates come from Template Builder — and it does
 //! not configure aircraft (`flights` / Fighter Pack are a different mutex).
@@ -32,6 +36,8 @@ use crate::placement;
 /// Names the linker auto-selects. Use these in new templates to skip the picker.
 pub const SUGGESTED_TRIGGER_NAMES: &str = "Zone IN or MISSION START";
 pub const SUGGESTED_END_NAMES: &str = "END or MISSION END";
+/// An MP mission is built for a 3 hour window. The gate timer uses seconds.
+pub const MISSION_WINDOW_S: f64 = 3.0 * 60.0 * 60.0;
 
 #[derive(Debug, Clone)]
 pub struct McuChoice {
@@ -75,6 +81,10 @@ struct GateCell {
     fanout_disable: Il2Entity,
     open_zones: Il2Entity,
     close_zones: Il2Entity,
+    /// Starts when this plan triggers. Pulses the plan's end timer at 3 hours.
+    window: Il2Entity,
+    /// The end timer deactivates `window` so a finished plan cannot fire it later.
+    window_off: Il2Entity,
 }
 
 impl GateCell {
@@ -88,6 +98,8 @@ impl GateCell {
             self.fanout_disable,
             self.open_zones,
             self.close_zones,
+            self.window,
+            self.window_off,
         ]
     }
 }
@@ -350,17 +362,23 @@ pub fn link_bomber_plans_placing(
         cells.push(cell);
     }
 
-    for (i, (plan, cell)) in copies.iter_mut().zip(cells.iter()).enumerate() {
+    for (i, (plan, cell)) in copies.iter_mut().zip(cells.iter_mut()).enumerate() {
         let out_disable = cell.out_disable.index.unwrap();
         let out_enable = cell.out_enable.index.unwrap();
+        let window = cell.window.index.unwrap();
+        let window_off = cell.window_off.index.unwrap();
         let triggers = &mapped_triggers[i];
         let completion = mapped_completion[i];
+        cell.window.set_targets(vec![completion]);
+        cell.window_off.set_targets(vec![window]);
         plan.for_each_mut(&mut |e| {
             if e.index.is_some_and(|id| triggers.contains(&id)) {
                 e.append_target(out_disable);
+                e.append_target(window);
             }
             if e.index == Some(completion) {
                 e.append_target(out_enable);
+                e.append_target(window_off);
             }
         });
     }
@@ -435,6 +453,20 @@ fn build_gate_cell(
     set_pos(&mut open_zones, x + dx, y, z + 40.0);
     set_pos(&mut close_zones, x + dx, y, z + 80.0);
 
+    let mut window = clone_named(proto_timer, next_id, &format!("{n} WINDOW"));
+    window.set_property("Time", format!("{:.0}", MISSION_WINDOW_S));
+    window.set_property("Random", "100");
+    window.set_targets(vec![]);
+    window.set_objects(vec![]);
+    set_pos(&mut window, x + dx, y, z + 120.0);
+    let mut window_off = match proto_deactivate {
+        Some(proto) => clone_named(proto, next_id, &format!("{n} WINDOW OFF")),
+        None => synthesize_mcu("MCU_Deactivate", next_id, &format!("{n} WINDOW OFF")),
+    };
+    window_off.set_targets(vec![]);
+    window_off.set_objects(vec![]);
+    set_pos(&mut window_off, x + dx, y, z + 160.0);
+
     Ok(GateCell {
         in_enable,
         in_disable,
@@ -444,6 +476,8 @@ fn build_gate_cell(
         fanout_disable,
         open_zones,
         close_zones,
+        window,
+        window_off,
     })
 }
 
@@ -1160,6 +1194,28 @@ mod tests {
             out.find_by_name("DPRK Bombers - Small Formation [2]")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn mission_window_is_three_hours_and_cancels_on_completion() {
+        let out = link_bomber_plans(&[input("dprk", dprk()), input("dprk", dprk())]).unwrap();
+        let gates = out.find_by_name("NodeGates").unwrap();
+        let window = gates.find_by_name("1 WINDOW").unwrap();
+        let off = gates.find_by_name("1 WINDOW OFF").unwrap();
+        assert_eq!(window.block_type, "MCU_Timer");
+        assert_eq!(window.property("Time"), Some("10800"));
+        assert_eq!(off.block_type, "MCU_Deactivate");
+        assert_eq!(off.targets, vec![window.index.unwrap()]);
+        let start = all_named(&out, "MISSION START")
+            .into_iter()
+            .find(|e| e.targets.contains(&window.index.unwrap()))
+            .expect("trigger starts the window");
+        let cleanup = all_named(&out, "MISSION CLEAN UP (2m)")
+            .into_iter()
+            .find(|e| e.targets.contains(&off.index.unwrap()))
+            .expect("completion cancels the window");
+        assert_eq!(window.targets, vec![cleanup.index.unwrap()]);
+        assert!(start.targets.contains(&window.index.unwrap()));
     }
 
     #[test]

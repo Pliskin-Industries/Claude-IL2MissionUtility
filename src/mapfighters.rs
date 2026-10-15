@@ -40,6 +40,11 @@ pub struct FighterSpot {
     pub pack: u32,
     /// 1-based `Group N` index inside that pack.
     pub slot: u32,
+    /// AttackArea center relative to this spot (the group's Zone IN).
+    pub area_dx: f64,
+    pub area_dz: f64,
+    /// AttackArea radius in metres. Zero draws no circle.
+    pub area_r: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -379,6 +384,9 @@ fn deal_spots(mut pts: Vec<(f64, f64)>, waves: usize, groups_per_wave: usize) ->
                     wave,
                     pack,
                     slot: (slot + 1) as u32,
+                    area_dx: 0.0,
+                    area_dz: 0.0,
+                    area_r: 0.0,
                 });
             }
             pack += 1;

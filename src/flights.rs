@@ -3,7 +3,8 @@
 //! Rebuilds **Group 1** from Template Builder pair logic (Independent
 //! seats, OnSpawned → AttackArea lead / Cover wing including leftover
 //! and extra pair leads, events → that plane’s Mission Complete →
-//! Force Complete / RTB / deactivate for that bird only, AI RTB off,
+//! Force Complete / RTB / deactivate for that bird only, OnKilled
+//! pulses that plane’s Delay Delete so a kill counts once, AI RTB off,
 //! Spawn + repeat) then injects the fighter-pack randomizer, per-flight
 //! spawners / DeathCounts, pack hook names, finger-four placement, and
 //! GUI altitude / timer / identity settings. Zones stay
@@ -440,6 +441,11 @@ fn install_pack_logic(
         cfg.delete_orders,
         &mut next_id,
     )?;
+    // OnKilled and the wounded/critical cleanup both reach Delay Delete.
+    // A timer pulsed again while it runs restarts and fires once, so a kill
+    // increments DeathCount once. Pointing OnKilled at DeathCount directly
+    // counts the same aircraft twice.
+    point_kills_at_own_delay(group, &entity_ids, sizes, &death_ids);
 
     let mut enable = clone_mcu(&proto_act, &mut next_id, "Enable Spawner");
     enable.set_targets(vec![zone_in_id]);
@@ -896,6 +902,51 @@ fn install_plane_ends(
         group.children.push(wps);
     }
     Ok(())
+}
+
+fn point_kills_at_own_delay(
+    group: &mut Il2Entity,
+    entity_ids: &[i32],
+    sizes: &[usize],
+    death_ids: &[i32],
+) {
+    let killed = EntityEvent::OnKilled.type_id();
+    let delay_ids: Vec<Option<i32>> = entity_ids
+        .iter()
+        .enumerate()
+        .map(|(si, _)| {
+            group
+                .find_by_name(&format!("Delay Delete {}", si + 1))
+                .and_then(|e| e.index)
+        })
+        .collect();
+    let Some(units) = group.find_by_name_mut("Units") else {
+        return;
+    };
+    for (si, &eid) in entity_ids.iter().enumerate() {
+        let Some(death_id) = flight_of_seat(sizes, si).and_then(|f| death_ids.get(f).copied())
+        else {
+            continue;
+        };
+        let Some(delay_id) = delay_ids.get(si).copied().flatten() else {
+            continue;
+        };
+        for node in &mut units.children {
+            if node.block_type != "MCU_TR_Entity" || node.index != Some(eid) {
+                continue;
+            }
+            node.for_each_mut(&mut |e| {
+                if e.block_type != "OnEvent" {
+                    return;
+                }
+                let typ = e.property("Type").and_then(|s| s.parse::<i32>().ok());
+                let tar = e.property("TarId").and_then(|s| s.parse::<i32>().ok());
+                if typ == Some(killed) && tar == Some(death_id) {
+                    e.set_property("TarId", delay_id.to_string());
+                }
+            });
+        }
+    }
 }
 
 fn flight_of_seat(sizes: &[usize], si: usize) -> Option<usize> {
@@ -1660,6 +1711,65 @@ mod tests {
             .pos_xz()
             .unwrap();
         assert!((plane_wp.0 - dest.0).abs() < 0.5 && (plane_wp.1 - dest.1).abs() < 0.5);
+    }
+
+    #[test]
+    fn killed_plane_ticks_delay_delete_once() {
+        let cfg = FlightConfig {
+            flight_count: 1,
+            max_in_flight: 4,
+            type_ids: vec!["mig15bis".into()],
+            ..FlightConfig::default()
+        };
+        let g1 = configured(cfg).find_by_name("Group 1").unwrap().clone();
+        let death = g1
+            .find_by_name("Logic")
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.name() == Some("DeathCount"))
+            .unwrap()
+            .index
+            .unwrap();
+        let entities: Vec<i32> = g1
+            .find_by_name("Units")
+            .unwrap()
+            .children
+            .iter()
+            .filter(|c| c.block_type == "MCU_TR_Entity")
+            .filter_map(|c| c.index)
+            .collect();
+        assert_eq!(entities.len(), 4);
+        for (si, eid) in entities.iter().enumerate() {
+            let delay = g1
+                .find_by_name(&format!("Delay Delete {}", si + 1))
+                .unwrap();
+            assert!(
+                delay.targets.contains(&death),
+                "Delay Delete is the only feed into DeathCount"
+            );
+            let mut killed = None;
+            g1.for_each(&mut |e| {
+                if e.index != Some(*eid) {
+                    return;
+                }
+                for wrap in &e.children {
+                    if wrap.block_type != "OnEvents" {
+                        continue;
+                    }
+                    for ev in &wrap.children {
+                        if ev.block_type == "OnEvent" && ev.property("Type") == Some("13") {
+                            killed = ev.property("TarId").and_then(|s| s.parse().ok());
+                        }
+                    }
+                }
+            });
+            assert_eq!(
+                killed,
+                Some(delay.index.unwrap()),
+                "OnKilled pulses this aircraft's Delay Delete, not DeathCount"
+            );
+        }
     }
 
     #[test]

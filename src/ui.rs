@@ -49,7 +49,7 @@ use crate::aircraft::{
 use crate::airfield::AirfieldInfo;
 use crate::airstart::{AirStartField, AirStartPlane, PlacedAirStart};
 use crate::bombers::{
-    BomberInput, BomberPlanInfo, SUGGESTED_END_NAMES, SUGGESTED_TRIGGER_NAMES,
+    BomberInput, BomberPlanInfo, MISSION_WINDOW_S, SUGGESTED_END_NAMES, SUGGESTED_TRIGGER_NAMES,
     extract_exclusive_plans, inspect_plan, link_bomber_plans_with, looks_like_exclusive_pack,
 };
 use crate::duplicate::apply_overrides;
@@ -327,6 +327,9 @@ struct GroupGeneratorApp {
     map_target_cache: std::cell::RefCell<Option<map::TargetScan>>,
     air_start_tex_nato: Option<TextureHandle>,
     air_start_tex_east: Option<TextureHandle>,
+    /// `assets/NATO_Strike.svg` / `Eastern_Strike.svg`, as drawn.
+    strike_tex_nato: Option<TextureHandle>,
+    strike_tex_east: Option<TextureHandle>,
     harvest_missions_dir: String,
     harvest_db_dir: String,
     harvest_cfg: HarvestConfig,
@@ -342,6 +345,8 @@ struct GroupGeneratorApp {
     /// Load base map can still restore a saved box.
     ao_locked: bool,
     map_drag_uv: Option<Pos2>,
+    /// The AO box at the start of an unlocked empty-map drag, so release can undo it.
+    ao_drag_before: Option<WorldAabb>,
     map_lo_tex: Option<TextureHandle>,
     map_hi_tex: Option<TextureHandle>,
     map_rx: Option<std::sync::mpsc::Receiver<KoreaMapLayer>>,
@@ -419,6 +424,8 @@ struct GroupGeneratorApp {
     ground_heading_drag: Option<GroundHit>,
     wp_drag: Option<(GroundHit, usize)>,
     wp_selected: Option<(GroundHit, usize)>,
+    /// Ground unit whose waypoints stay highlighted until another click.
+    route_focus: Option<GroundHit>,
     front_focus: Option<&'static str>,
     help_open: bool,
     help_topic: HelpTopic,
@@ -594,6 +601,8 @@ impl Default for GroupGeneratorApp {
             map_target_cache: std::cell::RefCell::new(None),
             air_start_tex_nato: None,
             air_start_tex_east: None,
+            strike_tex_nato: None,
+            strike_tex_east: None,
             harvest_missions_dir: DEFAULT_MISSIONS_DIR.to_string(),
             harvest_db_dir: DEFAULT_DB_DIR.to_string(),
             harvest_cfg: HarvestConfig::default(),
@@ -605,6 +614,7 @@ impl Default for GroupGeneratorApp {
             front_aabb: WorldAabb::full_map(),
             ao_locked: false,
             map_drag_uv: None,
+            ao_drag_before: None,
             map_lo_tex: None,
             map_hi_tex: None,
             map_rx: None,
@@ -672,6 +682,7 @@ impl Default for GroupGeneratorApp {
             ground_heading_drag: None,
             wp_drag: None,
             wp_selected: None,
+            route_focus: None,
             front_focus: None,
             help_open: false,
             help_topic: HelpTopic::Overview,
@@ -1268,7 +1279,10 @@ impl GroupGeneratorApp {
             AppMode::Map => {
                 // Lines count too when the snapshot holds them (a line Clear).
                 // Drawings with their own undo rebase it instead (`note_map_drawing`).
+                // The AO box counts so a resize replaces the previous undo, and a
+                // later edit drops a resize undo instead of restoring a stale box.
                 let lines = self.map_undo.peek().is_some_and(|f| f.lines.is_some());
+                let ao = self.front_aabb;
                 let fp = hash(format!(
                     "{:?}",
                     (
@@ -1291,6 +1305,7 @@ impl GroupGeneratorApp {
                             &self.salients,
                             &self.attack_arrows
                         )),
+                        (ao.x_min, ao.x_max, ao.z_min, ao.z_max),
                     )
                 ));
                 self.map_undo.settle(fp);
@@ -2681,7 +2696,8 @@ impl GroupGeneratorApp {
                 })
                 .response
                 .on_hover_text(format!(
-                    "A timer named {SUGGESTED_END_NAMES} is picked automatically."
+                    "A timer named {SUGGESTED_END_NAMES} is picked automatically. Triggering the plan also starts a {:.0} hour window in NodeGates. If the plan never finishes, that window pulses this timer.",
+                    MISSION_WINDOW_S / 3600.0
                 ));
             if let Some(id) = slot.selected_completion {
                 if let Some(msg) = slot.info.cleanup_warnings.get(&id) {

@@ -29,7 +29,9 @@
 - `build.rs` embeds `assets/models/*.png` into `model_spec` (deduped
   identical bytes). Do not parse model images at runtime.
 - Assets in `assets/`: unit SVG icons, Korea map JPEGs, `Models.Group`
-  (+ language sidecars), `Payloads.txt`, `roads.svg` / `railroads.svg`,
+  (+ language sidecars), `Payloads.txt`, `gamedata/highways.ini` /
+  `gamedata/railroads.ini` (road and rail centerlines), `roads.svg` /
+  `railroads.svg` (on disk, not the placement network),
   `combined_terrain.bin`, and per-model PNGs under `assets/models/`.
 
 ## Files
@@ -180,7 +182,10 @@ warnings), detects already-generated packs (`looks_like_exclusive_pack`,
 `extract_exclusive_plans` — strips NodeGates links and `[n]`/`*n*`
 suffixes), and `link_bomber_plans` / `link_bomber_plans_with` write a
 file where only one plan activates at a time (NodeGates mutex; optional
-in-place keep-positions). Multiple `Zone IN` MCUs in one template count
+in-place keep-positions). Triggering a plan also starts `{n} WINDOW`
+(`MISSION_WINDOW_S`, 3 hours) in NodeGates. The window pulses that plan's
+end timer; the end timer deactivates `{n} WINDOW OFF` so a finished plan
+cannot fire the window later. Multiple `Zone IN` MCUs in one template count
 as a single plan. Map export calls the same linker, positions kept, when more
 than one strike is placed. `SUGGESTED_TRIGGER_NAMES` / `SUGGESTED_END_NAMES`.
 **Exclusive mode, Map.**
@@ -201,7 +206,8 @@ Rebuilds **Group 1** from Template Builder pair logic (Independent
 seats, OnSpawned → AttackArea lead / Cover wing, leftover and extra
 pair leads each get their own AttackArea, events → that plane’s
 Mission Complete → Force Complete / RTB / deactivate for that bird
-only, AI RTB off, Spawn + repeat) then injects the pack randomizer
+only, OnKilled → that plane’s Delay Delete → the flight DeathCount,
+AI RTB off, Spawn + repeat) then injects the pack randomizer
 (`Random i:pct%` → `Out i` → `Spawn i`, 500 ms equal-odds waterfall),
 per-flight DeathCount, pack hooks (`Enable Spawner` / `Disable Spawner`
 / `Delete Orders`; the reinforcement timer is omitted), finger-four placement,
@@ -282,14 +288,14 @@ rules (`can_extend_salient`, `can_extend_west_east`).
 polygon (spread across the whole zone, including narrow parts; waves
 split the spots evenly; optional AO fill at Zone In spacing; 8-pack cap).
 `full_pack_spots` keeps complete copies of a loaded N-group pack.
-`MapFighterLayout` / `FighterSpot` (wave/pack/slot), `rtb_ao_point`
+`MapFighterLayout` / `FighterSpot` (wave/pack/slot, AttackArea offset and radius), `rtb_ao_point`
 (friendly-rear AO corner closer to the group), `country_for_coalition`
 (eastern keeps a 500-series setpoint or 501; NATO is always 601),
 `MAX_PACKS` = 8. **Map mode.**
 
 ### `mapground.rs` — ground unit placement
 `place_ground` / `place_ground_jobs` park armor/supply/artillery on
-dry open terrain, infantry on any dry land (not water), and trains/columns on roads or rails (`mapnet`).
+dry open terrain, infantry on any dry land (not water), and trains/columns on roads or rails (`mapnet`). Truck columns prefer a stretch at least 10 km inside the AO when one fits.
 `GroundKind`, `GroundJob` (optional `RouteLayout` + weapon range),
 `GroundSpot` (pos, heading, network pose, hashed objective, in-AO,
 soft `issue`), `MapGroundLayout`, `START_DELAY_S` / `GROUP_DELAY_S`,
@@ -312,9 +318,11 @@ use `geo::cities_on_map`, and user reference groups go through
 `frontlines::MapRefGroup`. **Map (future / tests).**
 
 ### `mapnet.rs` — road & railroad network
-Korea road/rail polylines parsed from mission-editor SVGs
-(`assets/roads.svg`, `assets/railroads.svg`) into world X/Z (50 m per
-SVG unit, `svg_to_world`). Owns the whole network-placement pipeline:
+Korea road/rail polylines parsed from the editor road INIs
+(`assets/gamedata/highways.ini`, `assets/gamedata/railroads.ini`; nom,
+in `mapnet/ini.rs`) into world X/Z (50 m per image unit, `svg_to_world`).
+Bridge tags stay on the centerline. `roads.svg` / `railroads.svg` are
+not loaded. Owns the whole network-placement pipeline:
 `Network`/`PolyLine` (arc-length indexed lines, `nearest` point
 snapping), `RouteLayout` (extracted from authored groups by
 `inspect_route` — trains → rail; roads require a detected perfect
@@ -387,7 +395,7 @@ cell by one shared delta. `generate_pack` (grid; root name
 `{nation} Fighters Npack - Linked` from the planes' country),
 `generate_pack_at`
 (explicit positions), `builtin_template` (bundled 3pack V6),
-`park_rtbs`, `zone_in_radius` (used by Map UI). `inspect_pack` /
+`park_rtbs`, `zone_in_radius` (used by Map UI), `group_attack_orbit` (AttackArea offset from Zone IN plus radius). `inspect_pack` /
 `PackInfo` and `group_anchor_xz` are for tests / internal parking
 (`inspect_pack` is `#[allow(dead_code)]` from ui.rs's point of view).
 **Fighter Pack, Map.**
@@ -475,18 +483,22 @@ plus `PULSE OUT`, Activate or Spawn bring-up: `Trigger Spawner` +
 `Modifier Set Value` + `Reset Counter`), and the `MISSION END` →
 `MISSION END ORDERS` (→ `Force Complete - High`, optional `RTB DELAY` →
 `RTB East/West n` per coalition/group) + `DELAYED END ORDERS` (60 s
-with RTB, 2 s without) → `Deactivate Units` → `DELETE DELAY` →
-`Trigger Delete` cleanup hub. `Units` = cloned object + `MCU_TR_Entity`
+with RTB, 2 s without) → `Deactivate Units`. Spawn mode then runs
+`DELETE DELAY` → `Trigger Delete`, object-linked to each unit's
+`MCU_TR_Entity` (the unit block index is ignored). Activate mode does
+not write those two MCUs. `DeathCount` listens for `OnKilled` (13) on
+every unit; Korea does not raise `OnPlaneDestroyed` (4). `Units` = cloned object + `MCU_TR_Entity`
 pairs (wingmen target-linked to their lead; `AiRTBDecision` /
 `StartType` written only when the prototype has the key — writing them
 on a Vehicle breaks mission-editor parsing); `Orders` = command MCUs
 (one MCU shared across `shared_with` seats; ground AttackArea sits at
 the group origin); `Waypoints` = `WP n` hops along +X at 4 km (300 m
 area for planes, 100 m ground, unclamped speed, 0 m altitude for
-ground, per-hop altitude/priority override, optional north/east offset and a `loop_to` back to an earlier WP). `apply_mission_package` fills a CAP diamond or a strike (V-Form, 8 km IP, 3 km AttackArea for 2 min, home waypoint, Mission Complete). A new aircraft with no prototype height starts at 1500 m airstart; strike forces that height. `zone_out_enabled` false keeps Zone Out from running MISSION END. An event-owned Goto also pulses Force Complete; a report may still chain into that same Goto. Goto WP
+ground, per-hop altitude/priority override, optional north/east offset and a `loop_to` back to an earlier WP). `apply_mission_package` fills a CAP diamond or a strike (formation by aircraft role, 8 km IP, 3 km AttackArea for 2 min, Time on Target in parallel for the same 2 min, home waypoint, Mission Complete). A new aircraft with no prototype height starts at 1500 m airstart; strike forces that height. `zone_out_enabled` false keeps Zone Out from running MISSION END. An `All destroyed` event ticks one `ALL DESTROYED` counter (Dropcount 0) that pulses MISSION END once every such attacker is gone. CAP and Strike add `OnKilled` → All destroyed on each aircraft, and they do not abort on bingo fuel. Abort events that Then a Goto pulse `Go Home Once` (Counter 1, Dropcount 0), which pulses that Goto timer once per flight. An event-owned Goto also pulses Force Complete, unless arrival at that waypoint starts Mission Complete — then the Goto timer pulses only the waypoint, and Force Complete runs from MISSION END after the flight is home. A report or Time on Target may still chain into that same Goto. Goto WP
 delays pulse only the WP MCU; on arrival the WP pulses Attack /
-AttackArea and Time on Target in parallel (list order doesn't matter),
-and TOT expiry continues the chain. Seat model + bookkeeping:
+AttackArea and Time on Target in parallel (list order doesn't matter,
+including a report stacked between them), and TOT expiry continues the
+chain even when abort events also Then that next order. Seat model + bookkeeping:
 `TemplateSeat` / `CatalogUnit` / `FlightRole` / `PlaneStart`,
 `append_seat` / `replace_seat_unit` / `copy_seat_attributes` /
 `move_seat`, `apply_plane_start` / `AIR_START_ALTITUDE_M` (airstart
