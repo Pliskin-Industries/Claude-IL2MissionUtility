@@ -1,4 +1,4 @@
-//! One-use Activate sortie shells (flights 1G, 1J, 1P; decision 0017).
+//! One-use Activate sortie shells (decisions 0017/0018).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -98,6 +98,10 @@ fn remove_ids(root: &mut Il2Entity, removed: &BTreeSet<i32>) {
 /// This removes unreachable cycles too, unlike an incoming-degree sweep.
 fn strip(root: &mut Il2Entity, shape: &SortieShape) {
     recon::silence_clone_starts(root);
+    // Decision 0018: keep the enemy-seen check, but cut its template start
+    // and self-deactivation links before the orphan sweep.
+    by_id_mut(root, shape.zone_in).unwrap()
+        .set_targets(vec![shape.zone_out_activate, shape.zone_out_pulse]);
     by_id_mut(root, shape.zone_out).unwrap().set_targets(vec![]);
     root.for_each_mut(&mut |node| {
         if node.index.is_some_and(|id| shape.planes.contains(&id)) {
@@ -115,6 +119,7 @@ fn strip(root: &mut Il2Entity, shape: &SortieShape) {
         .collect();
     let mut pending = vec![
         shape.bring_up_timer,
+        shape.zone_in,
         shape.zone_out,
         shape.zone_out_activate,
         shape.zone_out_pulse,
@@ -183,6 +188,7 @@ pub fn wrap_sortie(
         .collect();
     if [
         shape.bring_up_timer,
+        shape.zone_in,
         shape.zone_out,
         shape.zone_out_activate,
         shape.zone_out_pulse,
@@ -286,11 +292,19 @@ pub fn wrap_sortie(
         .unwrap()
         .append_target(ids["DELETE DELAY"]);
     let wp = by_id_mut(&mut copy, shape.path_waypoints[&shape.navigation_lead]).unwrap();
-    wp.append_target(shape.zone_out_activate);
-    wp.append_target(shape.zone_out_pulse);
+    wp.append_target(shape.zone_in);
+    let radius = by_id(&copy, shape.zone_out).property("Zone")
+        .ok_or_else(|| format!("Air Tasking {prefix}: Zone Out has no Zone radius"))?
+        .to_owned();
+    for zone_id in [shape.zone_in, shape.zone_out] {
+        let zone = by_id_mut(&mut copy, zone_id).unwrap();
+        placement::set_coord(zone, "XPos", spec.target.0);
+        placement::set_coord(zone, "ZPos", spec.target.1);
+    }
+    // Keep the template name, as for Zone Out: this is the same retained MCU.
+    let zone_in = by_id_mut(&mut copy, shape.zone_in).unwrap();
+    zone_in.set_property("Zone", radius);
     let zone = by_id_mut(&mut copy, shape.zone_out).unwrap();
-    placement::set_coord(zone, "XPos", spec.target.0);
-    placement::set_coord(zone, "ZPos", spec.target.1);
     zone.set_targets(vec![ids["DONE HUB"]]);
     let mut single_use_outs = Vec::new();
     match spec.zone_out {
@@ -573,10 +587,10 @@ mod tests {
     }
 
     #[test]
-    fn shell_strips_zone_in_and_start() {
+    fn shell_keeps_zone_in_and_strips_start() {
         for f in fixtures() {
+            assert_eq!(by_id(&f.root, f.shape.zone_in).name(), Some("Zone IN"));
             for name in [
-                "Zone IN",
                 "ENABLE / PULSE IN",
                 "COOLDOWN",
                 "Zone In ReActivate",
@@ -682,16 +696,33 @@ mod tests {
     }
 
     #[test]
-    fn shell_wp1_arms_zone_out() {
+    fn shell_wp1_pulses_zone_in() {
         for f in fixtures() {
             let wp = by_id(&f.root, f.shape.path_waypoints[&f.shape.navigation_lead]);
-            assert!(wp.targets.contains(&f.shape.zone_out_activate));
-            assert!(wp.targets.contains(&f.shape.zone_out_pulse));
-            assert_eq!(by_id(&f.root, f.shape.zone_out).pos_xz(), Some(TARGET));
-            assert_eq!(
-                number(by_id(&f.root, f.shape.zone_out), "Zone").unwrap(),
-                35000.0
-            );
+            assert!(wp.targets.contains(&f.shape.zone_in));
+            assert!(!wp.targets.contains(&f.shape.zone_out_activate));
+            assert!(!wp.targets.contains(&f.shape.zone_out_pulse));
+            let zone_in = by_id(&f.root, f.shape.zone_in);
+            assert_eq!(zone_in.targets, [f.shape.zone_out_activate, f.shape.zone_out_pulse]);
+            assert_eq!(incoming(&f.root, f.shape.zone_in), BTreeSet::from([wp.index.unwrap()]));
+            assert_eq!(incoming(&f.root, f.shape.zone_out_activate), BTreeSet::from([f.shape.zone_in]));
+            assert_eq!(incoming(&f.root, f.shape.zone_out_pulse), BTreeSet::from([f.shape.zone_in]));
+            assert_eq!(by_id(&f.root, f.shape.zone_out_activate).targets, [f.shape.zone_out]);
+            assert_eq!(by_id(&f.root, f.shape.zone_out_pulse).targets, [f.shape.zone_out]);
+            assert_eq!(number(by_id(&f.root, f.shape.zone_out_pulse), "Time").unwrap(), 0.1);
+            assert!(!f.logic.init_off.contains(&f.shape.zone_in));
+            let root = runtime(&f, false);
+            assert!(!nodes(&root).iter().any(|node| node.block_type == "MCU_Deactivate"
+                && (node.targets.contains(&f.shape.zone_in) || node.objects.contains(&f.shape.zone_in))));
+            assert_eq!(f.root.count_block_type("MCU_CheckZone"), 2);
+            for (zone, closer) in [(f.shape.zone_in, "1"), (f.shape.zone_out, "0")] {
+                let zone = by_id(&f.root, zone);
+                assert_eq!(zone.pos_xz(), Some(TARGET));
+                assert_eq!(number(zone, "Zone").unwrap(), 35_000.0);
+                assert_eq!(zone.property("Closer"), Some(closer));
+                assert_eq!(zone.property("PlaneCoalitions"),
+                    Some(if f.shape.side == AirSide::Nato { "[1]" } else { "[2]" }));
+            }
         }
     }
 
@@ -729,7 +760,7 @@ mod tests {
             }
             assert_eq!(f.logic.hot_consumers[&1], [f.ids.hot]);
             assert_eq!(f.logic.cold_consumers[&1], [f.ids.cold]);
-            assert_eq!(f.root.count_block_type("MCU_CheckZone"), 1);
+            assert_eq!(f.root.count_block_type("MCU_CheckZone"), 2);
         }
     }
 
@@ -790,9 +821,13 @@ mod tests {
         let shape = inspect_sortie(&original).unwrap();
         let mut stripped = original.clone();
         strip(&mut stripped, &shape);
-        assert_eq!(mcus(&original) - mcus(&stripped), 9);
+        assert_eq!(mcus(&original) - mcus(&stripped), 8);
         let f = fixture(original, Strategies::default());
         assert_eq!(mcus(&f.root) - mcus(&stripped), 19 + 1);
+        assert_eq!(mcus(&f.root), 43);
+        let mut without_zone_in = f.root.clone();
+        remove_ids(&mut without_zone_in, &BTreeSet::from([f.shape.zone_in]));
+        assert_eq!(mcus(&without_zone_in), 42); // decision 0017
         assert!(f.root.find_by_name("RTB 1").is_some());
     }
 
@@ -803,10 +838,14 @@ mod tests {
         let rtb = shape.rtb_timer.unwrap();
         let mut stripped = original.clone();
         strip(&mut stripped, &shape);
-        assert_eq!(mcus(&original) - mcus(&stripped), 8);
+        assert_eq!(mcus(&original) - mcus(&stripped), 7);
         let f = fixture(original, Strategies::default());
         assert_eq!(f.shape.rtb_timer, Some(rtb));
         assert_eq!(mcus(&f.root) - mcus(&stripped), 18 + 1); // one lead lacked RTB
+        assert_eq!(mcus(&f.root), 47);
+        let mut without_zone_in = f.root.clone();
+        remove_ids(&mut without_zone_in, &BTreeSet::from([f.shape.zone_in]));
+        assert_eq!(mcus(&without_zone_in), 46); // decision 0017
         assert_eq!(
             nodes(&f.root)
                 .iter()
@@ -1007,7 +1046,7 @@ mod tests {
             by_id(&f.root, f.shape.zone_out).property("Closer"),
             Some("1")
         );
-        assert_eq!(f.root.count_block_type("MCU_CheckZone"), 1);
+        assert_eq!(f.root.count_block_type("MCU_CheckZone"), 2);
         assert_eq!(
             by_id(&f.root, f.shape.zone_out).targets,
             [shell_id(&f, "WATCHDOG")]
@@ -1094,6 +1133,76 @@ mod tests {
             assert_eq!(times(&log, f.ids.delete_timer), [ticks(963.1)]);
             assert!(active(&log, f.ids.flying, ticks(963.05)));
             assert!(!active(&log, f.ids.flying, ticks(963.1)));
+        }
+    }
+
+    #[test]
+    fn shell_empty_target_stays_on_station() {
+        let f = fixture(builtin(1), Strategies::default());
+        let mut script = input(&f, 2200.0, Some(302.0));
+        script.tracks.clear();
+        for config in configs() {
+            let log = walk(&runtime(&f, false), config, &script);
+            assert!(times(&log, f.shape.zone_in).is_empty());
+            assert!(times(&log, f.shape.zone_out).is_empty());
+            assert_eq!(times(&log, f.ids.cold), [ticks(902.5)]);
+            assert_eq!(times(&log, f.ids.done_hub), [ticks(902.5)]);
+            assert_eq!(times(&log, f.ids.delete_timer), [ticks(963.1)]);
+        }
+    }
+
+    fn enemy_window(f: &Fixture, first_s: u32, leave_s: u32) -> WalkerInput {
+        let mut script = input(f, 2200.0, Some(302.0));
+        // A track is absent before its first sample. Its last sample stays
+        // outside the zone; samples in between are exactly one second apart.
+        script.tracks[0].samples = (first_s..=leave_s).map(|second| {
+            (ticks(f64::from(second)), TARGET.0 + if second == leave_s { 40_000.0 } else { 0.0 }, TARGET.1)
+        }).collect();
+        script
+    }
+
+    #[test]
+    fn shell_enemy_present_at_arrival_then_leaves() {
+        let f = fixture(builtin(1), Strategies::default());
+        let script = enemy_window(&f, 0, 482);
+        for config in configs() {
+            let log = walk(&runtime(&f, false), config, &script);
+            assert_eq!(times(&log, f.shape.zone_in), [ticks(302.0)]);
+            assert_eq!(times(&log, f.shape.zone_out_pulse), [ticks(302.1)]);
+            assert_eq!(times(&log, f.shape.zone_out), [ticks(482.0)]);
+            assert_eq!(times(&log, f.ids.done_hub), [ticks(482.0)]);
+            assert_eq!(times(&log, f.ids.cold), [ticks(902.5)]);
+        }
+    }
+
+    #[test]
+    fn shell_enemy_arrives_after_then_leaves() {
+        let f = fixture(builtin(1), Strategies::default());
+        let script = enemy_window(&f, 422, 602);
+        for config in configs() {
+            let log = walk(&runtime(&f, false), config, &script);
+            assert_eq!(times(&log, f.shape.zone_in), [ticks(422.0)]);
+            assert_eq!(times(&log, f.shape.zone_out_pulse), [ticks(422.1)]);
+            assert_eq!(times(&log, f.shape.zone_out), [ticks(602.0)]);
+            assert_eq!(times(&log, f.ids.done_hub), [ticks(602.0)]);
+            assert_eq!(times(&log, f.ids.cold), [ticks(902.5)]);
+        }
+    }
+
+    #[test]
+    fn shell_hot_empty_target_extends_once() {
+        let f = fixture(builtin(1), Strategies::default());
+        let mut script = input(&f, 2200.0, Some(302.0));
+        script.tracks.clear();
+        for config in configs() {
+            let log = walk(&runtime(&f, true), config, &script);
+            assert!(times(&log, f.shape.zone_in).is_empty());
+            assert!(times(&log, f.shape.zone_out).is_empty());
+            assert!(times(&log, f.ids.cold).is_empty());
+            assert_eq!(times(&log, f.ids.hot), [ticks(902.5)]);
+            assert_eq!(times(&log, shell_id(&f, "EXTEND")), [ticks(1502.5)]);
+            assert_eq!(times(&log, f.ids.done_hub), [ticks(1502.5)]);
+            assert_eq!(times(&log, shell_id(&f, "HARD STOP")), [ticks(2102.0)]);
         }
     }
 

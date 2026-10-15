@@ -31,3 +31,7 @@ Flight 0's cell T-z had recorded that an empty `Closer 0` zone does not fire on 
 - Per copy: 20 MCUs (was 19) and 2 check zones (was 1). At 24 copies per side that is 96 check zones per mission, above the plan's rough warning level of 40 (D36); the load test measures what that costs.
 - **AI counts as seen**, not only players (flight 0, risk a). An enemy Air Tasking sortie passing near the target keeps this sortie on station until it leaves. Filtering to players needs the country filter of decision 0008 and is left to step 4.
 - An empty target now holds the sortie for its full on-station time, then `COLD` ends it or `HOT` extends it once.
+
+## Correction added 2026-10-14 (MCU counts)
+
+The first Consequences line above says "20 MCUs (was 19)". That was Claude's wording error, caught by the implementer: the shell's count tests measure the MCUs the shell adds, and keeping Zone IN removes one template MCU fewer rather than adding one. Correct: the shell still adds 19 MCUs to a wrapped HVAR copy (18 with a template RTB timer) and removes 8 template MCUs (was 9; 7 with a template RTB timer, was 8), so each copy holds one MCU more than under decision 0017, and 2 check zones. Details: `handoff/P14-step-3c-count-correction.md`.

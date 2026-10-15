@@ -105,7 +105,10 @@ on-station timing, HOT/COLD extension, a FLYING budget flag, and one OnKilled
 (13) hook per aircraft into LOSSES. It replaces any template Delete chain
 with its own 0.5 s DELETE DELAY and entity-linked DELETE, then registers
 lifecycle events in `SideLogic`. `ShellSpec` supplies timing and strategy
-choices; `ShellIds` supplies cross-builder connection points. Decision 0017.
+choices; `ShellIds` supplies cross-builder connection points. Decisions 0017/0018.
+WP 1 pulses the retained Zone IN at the target; only an enemy seen there arms
+Zone Out. Both zones use Zone Out's radius. Empty targets complete their
+on-station time, then COLD ends the sortie or HOT extends it once.
 **Air Tasking generation.**
 
 ### `airtask/budget.rs` — per-side live-copy census
