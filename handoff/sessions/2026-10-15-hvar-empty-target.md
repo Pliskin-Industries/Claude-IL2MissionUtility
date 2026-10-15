@@ -119,3 +119,32 @@ So options A, A′, B and C (the order) and the weight hypothesis are set aside.
 | I | **Accept**: the AI's own formation flying; `LOSSES` already ends a sortie that loses every aircraft | none | 0 | Losses continue at an unknown rate on a healthy server |
 
 Proposed next probe (flight 2D, not built): the same empty targets with `FormationDensity` 0, 1 and 2 (and, if useful, Pairs), with few enough aircraft that the server shows no overload message (first find that count with one short run), flown twice with Tacview. Count close passes under 20 m and collisions per variant.
+
+## Flight 2D design (proposed 2026-10-15; waits for the user's go-ahead)
+
+**What `FormationDensity` means.** The repository does not say. The game's own editor does: `game\bin\editor\IL2Editor.exe` holds the Formation command's labels "Formation Density:" and the list **Dense, Safe, Loose**, right after the formation-type names. By the list's order, 0 = Dense, 1 = Safe, 2 = Loose (inference from the order; not checked in the editor's window). The spacing each gives in metres is not known; flight 2D measures it from Tacview. The repository's own files use 1 for bombers (`BomberMissions/DPRK Bombers - Small Formation.Group`, Heavy Wedge) and 1–2 for vehicle columns; Template Builder writes 0 for every air formation.
+
+**Cells.** One HVAR 4-ship each (template as shipped, only its one Formation command changed), 16 AI aircraft in all, a third of flight 2C's 48. No spawn, no enemy, areas COLD.
+
+| Cell | Formation | Density | Target (flight 2C cell, settled height above ground there) | START |
+|---|---|---|---|---|
+| D0 | 20 Wedge | 0 Dense (control, as shipped) | (185, −90) km (C1b, 498–580 m) | 60 s |
+| D1 | 20 Wedge | 1 Safe | (230, −90) km (C2c, 543–565 m) | 120 s |
+| D2 | 20 Wedge | 2 Loose | (185, −45) km (C2b, 567–722 m) | 180 s |
+| DP | 19 Pairs | 0 Dense | (230, 45) km (C1c, 616–643 m) | 240 s |
+
+- The four targets were picked from flight 2C because their flights settled at a similar height above ground, so the place does not stand in for the formation (flight 2C showed the place sets the height).
+- Starts 60 s apart: subtitles give the aircraft count at each start (4, 8, 12, 16), and the host notes the first time "server overload" shows. That gives the test bed's limit without a separate run. If it shows, the run is marked overloaded.
+- The host leaves at 15:00, as in flight 2C. Every copy is then at least 373 s on station.
+- **Fly it three times**, with Tacview, so each formation has three sorties. Per run about 16 minutes if the server keeps up.
+
+**What to read, per cell and run:** losses (`AType:3`, `AID:-1`); from Tacview the distance from each wingman to its nearest neighbour (median, 5th percentile) in transit, descent and on station; seconds under 20 m (counted as in flight 2C).
+
+**Readings.**
+- D0 has close passes or collisions on a healthy server, and D1 or D2 has none: a looser density is the fix (option G); changing the templates or Template Builder's 0 is the user's ruling.
+- D0 has no close passes either: the overload was the likely cause (option H), not the formation.
+- Three sorties per cell are too few to rank collisions (flight 2C lost aircraft in 4 of 24 sortie-runs); the spacing and the close passes are the measure, the collisions only a check.
+- Every cell has close passes: density does not help; Pairs, or option I (accept).
+- If the overload message shows before DP starts, the run tells the limit but not the answer; fly the next run with fewer cells.
+
+Prompt for Astra: `handoff/P14-flight-2d-codex-prompt.md`.
