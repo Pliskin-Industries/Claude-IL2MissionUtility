@@ -467,6 +467,25 @@ So event 13 fires for a crash with no damage and no attacker. The crash was an i
 1. **Zone Out on an empty target. Ruled 2026-10-14, decision 0018:** a sortie stays on station at an empty target; Zone Out ends it only after an enemy has been seen inside (the template's Zone IN is kept for that). Flight 2B re-flies the sortie cells. The original note: As built, a sortie whose target has no enemy aircraft within 35 km ends on arrival. Either that is intended (a sortie only stays while there is something to fight), or Zone Out should only end a sortie after an enemy has been seen inside it, which costs MCUs. Flight 2 could not test the on-station part of the shell either way: a re-fly needs an enemy AI flight over each target (AI aircraft trigger check zones, flight 0).
 2. **The load file** (24 copies per side) was not flown here: this PC is a test bed, not the real host. It went to the upstream author, who hosts the server: https://github.com/eszyman/IL2MissionUtility/issues/2 (mission text log and Tacview recording requested).
 
+## Flight 2B (decision 0018: Zone Out only after an enemy is seen) — 2026-10-14, session `2026-10-14_23-34-26`
+
+Step 3c probe `P14_Probe_2B_traced` (`handoff/p14-probes/flight2b/`), built from `codex/p14-3b` (`336997b`) as `P14_Probe_2B_20261014` without the resaver, hosted by the game client on the second PC (game `261013`). Nobody spawned. The mission ended at 31:17, after the 30:00 close, when the game left the server; not reloaded. Logs: `src/testdata/missionlog/real_20/` (65 files). Replay: no dead links. Every input that can end a sortie carries a breadcrumb, so each `DONE HUB` below has a logged cause.
+
+| Cell | Setup | `START` | WP 1 | Zone IN | `DONE HUB` and its cause | `DELETE DELAY` | Result |
+|---|---|---|---|---|---|---|---|
+| T-s1 HVAR | empty target, area HOT from 10:00 | 01:00.0 | 05:46.8 | never | 25:47.3, **`EXTEND`** (on station to 15:47.3, then one 600 s extension) | 26:47.9 | **as decision 0018 intends** |
+| T-s2 AirAlert | empty target, area COLD | 01:30.0 | 06:09.1 | never | 24:10.1, **`COLD`** (on station 1,080 s from the second attack timer, 06:10.1) | 25:10.7 | **as intended**; both AttackArea timers fired (06:09.6, 06:10.1; D28) |
+| T-s3 HVAR | DPRK AI pair over the target from 00:30, deleted 09:46.0 | 02:00.0 | 06:46.3 | 06:46.3 (enemy already inside) | 09:46.02, **Zone Out**, 0.02 s after the enemy was deleted | 10:46.6 | **as intended** |
+| T-s4 HVAR | DPRK AI pair appears 09:16.0, deleted 12:16.0 | 02:30.0 | 07:15.6 | 09:16.04, when the enemy appeared | 12:16.02, **Zone Out**, 0.02 s after the enemy was deleted | 13:16.6 | **as intended** |
+
+- **Decision 0018 works in the game on all four paths.** An empty target holds the sortie for its on-station time, then `COLD` ends it or `HOT` extends it once. An enemy seen on arrival, or later, arms Zone Out, which ends the sortie when the enemy is gone. Zone IN pulsed by WP 1 fires within the tick when the enemy is already inside.
+- Transit to WP 1: 286.8, 286.3 and 285.6 s for the HVARs, 279.1 s for AirAlert, as in flight 2.
+- **No fight.** The DPRK pairs (8,000 m, `Engageable = 0`, orbit 18–22 km from the attack point) and the sorties never fired at each other: no kill has an attacker. The `Behaviour` `Filter = 8` is still not understood; the separation alone may be what kept them apart.
+- After each `DONE HUB`, the cell's other end-of-station pulse (`COLD` or `EXTEND`) reached a closed hub and did nothing.
+- **Deletion works:** no sortie or enemy aircraft is in the end-of-mission list.
+- **New: T-s1 lost two of its four F-80Cs on station with no enemy and no attacker.** Red 12 was destroyed at 09:19.0 at 247 m (its pilot bailed out at 09:20.8; the aircraft hit the ground at 09:25.1). Red 13 was destroyed at 09:55.7 at 28.6 m, on the ground. That is 3.5 and 4.1 minutes after arriving, while the AttackArea order was active over an empty target. The other HVARs were on station 3 minutes (T-s3) and 5 minutes (T-s4) with no loss. The cause is not known: the text log has no aircraft positions, and this PC records no Tacview (`tacviewrecord = 0`). Two losses of four did not reach `LOSSES` (Counter 4), as designed.
+- **Still not seen:** what the aircraft do during the extension (risk v), whether they really attack anything on an empty AttackArea, and the turn for home. These need a Tacview recording.
+
 ## Step 0 after the flights of 2026-10-12 to 2026-10-14
 
 | Risk | Answer | From |
@@ -489,5 +508,7 @@ So event 13 fires for a crash with no damage and no attacker. The crash was an i
 | new | the head-count budget works in the game as `budget.rs` writes it, at N = 2 and N = 1; two same-tick requests both pass an open gate (the documented overshoot), and the next recount keeps the gates shut until both copies are deleted | flight 2 |
 | new | a sortie whose target has no enemy aircraft within 35 km ends at WP 1 arrival (Zone Out fires at once); the shell's own Delete removes all its aircraft 60.6 s after `DONE HUB` | flight 2 |
 | g, again | event 13 fires once for a crash with no damage and no attacker (event 2 first); events 0 and 5 do not | flight 2 |
+| new | decision 0018 works on all four paths: an empty target holds a sortie for its on-station time (`COLD` ends it, `HOT` extends it once); an enemy seen on arrival or later arms Zone Out, which ends the sortie 0.02 s after the enemy is gone | flight 2B |
+| new | an HVAR F-80C 4-ship on an AttackArea over an empty target lost two aircraft to crashes in its first 4 minutes on station, with no attacker; the cause is not known | flight 2B |
 
 Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.
