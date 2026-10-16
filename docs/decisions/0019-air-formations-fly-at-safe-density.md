@@ -1,8 +1,8 @@
-# 0019. AI flights fly their formation at density 1 (Safe), not 0 (Dense)
+# 0019. Every AI air formation flies at density 1 (Safe) until Dense is fixed
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-15
-- **Decided by:** open; the user rules. Proposed by Claude from flights 2C and 2D
+- **Decided by:** the user ("Every formation needs safe until Dense is 'fixed'"; options A, B and C), on Claude's proposal from flights 2C and 2D
 
 ## Context
 
@@ -17,25 +17,28 @@ Flight 2D, three runs:
 | Wedge, 2 Loose | about 500 m | 0, 0, 0 | none |
 | Pairs, 0 Dense | about 50–80 m | 13, 26, 26 | two aircraft in one run |
 
-Every one of the six built-in sorties (`TemplateExamples/Historical1950/`) flies density 0: four in Wedge, two (Yak raid, F-51 ArmedRecon) in Pairs. Template Builder writes 0 for every air formation (`src/template.rs`, `air_form`).
+Before this decision every one of the six built-in sorties (`TemplateExamples/Historical1950/`) flew density 0 (four Wedge, two Pairs), and Template Builder wrote 0 for every air formation (`src/template.rs`, `air_form`).
 
-## Decision (proposed)
+## Decision
 
-Air formations fly at `FormationDensity = 1` (Safe). The user picks where it applies:
+Every AI air formation the app writes or places flies at `FormationDensity = 1` (Safe):
 
-1. **Air Tasking's placed copies only:** the shell sets density 1 on each copy's Formation commands, as it already sets `AiRTBDecision = 0` (decision 0015). No curated file or generator output changes. 0 MCUs. **Recommended first step.**
-2. **The six built-in files:** set density 1 in their nine Formation commands. Changes what Template Builder users get from those files (decision D28 kept the curated files out of scope; STATE "Waiting on the user" item 3 already asks about editing them).
-3. **Template Builder's default for air formations** (`air_form` density 0 → 1): changes every generated air group's output file.
+- **A. Air Tasking** sets density 1 on every Formation command of each copy it places, whatever its source template says (as it sets `AiRTBDecision = 0`, decision 0015). 0 MCUs.
+- **B. The six built-in sorties** carry density 1 in all nine of their Formation commands.
+- **C. Template Builder** writes density 1 by default for every air formation (`air_form`). Ground (vehicle) formations keep their values.
 
-## Rejected (proposed)
+This stands until the game's Dense formation is fixed. The collision is drafted as a game bug in `handoff/il2-bug-report-drafts.md`; when a game update fixes it, a new record can supersede this one.
 
-- **Density 2 (Loose).** Also clean, but about 500 m apart the flight no longer looks or acts like a formation; Safe is the smallest change that removed every close pass.
+## Rejected
+
+- **Density 2 (Loose).** Also clean, but about 500 m apart the flight no longer flies as a formation; Safe is the smallest change that removed every close pass.
+- **Only one of A, B, C.** The user wants every formation safe: A alone leaves the files and Template Builder Dense; B or C alone leaves a user template placed by Air Tasking Dense.
 - **Accept the losses (option I).** Two of three healthy-server runs lost two aircraft in the as-shipped Dense Wedge.
-- **Fewer aircraft per server (option H).** Flight 2D lost aircraft at Dense with no overload, so overload is not the cause.
-- **Change the attack order or the payload (options A, A′, B, C).** Flight 2C showed they do not affect the losses.
+- **Fewer aircraft per server (option H).** Flight 2D lost aircraft at Dense with no overload.
+- **Change the attack order or the payload (options A, A′, B, C of the options note).** Flight 2C showed they do not affect the losses.
 
 ## Consequences
 
-- Three runs per cell are few: zero collisions at Safe is not proof it never collides. The spacing (closest 27 m against 4 m at Dense) is the stronger evidence. A later flight with more sorties at Safe would confirm it.
-- Option 1 needs a shell change and tests (each copy's Formation commands); the frozen probe files of flights 0 to 2D do not change.
-- Pairs at Dense flew closest of all; option 1 would also move the Yak and ArmedRecon copies to Safe.
+- **Generated files change on purpose:** every air group Template Builder writes and the six example files now say `FormationDensity = 1`. This overrides the rule that Generate writes the same files for the same inputs, for this one property.
+- Flown probe files built from the Dense originals must still regenerate byte for byte or be frozen, as flight 2 was under decision 0018.
+- Evidence covers F-80C Wedges only. Pairs at Safe and the propeller types (F-51, Yak, Il-10) are not flown yet; a confirming flight should cover them.
