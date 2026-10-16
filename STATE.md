@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-16, after decision 0019 (every AI air formation at Safe density) was built.
+> Last updated: 2026-10-16, after probe flight 2E (decision 0019's confirming flight) was built.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -24,6 +24,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | `codex/p14-2c` | `.claude/worktrees/adoring-mahavira-fad55e` | `codex/p14-3b` plus the HVAR options note (`claude/p14-hvar-empty-target`), probe flight 2C (built by Astra, reviewed) and its results. 645 passed, 0 failed, 22 ignored; 69 / 251 warnings; 52 flown probe files byte-identical. Not merged. |
 | `codex/p14-2d` | `.claude/worktrees/distracted-taussig-b9259d` | `codex/p14-2c` plus probe flight 2D (built by Astra, reviewed), its results and proposed decision 0019. 651 passed, 0 failed, 23 ignored; 69 / 251 warnings; 56 flown probe files byte-identical. Not merged. |
 | `claude/formation-safe-0019` | `.claude/worktrees/distracted-taussig-b9259d` | `codex/p14-2d` plus **decision 0019 built** (`077e14b`): every AI air formation at `FormationDensity = 1` in Air Tasking placement, the six built-ins, Template Builder and every copy path; bug-report drafts. 663 passed, 0 failed, 23 ignored; 69 / 251 warnings; 40 flown probe files byte-identical (1M, 2B, 2C, 2D now frozen like flight 2). Not merged. |
+| `claude/p14-flight-2e` | `.claude/worktrees/eloquent-lumiere-a004d5` | `claude/formation-safe-0019` plus **probe flight 2E built** (Astra, reviewed): four built-ins as shipped at Safe (F-51 ArmedRecon, Yak raid, Il-10, F-51 CloseSupport), 20 aircraft. Design `handoff/sessions/2026-10-16-flight-2e.md`. 669 passed, 0 failed, 24 ignored; 69 / 251 warnings; flown probe files unchanged; mission check OK. **Not flown**; waits for the user (screen free). Not merged. |
 | `trial/upstream-merge` | `Claude-IL2MissionUtility-merge` | Uncommitted trial merge of upstream. Do not build on it. |
 | `trial/upstream-strike-files` | `Claude-IL2MissionUtility-up` | A checkout of upstream `a31ad0a` with one ignored test that writes its strike and CAP files. Never pushed or merged. |
 | `codex/fix-0016`, `codex/p14-0k` and the older `codex/*` branches | `Claude-IL2MissionUtility-0e` (on `codex/p14-0k`), `-0b` | Already merged. Leftover worktrees. |
@@ -65,7 +66,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
 2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-3. Merge `claude/formation-safe-0019` (user; it contains `codex/p14-3b`, `-2c` and `-2d`). Then a confirming flight at Safe for what flight 2D did not cover: Pairs (Yak raid, F-51 ArmedRecon) and the propeller types (F-51, Yak, Il-10).
+3. Merge `claude/formation-safe-0019` (user; it contains `codex/p14-3b`, `-2c` and `-2d`). Then fly confirming flight 2E (`claude/p14-flight-2e`, built): Pairs and the propeller types at Safe, 20 aircraft; if the server overloads badly, rerun it as two missions split by side (user, 2026-10-16).
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 5. Optional probes, if they matter later: the go-home timer without Force Complete when it fires more than once (1P's H3 did not test it), and what makes the game raise event 7 at activation.
 
