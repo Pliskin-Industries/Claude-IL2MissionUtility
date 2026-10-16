@@ -20,7 +20,7 @@ use crate::template::{
 use crate::trace::{self, ObjectiveStyle, TraceCarrier, TraceMap, TraceSelect, TraceSource};
 
 const HVAR: &str =
-    include_str!("../../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group");
+    include_str!("../testdata/p14_probe_inputs/historical1950_pre0019/1950_US_F80_HVAR_Strike_4ship.Group");
 const W_INPUT_DIR: &str = "src/testdata/p14_probe_inputs/flight1l";
 const X_INPUT_DIR: &str = "src/testdata/p14_probe_inputs/flight1m";
 const P_INPUT_DIR: &str = "src/testdata/p14_probe_inputs/flight1p";
@@ -41,7 +41,7 @@ const ATTACK_TARGET: &str =
     include_str!("../../TemplateExamples/CorrectedFlightfromTemplate.Group");
 const BEHAVIOUR: &str = include_str!("../../TemplateExamples/DPRK_Scramble.Group");
 const TWO_B_ENEMY: &str =
-    include_str!("../../TemplateExamples/Historical1950/1950_DPRK_Yak_AirfieldRaid_2plus2.Group");
+    include_str!("../testdata/p14_probe_inputs/historical1950_pre0019/1950_DPRK_Yak_AirfieldRaid_2plus2.Group");
 // Assets and loadout from the first Plane in
 // TemplateExamples/CorrectedFlightfromTemplate.Group (a MiG-15bis).
 const MIG15BIS_PLANE_KEYS: [&str; 8] = [
@@ -166,7 +166,9 @@ impl Flight {
     }
 
     fn is_frozen(self) -> bool {
-        matches!(self, Self::Two)
+        // 0018 changed flight 2's shell. 0019 changes placement in 1M's Y1
+        // and every sortie in 2B/2C/2D, even with their original Dense inputs.
+        matches!(self, Self::OneM | Self::Two | Self::TwoB | Self::TwoC | Self::TwoD)
     }
 
     fn regenerates_flown_files(self) -> bool {
@@ -4699,9 +4701,9 @@ fn serialize_probe(root: &Il2Entity) -> String {
 }
 
 fn write_probe(flight: Flight, carrier: TraceCarrier) {
-    // Decision 0018: flight 2 is flown evidence. Its builder uses the current
-    // shell for tests, but must never regenerate the frozen flight's artifacts.
-    assert!(!flight.is_frozen(), "decision 0018: {} is frozen; write flight 2B", flight.stem());
+    // Decisions 0018/0019: these builders test current code; their flown
+    // artifacts must remain the evidence of the old shell/placement.
+    assert!(!flight.is_frozen(), "decisions 0018/0019: {} is frozen; use a new flight name", flight.stem());
     let dir = Path::new("target/p14");
     std::fs::create_dir_all(dir).expect("create target/p14");
     let probe = build(flight);
@@ -5084,10 +5086,22 @@ fn write_load_probe() {
 
 #[test]
 fn flight2_frozen_files_parse_and_links_resolve() {
-    // The four flown files are the traced Group, English, spawn list and map;
-    // no plain Group was archived for flight 2.
-    let stem = "P14_Probe_2_traced";
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/flight2").join(stem);
+    assert_frozen_files_parse_and_links_resolve(Flight::Two);
+}
+
+#[test]
+fn placement_frozen_files_parse_and_links_resolve() {
+    for flight in [Flight::OneM, Flight::TwoB, Flight::TwoC, Flight::TwoD] {
+        assert!(flight.is_frozen(), "{}: placement changed under 0019", flight.stem());
+        assert_frozen_files_parse_and_links_resolve(flight);
+    }
+}
+
+fn assert_frozen_files_parse_and_links_resolve(flight: Flight) {
+    // Each frozen flight has a traced Group, English, spawn list and map.
+    let stem = format!("{}_traced", flight.stem());
+    let directory = format!("flight{}", flight.stem().strip_prefix("P14_Probe_").unwrap().to_lowercase());
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes").join(directory).join(&stem);
     let root = parse_group_file(&std::fs::read_to_string(path.with_extension("Group")).unwrap()).unwrap();
     super::testkit::assert_links_resolve(&root);
     let mut indexes = Vec::new();
@@ -5109,7 +5123,10 @@ fn flight2_frozen_files_parse_and_links_resolve() {
             }
         }
     });
-    assert_eq!(root.count_block_type("Plane"), 9);
+    assert_eq!(root.count_block_type("Plane"), build(flight).root.count_block_type("Plane"), "{stem}: aircraft count");
+    if flight == Flight::Two {
+        assert_eq!(root.count_block_type("Plane"), 9);
+    }
     let map = trace::read_trace_sidecar(&path.with_extension("trace.json")).unwrap();
     assert!(!map.entries.is_empty());
     for entry in &map.entries {
@@ -5119,7 +5136,7 @@ fn flight2_frozen_files_parse_and_links_resolve() {
     for edge in &map.edges {
         assert!(unique.contains(&edge.from) && unique.contains(&edge.to), "{stem}: unresolved trace edge");
     }
-    assert_eq!(std::fs::read_to_string(path.with_extension("spawns.json")).unwrap().trim(), "[]");
+    assert_eq!(std::fs::read_to_string(path.with_extension("spawns.json")).unwrap(), spawn_json(flight), "{stem}: spawns");
 }
 
 #[test]
@@ -5129,9 +5146,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     std::fs::create_dir_all(&scratch).unwrap();
     let mut compared = 0;
     for flight in Flight::ALL {
-        // Decision 0018 freezes flight 2's flown files: the current shell
-        // intentionally changes its builder. Load is unflown; 2B flew 2026-10-14,
-        // 2C and 2D 2026-10-15, and each must regenerate its flown files.
+        // 0018 freezes flight 2's shell; 0019 freezes placement in 1M,
+        // 2B, 2C and 2D. Load is unflown. All other flown files regenerate.
         if !flight.regenerates_flown_files() {
             continue;
         }
@@ -5163,9 +5179,9 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
             compared += 1;
         }
     }
-    // Flights 0 to 1P (44 files), flight 2B (4 files, flown 2026-10-14),
-    // flight 2C and flight 2D (4 files each, flown 2026-10-15).
-    assert_eq!(compared, 56);
+    // 56 minus 1M, 2B, 2C and 2D (four files each); flight 2 was already
+    // excluded by 0018. The remaining flights use unchanged or frozen inputs.
+    assert_eq!(compared, 40);
 }
 
 #[test]
@@ -5282,7 +5298,7 @@ fn flight2c_c2_wiring_changes_only_the_two_orders() {
     for cell in ["C2a", "C2b", "C2c"] {
         let row = TWO_C_SORTIES.iter().find(|row| row.cell == cell).unwrap();
         let source = empty_target_source(row);
-        let original = parse_group_file(HVAR).unwrap();
+        let original = sortie_probe_source(&row.sortie());
         assert_eq!(id(&source, "AttackArea 1"), 37);
         assert_eq!(id(&source, "AttackArea"), 38);
         assert_eq!(id(&source, "Mission Complete 1"), 39);
@@ -5543,11 +5559,11 @@ fn flight2d_sources_and_placed_copies_change_only_formation() {
     }
     let root = generate_probe_2d();
     let control = normalized_copy(&root, "D0", "SN01");
-    let original = parse_group_file(HVAR).unwrap();
+    let original = sortie_probe_source(&TWO_D_SORTIES[0].sortie());
     assert_eq!(block_ids(&original, "MCU_CMD_Formation"), [35]);
     assert_eq!(by_id(&original, 35).objects, [7]);
     assert_eq!(by_id(&original, 35).property("FormationType"), Some("20"));
-    assert_eq!(by_id(&original, 35).property("FormationDensity"), Some("0"));
+    assert_eq!(by_id(&original, 35).property("FormationDensity"), Some("1"));
     for (cell, prefix, formation_type, formation_density) in [
         ("D0", "SN01", "20", "0"), ("D1", "SN02", "20", "1"),
         ("D2", "SN03", "20", "2"), ("DP", "SN04", "19", "0"),
@@ -5563,11 +5579,13 @@ fn flight2d_sources_and_placed_copies_change_only_formation() {
         assert_eq!(block_ids(&source, "MCU_CMD_Formation"), [35]);
         let copy = named(&root, &format!("{cell} sortie"));
         assert_eq!(number(named(copy, &format!("{prefix} ON STATION")), "Time"), 600.0);
-        for tree in [&source, copy] {
+        // The experiment's source variants remain explicit; current placement
+        // enforces Safe on all of them. The flown variants are checked frozen.
+        for (tree, density) in [(&source, formation_density), (copy, "1")] {
             assert_eq!(tree.count_block_type("MCU_CMD_Formation"), 1, "{cell}: Formation count");
             let formation = named(tree, "Formation");
             assert_eq!(formation.property("FormationType"), Some(formation_type), "{cell}");
-            assert_eq!(formation.property("FormationDensity"), Some(formation_density), "{cell}");
+            assert_eq!(formation.property("FormationDensity"), Some(density), "{cell}");
             assert_eq!(formation.objects, named(tree, "WP 1").objects, "{cell}: navigation lead");
             let mut incoming = Vec::new();
             tree.for_each(&mut |node| {
@@ -5576,12 +5594,12 @@ fn flight2d_sources_and_placed_copies_change_only_formation() {
             assert_eq!(incoming, [id(tree, "Formation 1")], "{cell}: issuing timer");
         }
         by_id_mut(&mut source, 35).set_property("FormationType", "20");
-        by_id_mut(&mut source, 35).set_property("FormationDensity", "0");
+        by_id_mut(&mut source, 35).set_property("FormationDensity", "1");
         assert_eq!(source, original, "{cell}: only two source properties may change");
         let mut normalized = normalized_copy(&root, cell, prefix);
         let formation = id(&normalized, "Formation");
         by_id_mut(&mut normalized, formation).set_property("FormationType", "20");
-        by_id_mut(&mut normalized, formation).set_property("FormationDensity", "0");
+        by_id_mut(&mut normalized, formation).set_property("FormationDensity", "1");
         assert_eq!(normalized, control, "{cell}: only two placed properties may change");
     }
 }
@@ -8040,6 +8058,10 @@ fn assert_larger_rtb_probe(root: &Il2Entity) {
     // Keep the RTB changes above explicit; discard only their tested nodes.
     let mut ordinary = probe_flight(HVAR, 4, world((40.0, 20.0)), world((50.0, 20.0)), &mut 1);
     ordinary.set_name("Y1");
+    // Decision 0019 changes only the placed Y1's Formation density.
+    assert_eq!(named(y1, "Formation").property("FormationDensity"), Some("1"));
+    assert_eq!(named(&ordinary, "Formation").property("FormationDensity"), Some("0"));
+    ordinary.find_by_name_mut("Formation").unwrap().set_property("FormationDensity", "1");
     // The placed copy's Delete repair is asserted separately above.
     let entities = block_ids(&ordinary, "MCU_TR_Entity");
     ordinary

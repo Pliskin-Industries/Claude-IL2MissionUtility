@@ -398,7 +398,8 @@ fn trace_off_changes_nothing() {
         }
     }
     // Decision 0016: Fighter Pack death events target each aircraft's Delay Delete.
-    assert_eq!(fingerprint, 0xb5edbca97b0ede83);
+    // Decision 0019: aircraft FormationDensity is Safe (1).
+    assert_eq!(fingerprint, 0x3b860e163e2b4cbe);
 
     fn check_source(dir: &Path) {
         for entry in std::fs::read_dir(dir).unwrap() {

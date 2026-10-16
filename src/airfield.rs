@@ -107,7 +107,9 @@ pub fn clean_airfield(
     plane_coalitions: &str,
 ) -> Result<CleanReport, String> {
     let plan = plan_clean(root);
-    apply_plan(root, plan, plane_coalitions)
+    let report = apply_plan(root, plan, plane_coalitions)?;
+    crate::template::set_safe_air_formations(root);
+    Ok(report)
 }
 
 /// Remove every remaining `Plane` (AI flights) and the logic that only
@@ -518,6 +520,16 @@ mod tests {
         for child in &e.children {
             collect_named_zones(child, name, out);
         }
+    }
+
+    #[test]
+    fn cleaned_copy_uses_safe_air_density_and_preserves_vehicle_density() {
+        use crate::template::formation_test_support::{assert_safe_air_and_unchanged_ground, mixed_template};
+        let source = mixed_template();
+        let mut copy = source.clone();
+        clean_airfield(&mut copy, WESTERN_PLANE_COALITIONS).unwrap();
+        assert_safe_air_and_unchanged_ground(&copy);
+        assert_eq!(source, mixed_template(), "loaded airfield template must not change");
     }
 
     #[test]

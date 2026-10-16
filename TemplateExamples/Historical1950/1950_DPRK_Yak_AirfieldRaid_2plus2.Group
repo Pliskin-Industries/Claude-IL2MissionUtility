@@ -779,7 +779,7 @@ Group
       YOri = 0;
       ZOri = 0;
       FormationType = 19;
-      FormationDensity = 0;
+      FormationDensity = 1;
       FlightSize = 1;
       WaitForWingmen = 1;
     }
@@ -821,7 +821,7 @@ Group
       YOri = 0;
       ZOri = 0;
       FormationType = 19;
-      FormationDensity = 0;
+      FormationDensity = 1;
       FlightSize = 1;
       WaitForWingmen = 1;
     }

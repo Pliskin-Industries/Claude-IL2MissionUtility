@@ -192,7 +192,8 @@ fn generate_pack_ex(
     name: &str,
 ) -> Result<Il2Entity, String> {
     let group_count = group_count.max(1);
-    let group1 = require_group(root, 1)?.clone();
+    let mut group1 = require_group(root, 1)?.clone();
+    crate::template::set_safe_air_formations(&mut group1);
     let waypoint1 = require_rtb(root, 1)?.clone();
     let node_gates = root
         .children
@@ -490,6 +491,19 @@ mod tests {
             "../TemplateExamples/Eastern_Fighters_Random_5pack_V6.Group"
         ))
         .expect("parse 5pack")
+    }
+
+    #[test]
+    fn copied_group_uses_safe_air_density_and_preserves_vehicle_density() {
+        use crate::template::formation_test_support::{assert_safe_air_and_unchanged_ground, mixed_template};
+        let mut source = pack3();
+        let mut next_id = source.max_index() + 1;
+        let (mixed, _) = duplicate_template(&mixed_template(), &mut next_id);
+        source.find_by_name_mut("Group 1").unwrap().children.push(mixed);
+        let loaded = source.clone();
+        let out = generate_pack(&source, 2).unwrap();
+        assert_safe_air_and_unchanged_ground(&out);
+        assert_eq!(source, loaded, "loaded fighter pack must not change");
     }
 
     #[test]

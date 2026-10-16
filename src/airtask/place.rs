@@ -107,6 +107,7 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
     mapnet::park_path_waypoints(root, &vec![p.target; paths.len()]);
     // park_path_waypoints has a legacy RTB-name filter. The inspected ids also
     // handle renamed path/RTB nodes; existing RTBs are moved to p.rtb below.
+    template::set_safe_air_formations(root);
     root.for_each_mut(&mut |node| {
         if node
             .index
@@ -336,6 +337,33 @@ mod tests {
                     "builtin {i}, Plane {:?}",
                     plane.index
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn place_overrides_formation_density_without_other_formation_changes() {
+        for builtin_index in 0..6 {
+            // Supply the existing RTBs so placement adds no MCUs; the second
+            // placement also has identical geometry for an exact property check.
+            let mut source = builtin(builtin_index);
+            place_air_sortie(&mut source, &PLACEMENT).unwrap();
+            for density in ["0", "2"] {
+                let mut copy = source.clone();
+                copy.for_each_mut(&mut |node| {
+                    if node.block_type == "MCU_CMD_Formation" {
+                        node.set_property("FormationDensity", density);
+                    }
+                });
+                let before = copy.clone();
+                place_air_sortie(&mut copy, &PLACEMENT).unwrap();
+                let mcu_count = |root: &Il2Entity| nodes(root).iter().filter(|node| node.block_type.starts_with("MCU_")).count();
+                assert_eq!(mcu_count(&copy), mcu_count(&before), "builtin {builtin_index}, density {density}");
+                for original in nodes(&before).into_iter().filter(|node| node.block_type == "MCU_CMD_Formation") {
+                    let mut expected = original.clone();
+                    expected.set_property("FormationDensity", "1");
+                    assert_eq!(by_id(&copy, original.index.unwrap()), &expected, "builtin {builtin_index}, density {density}: only FormationDensity changes");
+                }
             }
         }
     }

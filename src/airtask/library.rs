@@ -1538,6 +1538,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn builtin_air_formations_all_have_safe_density() {
+        let mut formations = 0;
+        for (file, text) in BUILTINS {
+            let root = parser::parse_group_file(text).unwrap_or_else(|error| panic!("{file}: {error}"));
+            let mut in_file = 0;
+            root.for_each(&mut |node| {
+                if node.block_type == "MCU_CMD_Formation" {
+                    assert_eq!(node.property("FormationDensity"), Some("1"), "{file}: Formation {:?}", node.index);
+                    in_file += 1;
+                }
+            });
+            assert!(in_file > 0, "{file}: missing Formation command");
+            formations += in_file;
+        }
+        assert_eq!(formations, 9);
+    }
+
+    #[test]
     fn library_leads_are_entities_with_empty_targets() {
         for (i, expected) in [
             vec![7],

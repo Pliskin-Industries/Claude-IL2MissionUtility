@@ -627,11 +627,14 @@ pub struct FormationPreset {
     pub density: i32,
 }
 
+/// Decision 0019: aircraft fly at Safe density until Dense is fixed.
+pub const SAFE_AIR_FORMATION_DENSITY: i32 = 1;
+
 const fn air_form(id: i32, label: &'static str) -> FormationPreset {
     FormationPreset {
         id,
         label,
-        density: 0,
+        density: SAFE_AIR_FORMATION_DENSITY,
     }
 }
 
@@ -684,7 +687,31 @@ pub fn formation_density(id: i32, kind: UnitKind) -> i32 {
         .iter()
         .find(|f| f.id == id)
         .map(|f| f.density)
-        .unwrap_or(0)
+        .unwrap_or(match kind {
+            UnitKind::Plane => SAFE_AIR_FORMATION_DENSITY,
+            _ => 0,
+        })
+}
+
+/// Apply decision 0019 to an output copy, identifying aircraft by entity links.
+/// Formation types alone do not identify the units commanded by a loaded group.
+pub fn set_safe_air_formations(root: &mut Il2Entity) {
+    let mut plane_entities = HashSet::new();
+    root.for_each(&mut |node| {
+        if node.block_type != "Plane" {
+            return;
+        }
+        if let Some(entity) = node.property("LinkTrId").and_then(|id| id.parse::<i32>().ok()) {
+            plane_entities.insert(entity);
+        }
+    });
+    root.for_each_mut(&mut |node| {
+        if node.block_type == "MCU_CMD_Formation"
+            && node.objects.iter().any(|id| plane_entities.contains(id))
+        {
+            node.set_property("FormationDensity", SAFE_AIR_FORMATION_DENSITY.to_string());
+        }
+    });
 }
 
 #[derive(Clone, Debug)]
@@ -5317,6 +5344,50 @@ fn distinctive_drop(e: &Il2Entity) -> bool {
 }
 
 #[cfg(test)]
+pub(crate) mod formation_test_support {
+    use super::*;
+    use crate::parser::{parse_group_file, parse_il2_document};
+
+    /// Loaded aircraft and vehicle templates with deliberately different densities.
+    pub fn mixed_template() -> Il2Entity {
+        let mut air = parse_group_file(include_str!("../TemplateExamples/ImprovedCooldownLogic.Group"))
+            .expect("ImprovedCooldownLogic.Group");
+        let mut ground = parse_il2_document(include_str!("../TemplateExamples/Simple Vehicle Formation 2 way column.Group"))
+            .expect("Simple Vehicle Formation 2 way column.Group");
+        for (root, name, density) in [(&mut air, "Air formation", "0"), (&mut ground, "Ground formation", "2")] {
+            root.for_each_mut(&mut |node| {
+                if node.block_type == "MCU_CMD_Formation" {
+                    node.set_name(name);
+                    node.set_property("FormationDensity", density);
+                    // Both use the same type so only Plane entity links can distinguish them.
+                    node.set_property("FormationType", "23");
+                }
+            });
+        }
+        let mut next_id = air.max_index() + 1;
+        air.children.push(duplicate_template(&ground, &mut next_id).0);
+        air
+    }
+
+    pub fn assert_safe_air_and_unchanged_ground(root: &Il2Entity) {
+        let mut counts = [0, 0];
+        root.for_each(&mut |node| {
+            if node.block_type != "MCU_CMD_Formation" {
+                return;
+            }
+            let (slot, expected) = match node.name() {
+                Some("Air formation") => (0, "1"),
+                Some("Ground formation") => (1, "2"),
+                name => panic!("mixed formation template: unexpected Formation {name:?}"),
+            };
+            counts[slot] += 1;
+            assert_eq!(node.property("FormationDensity"), Some(expected), "{:?} in {:?}", node.name(), root.name());
+        });
+        assert!(counts.iter().all(|count| *count > 0), "{:?}: missing air or ground Formation", root.name());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::parser::{parse_group_file, parse_il2_document};
@@ -5767,7 +5838,7 @@ mod tests {
         assert!(!text.contains("NodeGates"));
         let formation = pack.find_by_name("Formation").unwrap();
         assert_eq!(formation.property("FormationType"), Some("23"));
-        assert_eq!(formation.property("FormationDensity"), Some("0"));
+        assert_eq!(formation.property("FormationDensity"), Some("1"));
         assert_eq!(formation.property("FlightSize"), Some("1"));
     }
 
@@ -6200,6 +6271,45 @@ mod tests {
         assert_eq!(AIR_FORMATIONS[0].label, "Pairs");
         assert_eq!(formation_label(23, UnitKind::Plane), "Heavy Wedge");
         assert_eq!(formation_label(4, UnitKind::Vehicle), "Road Column 1 way");
+    }
+
+    #[test]
+    fn air_formations_and_unknown_air_ids_generate_safe_density() {
+        const UNKNOWN_FORMATION: i32 = 999;
+        assert!(!AIR_FORMATIONS.iter().any(|formation| formation.id == UNKNOWN_FORMATION));
+        assert_eq!(SAFE_AIR_FORMATION_DENSITY, 1);
+        for id in AIR_FORMATIONS.iter().map(|formation| formation.id).chain([UNKNOWN_FORMATION]) {
+            assert_eq!(formation_density(id, UnitKind::Plane), 1, "air formation {id}");
+            let mut opts = four_migs();
+            opts.seats[0].orders[0].formation_type = id;
+            let root = generate_template(&opts).unwrap();
+            assert_eq!(root.find_by_name("Formation").unwrap().property("FormationDensity"), Some("1"), "air formation {id}");
+        }
+        for (id, density) in [(4, 0), (18, 1), (10, 0), (11, 0), (UNKNOWN_FORMATION, 0)] {
+            assert_eq!(formation_density(id, UnitKind::Vehicle), density, "vehicle formation {id}");
+        }
+    }
+
+    #[test]
+    fn safe_air_formations_change_only_density_on_plane_entity_commands() {
+        use formation_test_support::mixed_template;
+        for density in ["0", "2"] {
+            let mut source = mixed_template();
+            source.find_by_name_mut("Air formation").unwrap().set_property("FormationDensity", density);
+            let mut unrelated = source.find_by_name("Air formation").unwrap().clone();
+            unrelated.index = Some(source.max_index() + 1);
+            unrelated.set_property("Index", unrelated.index.unwrap().to_string());
+            unrelated.set_name("Unlinked formation");
+            unrelated.set_objects(Vec::new());
+            source.children.push(unrelated);
+            let mut expected = source.clone();
+            expected.find_by_name_mut("Air formation").unwrap().set_property("FormationDensity", "1");
+            let mut copy = source.clone();
+            set_safe_air_formations(&mut copy);
+            assert_eq!(copy, expected, "source density {density}: only aircraft FormationDensity may change");
+            set_safe_air_formations(&mut copy);
+            assert_eq!(copy, expected, "source density {density}: idempotent");
+        }
     }
 
     #[test]

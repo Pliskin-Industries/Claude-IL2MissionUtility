@@ -2192,6 +2192,7 @@ fn place_ref_groups(
     let mut n = 0usize;
     for src in groups {
         let mut entity = src.entity.clone();
+        crate::template::set_safe_air_formations(&mut entity);
         strip_catalog_waypoints(&mut entity);
         prune_to_aabb(&mut entity, place);
         if !spatially_relevant(&entity, place) {
@@ -2210,7 +2211,8 @@ where
 {
     let mut out = Vec::new();
     for root in packs {
-        let (clone, _) = duplicate_template(root, next_id);
+        let (mut clone, _) = duplicate_template(root, next_id);
+        crate::template::set_safe_air_formations(&mut clone);
         out.push(clone);
     }
     out
@@ -2673,6 +2675,28 @@ mod tests {
     use super::*;
     use crate::parser::{parse_group_file, parse_il2_document};
     use crate::serialize::serialize_group;
+
+    #[test]
+    fn reference_groups_use_safe_air_density_and_preserve_vehicle_density() {
+        use crate::template::formation_test_support::{assert_safe_air_and_unchanged_ground, mixed_template};
+        let source = mixed_template();
+        let groups = [MapRefGroup { path: "mixed.Group".into(), entity: source.clone() }];
+        let bounds = WorldAabb { x_min: -1_000_000.0, x_max: 1_000_000.0, z_min: -1_000_000.0, z_max: 1_000_000.0 };
+        let (out, count) = place_ref_groups(&groups, bounds, &mut 1);
+        assert_eq!(count, 1);
+        assert_safe_air_and_unchanged_ground(&out);
+        assert_eq!(groups[0].entity, source, "loaded map reference must not change");
+    }
+
+    #[test]
+    fn rooted_packs_use_safe_air_density_and_preserve_vehicle_density() {
+        use crate::template::formation_test_support::{assert_safe_air_and_unchanged_ground, mixed_template};
+        let source = mixed_template();
+        let out = stamp_rooted_packs([&source], &mut 1);
+        assert_eq!(out.len(), 1);
+        assert_safe_air_and_unchanged_ground(&out[0]);
+        assert_eq!(source, mixed_template(), "loaded map pack must not change");
+    }
 
     #[test]
     fn six_sectors_overlap_and_cover_the_map() {
