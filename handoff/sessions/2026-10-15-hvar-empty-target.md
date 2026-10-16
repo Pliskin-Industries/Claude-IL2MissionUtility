@@ -150,3 +150,13 @@ Built by Astra from `handoff/P14-flight-2d-codex-prompt.md` and reviewed. Checks
 - If the overload message shows before DP starts, the run tells the limit but not the answer; fly the next run with fewer cells.
 
 Prompt for Astra: `handoff/P14-flight-2d-codex-prompt.md`.
+
+## After flight 2D (flown 2026-10-15, three runs, Tacview)
+
+Results: `handoff/P14-probe-results.md`, "Flight 2D". In short:
+
+- 16 aircraft ran at 1.0× wall time with no overload message. The as-shipped Dense Wedge (D0) still lost two aircraft to a wingman collision in two of three runs, so the overload was not the cause (option H set aside).
+- Density sets the spacing: Dense about 100 m, Safe about 140 m, Loose about 500 m. Safe and Loose had no pass under 20 m and no loss; Pairs at Dense flew closest (13–26 aircraft-seconds under 20 m) and lost two aircraft once.
+- The height on station matched flight 2C's over the same targets, whatever the density.
+
+So option G (a looser formation) is what is left, at density 1 (Safe). Where to apply it (Air Tasking's copies, the six built-in files, or Template Builder's default) is the user's ruling: `docs/decisions/0019-air-formations-fly-at-safe-density.md` (Proposed).

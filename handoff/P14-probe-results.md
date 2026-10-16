@@ -572,6 +572,61 @@ All four variants did the same: at `WP 1` the flight left 3,050 m, came down to 
 - Fix A′ changes nothing seen here and is not proposed any more. Next options in `handoff/sessions/2026-10-15-hvar-empty-target.md`, "After flight 2C".
 - Losses per aircraft-flight were low in run 1 (0 of 48) and higher in run 2 (7 of 48). Two runs are too few to rank the variants.
 
+## Flight 2D (does a looser formation stop the collisions?) — 2026-10-15, three runs, Tacview recorded
+
+Probe `P14_Probe_2D_traced` (`handoff/p14-probes/flight2d/`; design in `handoff/sessions/2026-10-15-hvar-empty-target.md`, "Flight 2D design"; prompt `handoff/P14-flight-2d-codex-prompt.md`), built from `codex/p14-2d` (`b82cd9e`) as `P14_Probe_2D_20261015` without the resaver, hosted by the game client on this PC (game `261013`). Four HVAR 4-ships on empty targets, area COLD, no enemy, 16 AI aircraft. Each is the template as shipped except its one Formation command: **D0** Wedge, density 0 (Dense, as shipped); **D1** Wedge, 1 (Safe); **D2** Wedge, 2 (Loose); **DP** Pairs, 0 (Dense). Starts 60 s apart (60, 120, 180, 240 s). The targets are flight 2C's C1b, C2c, C2b and C1c. The host spectated, pressed LCtrl+R, and left at 15:00.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-15_20-53-34` | `src/testdata/missionlog/real_25/` (32 files) | `handoff/tacview/P14_Probe_2D_run1.zip.acmi` (from 20-52-35) | 15:26.0 |
+| 2 | `2026-10-15_21-10-21` | `src/testdata/missionlog/real_26/` (32 files) | `handoff/tacview/P14_Probe_2D_run2.zip.acmi` (from 21-09-23) | 15:24.4 |
+| 3 | `2026-10-15_21-27-02` | `src/testdata/missionlog/real_27/` (32 files) | `handoff/tacview/P14_Probe_2D_run3.zip.acmi` (from 21-26-07) | 15:25.5 |
+
+Replay against the frozen files: no dead links in any run. The unobserved successors are the `HARD STOP`, `ON STATION` and Zone IN branches that the 15:00 leave or the empty targets cut off, as planned.
+
+### No overload with 16 aircraft; timing as predicted
+
+- No "server overload" message showed in runs 1 and 2 (the host watched through every start cue); run 3 was not watched on screen. Mission time ran at about 1.0× wall time: each session began 16.7 to 16.8 minutes after the one before, for a 15.4-minute mission plus loading. With 48 aircraft (flight 2C) it ran at 0.4×. So this PC's limit lies between 16 and 48 AI aircraft.
+- Every `START` and cue fired on its second. `WP 1` came 0.3 to 0.8 s after the predicted time in every copy (D0 346.3–346.8 s, D1 406.3–406.6, D2 466.1–466.3, DP 525.3–525.8), and each attack timer 0.50 s after it.
+- No aircraft fired: every live aircraft in the three end-of-mission lists has `BUL:1800`, `RCT:8`.
+
+### Losses
+
+Every loss was a collision between two wingmen of one flight, during the descent from 3,050 m (no attacker, `AType:3 AID:-1`; heights are altitude above sea level):
+
+| Run | Cell | Destroyed | After `WP 1` | Altitude | Reading |
+|---|---|---|---|---|---|
+| 1 | DP (Pairs) | Red 13 and Red 14, 569.3 s, ticks 28469–28470, 10 m apart | +43 s | 2,328 m | collision; Red 13's pilot killed, Red 14's bailed out at 576.7 s |
+| 2 | D0 (Dense) | Red 11 and Red 14, 414.4 s, same tick, 7 m apart | +68 s | 1,936 m | collision; Red 11's pilot killed, Red 14's bailed out at 420.4 s |
+| 3 | D0 (Dense) | Red 13 at 385.2 s; Red 11 and Red 13's pilot 0.48 s later, 90 m further on | +39 s | 2,422–2,430 m | collision or a strike by the wreck (Tacview: D0's closest pass in run 3 was 4 m) |
+
+**D1 (Safe) and D2 (Loose) lost nothing in three runs.** D0 lost two aircraft in two of three runs, DP in one.
+
+### Spacing (Tacview)
+
+Distance from each aircraft to its nearest wingman, sampled once a second; phases are transit (before `WP 1`), descent (the first 180 s after it) and on station. "Under 20 m" counts aircraft-seconds (a pair 15 m apart for one second counts 2). Script: `tools/p14/flight2d_spacing.py <run dir>` (the run dir holds the run's logs and its unzipped `.acmi`).
+
+| Cell | Median: transit / descent / on station | 5th percentile, transit / descent | Under 20 m (runs 1, 2, 3) | Closest |
+|---|---|---|---|---|
+| D0 Dense | 82–121 / 77–175 / 75 m (run 1; runs 2 and 3 had two survivors that split up) | 57–66 / 42–53 m | 4, 6, 4 | 4 m |
+| D1 Safe | 143–149 / 135–139 / 141–147 m | 121–130 / 86–93 m | 0, 0, 0 | 27 m |
+| D2 Loose | 577–697 / 472–475 / 490–498 m | 377–396 / 380–404 m | 0, 0, 0 | 139 m |
+| DP Pairs | 67–84 / 51–122 / 47–57 m (583 m in run 1, after its loss) | 26–33 / 25–28 m | 13, 26, 26 | 7 m |
+
+- Density sets the spacing: Dense about 100 m, Safe about 140 m, Loose about 500 m. Only Safe and Loose never came under 20 m. Safe's closest pass was 27 m; Loose's was 139 m.
+- Pairs at density 0 flies closer than Wedge at density 0 and has the most close passes.
+
+### Height on station
+
+The end-of-mission lists (15:24–15:26) put the survivors at the altitude flight 2C's flights held over the same targets: D0 620–753 m (2C's C1b 647–747 m), D1 574–600 m (C2c 580–599 m), D2 857–962 m (C2b 855–1,112 m), DP 548–691 m (C1c 653–686 m). Density does not change the height. D1 and D2 were 7.4–8.4 km from their targets at the end; D0 and DP 1.8–6.2 km.
+
+### What this changes (reading)
+
+- On a server that keeps up, the as-shipped Dense Wedge still collides (two of three runs). So the overload was not the cause (option H set aside), and the collisions are the AI's close formation flying.
+- **Density 1 (Safe) is the smallest change that removed every close pass** (0 aircraft-seconds under 20 m in three runs, closest 27 m) while keeping a formation about 140 m wide. Loose (about 500 m) did the same but barely flies as a formation.
+- Three runs are few: Safe's zero collisions in three sorties do not prove it never collides; the spacing is the stronger evidence. Two of the six built-ins (Yak raid, F-51 ArmedRecon) fly Pairs at density 0, the closest-flying setting.
+- Changing the density is the user's ruling: `docs/decisions/0019-air-formations-fly-at-safe-density.md` (Proposed).
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -614,5 +669,6 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | new | a spectating host records Tacview for the whole mission: `tacviewrecord = 1` set while the game is closed, Spectate, LCtrl+R. The `.acmi` holds every AI aircraft (position, altitude, height above ground) | flight 2C |
 | new | under server overload (mission time at 0.4× wall time) every traced MCU fired at its predicted mission time, to the tick | flight 2C |
 | new | on an AttackArea over an empty target, HVAR, HVAR without rockets, HVAR with an air order after 120 s, and AirAlert all come down from 3,050 m to a few hundred metres above the ground and hold one altitude, set by the target's place. Losses seen with Tacview were all collisions inside a formation, in every phase; the no-rocket cell lost the most | flight 2C, two runs |
+| new | 16 AI aircraft run at 1.0× wall time on this PC with no overload message (48 overloaded it). On a healthy server the as-shipped Dense Wedge still collides; `FormationDensity` sets the spacing: Dense about 100 m, Safe about 140 m, Loose about 500 m. Safe and Loose had no pass under 20 m and no loss in three runs; Pairs at Dense flew closest | flight 2D, three runs |
 
 Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.

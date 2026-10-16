@@ -171,7 +171,7 @@ impl Flight {
 
     fn regenerates_flown_files(self) -> bool {
         match self {
-            Self::TwoD | Self::Load => false,
+            Self::Load => false,
             _ => !self.is_frozen(),
         }
     }
@@ -5130,8 +5130,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     let mut compared = 0;
     for flight in Flight::ALL {
         // Decision 0018 freezes flight 2's flown files: the current shell
-        // intentionally changes its builder. Load and 2D are unflown; 2B flew 2026-10-14
-        // and 2C 2026-10-15, and both must regenerate their flown files.
+        // intentionally changes its builder. Load is unflown; 2B flew 2026-10-14,
+        // 2C and 2D 2026-10-15, and each must regenerate its flown files.
         if !flight.regenerates_flown_files() {
             continue;
         }
@@ -5163,9 +5163,9 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
             compared += 1;
         }
     }
-    // Flights 0 to 1P (44 files), flight 2B (4 files, flown 2026-10-14) and
-    // flight 2C (4 files, flown 2026-10-15).
-    assert_eq!(compared, 52);
+    // Flights 0 to 1P (44 files), flight 2B (4 files, flown 2026-10-14),
+    // flight 2C and flight 2D (4 files each, flown 2026-10-15).
+    assert_eq!(compared, 56);
 }
 
 #[test]

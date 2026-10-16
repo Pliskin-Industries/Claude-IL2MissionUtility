@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-15, after flight 2C (two runs, Tacview).
+> Last updated: 2026-10-15, after flight 2D (three runs, Tacview).
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -22,6 +22,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | `codex/p14-3` | `Claude-IL2MissionUtility-0t` | P14 step 3, built before flight 0; superseded by `codex/p14-3b`. |
 | `codex/p14-3b` | `Claude-IL2MissionUtility-3b` | P14 step 3: decisions 0017 and 0018, reviewed; flights 2 and 2B flown. Not merged: waits for the user. |
 | `codex/p14-2c` | `.claude/worktrees/adoring-mahavira-fad55e` | `codex/p14-3b` plus the HVAR options note (`claude/p14-hvar-empty-target`), probe flight 2C (built by Astra, reviewed) and its results. 645 passed, 0 failed, 22 ignored; 69 / 251 warnings; 52 flown probe files byte-identical. Not merged. |
+| `codex/p14-2d` | `.claude/worktrees/distracted-taussig-b9259d` | `codex/p14-2c` plus probe flight 2D (built by Astra, reviewed), its results and proposed decision 0019. 651 passed, 0 failed, 23 ignored; 69 / 251 warnings; 56 flown probe files byte-identical. Not merged. |
 | `trial/upstream-merge` | `Claude-IL2MissionUtility-merge` | Uncommitted trial merge of upstream. Do not build on it. |
 | `trial/upstream-strike-files` | `Claude-IL2MissionUtility-up` | A checkout of upstream `a31ad0a` with one ignored test that writes its strike and CAP files. Never pushed or merged. |
 | `codex/fix-0016`, `codex/p14-0k` and the older `codex/*` branches | `Claude-IL2MissionUtility-0e` (on `codex/p14-0k`), `-0b` | Already merged. Leftover worktrees. |
@@ -45,12 +46,14 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 - **Flight 2B run 2 (2026-10-15; logs `real_21`):** the logic repeated run 1 to within 0.2 s. HVAR 4-ships over an empty target lost aircraft again (T-s1 two crashes, T-s4 an apparent collision of two wingmen); AirAlert never. No Tacview was written: the game had rewritten `startup.cfg` back to `tacviewrecord = 0`, and nobody pressed LCtrl+R.
 - **Flight 2B run 3 (2026-10-15, host spectating; logs `real_22`):** still no Tacview file, for the same two reasons. T-s1 lost one more HVAR.
 - **Flight 2C (2026-10-15, two runs, Tacview; logs `real_23`, `real_24`; tracks `handoff/tacview/`; results `handoff/P14-probe-results.md`, "Flight 2C"):** twelve sorties on empty targets, four variants (HVAR, no rockets, fix A′, AirAlert). Every variant comes down to a few hundred metres above the ground and holds an altitude set by the target's place (flight 2B's height difference was the places). **Every loss seen was a collision inside a formation** (7 aircraft in run 2, none in run 1); the no-rocket cell lost the most, so neither the order nor the rockets explain it. The test-bed server was overloaded (mission time 0.4× wall time); every MCU still fired at its mission time to the tick. Options now: `handoff/sessions/2026-10-15-hvar-empty-target.md`, "After flight 2C". This PC's `startup.cfg` now holds `tacviewrecord = 1` (set with the game closed).
+- **Flight 2D (2026-10-15, three runs, Tacview; logs `real_25` to `real_27`; tracks `handoff/tacview/`; results `handoff/P14-probe-results.md`, "Flight 2D"):** four HVAR 4-ships, only `FormationDensity` (or Pairs) changed, 16 aircraft: **no server overload** (1.0× wall time). The as-shipped Dense Wedge still collided (two aircraft in two of three runs); **Safe (1) and Loose (2) had no pass under 20 m and no loss**; Pairs at Dense flew closest. Spacing: Dense about 100 m, Safe about 140 m, Loose about 500 m. Proposed fix: decision 0019 (density 1).
 - **Upstream (eszyman), 2026-10-15:** issue #1: he fixed all three bugs (event 13, Fighter Pack counts once, Delete by entity / none in Activate mode) plus a once-only strike go-home in his working tree; we asked him to publish it upstream and close the issue. Issue #2: he ran the old `P14_Load_2` file (one check zone per copy): SPS 50, tick delay 1.0 idle; all 240 switched-off aircraft present (`handoff/P14-probe-results.md`, "Load test on the upstream author's server").
 - **The game is 1.005 (`261013`).** Its `MissionResaver.exe` crashes on every mission; build probes with `--no-resave`. How to run a no-pilot probe on this PC: `handoff/sessions/2026-10-14-handoff-flight-1n.md` ("Flying a no-pilot probe") and `handoff/sessions/2026-10-13-delete-probes.md`.
 
 ## Waiting on the user
 
-0. **Merge `codex/p14-3b` (or `codex/p14-2c`, which contains it) into `claude/p14-air-tasking`?** Step 3 has flown in flights 2, 2B and 2C. Open from it: formation collisions on station (a looser formation is a template or generator change: a ruling), and the extension and RTB turn, still unseen. Tacview now works (`docs/il2-loader-and-log-facts.md`, 2026-10-15).
+0. **Merge `codex/p14-3b` (or `codex/p14-2c`, which contains it) into `claude/p14-air-tasking`?** Step 3 has flown in flights 2, 2B and 2C. Open from it: the formation collisions (decision 0019, below), and the extension and RTB turn, still unseen. Tacview now works (`docs/il2-loader-and-log-facts.md`, 2026-10-15).
+0a. **Decision 0019 (Proposed): fly AI formations at density 1 (Safe)?** And where: Air Tasking's placed copies only (recommended; 0 MCUs, no file changes), the six built-in files, or Template Builder's default (changes generated files). Evidence: flight 2D.
 1. **The load test is with the upstream author:** https://github.com/eszyman/IL2MissionUtility/issues/2 (posted 2026-10-14; mission text log and Tacview recording requested). The text names the rebuilt file `P14_Load_3_20261014` (decision 0018 shell, 48 check zones per side); **the zip attached to the issue is still the old `P14_Load_2` and must be replaced** with `target/p14/missions/P14_Load_3_20261014/P14_Load_3_20261014.zip` (step 3b worktree). This PC is a test bed: its load numbers are not used.
 2. **The upstream issue is posted** (2026-10-14, https://github.com/eszyman/IL2MissionUtility/issues/1; text in `handoff/upstream-issue-draft.md`). Waiting on the upstream author's reply; offering patches for 1 to 3 is the next step if they want them.
 3. **The six built-in sorties** (`TemplateExamples/Historical1950/`) still carry the old Delete list. Air Tasking removes it from the copies it places and writes its own (decision 0017); whether to change the files is open.
@@ -61,7 +64,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
 2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-3. Merge `codex/p14-3b` / `codex/p14-2c` / `codex/p14-2d` (user). **Fly flight 2D** (built and checked on `codex/p14-2d`, `b82cd9e`; design in `handoff/sessions/2026-10-15-hvar-empty-target.md`, "Flight 2D design"): build `P14_Probe_2D_<date>` from `target/p14/P14_Probe_2D_traced.Group` with `--no-resave`, fly three runs with Tacview, note when "server overload" first shows. Waits for the user to say the screen is free.
+3. Merge `codex/p14-3b` / `codex/p14-2c` / `codex/p14-2d` (user; `codex/p14-2d` contains the other two). Then build decision 0019 as the user rules it, and confirm it with a longer flight at density 1.
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 5. Optional probes, if they matter later: the go-home timer without Force Complete when it fires more than once (1P's H3 did not test it), and what makes the game raise event 7 at activation.
 
