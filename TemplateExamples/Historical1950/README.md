@@ -24,6 +24,8 @@ Each file was reloaded with `template::load_template`: seats and orders round-tr
 | `1950_DPRK_Yak_AirfieldRaid_2plus2` | 2 + 2 × Yak-9P (standing in for the Yak-3/7B/9), guns | Each pair: Pairs → WP 1 at 3,050 m → AttackArea ground targets, 1.5 km, 5 min → Mission Complete | Raids of 2–6 aircraft in pairs, threes or fours [S9 p.121]; 3,050 m [10,000 ft] on the way to Kimpo [S9 p.34]; strafed aircraft and airfields [S9 p.50] | 5 min over the target |
 | `1950_DPRK_Il10_KimpoAttack_2x4` | 2 × 4 × Il-10, 128 × AO-2.5 frag (payload 25) | Each four: Formation Wedge → WP 1 at 1,500 m → AttackArea ground targets, 1.5 km, 10 min → Mission Complete | 8 Il-10s attacked transport aircraft at Kimpo on 27 Jun 1950 [S9 p.35] | **Altitude and load are unsourced**. Historically they broke off after losing 4 [S9 p.35]; that is **not wired**, and damaged aircraft rely on AI RTB (`AiRTBDecision 1`) |
 
+**Formation density.** Every Formation command flies at `FormationDensity = 1` (Safe). At 0 (Dense) AI wingmen collided with each other (flights 2C and 2D; decision 0019).
+
 **Zone triggers.** US templates watch Eastern players (`PlaneCoalitions = [1]`); North Korean templates watch Western players (`[2]`).
 
 **Not in this set.**
