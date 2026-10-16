@@ -627,6 +627,58 @@ The end-of-mission lists (15:24–15:26) put the survivors at the altitude fligh
 - Three runs are few: Safe's zero collisions in three sorties do not prove it never collides; the spacing is the stronger evidence. Two of the six built-ins (Yak raid, F-51 ArmedRecon) fly Pairs at density 0, the closest-flying setting.
 - Changing the density is the user's ruling: `docs/decisions/0019-air-formations-fly-at-safe-density.md` (Proposed).
 
+## Flight 2E (does Safe density hold for Pairs and the propeller built-ins?) — 2026-10-16, three runs, Tacview recorded
+
+Probe `P14_Probe_2E_traced` (`handoff/p14-probes/flight2e/`; design `handoff/sessions/2026-10-16-flight-2e.md`; prompt `handoff/P14-flight-2e-codex-prompt.md`), built from `claude/p14-flight-2e` (`3cf12e4`) as `P14_Probe_2E_20261016` without the resaver, hosted by the game client on this PC (game `261013`). Four built-ins **exactly as shipped after decision 0019** (every Formation command at density 1, Safe), placed and wrapped as Air Tasking does, on empty targets, area COLD, no enemy, 20 AI aircraft: **EA** F-51 ArmedRecon (NATO, two pairs, Pairs), **EY** Yak airfield raid (DPRK, two pairs, Pairs, one shared `WP 1`), **EI** Il-10 Kimpo attack (DPRK, two fours, Wedge, one shared `WP 1`), **EC** F-51 CloseSupport (NATO, one four, Wedge). Starts 60, 120, 180, 240 s. The host spectated, pressed LCtrl+R and left at 15:00; after runs 1 and 2 the server reloaded the mission for the next run.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-16_10-25-51` | `src/testdata/missionlog/real_28/` (34 files) | `handoff/tacview/P14_Probe_2E_run1.zip.acmi` | 16:05.1 |
+| 2 | `2026-10-16_10-44-54` | `src/testdata/missionlog/real_29/` (34 files) | `handoff/tacview/P14_Probe_2E_run2.zip.acmi` | 15:51.0 |
+| 3 | `2026-10-16_11-04-02` | `src/testdata/missionlog/real_30/` (35 files) | `handoff/tacview/P14_Probe_2E_run3.zip.acmi` | 15:36.3 |
+
+Replay against the frozen files: no dead links in any run. The unobserved successors are the Zone IN, `HARD STOP`, `EXTEND` and on-station branches that the 15:00 leave or the empty targets cut off, as planned.
+
+### 20 aircraft: no overload message in flight; timing as predicted
+
+- **No "server overload" message during the flights.** The host opened the menu (where the chat shows) about every 100 s in runs 2 and 3, from 130 s to 830 s: no message. It appeared only when the host left, stamped 12:45 (mission 15:00), in runs 1 and 2. Mission time ran at about 0.85× wall time (2D, 16 aircraft: 1.0×; 2C, 48: 0.4×). The split into two missions was not needed.
+- Every `START` and cue fired on its second. Measured `WP 1` (all three runs within 0.1 s): EA 378.5 s, EY 384.1 s, EI 463.1 s, EC 553.1 s, so the transits were 318, 264, 283 and 313 s (nominal 300). Each attack timer fired 0.50 s after `WP 1`. EY's shipped 300 s attack ended at 684.6 s, its `DONE HUB` fired then and `DELETE DELAY` at 745.2 s, in runs 1 and 2 (walker: 0.5 s after `WP 1` + 300 s, then 60.6 s).
+- No aircraft fired or dropped anything: every live aircraft in the three end-of-mission lists has full guns (`BUL:1800` Il-10, `BUL:1880` F-51) and its full load (`BOMB:4` Il-10, `BOMB:2` EC, `RCT:4` EA).
+
+### Losses
+
+Every loss was in **EY, the Yak raid's Pairs**, with no attacker (`AType:3 AID:-1`). Distances are from Tacview at full frame rate.
+
+| Run | Destroyed | After `WP 1` | Altitude | What Tacview shows |
+|---|---|---|---|---|
+| 1 | Blue 21 397.1 s, Blue 22 397.9 s | +13 s | 2,890–2,910 m | collision: the pair passed 5.0 m apart at 397.4 s; both pilots bailed out |
+| 3 | Blue 21 405.2 s | +21 s | 2,660 m | the pair passed **3.5 m** apart at 396.4 s; Blue 21 then slowed from 600 to 200 km/h, rolled inverted and its pilot bailed out |
+| 3 | Blue 22 517.1 s | +133 s | 1,125 m | flying a steady 40° bank turn, nearest aircraft 3.2 km; pilot bailed out. Reading: damage from the 396.4 s contact (the log has no damage record) |
+| 3 | Red 11 and Red 12, 637.8–637.9 s | +254 s | 1,095 m | collision: 3.0 m apart at 637.2 s; Red 12's pilot killed, Red 11's bailed out. All four Yaks lost, so `LOSSES` fired `DONE HUB` at 637.9 s |
+
+Run 2 lost nothing, but its Blue pair passed 7.9 m apart at 396.4 s. **In all three runs the Yak Blue pair came within 8 m at 396–397 s**, 12–13 s after `WP 1`, as the flight turned onto the attack.
+
+### Spacing (Tacview)
+
+Distance from each aircraft to the nearest aircraft of its **own flight**, sampled once a second; phases are transit (before `WP 1`), descent (the next 180 s) and on station. "Under 20 m" counts aircraft-seconds. "Closest" is at full frame rate. Script: `tools/p14/flight2e_spacing.py <run dir>` (the run's logs and its unzipped `.acmi`).
+
+| Cell | Formation | Median: transit / descent / on station | 5th percentile, descent | Under 20 m (runs 1, 2, 3) | Closest |
+|---|---|---|---|---|---|
+| EA F-51 ArmedRecon | Pairs, Safe | 142–200 / 115–257 / 114–265 m | 41–66 m | 2, 4, 2 | 13 m |
+| EY Yak raid | Pairs, Safe | 122–138 / 96–188 / 124–473 m | 27–34 m | 8, 10, 8 | 3.0 m (two collisions) |
+| EI Il-10 | Wedge, Safe | 97–99 / 297–357 / 754–1,081 m | 85–89 m | 0, 0, 0 | 23 m |
+| EC F-51 CloseSupport | Wedge, Safe | 97 / 177–189 / 210–212 m | 77–78 m | 0, 0, 0 | 49 m |
+
+- **Wedge at Safe holds for the propeller types**: no pass under 20 m in three runs, as for the F-80C in flight 2D (closest 27 m). The Il-10s fly tighter than the F-80Cs in transit (median 97 m against about 145 m).
+- **Pairs at Safe does not.** Both two-ship Pairs built-ins came under 20 m in every run; the Yak raid collided in two of three runs. For comparison, flight 2D's Pairs at Dense (an F-80C four): 13–26 aircraft-seconds under 20 m, closest 7 m.
+- **The two flights of one cell kept apart** until the host left: other-flight nearest at least 178 m (EA), 295 m (EY) and 42 m (EI). In run 3 two Il-10s of different fours came within 17 m at 931 s, after the leave. The shared `WP 1` of S4 did not cause the losses.
+
+### What this changes (reading)
+
+- Decision 0019's Safe density is enough for **Wedge** formations of every type flown (F-80C, F-51D, Il-10), but **not for Pairs**: the Yak raid as the app ships it lost 6 of 12 aircraft-sorties in three runs, every one inside a pair.
+- The F-51 ArmedRecon's pairs came within 13 m but lost nothing. Three runs are few; the close passes are the stronger evidence.
+- What to do about Pairs is the user's call: `docs/decisions/0020-pairs-formations-after-flight-2e.md` (Proposed).
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.

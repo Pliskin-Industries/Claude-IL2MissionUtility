@@ -176,7 +176,7 @@ impl Flight {
 
     fn regenerates_flown_files(self) -> bool {
         match self {
-            Self::TwoE | Self::Load => false,
+            Self::Load => false,
             _ => !self.is_frozen(),
         }
     }
@@ -5335,7 +5335,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     }
     // 56 minus 1M, 2B, 2C and 2D (four files each); flight 2 was already
     // excluded by 0018. The remaining flights use unchanged or frozen inputs.
-    assert_eq!(compared, 40);
+    // Flight 2E (flown 2026-10-16) adds its four files.
+    assert_eq!(compared, 44);
 }
 
 #[test]
@@ -5927,7 +5928,7 @@ fn flight2e_cells_match_table_and_land_path_separation() {
     let root = generate_probe_2e();
     assert_eq!(root.name(), Some("P14_Probe_2E"));
     assert!(!Flight::TwoE.is_frozen());
-    assert!(!Flight::TwoE.regenerates_flown_files());
+    assert!(Flight::TwoE.regenerates_flown_files());
     assert!(Flight::TwoE.writes_schedule());
     assert_eq!(RUN_SHEET_2E.len(), 4);
     assert_eq!(TWO_E_SORTIES.len(), 4);

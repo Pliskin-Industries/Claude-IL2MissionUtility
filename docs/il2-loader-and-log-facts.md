@@ -101,3 +101,10 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **What `FormationDensity` does (flight 2D, AI F-80C 4-ships):** nearest wingman about 100 m at 0, about 140 m at 1, about 500 m at 2 (Wedge); Pairs at 0 about 50–80 m. At 0 wingmen came within 4 m and collided; at 1 and 2 never under 27 m.
 - **This PC's server load:** 16 AI aircraft flying ran at 1.0× wall time with no overload message; 48 ran at 0.4× with it.
 - **Use `FormationDensity = 1` for AI aircraft.** The app now writes it everywhere (decision 0019); a group made by hand in the editor still defaults as the editor does. Bug drafts for the game's developers: `handoff/il2-bug-report-drafts.md`.
+
+## Found on 2026-10-16 (flight 2E, game 1.005)
+
+- **Safe density by formation type** (flight 2E, built-ins at density 1, three runs): Wedge never came under 20 m within a flight (F-51D closest 49 m, Il-10 23 m). **Pairs did**: F-51D pairs closest 13 m, Yak-9P pairs 3 m with two collisions in three runs. Decision 0020 (Proposed).
+- **This PC's server load, again:** 20 AI aircraft ran at about 0.85× wall time with no overload message during the flight. The message appears when the host leaves, stamped with the in-game time of the leave; it is not evidence of overload in flight.
+- **The chat (and any overload message) is hidden while spectating.** Open the menu (Esc) to see it; Esc again returns to the spectator view without side effects.
+- **Repeat runs without the Create page:** let the results screen time out; the server reloads the same mission into a new log session. Spectate and press LCtrl+R again on each run (a new `.acmi` per load).
