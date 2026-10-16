@@ -10,12 +10,12 @@ Decision 0019 puts every AI air formation at `FormationDensity = 1` (Safe). Its 
 
 | Built-in | Formation | Aircraft-seconds under 20 m (runs 1, 2, 3) | Closest | Losses |
 |---|---|---|---|---|
-| F-51 CloseSupport | Wedge, Safe | 0, 0, 0 | 49 m | none |
-| Il-10 Kimpo attack | Wedge, Safe | 0, 0, 0 | 23 m | none |
-| F-51 ArmedRecon | Pairs, Safe | 2, 4, 2 | 13 m | none |
-| Yak airfield raid | Pairs, Safe | 8, 10, 8 | 3.0 m | 2 aircraft in run 1, all 4 in run 3 |
+| F-51 CloseSupport | Wedge, Safe | 0, 0, 0 | 54 m | none |
+| Il-10 Kimpo attack | Wedge, Safe | 0, 0, 0 | 20 m | none |
+| F-51 ArmedRecon | Pairs, Safe | 4, 0, 0 | 17 m | none |
+| Yak airfield raid | Pairs, Safe | 6, 6, 12 | 3.3 m | 2 aircraft in run 1, all 4 in run 3 |
 
-Wedge at Safe held for every type flown. Pairs at Safe did not: in every run the Yak raid's second pair passed within 8 m, 12–13 s after `WP 1`, as it turned onto the attack. Two of the six built-ins fly Pairs (each as two two-ship flights), and Template Builder offers Pairs for any air group.
+Wedge at Safe held for every type flown. Pairs at Safe did not: in every run the Yak raid's second pair passed within 9 m, 12–13 s after `WP 1`, when the lead reversed its turn and the wingman, on the inside, slid straight across its lead at the same height without avoiding it (Tacview; three contacts in two runs). Pairs at Safe holds the wingman only about 65 to 120 m away, close to Pairs at Dense in flight 2D. Two of the six built-ins fly Pairs (each as two two-ship flights), and Template Builder offers Pairs for any air group.
 
 ## Options
 

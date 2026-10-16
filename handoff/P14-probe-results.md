@@ -647,36 +647,42 @@ Replay against the frozen files: no dead links in any run. The unobserved succes
 
 ### Losses
 
-Every loss was in **EY, the Yak raid's Pairs**, with no attacker (`AType:3 AID:-1`). Distances are from Tacview at full frame rate.
+Every loss was in **EY, the Yak raid's Pairs**, with no attacker (`AType:3 AID:-1`). Distances are between the two aircraft's reference points in Tacview, at its 0.2 s frame rate (the true closest point can be nearer). A Yak-9P is 9.7 m across the wings and 8.5 m long.
 
 | Run | Destroyed | After `WP 1` | Altitude | What Tacview shows |
 |---|---|---|---|---|
-| 1 | Blue 21 397.1 s, Blue 22 397.9 s | +13 s | 2,890–2,910 m | collision: the pair passed 5.0 m apart at 397.4 s; both pilots bailed out |
-| 3 | Blue 21 405.2 s | +21 s | 2,660 m | the pair passed **3.5 m** apart at 396.4 s; Blue 21 then slowed from 600 to 200 km/h, rolled inverted and its pilot bailed out |
+| 1 | Blue 21 397.1 s, Blue 22 397.9 s | +13 s | 2,890–2,910 m | collision: 3.3 m apart at 397.2 s, both aircraft's attitudes jump in the same 0.4 s (the lead's roll 60° to 138°); both pilots bailed out |
+| 3 | Blue 21 405.2 s | +21 s | 2,660 m | collision: 5.4 m apart at 396.2 s; in the next 0.4 s Blue 21's heading swings 82° (not a manoeuvre), then it slows from 606 to 320 km/h in 3 s, tumbles, and its pilot bails out |
 | 3 | Blue 22 517.1 s | +133 s | 1,125 m | flying a steady 40° bank turn, nearest aircraft 3.2 km; pilot bailed out. Reading: damage from the 396.4 s contact (the log has no damage record) |
-| 3 | Red 11 and Red 12, 637.8–637.9 s | +254 s | 1,095 m | collision: 3.0 m apart at 637.2 s; Red 12's pilot killed, Red 11's bailed out. All four Yaks lost, so `LOSSES` fired `DONE HUB` at 637.9 s |
+| 3 | Red 11 and Red 12, 637.8–637.9 s | +254 s | 1,095 m | collision: 5.3 m apart at 637.2 s; Red 12's heading swings 93° in 0.4 s; both destroyed 0.6 s later, 6 m apart. Red 12's pilot killed, Red 11's bailed out. All four Yaks lost, so `LOSSES` fired `DONE HUB` at 637.9 s |
 
-Run 2 lost nothing, but its Blue pair passed 7.9 m apart at 396.4 s. **In all three runs the Yak Blue pair came within 8 m at 396–397 s**, 12–13 s after `WP 1`, as the flight turned onto the attack.
+Run 2 lost nothing, but its Blue pair passed 8.5 m apart at 396.2 s, the wingman 5 m below the lead. **In all three runs the Yak Blue pair came within 9 m at 396–397 s**, 12–13 s after `WP 1`.
+
+**How the collisions happen (Tacview, all three runs alike).** The Pairs slot at Safe puts the wingman about 40 m behind, 47 m to the right and 6 m below its lead. At `WP 1` the lead banks 60° left, then at 391 s reverses into a 60° right turn. The wingman, now on the inside of the turn, reverses too, but holds its heading about 14° left of the lead's while flying 25 km/h faster at the lead's height: it slides straight across, nearly abeam (3 to 7 m behind), at about 30 m/s sideways. Neither aircraft climbs, dives or eases the bank to avoid it. Where the wingman is level with the lead (runs 1 and 3) they touch; 5 m below (run 2) it passes underneath. The run 3 Red pair is the same in a steady orbit: the lead turns at 51° bank, the wingman at 31° drifts ahead and to the right, and the lead's turn carries it into the wingman.
+
+The game's log has no collision record: it shows only the losses and bail-outs. The evidence for contact is Tacview: attitude jumps of 80° to 90° within 0.4 s at the closest point, which no controlled aircraft can fly, followed by loss of control.
 
 ### Spacing (Tacview)
 
-Distance from each aircraft to the nearest aircraft of its **own flight**, sampled once a second; phases are transit (before `WP 1`), descent (the next 180 s) and on station. "Under 20 m" counts aircraft-seconds. "Closest" is at full frame rate. Script: `tools/p14/flight2e_spacing.py <run dir>` (the run's logs and its unzipped `.acmi`).
+Distance from each aircraft to the nearest aircraft of its **own flight**, sampled once a second; phases are transit (before `WP 1`), descent (the next 180 s) and on station. "Under 20 m" counts aircraft-seconds. "Closest" is the once-a-second minimum, and for the Yaks the 0.2 s Tacview minimum. Script: `tools/p14/flight2e_spacing.py <run dir>` (the run's logs and its unzipped `.acmi`).
 
 | Cell | Formation | Median: transit / descent / on station | 5th percentile, descent | Under 20 m (runs 1, 2, 3) | Closest |
 |---|---|---|---|---|---|
-| EA F-51 ArmedRecon | Pairs, Safe | 142–200 / 115–257 / 114–265 m | 41–66 m | 2, 4, 2 | 13 m |
-| EY Yak raid | Pairs, Safe | 122–138 / 96–188 / 124–473 m | 27–34 m | 8, 10, 8 | 3.0 m (two collisions) |
-| EI Il-10 | Wedge, Safe | 97–99 / 297–357 / 754–1,081 m | 85–89 m | 0, 0, 0 | 23 m |
-| EC F-51 CloseSupport | Wedge, Safe | 97 / 177–189 / 210–212 m | 77–78 m | 0, 0, 0 | 49 m |
+| EA F-51 ArmedRecon | Pairs, Safe | 78–119 / 84–183 / 88–195 m | 47–50 m | 4, 0, 0 | 17 m |
+| EY Yak raid | Pairs, Safe | 66–77 / 73–152 / 95–250 m | 29–36 m | 6, 6, 12 | 3.3 m (three collisions in two runs) |
+| EI Il-10 | Wedge, Safe | 146 / 246–302 / 683–895 m | 79–90 m | 0, 0, 0 | 20 m |
+| EC F-51 CloseSupport | Wedge, Safe | 138 / 157–158 / 179–199 m | 96–100 m | 0, 0, 0 | 54 m |
 
-- **Wedge at Safe holds for the propeller types**: no pass under 20 m in three runs, as for the F-80C in flight 2D (closest 27 m). The Il-10s fly tighter than the F-80Cs in transit (median 97 m against about 145 m).
-- **Pairs at Safe does not.** Both two-ship Pairs built-ins came under 20 m in every run; the Yak raid collided in two of three runs. For comparison, flight 2D's Pairs at Dense (an F-80C four): 13–26 aircraft-seconds under 20 m, closest 7 m.
-- **The two flights of one cell kept apart** until the host left: other-flight nearest at least 178 m (EA), 295 m (EY) and 42 m (EI). In run 3 two Il-10s of different fours came within 17 m at 931 s, after the leave. The shared `WP 1` of S4 did not cause the losses.
+- **Wedge at Safe holds for the propeller types**: no pass under 20 m in three runs, as for the F-80C in flight 2D (closest 27 m). Transit spacing is the same for every type: about 140 to 145 m.
+- **Pairs at Safe does not.** The Yak raid came under 20 m in every run and collided in two of three; the F-51 ArmedRecon came within 17 m in run 1. A Pairs flight at Safe holds its wingman about 65 to 120 m away in transit, close to flight 2D's Pairs at **Dense** (an F-80C four, 67 to 84 m, 13–26 aircraft-seconds under 20 m, closest 7 m): for Pairs, Safe hardly widens the slot.
+- **The two flights of one cell kept apart** until the host left: other-flight nearest at least 236 m (EA), 271 m (EY) and 56 m (EI). In run 3 two Il-10s of different fours came within 15 m at 931 s, after the leave. The shared `WP 1` of S4 did not cause the losses.
+- *Correction (2026-10-16): the first version of this section and of `flight2e_spacing.py` scaled each aircraft's longitude by its own latitude, which adds about 1.4 m east per metre north at 127° E and misstated distances. The figures above are from the corrected script (differences first, as `flight2d_spacing.py` does); the flight 2D figures were not affected.*
 
 ### What this changes (reading)
 
 - Decision 0019's Safe density is enough for **Wedge** formations of every type flown (F-80C, F-51D, Il-10), but **not for Pairs**: the Yak raid as the app ships it lost 6 of 12 aircraft-sorties in three runs, every one inside a pair.
-- The F-51 ArmedRecon's pairs came within 13 m but lost nothing. Three runs are few; the close passes are the stronger evidence.
+- The F-51 ArmedRecon's pairs came within 17 m but lost nothing. Three runs are few; the close passes are the stronger evidence.
+- The collisions are turn crossovers: the AI wingman takes a straight line to its new slot through its lead and does not avoid it. A wider slot (Loose) may only delay the crossing; a different formation removes it only if its slot does not cross the lead in a turn reversal. Flight 2F tests both.
 - What to do about Pairs is the user's call: `docs/decisions/0020-pairs-formations-after-flight-2e.md` (Proposed).
 
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`

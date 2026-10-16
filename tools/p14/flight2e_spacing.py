@@ -41,13 +41,12 @@ nn = {c: {f: {ph: [] for ph in ("transit", "descent", "station")} for f in ("sam
 close = {c: {"same": 0, "other": 0} for c in CELLS}
 mins = {c: {"same": (1e9, None), "other": (1e9, None)} for c in CELLS}
 
-def xyz(s):
-    lat = math.radians(s["lat"])
-    return (s["lat"] * 111320.0, s["lon"] * 111320.0 * math.cos(lat), s["alt"])
-
 def dist(a, b):
-    pa, pb = xyz(a), xyz(b)
-    return math.dist(pa, pb)
+    # Scale the longitude difference, not each longitude: at 127 E,
+    # lon * cos(lat) per aircraft adds about 1.4 m east per metre north.
+    north = (b["lat"] - a["lat"]) * 111320.0
+    east = (b["lon"] - a["lon"]) * 111320.0 * math.cos(math.radians((a["lat"] + b["lat"]) / 2))
+    return math.hypot(north, east, b["alt"] - a["alt"])
 
 def snap():
     live = [(o, s) for o, s in st.items() if "lat" in s and not s.get("gone")]

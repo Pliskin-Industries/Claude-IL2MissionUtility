@@ -104,7 +104,9 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 
 ## Found on 2026-10-16 (flight 2E, game 1.005)
 
-- **Safe density by formation type** (flight 2E, built-ins at density 1, three runs): Wedge never came under 20 m within a flight (F-51D closest 49 m, Il-10 23 m). **Pairs did**: F-51D pairs closest 13 m, Yak-9P pairs 3 m with two collisions in three runs. Decision 0020 (Proposed).
+- **Safe density by formation type** (flight 2E, built-ins at density 1, three runs): Wedge never came under 20 m within a flight (F-51D closest 54 m, Il-10 20 m). **Pairs did**: F-51D pairs closest 17 m, Yak-9P pairs 3.3 m with collisions in two of three runs, each a wingman crossing its lead in a turn reversal. Pairs at Safe holds the wingman only 65–120 m away (Pairs at Dense, flight 2D: 67–84 m). Decision 0020 (Proposed).
+- **The log has no collision record.** A collision shows as `AType:3 AID:-1` (and `AType:18` bail-outs), sometimes minutes later for a damaged aircraft. Tacview shows it: at the closest point both aircraft's attitudes jump 80–90° within one 0.4 s step.
+- **Tacview distances:** subtract latitudes and longitudes first, then scale the longitude difference by cos(latitude). Scaling each longitude by its own cos(latitude) is wrong by about 1.4 m east per metre north at 127° E.
 - **This PC's server load, again:** 20 AI aircraft ran at about 0.85× wall time with no overload message during the flight. The message appears when the host leaves, stamped with the in-game time of the leave; it is not evidence of overload in flight.
 - **The chat (and any overload message) is hidden while spectating.** Open the menu (Esc) to see it; Esc again returns to the spectator view without side effects.
 - **Repeat runs without the Create page:** let the results screen time out; the server reloads the same mission into a new log session. Spectate and press LCtrl+R again on each run (a new `.acmi` per load).
