@@ -47,9 +47,13 @@ for line in open(acmi, encoding="utf-8", errors="replace"):
         if p[i] != "": s[k] = float(p[i])
     if "yaw" in s and "lat" in s: hist.setdefault(o, []).append((t, dict(s)))
 
+# Tacview reuses a destroyed aircraft's id for its wreck fragments: keep only
+# the frames under the aircraft's first name.
 by_name = {}
 for o, h in hist.items():
-    by_name[(cell_of[o], h[-1][1]["name"].split(" - ")[-1])] = h
+    first = h[0][1].get("name", "")
+    h = [x for x in h if x[1].get("name") == first]
+    by_name[(cell_of[o], first.split(" - ")[-1])] = h
 
 def at(h, ts, when, tol=0.1):
     i = bisect.bisect_left(ts, when - tol)
