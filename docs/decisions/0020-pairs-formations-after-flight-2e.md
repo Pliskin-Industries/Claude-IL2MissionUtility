@@ -44,4 +44,4 @@ Flight 2F (above) was that probe. Loose Pairs kept every pass above 20 m and Wed
 ## Consequences
 
 - Until this is decided, the app keeps writing Pairs at Safe, as 0019 says.
-- The game bug draft (`handoff/il2-bug-report-drafts.md`) covers Dense only; Pairs at Safe is the same fault and could be added.
+- The game bug draft (`handoff/il2-bug-report-drafts.md`) now has report 3: wingmen cross over through their lead in turns, at any density. Decision 0021 treats this as a game bug and whatever 0020 chooses as a workaround to remove when it is fixed.

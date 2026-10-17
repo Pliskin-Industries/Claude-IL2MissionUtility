@@ -33,7 +33,7 @@ Status: **drafts, not posted.** The user decides whether, where and when to post
 
 - Attachments: Tacview tracks `handoff/tacview/P14_Probe_2D_run1.zip.acmi` to `run3` and `P14_Probe_2C_run2.zip.acmi`; the server text logs `src/testdata/missionlog/real_24` to `real_27`; the mission group `handoff/p14-probes/flight2d/P14_Probe_2D_traced.Group`.
 
-**Workaround:** use density 1 (Safe).
+**Workaround:** use density 1 (Safe). Later flights showed this is one case of report 3 (wingmen cross over through their lead in turns); Safe is not enough for Pairs.
 
 ---
 
@@ -61,3 +61,38 @@ Status: **drafts, not posted.** The user decides whether, where and when to post
 **Workaround:** count losses on type 13 (`OnKilled`). This repository does so (decisions 0011 and 0012).
 
 **Also seen, possibly related:** type 7 (`OnPlaneBingoFuel`) fired three seconds after activation on aircraft with full tanks in some missions (upstream's F-80C strike and F-86A CAP), but not on others of the same types (flight 1P). Cause not known; not part of this report unless it reproduces.
+
+---
+
+## 3. AI wingmen cross over through their leader in turns, at any formation density
+
+**Game:** IL-2 Sturmovik: Korea, version 1.005 (`261013`). Multiplayer dogfight mission hosted from the game client, AI only, no players flying.
+
+**Summary:** when the leader of an AI formation reverses its turn, or holds a steady turn while another aircraft changes sides, the wingman flies a straight line to its new slot through the leader's position, nearly abeam and at almost the same height. It neither drops back nor steps up or down to clear. The formation's density only changes the clearance at the crossing. At Pairs and density 1 (Safe) the clearance is a few metres and the aircraft collide; the same happens at Wedge density 0 (report 1). The server is not the cause: it happens with 8 AI aircraft at full speed.
+
+**Steps to reproduce:**
+1. Place a pair of AI Yak-9P (lead and wingman), air start at 3,050 m, about 300 s of flight from a target.
+2. Give the lead `MCU_CMD_Formation` with `FormationType = 19` (Pairs), `FormationDensity = 1` (Safe).
+3. Put a waypoint on the target, and on arrival give `MCU_CMD_AttackArea` (ground targets, 1.5 km, 300 s) centred on the waypoint, over an area with no enemy units.
+4. Watch in Tacview from the waypoint on.
+
+**Expected:** in the turn reversal the wingman crosses behind and below (or above) the leader, or stays on its side.
+
+**Actual:** on arrival the leader banks 60° left for about 5 s, then rolls into a 60° right orbit. The wingman, then on the inside, slides from about 110 m to the leader's track in 3 to 9 s and crosses 3–8 m behind and 2–7 m below it, 12–13 s after the waypoint. In six runs it came within 10 m every time and collided in three.
+
+**Evidence (flights 2E and 2F, six runs):**
+
+| Yak pair flown as | Slot behind / right / below | Clearance at the crossing (behind / below) | Closest |
+|---|---|---|---|
+| Pairs, Dense | 23 / 21 / 5 m | 22–26 m / level | 22–27 m |
+| Pairs, Safe | 40 / 40 / 7 m | 3–8 m / 2–7 m | 3.3–9.4 m, collisions |
+| Pairs, Loose | 124 / 163 / 17 m | 28–29 m ahead / 11–14 m | 32 m |
+| Wedge, Dense | 40 / 40 / 9 m | 0–6 m / 9–12 m | 10–13 m |
+| Wedge, Safe | 73 / 91 / 15 m | 2–6 m / 18–21 m | 18–22 m |
+| Wedge, Loose | 238 / 291 / 10 m | 15–25 m ahead / 27–33 m | 35–38 m |
+
+- Every collision we could resolve with Tacview in flights 2C to 2F (nine) was one aircraft crossing another's track in a turn: four at a turn reversal, five in steady 30–50° turns while an aircraft changed sides.
+- Mission time ran at 1.00× wall time with at most 8 aircraft (flight 2F); attitude jumps in Tacview start only at the contacts.
+- Attachments: `handoff/tacview/P14_Probe_2F_run3.zip.acmi` (collision at 666.8 s, Blue 21 and 22 of the second raid) and `run1`, `run2`; `handoff/tacview/P14_Probe_2E_run1.zip.acmi` and `run3`; logs `src/testdata/missionlog/real_31` to `real_33`; mission group `handoff/p14-probes/flight2f/P14_Probe_2F_traced.Group`.
+
+**Workaround:** density 2 (Loose) kept every pass above 20 m in both formations (flight 2F). Decisions 0019 to 0021.

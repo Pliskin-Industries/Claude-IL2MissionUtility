@@ -737,6 +737,33 @@ Nearest aircraft of the **same flight** (the two aircraft of one pair), sampled 
 - Pairs at Dense (13–14 m, no contact) flew no closer than Pairs at Safe here: for the Yak pair, Safe does not widen the slot that matters, the reversal.
 - The two pairs of one cell kept at least 120 m apart while on the attack, except PD (Dense), whose pairs passed 23–43 m apart at 386 s (`WP 1` + 62 s). In run 3 PL's Red 11 and Blue 22 came within 12.3 m at 1,338 s, after `DONE HUB` (1,284.6 s), as both pairs turned for home before the delete.
 
+### The wingman crosses over in every formation (Tacview)
+
+The wingman's position in its lead's frame (forward, right, up), the Blue pair of each raid, from `WP 1` − 5 s to + 60 s (`tools/p14/flight2f_crossover.py`). On arrival over the area's centre (placement puts `WP 1` on it) the lead banks 60° left for about 5 s, then rolls straight into a steady 60° right orbit. The wingman, now on the inside, crosses the lead's track:
+
+| Flown as | Slot before `WP 1` (behind / right / below) | Crosses at | At the crossing (behind or ahead / below) | Closest |
+|---|---|---|---|---|
+| Pairs, Dense | 23 / 21 / 5 m | `WP 1` + 8 to 10 s | 22–26 m behind, level | 22–27 m |
+| Pairs, Safe (shipped) | 40 / 40 / 7 m | + 12 to 13 s | 3–8 m behind, 2–7 m below | 3.3–9.4 m |
+| Pairs, Loose | 124 / 163 / 17 m | + 18 s | 28–29 m ahead, 11–14 m below | 32 m |
+| Wedge, Dense | 40 / 40 / 9 m | + 12 to 13 s | 0–6 m behind, 9–12 m below | 10–13 m |
+| Wedge, Safe | 73 / 91 / 15 m | + 15 s | 2–6 m behind, 18–21 m below | 18–22 m |
+| Wedge, Loose | 238 / 291 / 10 m | + 21 s | 15–25 m ahead, 27–33 m below | 35–38 m |
+
+- **The crossover happens at every setting**; the setting only changes the clearance. The wingman takes a straight line to the far side, nearly abeam, without dropping back; only the formation's own vertical step separates them.
+- **Safe is not a broken value:** Safe is about twice Dense in both types, Loose about six times. Pairs has half Wedge's slot at every setting: **Pairs at Safe is exactly Wedge at Dense** (40 m back, 40 m right), the setting that collided in flight 2D.
+
+### Every collision is a crossing in a turn (flights 2C to 2F, Tacview)
+
+`tools/p14/formation_collisions.py` on every run with a track and a loss (2C run 2, 2D runs 1–3, 2E runs 1 and 3, 2F run 3): in every collision it could resolve, one aircraft crossed the other's track in a turn; none was in straight and level flight.
+
+| Kind | Collisions | What Tacview shows |
+|---|---|---|
+| Crossover at the lead's turn reversal | 4: Yak Pairs at Safe (2E runs 1 and 3, 2F run 3), F-80C Pairs at Dense (2D run 1) | the lead rolls from one bank into the other; the wingman, now inside, slides across nearly abeam at the lead's height (from about 110 m out to 3–5 m behind and 1–2 m below in 3–9 s) |
+| Sliding across in a steady turn | 5: F-80C Wedge fours at Dense (2D runs 2 and 3, two in 2C run 2), the Yak Red pair on station (2E run 3, + 254 s) | the lead holds 30–50° of bank; another aircraft of the flight changes sides (from 100–400 m out) or, at a shallower bank, overshoots ahead, and crosses the lead's track |
+
+Not resolved: two 2C run 2 losses (one in transit 27 s after activation; one whose pair the script did not find). Flight 2B had no Tacview. Turn angle alone is not the cause: steady 60° orbits mostly held their slots, and collisions came at 30° too; what precedes every contact is an aircraft changing sides.
+
 ### What this changes (reading)
 
 - **The collisions are the formation, not the server.** They repeat at 1.00× with 8 aircraft, at the same second after `WP 1`, and every attitude jump in 2E and 2F starts at a contact.
