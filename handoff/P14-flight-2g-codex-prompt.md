@@ -1,6 +1,6 @@
 # Delegation prompt for flight 2G (can a setting or an MCU stop the wingman crossing its lead?)
 
-One job, in the worktree `distracted-taussig-b9259d` on `claude/p14-flight-2g-be3801` (cut from `claude/p14-flight-2f` at `76b432e`, plus this prompt and the design note, committed). Sent with `codex_start`, `reasoning_effort` = `max`, `sandbox` = `workspace-write`, `max_idle_seconds` = 1200. Model: the config default.
+One job, in the worktree `distracted-taussig-b9259d` on `claude/p14-flight-2g-be3801` (cut from `claude/p14-flight-2f` at `76b432e`, plus this prompt and the design note, committed). Sent with `codex_start`, `reasoning_effort` = `max`, `sandbox` = `workspace-write`, `max_idle_seconds` = 1200. Model: the config default. First job `20261017220409-fdfd434b` stopped before editing on a contradiction (H asked for S4 on placed copies, which inspect as S7); H is corrected below and the job re-sent.
 
 ---
 
@@ -59,7 +59,7 @@ H. **Tests** (`flight2g_…`), each stating its own literals:
 - **only the named change differs**: each 2G cell's sortie equals the same file placed and wrapped as shipped (same cell, prefix and ids, through the same path with no change) except: GC nothing; G3 and G4 only `AILevel` on the four Planes; GX only the two added Formation commands and the two added `WP 1` targets; GA only `XPos` of the two ground AttackAreas, each +3,000 m;
 - GX: each new command has the copied command's `FormationType` 19, `FlightSize`, `WaitForWingmen` and `Objects`, `FormationDensity` 2; `WP 1`'s targets are its old targets followed by the two new indexes; nothing targets the new commands except `WP 1`;
 - each change fails with the cell name on a copy that lacks what it changes (no Plane; a lead with no Formation command; no ground AttackArea);
-- `inspect_sortie` gives S4 and 300 on every placed copy; `ON STATION` `Time` is 300;
+- as the `flight2f_…` tests do: `inspect_sortie` gives S4 and 300 on the parsed source (placement adds RTB, so a placed copy inspects as S7; do not require S4 there); every AttackArea `Time` and `ON STATION` `Time` is 300 on the wrapped copy;
 - the walker run in C, including both GX Formation commands firing at `WP 1`;
 - the cues, with their times and texts, in the shared run-sheet and cue tables;
 - the existing byte and frozen-file tests (`flown_probes_regenerate_byte_for_byte_except_flight2`, `flight2_frozen_files_parse_and_links_resolve`, `placement_frozen_files_parse_and_links_resolve`, the `flight2d_…`, `flight2e_…` and `flight2f_…` tests) still pass unchanged.
