@@ -110,3 +110,11 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **This PC's server load, again:** 20 AI aircraft ran at about 0.85× wall time with no overload message during the flight. The message appears when the host leaves, stamped with the in-game time of the leave; it is not evidence of overload in flight.
 - **The chat (and any overload message) is hidden while spectating.** Open the menu (Esc) to see it; Esc again returns to the spectator view without side effects.
 - **Repeat runs without the Create page:** let the results screen time out; the server reloads the same mission into a new log session. Spectate and press LCtrl+R again on each run (a new `.acmi` per load).
+
+## Found on 2026-10-17 (flight 2F, game 1.005)
+
+- **Wingman collisions are not server load.** With at most 8 AI aircraft (mission time 1.00× wall time) the Yak raid's Pairs at Safe still collided, at the same `WP 1` + 12–13 s reversal as with 20. Every Tacview attitude jump (60° or more in 0.4 s) in flights 2E and 2F starts with another aircraft within 20 m: the jumps are contacts. Of Dense, Safe and Loose in Pairs and in a two-ship Wedge, only Loose kept every pass above 20 m. Decision 0020 (Proposed).
+- **Server speed from the logs:** each `missionReport` file's last `T:` against its modification time gives mission seconds per wall second (`tools/p14/flight2f_spacing.py`); copy logs with `cp -p` to keep the times.
+- **When every aircraft has been deleted, the log has no end-of-mission (`AType:4`) list**, so no ammunition check is possible.
+- **Leaving after the last run can loop:** a Leave Server from the results screen that comes a few seconds late starts another load; leaving from the next briefing reached the results screen and loaded again. A window-close request (`(Get-Process IL2Series).CloseMainWindow()`) closed the game cleanly.
+- **Keyboard focus for computer use:** `AppActivate` sometimes leaves the keys with Claude's own window. A left click on the sky in the spectator view gives the game focus without side effects.

@@ -179,7 +179,7 @@ impl Flight {
 
     fn regenerates_flown_files(self) -> bool {
         match self {
-            Self::TwoF | Self::Load => false, // Unflown; no committed artifacts to compare.
+            Self::Load => false,
             _ => !self.is_frozen(),
         }
     }
@@ -5526,8 +5526,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     }
     // 56 minus 1M, 2B, 2C and 2D (four files each); flight 2 was already
     // excluded by 0018. The remaining flights use unchanged or frozen inputs.
-    // Flight 2E (flown 2026-10-16) adds its four files.
-    assert_eq!(compared, 44);
+    // Flight 2E (flown 2026-10-16) adds its four files, flight 2F (flown 2026-10-17) four more.
+    assert_eq!(compared, 48);
 }
 
 #[test]
@@ -6435,7 +6435,7 @@ fn flight2f_cells_match_table_and_land_path_separation() {
     assert_eq!(root.name(), Some("P14_Probe_2F"));
     assert!(Flight::ALL.contains(&Flight::TwoF));
     assert!(!Flight::TwoF.is_frozen());
-    assert!(!Flight::TwoF.regenerates_flown_files(), "2F is unflown");
+    assert!(Flight::TwoF.regenerates_flown_files());
     assert!(Flight::TwoF.writes_schedule());
     assert_eq!(RUN_SHEET_2F.len(), 6);
     assert_eq!(TWO_F_SORTIES.len(), 6);
