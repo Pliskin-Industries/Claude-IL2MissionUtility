@@ -928,7 +928,20 @@ pub(crate) mod tests {
     use crate::template::{
         self, BringUp, EntityEvent, EventHook, EventThen, OrderKind, OrderSpec, TemplateOptions,
         TemplateSeat, UnitKind, ZoneCoalition,
+        LOOSE_AIR_FORMATION_DENSITY, PAIRS_AIR_FORMATION_TYPE, SAFE_AIR_FORMATION_DENSITY,
     };
+
+    /// Formation index, lead entity, type and density, in BUILTINS order.
+    pub(crate) const BUILTIN_FORMATIONS: [&[(i32, i32, i32, i32)]; BUILTINS.len()] = [
+        &[(35, 7, 20, SAFE_AIR_FORMATION_DENSITY)],
+        &[(35, 7, 20, SAFE_AIR_FORMATION_DENSITY)],
+        &[(35, 7, 20, SAFE_AIR_FORMATION_DENSITY)],
+        &[(35, 7, PAIRS_AIR_FORMATION_TYPE, LOOSE_AIR_FORMATION_DENSITY),
+          (41, 11, PAIRS_AIR_FORMATION_TYPE, SAFE_AIR_FORMATION_DENSITY)],
+        &[(35, 7, PAIRS_AIR_FORMATION_TYPE, LOOSE_AIR_FORMATION_DENSITY),
+          (41, 11, PAIRS_AIR_FORMATION_TYPE, LOOSE_AIR_FORMATION_DENSITY)],
+        &[(43, 7, 20, SAFE_AIR_FORMATION_DENSITY), (49, 15, 20, SAFE_AIR_FORMATION_DENSITY)],
+    ];
 
     pub(crate) fn builtin(index: usize) -> Il2Entity {
         parser::parse_group_file(BUILTINS[index].1).unwrap()
@@ -1535,6 +1548,33 @@ pub(crate) mod tests {
             shape.lead_roles,
             [vec![AirRole::Escort], vec![AirRole::GroundAttack]]
         );
+    }
+
+    #[test]
+    fn builtin_air_formations_use_loose_pairs_except_cover_and_match_shared_rule() {
+        let mut formations = 0;
+        for ((file, text), expected) in BUILTINS.into_iter().zip(BUILTIN_FORMATIONS) {
+            let root = parser::parse_group_file(text).unwrap_or_else(|error| panic!("{file}: {error}"));
+            let mut in_file = 0;
+            root.for_each(&mut |node| {
+                if node.block_type == "MCU_CMD_Formation" {
+                    let &(index, lead, formation_type, density) = expected.iter()
+                        .find(|row| Some(row.0) == node.index)
+                        .unwrap_or_else(|| panic!("{file}: unexpected Formation {:?}", node.index));
+                    assert_eq!(node.objects, [lead], "{file}: Formation {index} lead");
+                    assert_eq!(node.property("FormationType"), Some(formation_type.to_string().as_str()), "{file}: Formation {index}");
+                    assert_eq!(node.property("FormationDensity"), Some(density.to_string().as_str()), "{file}: Formation {index}");
+                    in_file += 1;
+                }
+            });
+            assert_eq!(in_file, expected.len(), "{file}: wrong Formation command count");
+            formations += in_file;
+            let mut written = root.clone();
+            template::set_air_formation_density(&mut written);
+            assert_eq!(written, root, "{file}: built-in must already follow the shared rule");
+            assert_eq!(crate::serialize::serialize_group(&written), text, "{file}: every byte, including CRLF, must match");
+        }
+        assert_eq!(formations, 9);
     }
 
     #[test]

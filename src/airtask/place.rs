@@ -107,6 +107,7 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
     mapnet::park_path_waypoints(root, &vec![p.target; paths.len()]);
     // park_path_waypoints has a legacy RTB-name filter. The inspected ids also
     // handle renamed path/RTB nodes; existing RTBs are moved to p.rtb below.
+    template::set_air_formation_density(root);
     root.for_each_mut(&mut |node| {
         if node
             .index
@@ -215,10 +216,10 @@ fn append_sibling(root: &mut Il2Entity, sibling: i32, node: Il2Entity) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::airtask::library::tests::{builtin, generate, options, order, swap_flights};
+    use crate::airtask::library::tests::{BUILTIN_FORMATIONS, builtin, generate, options, order, swap_flights};
     use crate::airtask::library::{TestedShape, nodes};
     use crate::airtask::testkit::assert_links_resolve;
-    use crate::template::{OrderKind, TemplateOptions};
+    use crate::template::{LOOSE_AIR_FORMATION_DENSITY, OrderKind, SAFE_AIR_FORMATION_DENSITY, TemplateOptions};
 
     const PLACEMENT: SortiePlacement = SortiePlacement {
         target: (100_000.0, 150_000.0),
@@ -336,6 +337,36 @@ mod tests {
                     "builtin {i}, Plane {:?}",
                     plane.index
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn place_overrides_formation_density_without_other_formation_changes() {
+        for (builtin_index, formations) in BUILTIN_FORMATIONS.into_iter().enumerate() {
+            // Supply the existing RTBs so placement adds no MCUs; the second
+            // placement also has identical geometry for an exact property check.
+            let mut source = builtin(builtin_index);
+            place_air_sortie(&mut source, &PLACEMENT).unwrap();
+            for density in [0, SAFE_AIR_FORMATION_DENSITY, LOOSE_AIR_FORMATION_DENSITY] {
+                let mut copy = source.clone();
+                copy.for_each_mut(&mut |node| {
+                    if node.block_type == "MCU_CMD_Formation" {
+                        node.set_property("FormationDensity", density.to_string());
+                    }
+                });
+                let before = copy.clone();
+                place_air_sortie(&mut copy, &PLACEMENT).unwrap();
+                let mcu_count = |root: &Il2Entity| nodes(root).iter().filter(|node| node.block_type.starts_with("MCU_")).count();
+                assert_eq!(mcu_count(&copy), mcu_count(&before), "builtin {builtin_index}, density {density}");
+                assert_eq!(copy.count_block_type("MCU_CMD_Formation"), formations.len(), "builtin {builtin_index}: wrong Formation command count");
+                for original in nodes(&before).into_iter().filter(|node| node.block_type == "MCU_CMD_Formation") {
+                    let mut expected = original.clone();
+                    let &(_, _, _, placed_density) = formations.iter().find(|row| Some(row.0) == original.index)
+                        .unwrap_or_else(|| panic!("builtin {builtin_index}: unexpected Formation {:?}", original.index));
+                    expected.set_property("FormationDensity", placed_density.to_string());
+                    assert_eq!(by_id(&copy, original.index.unwrap()), &expected, "builtin {builtin_index}, density {density}: only FormationDensity changes");
+                }
             }
         }
     }

@@ -192,7 +192,8 @@ fn generate_pack_ex(
     name: &str,
 ) -> Result<Il2Entity, String> {
     let group_count = group_count.max(1);
-    let group1 = require_group(root, 1)?.clone();
+    let mut group1 = require_group(root, 1)?.clone();
+    crate::template::set_air_formation_density(&mut group1);
     let waypoint1 = require_rtb(root, 1)?.clone();
     let node_gates = root
         .children
@@ -490,6 +491,53 @@ mod tests {
             "../TemplateExamples/Eastern_Fighters_Random_5pack_V6.Group"
         ))
         .expect("parse 5pack")
+    }
+
+    #[test]
+    fn copied_group_uses_safe_air_density_and_preserves_vehicle_density() {
+        use crate::template::formation_test_support::{assert_safe_air_and_unchanged_ground, mixed_template};
+        let mut source = pack3();
+        let mut next_id = source.max_index() + 1;
+        let (mixed, _) = duplicate_template(&mixed_template(), &mut next_id);
+        source.find_by_name_mut("Group 1").unwrap().children.push(mixed);
+        let loaded = source.clone();
+        let out = generate_pack(&source, 2).unwrap();
+        assert_safe_air_and_unchanged_ground(&out);
+        assert_eq!(source, loaded, "loaded fighter pack must not change");
+    }
+
+    #[test]
+    fn copied_pairs_use_loose_density_except_covering_leads() {
+        use crate::template::{LOOSE_AIR_FORMATION_DENSITY, PAIRS_AIR_FORMATION_TYPE, SAFE_AIR_FORMATION_DENSITY};
+        let pairs = parse_group_file(r#"Group {
+            Plane { Index = 1; LinkTrId = 101; }
+            Plane { Index = 2; LinkTrId = 102; }
+            MCU_TR_Entity { Index = 101; MisObjID = 1; }
+            MCU_TR_Entity { Index = 102; MisObjID = 2; }
+            MCU_CMD_Formation { Index = 201; Name = "Covered Pairs"; Objects = [101]; FormationType = 19; FormationDensity = 0; }
+            MCU_CMD_Formation { Index = 202; Name = "Covering Pairs"; Objects = [102]; FormationType = 19; FormationDensity = 2; }
+            MCU_CMD_Cover { Index = 203; Name = "Pairs Cover"; Objects = [102]; Targets = [101]; }
+        }"#).expect("Pairs formations with one covering lead");
+        let mut source = pack3();
+        let mut next_id = source.max_index() + 1;
+        let (pairs, _) = duplicate_template(&pairs, &mut next_id);
+        source.find_by_name_mut("Group 1").expect("fighter pack Group 1").children.push(pairs);
+        let loaded = source.clone();
+        let out = generate_pack(&source, 2).expect("fighter pack with Pairs and Cover");
+        for group in 1..=2 {
+            let copy = require_group(&out, group).expect("copied fighter group");
+            let cover = copy.find_by_name("Pairs Cover").expect("copied Pairs Cover");
+            for (name, objects, density) in [
+                ("Covered Pairs", &cover.targets, LOOSE_AIR_FORMATION_DENSITY),
+                ("Covering Pairs", &cover.objects, SAFE_AIR_FORMATION_DENSITY),
+            ] {
+                let formation = copy.find_by_name(name).unwrap_or_else(|| panic!("Group {group}: missing {name}"));
+                assert_eq!(&formation.objects, objects, "Group {group}: {name} lead links");
+                assert_eq!(formation.property("FormationType"), Some(PAIRS_AIR_FORMATION_TYPE.to_string().as_str()));
+                assert_eq!(formation.property("FormationDensity"), Some(density.to_string().as_str()), "Group {group}: {name}");
+            }
+        }
+        assert_eq!(source, loaded, "loaded fighter pack must not change");
     }
 
     #[test]

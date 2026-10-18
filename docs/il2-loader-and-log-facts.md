@@ -89,3 +89,49 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **Fighter Pack aircraft are separate formations** (`FlightRole::Independent` in `flights.rs`), so a Damage command on the lead would reach only the lead (flight 1H: a Damage command acts on one formation). Read from the code; flight 1P used one Damage command per aircraft and did not test it.
 - **With `AiRTBDecision = 1`, all aircraft of a damaged formation but one stop answering commands** (flight 1M: three of a 4-ship).
 
+
+## Found on 2026-10-15 (flight 2C, game 1.005)
+
+- **The game rewrites `data\startup.cfg` when it exits.** An edit made while the game runs is lost. Close the game normally (a window-close request), edit, start it, and check the file again.
+- **Tacview from a client-hosted server:** `tacviewrecord = 1` under `[KEY = track_record]`, the server's "TacView record" box ticked, press Spectate, then **LCtrl+R** (action `record` in `data\input\current.map`). A red icon shows top right. `data\Tracks\` gets a `.acmi` and a `.trk` (about 750 MB for 15 minutes) named for the load time; both close when the mission ends. The `.acmi` held all 48 AI aircraft, not only those near the camera. Its `ReferenceTime` is the game time when recording began; mission seconds = that minus the mission's `GTime`, plus the `#` time. ACMI object ids are the log's `OBJID`s in hexadecimal.
+- **The spectator camera did not answer F2, Shift+F2 or LAlt+F2** on this PC; it stayed at its first view. Recording did not need it.
+- **Server overload:** with 48 AI aircraft flying, the test-bed PC showed "Multiplayer server overload" all mission and mission time ran at about 0.4× wall time. Every MCU still fired at its mission time to the tick. Plan wall time from the breadcrumbs, not from the mission clock.
+- **The results screen gives about 10 s before the next load.** A Leave Server pressed after that starts another run of the same mission; leave from its briefing screen.
+- **`FormationDensity` values (game 1.005, from the editor's own labels):** `bin\editor\IL2Editor.exe` lists "Formation Density:" with the choices Dense, Safe, Loose. By list order 0 = Dense, 1 = Safe, 2 = Loose (inference, not checked in the editor window). The spacing in metres is not documented; flight 2D measures it.
+- **What `FormationDensity` does (flight 2D, AI F-80C 4-ships):** nearest wingman about 100 m at 0, about 140 m at 1, about 500 m at 2 (Wedge); Pairs at 0 about 50–80 m. At 0 wingmen came within 4 m and collided; at 1 and 2 never under 27 m.
+- **This PC's server load:** 16 AI aircraft flying ran at 1.0× wall time with no overload message; 48 ran at 0.4× with it.
+- **Use `FormationDensity = 1` for AI aircraft.** The app now writes it everywhere (decision 0019); a group made by hand in the editor still defaults as the editor does. *Since 2026-10-18 (decisions 0020 and 0022, branch `claude/pairs-loose-0020`): Pairs fly at 2 (Loose), except a flight flying a Cover order, which stays at 1; see the 2026-10-17 and 2026-10-18 sections.* Bug drafts for the game's developers: `handoff/il2-bug-report-drafts.md`.
+
+## Found on 2026-10-16 (flight 2E, game 1.005)
+
+- **Safe density by formation type** (flight 2E, built-ins at density 1, three runs): Wedge never came under 20 m within a flight (F-51D closest 54 m, Il-10 20 m). **Pairs did**: F-51D pairs closest 17 m, Yak-9P pairs 3.3 m with collisions in two of three runs, each a wingman crossing its lead in a turn reversal. Pairs at Safe holds the wingman only 65–120 m away (Pairs at Dense, flight 2D: 67–84 m). Decision 0020 (Proposed).
+- **The log has no collision record.** A collision shows as `AType:3 AID:-1` (and `AType:18` bail-outs), sometimes minutes later for a damaged aircraft. Tacview shows it: at the closest point both aircraft's attitudes jump 80–90° within one 0.4 s step.
+- **Tacview distances:** subtract latitudes and longitudes first, then scale the longitude difference by cos(latitude). Scaling each longitude by its own cos(latitude) is wrong by about 1.4 m east per metre north at 127° E.
+- **This PC's server load, again:** 20 AI aircraft ran at about 0.85× wall time with no overload message during the flight. The message appears when the host leaves, stamped with the in-game time of the leave; it is not evidence of overload in flight.
+- **The chat (and any overload message) is hidden while spectating.** Open the menu (Esc) to see it; Esc again returns to the spectator view without side effects.
+- **Repeat runs without the Create page:** let the results screen time out; the server reloads the same mission into a new log session. Spectate and press LCtrl+R again on each run (a new `.acmi` per load).
+
+## Found on 2026-10-17 (flight 2F, game 1.005)
+
+- **Wingman collisions are not server load.** With at most 8 AI aircraft (mission time 1.00× wall time) the Yak raid's Pairs at Safe still collided, at the same `WP 1` + 12–13 s reversal as with 20. Every Tacview attitude jump (60° or more in 0.4 s) in flights 2E and 2F starts with another aircraft within 20 m: the jumps are contacts. Of Dense, Safe and Loose in Pairs and in a two-ship Wedge, only Loose kept every pass above 20 m. Decision 0020 (Proposed).
+- **Server speed from the logs:** each `missionReport` file's last `T:` against its modification time gives mission seconds per wall second (`tools/p14/flight2f_spacing.py`); copy logs with `cp -p` to keep the times.
+- **When every aircraft has been deleted, the log has no end-of-mission (`AType:4`) list**, so no ammunition check is possible.
+- **Leaving after the last run can loop:** a Leave Server from the results screen that comes a few seconds late starts another load; leaving from the next briefing reached the results screen and loaded again. A window-close request (`(Get-Process IL2Series).CloseMainWindow()`) closed the game cleanly.
+- **Keyboard focus for computer use:** `AppActivate` sometimes leaves the keys with Claude's own window. A left click on the sky in the spectator view gives the game focus without side effects.
+
+## Found on 2026-10-17 (flight 2G, game 1.005)
+
+- **AI skill does not stop the formation crossover.** Yak-9P wingmen at `AILevel` 3 (Veteran) and 4 (Ace) held the same Pairs-at-Safe slot as at 2 (Normal), crossed their lead at the same `WP 1` + 12–13 s and collided (Ace in all three runs).
+- **An AI lead's AttackArea entry starts with a left turn at the waypoint, wherever the area is.** With the area centre 3 km straight ahead of `WP 1`, the lead still banked left at `WP 1`, turned about 40° over 14 s, then reversed right toward the area; the wingman crossed at + 23 s instead of + 12 s.
+- **A Formation command sent in flight is obeyed without slowing the lead:** a copy of the lead's own command (`WaitForWingmen = 1`) set to Loose and fired by `WP 1` moved the wingman out to the Loose slot within about 10 s; the lead's speed did not change.
+- **Tacview reuses a destroyed aircraft's object id for its wreck fragments** (`CAirplaneFragment_<id>`); scripts that key tracks by id must drop frames after the name changes (`tools/p14/flight2g_crossover.py`).
+- **The game's `.acmi` in `data/Tracks` is plain text**; the repository keeps tracks zipped as `<name>.zip.acmi`.
+- **Hosting from the client, mission rotation:** clicking a mission only selects it; scroll the settings page to reach Remove (rotation) and Add to rotation (available list).
+- **Keys in spectator view:** a plain key press sometimes does not reach the game; holding Escape for 0.3 s opens the menu reliably. Click the sky first, then send the key as a separate action.
+
+## Found on 2026-10-18 (flight 2H, game 1.005)
+
+- **A pair flying `MCU_CMD_Cover` weaves in transit.** The F-51 ArmedRecon's Blue pair, covering the Red pair 1,500 m below, flies 50–60° banked S-turns with a reversal every 10–20 s while it descends to the Red pair's height. At Pairs Safe its wingman stays on its side; at Pairs Loose it swings 150–400 m across the lead's track at each reversal (one collision in three runs).
+- **A Loose formation arrives later:** F-51 pairs at Loose reached `WP 1` 4–9 s after the same raid at Safe (318.5 s transit).
+- **Computer use, in spectator view:** a slow press on the sky (button down, 0.5 s, up), then 3 s before the key, gave the game keyboard focus where a quick click did not. `open_application` on the running game starts a second copy, which only shows an "already running" error; dismiss it with OK. A taskbar preview (from a remote-desktop window) can take focus from the game; only the user could dismiss it.
+- **Pairs at Loose removes the entry-reversal collision, not the steady-turn crossing** (flight 2I, the built-ins as shipped under decisions 0020 and 0022): the Yak raid lost nothing in twelve raids, but on station its wingmen still crossed their leads at 9.7–10.8 m; an F-51 covering pair at Safe crossed at 8.1 m and lost an aircraft.

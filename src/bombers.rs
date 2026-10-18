@@ -283,6 +283,7 @@ pub fn link_bomber_plans_with(
     let mut mapped_completion: Vec<i32> = Vec::with_capacity(plans.len());
     for (i, plan) in plans.iter().enumerate() {
         let (mut clone, id_map) = duplicate_template(&plan.root, &mut next_id);
+        crate::template::set_air_formation_density(&mut clone);
         if !keep_positions {
             placement::move_to_grid(&mut clone, i, plans.len());
         }
@@ -885,6 +886,18 @@ mod tests {
         let mut out = Vec::new();
         root.find_all_by_name(name, &mut out);
         out
+    }
+
+    #[test]
+    fn linked_copies_use_safe_air_density_and_preserve_vehicle_density() {
+        use crate::template::formation_test_support::{assert_safe_air_and_unchanged_ground, mixed_template};
+        let source = mixed_template();
+        let plans = [input("mixed aircraft and vehicles", source.clone())];
+        for keep_positions in [false, true] {
+            let out = link_bomber_plans_with(&plans, keep_positions).unwrap();
+            assert_safe_air_and_unchanged_ground(&out);
+            assert_eq!(plans[0].root, source, "loaded bomber template must not change");
+        }
     }
 
     #[test]

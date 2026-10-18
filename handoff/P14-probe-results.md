@@ -509,6 +509,412 @@ The same mission file. This time the host pressed **Spectate** and watched from 
   - T-s2's four AirAlert F-80Cs at about **1,140 to 1,165 m**, within 2.6 km of theirs.
 - **Reading (inference):** on an AttackArea over an empty target the HVAR flight works the area at a few hundred metres over hilly ground, low and close together, which fits the ground impacts and the one apparent collision seen in runs 1 and 2. AirAlert stays near 1,150 m and has lost nothing in three runs. A track recording would show it directly.
 
+## Flight 2C (why sorties lose aircraft over an empty target) — 2026-10-15, two runs, Tacview recorded
+
+Probe `P14_Probe_2C_traced` (`handoff/p14-probes/flight2c/`; design in `handoff/sessions/2026-10-15-hvar-empty-target.md` §5, prompt `handoff/P14-flight-2c-codex-prompt.md`), built from `codex/p14-2c` (`97ce5a3`) as `P14_Probe_2C_20261015` without the resaver, hosted by the game client on the second PC (game `261013`). Twelve placed sorties on empty targets, area COLD, no enemy: three copies each of **C0** HVAR as shipped, **C1** HVAR with payload 2 (no rockets), **C2** HVAR with fix A′ (ground order 120 s, then an air AttackArea, 5 km, 600 s), **C3** AirAlert as shipped. The host spectated, pressed LCtrl+R, and left at 15:00 so the end-of-mission list kept every live aircraft.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-15_16-51-04` | `src/testdata/missionlog/real_23/` (49 files) | `handoff/tacview/P14_Probe_2C_run1.zip.acmi` (from 02:33) | 15:09.2 |
+| 2 | `2026-10-15_17-27-17` (the server reloaded the mission) | `src/testdata/missionlog/real_24/` (49 files) | `handoff/tacview/P14_Probe_2C_run2.zip.acmi` (from 00:40) | 15:05.7 |
+
+Replay against the frozen files: no dead links in either run. Every unobserved successor is a `COLD`, `HARD STOP` or Zone IN branch that the 15:00 leave or the empty targets cut off, as planned.
+
+### The server was overloaded, and MCU timing was not affected
+
+- The game showed "Multiplayer server overload: erratic plane behavior may occur" for the whole of both runs (48 AI aircraft on this test-bed PC). **Mission time ran at about 0.4× wall time** in run 1 (the log files for the 5 s start steps were written 9 to 11 s apart; 14:30 came at 17:24 for a 16:51 load).
+- **Every traced MCU fired at its predicted mission time:** each `START` on its whole second (60.000 … 115.000 s), every 0.5 s attack timer exactly 0.50 s after its `WP 1`, C2's new 120 s timer at `WP 1` + 120.50 s in all six copies (the walker's Restart prediction), and the 14:30 cue at 870.000 s, in both runs. Overload stretched wall time only.
+- Aircraft behaviour under overload is not known; the losses below may be inflated compared with a healthy server. All four cells shared it.
+
+### Losses
+
+Run 1: **none** in any cell. No aircraft fired a round or a rocket in either run (`BUL:1800`; `RCT:8` on every live HVAR-payload aircraft).
+
+Run 2, every loss with its Tacview state 0.5 s before (no attacker in any; `AType:3 AID:-1`):
+
+| Cell | Destroyed | After `WP 1` | Height above ground | Nearest wingman | Reading |
+|---|---|---|---|---|---|
+| C2a | 01:57.1 | before it (in transit, 27 s after activation) | 2,970 m, bank 30°, pitch +9° | 8 m | collision; the other aircraft flew on |
+| C1a (two) | 06:51.9, same tick | +58 s, descending | 1,610–1,640 m, bank 30°, pitch −5° | 13–18 m, each other | collision |
+| C1b (two) | 08:17.3, same tick | +138 s | 830–850 m, bank 30°, pitch −5° | 16–21 m, each other | collision |
+| C0a | 14:52.0 | +545 s | 340 m, bank 9°, pitch −3° | 11 m | collision; the other aircraft flew on |
+
+- **Every loss in flight 2C was a collision inside a formation**, in a gentle turn, far above the ground. None was a ground impact or a hard pull.
+- **C1 (no rockets) lost the most** (four aircraft, two copies). So the rockets' weight (hypothesis H2) is not the cause.
+- **Close passes (two wingmen within 20 m, counted once per second of Tacview) happened in every variant**: run 1 C0 3, C1 7, C2 10, C3 0; run 2 C0 17, C1 5, C2 24, C3 19. Most came after `WP 1`. AirAlert (C3) lost nothing in 6 copies here and 3 in flight 2B, but came as close as 10 m.
+
+### Height on station
+
+All four variants did the same: at `WP 1` the flight left 3,050 m, came down to a few hundred metres above the ground within about three minutes, then held one altitude (Tacview, every lead in both runs). C2's switch to the air order at `WP 1` + 120.5 s did not make it climb.
+
+| Cell | Variant | Altitude held (both runs) | Height above ground (median on station) |
+|---|---|---|---|
+| C0a | HVAR | 369–385 m | 330–347 m |
+| C0b | HVAR | 816–844 m | 650–719 m |
+| C0c | HVAR | 1,359–1,730 m | 891–1,182 m |
+| C1a | no rockets | 697–986 m | 526–767 m |
+| C1b | no rockets | 647–747 m | 498–580 m |
+| C1c | no rockets | 653–686 m | 616–643 m |
+| C2a | fix A′ | 1,136–1,164 m | 759–781 m |
+| C2b | fix A′ | 855–1,112 m | 567–722 m |
+| C2c | fix A′ | 580–599 m | 543–565 m |
+| C3a | AirAlert | 1,678–1,705 m | 868–906 m |
+| C3b | AirAlert | 1,006–1,340 m | 597–815 m |
+| C3c | AirAlert | 939–1,441 m | 739–1,184 m |
+
+- **The altitude depends on where the target is, not on the template.** C0a sits on flight 2B's T-s1 target and held 370 m, as T-s1 did (366–408 m). C2a (an HVAR) sits on flight 2B's AirAlert target and held 1,150 m, as that AirAlert did (1,140–1,165 m). Flight 2B's "HVARs low, AirAlert high" was the two places.
+- The settled height above ground was 330 to 1,180 m; the lowest point any surviving aircraft reached was 33 m above the ground (an AirAlert in C3c, run 2).
+
+### What this changes (reading)
+
+- Hypotheses H1 (the ground order keeps the flight low) and H2 (the rockets' weight) do not explain the losses: every variant descends the same way, and the no-rocket cell lost the most.
+- H3 (formation) fits every flight 2C loss: wingmen collide in turns, in transit, in the descent and on station. Both templates fly formation 20 (Wedge) at `FormationDensity = 0`, the value Template Builder writes for every air formation. Flight 2B's "destroyed in the air with no damage record" losses fit collisions in which the other aircraft survived; its two ground impacts are not explained.
+- Fix A′ changes nothing seen here and is not proposed any more. Next options in `handoff/sessions/2026-10-15-hvar-empty-target.md`, "After flight 2C".
+- Losses per aircraft-flight were low in run 1 (0 of 48) and higher in run 2 (7 of 48). Two runs are too few to rank the variants.
+
+## Flight 2D (does a looser formation stop the collisions?) — 2026-10-15, three runs, Tacview recorded
+
+Probe `P14_Probe_2D_traced` (`handoff/p14-probes/flight2d/`; design in `handoff/sessions/2026-10-15-hvar-empty-target.md`, "Flight 2D design"; prompt `handoff/P14-flight-2d-codex-prompt.md`), built from `codex/p14-2d` (`b82cd9e`) as `P14_Probe_2D_20261015` without the resaver, hosted by the game client on this PC (game `261013`). Four HVAR 4-ships on empty targets, area COLD, no enemy, 16 AI aircraft. Each is the template as shipped except its one Formation command: **D0** Wedge, density 0 (Dense, as shipped); **D1** Wedge, 1 (Safe); **D2** Wedge, 2 (Loose); **DP** Pairs, 0 (Dense). Starts 60 s apart (60, 120, 180, 240 s). The targets are flight 2C's C1b, C2c, C2b and C1c. The host spectated, pressed LCtrl+R, and left at 15:00.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-15_20-53-34` | `src/testdata/missionlog/real_25/` (32 files) | `handoff/tacview/P14_Probe_2D_run1.zip.acmi` (from 20-52-35) | 15:26.0 |
+| 2 | `2026-10-15_21-10-21` | `src/testdata/missionlog/real_26/` (32 files) | `handoff/tacview/P14_Probe_2D_run2.zip.acmi` (from 21-09-23) | 15:24.4 |
+| 3 | `2026-10-15_21-27-02` | `src/testdata/missionlog/real_27/` (32 files) | `handoff/tacview/P14_Probe_2D_run3.zip.acmi` (from 21-26-07) | 15:25.5 |
+
+Replay against the frozen files: no dead links in any run. The unobserved successors are the `HARD STOP`, `ON STATION` and Zone IN branches that the 15:00 leave or the empty targets cut off, as planned.
+
+### No overload with 16 aircraft; timing as predicted
+
+- No "server overload" message showed in runs 1 and 2 (the host watched through every start cue); run 3 was not watched on screen. Mission time ran at about 1.0× wall time: each session began 16.7 to 16.8 minutes after the one before, for a 15.4-minute mission plus loading. With 48 aircraft (flight 2C) it ran at 0.4×. So this PC's limit lies between 16 and 48 AI aircraft.
+- Every `START` and cue fired on its second. `WP 1` came 0.3 to 0.8 s after the predicted time in every copy (D0 346.3–346.8 s, D1 406.3–406.6, D2 466.1–466.3, DP 525.3–525.8), and each attack timer 0.50 s after it.
+- No aircraft fired: every live aircraft in the three end-of-mission lists has `BUL:1800`, `RCT:8`.
+
+### Losses
+
+Every loss was a collision between two wingmen of one flight, during the descent from 3,050 m (no attacker, `AType:3 AID:-1`; heights are altitude above sea level):
+
+| Run | Cell | Destroyed | After `WP 1` | Altitude | Reading |
+|---|---|---|---|---|---|
+| 1 | DP (Pairs) | Red 13 and Red 14, 569.3 s, ticks 28469–28470, 10 m apart | +43 s | 2,328 m | collision; Red 13's pilot killed, Red 14's bailed out at 576.7 s |
+| 2 | D0 (Dense) | Red 11 and Red 14, 414.4 s, same tick, 7 m apart | +68 s | 1,936 m | collision; Red 11's pilot killed, Red 14's bailed out at 420.4 s |
+| 3 | D0 (Dense) | Red 13 at 385.2 s; Red 11 and Red 13's pilot 0.48 s later, 90 m further on | +39 s | 2,422–2,430 m | collision or a strike by the wreck (Tacview: D0's closest pass in run 3 was 4 m) |
+
+**D1 (Safe) and D2 (Loose) lost nothing in three runs.** D0 lost two aircraft in two of three runs, DP in one.
+
+### Spacing (Tacview)
+
+Distance from each aircraft to its nearest wingman, sampled once a second; phases are transit (before `WP 1`), descent (the first 180 s after it) and on station. "Under 20 m" counts aircraft-seconds (a pair 15 m apart for one second counts 2). Script: `tools/p14/flight2d_spacing.py <run dir>` (the run dir holds the run's logs and its unzipped `.acmi`).
+
+| Cell | Median: transit / descent / on station | 5th percentile, transit / descent | Under 20 m (runs 1, 2, 3) | Closest |
+|---|---|---|---|---|
+| D0 Dense | 82–121 / 77–175 / 75 m (run 1; runs 2 and 3 had two survivors that split up) | 57–66 / 42–53 m | 4, 6, 4 | 4 m |
+| D1 Safe | 143–149 / 135–139 / 141–147 m | 121–130 / 86–93 m | 0, 0, 0 | 27 m |
+| D2 Loose | 577–697 / 472–475 / 490–498 m | 377–396 / 380–404 m | 0, 0, 0 | 139 m |
+| DP Pairs | 67–84 / 51–122 / 47–57 m (583 m in run 1, after its loss) | 26–33 / 25–28 m | 13, 26, 26 | 7 m |
+
+- Density sets the spacing: Dense about 100 m, Safe about 140 m, Loose about 500 m. Only Safe and Loose never came under 20 m. Safe's closest pass was 27 m; Loose's was 139 m.
+- Pairs at density 0 flies closer than Wedge at density 0 and has the most close passes.
+
+### Height on station
+
+The end-of-mission lists (15:24–15:26) put the survivors at the altitude flight 2C's flights held over the same targets: D0 620–753 m (2C's C1b 647–747 m), D1 574–600 m (C2c 580–599 m), D2 857–962 m (C2b 855–1,112 m), DP 548–691 m (C1c 653–686 m). Density does not change the height. D1 and D2 were 7.4–8.4 km from their targets at the end; D0 and DP 1.8–6.2 km.
+
+### What this changes (reading)
+
+- On a server that keeps up, the as-shipped Dense Wedge still collides (two of three runs). So the overload was not the cause (option H set aside), and the collisions are the AI's close formation flying.
+- **Density 1 (Safe) is the smallest change that removed every close pass** (0 aircraft-seconds under 20 m in three runs, closest 27 m) while keeping a formation about 140 m wide. Loose (about 500 m) did the same but barely flies as a formation.
+- Three runs are few: Safe's zero collisions in three sorties do not prove it never collides; the spacing is the stronger evidence. Two of the six built-ins (Yak raid, F-51 ArmedRecon) fly Pairs at density 0, the closest-flying setting.
+- Changing the density is the user's ruling: `docs/decisions/0019-air-formations-fly-at-safe-density.md` (Proposed).
+
+## Flight 2E (does Safe density hold for Pairs and the propeller built-ins?) — 2026-10-16, three runs, Tacview recorded
+
+Probe `P14_Probe_2E_traced` (`handoff/p14-probes/flight2e/`; design `handoff/sessions/2026-10-16-flight-2e.md`; prompt `handoff/P14-flight-2e-codex-prompt.md`), built from `claude/p14-flight-2e` (`3cf12e4`) as `P14_Probe_2E_20261016` without the resaver, hosted by the game client on this PC (game `261013`). Four built-ins **exactly as shipped after decision 0019** (every Formation command at density 1, Safe), placed and wrapped as Air Tasking does, on empty targets, area COLD, no enemy, 20 AI aircraft: **EA** F-51 ArmedRecon (NATO, two pairs, Pairs), **EY** Yak airfield raid (DPRK, two pairs, Pairs, one shared `WP 1`), **EI** Il-10 Kimpo attack (DPRK, two fours, Wedge, one shared `WP 1`), **EC** F-51 CloseSupport (NATO, one four, Wedge). Starts 60, 120, 180, 240 s. The host spectated, pressed LCtrl+R and left at 15:00; after runs 1 and 2 the server reloaded the mission for the next run.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-16_10-25-51` | `src/testdata/missionlog/real_28/` (34 files) | `handoff/tacview/P14_Probe_2E_run1.zip.acmi` | 16:05.1 |
+| 2 | `2026-10-16_10-44-54` | `src/testdata/missionlog/real_29/` (34 files) | `handoff/tacview/P14_Probe_2E_run2.zip.acmi` | 15:51.0 |
+| 3 | `2026-10-16_11-04-02` | `src/testdata/missionlog/real_30/` (35 files) | `handoff/tacview/P14_Probe_2E_run3.zip.acmi` | 15:36.3 |
+
+Replay against the frozen files: no dead links in any run. The unobserved successors are the Zone IN, `HARD STOP`, `EXTEND` and on-station branches that the 15:00 leave or the empty targets cut off, as planned.
+
+### 20 aircraft: no overload message in flight; timing as predicted
+
+- **No "server overload" message during the flights.** The host opened the menu (where the chat shows) about every 100 s in runs 2 and 3, from 130 s to 830 s: no message. It appeared only when the host left, stamped 12:45 (mission 15:00), in runs 1 and 2. Mission time ran at about 0.85× wall time (2D, 16 aircraft: 1.0×; 2C, 48: 0.4×). The split into two missions was not needed.
+- Every `START` and cue fired on its second. Measured `WP 1` (all three runs within 0.1 s): EA 378.5 s, EY 384.1 s, EI 463.1 s, EC 553.1 s, so the transits were 318, 264, 283 and 313 s (nominal 300). Each attack timer fired 0.50 s after `WP 1`. EY's shipped 300 s attack ended at 684.6 s, its `DONE HUB` fired then and `DELETE DELAY` at 745.2 s, in runs 1 and 2 (walker: 0.5 s after `WP 1` + 300 s, then 60.6 s).
+- No aircraft fired or dropped anything: every live aircraft in the three end-of-mission lists has full guns (`BUL:1800` Il-10, `BUL:1880` F-51) and its full load (`BOMB:4` Il-10, `BOMB:2` EC, `RCT:4` EA).
+
+### Losses
+
+Every loss was in **EY, the Yak raid's Pairs**, with no attacker (`AType:3 AID:-1`). Distances are between the two aircraft's reference points in Tacview, at its 0.2 s frame rate (the true closest point can be nearer). A Yak-9P is 9.7 m across the wings and 8.5 m long.
+
+| Run | Destroyed | After `WP 1` | Altitude | What Tacview shows |
+|---|---|---|---|---|
+| 1 | Blue 21 397.1 s, Blue 22 397.9 s | +13 s | 2,890–2,910 m | collision: 3.3 m apart at 397.2 s, both aircraft's attitudes jump in the same 0.4 s (the lead's roll 60° to 138°); both pilots bailed out |
+| 3 | Blue 21 405.2 s | +21 s | 2,660 m | collision: 5.4 m apart at 396.2 s; in the next 0.4 s Blue 21's heading swings 82° (not a manoeuvre), then it slows from 606 to 320 km/h in 3 s, tumbles, and its pilot bails out |
+| 3 | Blue 22 517.1 s | +133 s | 1,125 m | flying a steady 40° bank turn, nearest aircraft 3.2 km; pilot bailed out. Reading: damage from the 396.4 s contact (the log has no damage record) |
+| 3 | Red 11 and Red 12, 637.8–637.9 s | +254 s | 1,095 m | collision: 5.3 m apart at 637.2 s; Red 12's heading swings 93° in 0.4 s; both destroyed 0.6 s later, 6 m apart. Red 12's pilot killed, Red 11's bailed out. All four Yaks lost, so `LOSSES` fired `DONE HUB` at 637.9 s |
+
+Run 2 lost nothing, but its Blue pair passed 8.5 m apart at 396.2 s, the wingman 5 m below the lead. **In all three runs the Yak Blue pair came within 9 m at 396–397 s**, 12–13 s after `WP 1`.
+
+**How the collisions happen (Tacview, all three runs alike).** The Pairs slot at Safe puts the wingman about 40 m behind, 47 m to the right and 6 m below its lead. At `WP 1` the lead banks 60° left, then at 391 s reverses into a 60° right turn. The wingman, now on the inside of the turn, reverses too, but holds its heading about 14° left of the lead's while flying 25 km/h faster at the lead's height: it slides straight across, nearly abeam (3 to 7 m behind), at about 30 m/s sideways. Neither aircraft climbs, dives or eases the bank to avoid it. Where the wingman is level with the lead (runs 1 and 3) they touch; 5 m below (run 2) it passes underneath. The run 3 Red pair is the same in a steady orbit: the lead turns at 51° bank, the wingman at 31° drifts ahead and to the right, and the lead's turn carries it into the wingman.
+
+The game's log has no collision record: it shows only the losses and bail-outs. The evidence for contact is Tacview: attitude jumps of 80° to 90° within 0.4 s at the closest point, which no controlled aircraft can fly, followed by loss of control.
+
+### Spacing (Tacview)
+
+Distance from each aircraft to the nearest aircraft of its **own flight**, sampled once a second; phases are transit (before `WP 1`), descent (the next 180 s) and on station. "Under 20 m" counts aircraft-seconds. "Closest" is the once-a-second minimum, and for the Yaks the 0.2 s Tacview minimum. Script: `tools/p14/flight2e_spacing.py <run dir>` (the run's logs and its unzipped `.acmi`).
+
+| Cell | Formation | Median: transit / descent / on station | 5th percentile, descent | Under 20 m (runs 1, 2, 3) | Closest |
+|---|---|---|---|---|---|
+| EA F-51 ArmedRecon | Pairs, Safe | 78–119 / 84–183 / 88–195 m | 47–50 m | 4, 0, 0 | 17 m |
+| EY Yak raid | Pairs, Safe | 66–77 / 73–152 / 95–250 m | 29–36 m | 6, 6, 12 | 3.3 m (three collisions in two runs) |
+| EI Il-10 | Wedge, Safe | 146 / 246–302 / 683–895 m | 79–90 m | 0, 0, 0 | 20 m |
+| EC F-51 CloseSupport | Wedge, Safe | 138 / 157–158 / 179–199 m | 96–100 m | 0, 0, 0 | 54 m |
+
+- **Wedge at Safe holds for the propeller types**: no pass under 20 m in three runs, as for the F-80C in flight 2D (closest 27 m). Transit spacing is the same for every type: about 140 to 145 m.
+- **Pairs at Safe does not.** The Yak raid came under 20 m in every run and collided in two of three; the F-51 ArmedRecon came within 17 m in run 1. A Pairs flight at Safe holds its wingman about 65 to 120 m away in transit, close to flight 2D's Pairs at **Dense** (an F-80C four, 67 to 84 m, 13–26 aircraft-seconds under 20 m, closest 7 m): for Pairs, Safe hardly widens the slot.
+- **The two flights of one cell kept apart** until the host left: other-flight nearest at least 236 m (EA), 271 m (EY) and 56 m (EI). In run 3 two Il-10s of different fours came within 15 m at 931 s, after the leave. The shared `WP 1` of S4 did not cause the losses.
+- *Correction (2026-10-16): the first version of this section and of `flight2e_spacing.py` scaled each aircraft's longitude by its own latitude, which adds about 1.4 m east per metre north at 127° E and misstated distances. The figures above are from the corrected script (differences first, as `flight2d_spacing.py` does); the flight 2D figures were not affected.*
+
+### What this changes (reading)
+
+- Decision 0019's Safe density is enough for **Wedge** formations of every type flown (F-80C, F-51D, Il-10), but **not for Pairs**: the Yak raid as the app ships it lost 6 of 12 aircraft-sorties in three runs, every one inside a pair.
+- The F-51 ArmedRecon's pairs came within 17 m but lost nothing. Three runs are few; the close passes are the stronger evidence.
+- The collisions are turn crossovers: the AI wingman takes a straight line to its new slot through its lead and does not avoid it. A wider slot (Loose) may only delay the crossing; a different formation removes it only if its slot does not cross the lead in a turn reversal. Flight 2F tests both.
+- What to do about Pairs is the user's call: `docs/decisions/0020-pairs-formations-after-flight-2e.md` (Proposed).
+
+## Flight 2F (is it the server or the formation? The Yak raid in six formations at low load) — 2026-10-17, three runs, Tacview recorded
+
+Probe `P14_Probe_2F_traced` (`handoff/p14-probes/flight2f/`; design `handoff/sessions/2026-10-16-flight-2f.md`; prompt `handoff/P14-flight-2f-codex-prompt.md`), built from `claude/p14-flight-2f` (`74b8d7d`) as `P14_Probe_2F_20261017` without the resaver, hosted by the game client on this PC (game `261013`) and flown by Claude at the keyboard. Six copies of the Yak airfield raid (`1950_DPRK_Yak_AirfieldRaid_2plus2`, two pairs sharing one `WP 1`), each placed and wrapped as Air Tasking does, with only its two Formation commands set after placement: **PD** Pairs Dense, **PS** Pairs Safe (as shipped: the 2E control), **PL** Pairs Loose, **WD** Wedge Dense, **WS** Wedge Safe, **WL** Wedge Loose. Starts 330 s apart (60 … 1,710 s) on two targets used in turn (A = 2E's Yak target, B = flight 2C's C2a), so **at most 8 aircraft flew at once**. Empty targets, area COLD, no enemy. The host spectated, pressed LCtrl+R and left at about 38:35.
+
+Why: the user's reading of 2E (2026-10-16) was that Tacview's sudden attitude jumps point to erratic aircraft on a loaded server. Flight 2F asks whether the collisions remain when the server is lightly loaded, and whether they follow the formation.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-17_11-42-39` | `src/testdata/missionlog/real_31/` (80 files) | `handoff/tacview/P14_Probe_2F_run1.zip.acmi` | 39:30 |
+| 2 | `2026-10-17_12-23-28` | `src/testdata/missionlog/real_32/` (80 files) | `handoff/tacview/P14_Probe_2F_run2.zip.acmi` | 39:28 |
+| 3 | `2026-10-17_13-04-15` | `src/testdata/missionlog/real_33/` (80 files) | `handoff/tacview/P14_Probe_2F_run3.zip.acmi` | 39:30 |
+
+Replay against the frozen files: no dead links in any run. The unobserved successors are the Zone IN, `EXTEND` and late `HARD STOP` branches that the empty targets and the leave cut off, as planned.
+
+### The server kept up; timing as predicted
+
+- **Mission time ran at 1.00× wall time in all three runs** (log file times against their mission clock, `tools/p14/flight2f_spacing.py`). No overload message was seen in the menu at 524, 1,015 and 1,513 s in run 1. This is the lightest load of any formation flight (2D: 16 aircraft, 1.0×; 2E: 20, 0.85×).
+- `WP 1` came within 0.3 s of the prediction (START + 264.1 s, 2E's measured transit) in every copy of every run, except WL at +1.9 s. Every `DONE HUB` fired at its attack end (624.6 … 2,276.5 s).
+- Every aircraft was deleted before the mission ended (last `DELETE DELAY` 2,335 s), so the logs carry no end-of-mission ammunition list. No aircraft had an attacker.
+
+### Losses
+
+One, in run 3, **in PS, the Pairs Safe raid as the app ships it**: Blue 21 and Blue 22 were destroyed in the same tick at 667.0 s (`WP 1` + 12.8 s, 2,900 m), 3.3 m apart in Tacview at 666.8 s. Both pilots were killed at the ground 22 s later; neither bailed out. It is the same moment as every 2E run: the Blue pair at `WP 1` + 12–13 s, in the turn reversal onto the attack. Runs 1 and 2 lost nothing.
+
+### Attitude jumps (the server test)
+
+Every Tacview step in which an aircraft's roll, pitch or yaw changed by 60° or more within 0.4 s, merged per aircraft into episodes:
+
+- **Flight 2F:** two episodes in three runs, both in run 3's PS pair, both starting at the 667 s contact (nearest aircraft 4.0 and 6.3 m). None anywhere else in 72 aircraft-sorties.
+- **Flight 2E rechecked the same way** (20 aircraft, 0.85×): four episodes in three runs, every one starting with its own wingman within 20 m (the three Yak collisions); none in the 16 other aircraft of each run, and none in run 2, which had no contact.
+
+So the jumps are contacts, not erratic flight on a loaded server.
+
+### Spacing (Tacview)
+
+Nearest aircraft of the **same flight** (the two aircraft of one pair), sampled once a second for the medians and the under-20 m count; "Closest" is at Tacview's 0.2 s frame rate. Transit is before `WP 1`, descent the next 180 s, then on station.
+
+| Cell | Formation | Median in transit (runs 1, 2, 3) | Under 20 m, aircraft-seconds (runs 1, 2, 3) | Closest (runs 1, 2, 3) | When |
+|---|---|---|---|---|---|
+| PD | Pairs, Dense | 54, 35, 36 m | 4, 4, 4 | 13.8, 13.0, 13.8 m | `WP 1` + 9–10 s |
+| PS | Pairs, Safe (shipped) | 75, 80, 86 m | 6, 24, 6 | 9.4, 8.3, **3.3 m (collision)** | `WP 1` + 12–13 s |
+| PL | Pairs, Loose | 206, 206, 206 m | 0, 0, 0 | 23.0, 31.8, 31.5 m | + 80, + 17, + 18 s |
+| WD | Wedge, Dense | 76, 80, 73 m | 12, 2, 4 | 9.7, 12.2, 13.3 m | + 77, + 12, + 13 s |
+| WS | Wedge, Safe | 166, 165, 162 m | 2, 0, 0 | 18.3, 18.7, 21.9 m | + 15–16 s |
+| WL | Wedge, Loose | 1,170, 1,239, 1,187 m | 0, 0, 0 | 28.5, 23.9, 36.5 m | + 30, + 28, + 99 s |
+
+- **Loose is the only setting that kept every pass above 20 m, in both formations, in every run.** Pairs at Loose holds the wingman about 200 m out in transit, still a visible pair; Wedge at Loose about 1,200 m, barely a formation.
+- **Pairs at Safe, as shipped, came within 10 m in every run and collided in one**, at the lightest load flown. With 2E: six runs, within 10 m in all six, collisions in three.
+- **Wedge at Safe, for a two-ship element, is marginal**: 18.3 and 18.7 m in two runs, at the same turn reversal. Wedge fours at Safe held 20–54 m in 2D and 2E.
+- Pairs at Dense (13–14 m, no contact) flew no closer than Pairs at Safe here: for the Yak pair, Safe does not widen the slot that matters, the reversal.
+- The two pairs of one cell kept at least 120 m apart while on the attack, except PD (Dense), whose pairs passed 23–43 m apart at 386 s (`WP 1` + 62 s). In run 3 PL's Red 11 and Blue 22 came within 12.3 m at 1,338 s, after `DONE HUB` (1,284.6 s), as both pairs turned for home before the delete.
+
+### The wingman crosses over in every formation (Tacview)
+
+The wingman's position in its lead's frame (forward, right, up), the Blue pair of each raid, from `WP 1` − 5 s to + 60 s (`tools/p14/flight2f_crossover.py`). On arrival over the area's centre (placement puts `WP 1` on it) the lead banks 60° left for about 5 s, then rolls straight into a steady 60° right orbit. The wingman, now on the inside, crosses the lead's track:
+
+| Flown as | Slot before `WP 1` (behind / right / below) | Crosses at | At the crossing (behind or ahead / below) | Closest |
+|---|---|---|---|---|
+| Pairs, Dense | 23 / 21 / 5 m | `WP 1` + 8 to 10 s | 22–26 m behind, level | 22–27 m |
+| Pairs, Safe (shipped) | 40 / 40 / 7 m | + 12 to 13 s | 3–8 m behind, 2–7 m below | 3.3–9.4 m |
+| Pairs, Loose | 124 / 163 / 17 m | + 18 s | 28–29 m ahead, 11–14 m below | 32 m |
+| Wedge, Dense | 40 / 40 / 9 m | + 12 to 13 s | 0–6 m behind, 9–12 m below | 10–13 m |
+| Wedge, Safe | 73 / 91 / 15 m | + 15 s | 2–6 m behind, 18–21 m below | 18–22 m |
+| Wedge, Loose | 238 / 291 / 10 m | + 21 s | 15–25 m ahead, 27–33 m below | 35–38 m |
+
+- **The crossover happens at every setting**; the setting only changes the clearance. The wingman takes a straight line to the far side, nearly abeam, without dropping back; only the formation's own vertical step separates them.
+- **Safe is not a broken value:** Safe is about twice Dense in both types, Loose about six times. Pairs has half Wedge's slot at every setting: **Pairs at Safe is exactly Wedge at Dense** (40 m back, 40 m right), the setting that collided in flight 2D.
+
+### Every collision is a crossing in a turn (flights 2C to 2F, Tacview)
+
+`tools/p14/formation_collisions.py` on every run with a track and a loss (2C run 2, 2D runs 1–3, 2E runs 1 and 3, 2F run 3): in every collision it could resolve, one aircraft crossed the other's track in a turn; none was in straight and level flight.
+
+| Kind | Collisions | What Tacview shows |
+|---|---|---|
+| Crossover at the lead's turn reversal | 4: Yak Pairs at Safe (2E runs 1 and 3, 2F run 3), F-80C Pairs at Dense (2D run 1) | the lead rolls from one bank into the other; the wingman, now inside, slides across nearly abeam at the lead's height (from about 110 m out to 3–5 m behind and 1–2 m below in 3–9 s) |
+| Sliding across in a steady turn | 5: F-80C Wedge fours at Dense (2D runs 2 and 3, two in 2C run 2), the Yak Red pair on station (2E run 3, + 254 s) | the lead holds 30–50° of bank; another aircraft of the flight changes sides (from 100–400 m out) or, at a shallower bank, overshoots ahead, and crosses the lead's track |
+
+Not resolved: two 2C run 2 losses (one in transit 27 s after activation; one whose pair the script did not find). Flight 2B had no Tacview. Turn angle alone is not the cause: steady 60° orbits mostly held their slots, and collisions came at 30° too; what precedes every contact is an aircraft changing sides.
+
+### What this changes (reading)
+
+- **The collisions are the formation, not the server.** They repeat at 1.00× with 8 aircraft, at the same second after `WP 1`, and every attitude jump in 2E and 2F starts at a contact.
+- For decision 0020: **option A (Pairs fly Loose) is the only option that kept every pass above 20 m.** Option B (Wedge at Safe for the two Pairs built-ins) came to 18 m in two of three runs for a two-ship. What to write is the user's call: `docs/decisions/0020-pairs-formations-after-flight-2e.md` (Proposed, evidence added).
+- Three runs per cell are few; the close-pass counts and the repeat of the 12 s reversal are the stronger evidence. Not flown: the F-51 ArmedRecon pairs at Loose (the other Pairs built-in).
+
+## Flight 2G (can a setting or an MCU stop the wingman crossing its lead? Skill, Loose at `WP 1`, attack area ahead) — 2026-10-17, three runs, Tacview recorded
+
+Probe `P14_Probe_2G_traced` (`handoff/p14-probes/flight2g/`; design `handoff/sessions/2026-10-17-flight-2g.md`; prompt `handoff/P14-flight-2g-codex-prompt.md`), built from `claude/p14-flight-2g-be3801` (`29b9a5f`) as `P14_Probe_2G_20261017` without the resaver, hosted by the game client on this PC (game `261013`) and flown by Claude at the keyboard. Five copies of the Yak airfield raid (`1950_DPRK_Yak_AirfieldRaid_2plus2`, two pairs sharing one `WP 1`), each placed and wrapped as Air Tasking ships it (Pairs at Safe, AILevel 2), with one change on the placed copy: **GC** none (the control: 2F's PS on the same target B), **G3** AILevel 3 (Veteran) on all four aircraft, **G4** AILevel 4 (Ace), **GX** one Formation command per flight, Pairs at Loose, fired by `WP 1` (2 MCUs per raid, no switch back), **GA** both AttackArea centres 3 km straight ahead of `WP 1`. Starts 330 s apart (60 … 1,380 s) on targets B and A in turn, so **at most 8 aircraft flew at once**. Empty targets, area COLD, no enemy. The host spectated, pressed LCtrl+R and left at 33:00.
+
+Why: decision 0021 rules the crossover a game bug and asks for the smallest workaround. Flight 2G asks whether the AI's skill, loosening the pair only for the attack, or a different arrival geometry stops the wingman crossing through its lead while the shipped Pairs at Safe stays.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-17_18-43-00` | `src/testdata/missionlog/real_34/` (69 files) | `handoff/tacview/P14_Probe_2G_run1.zip.acmi` | 33:40 |
+| 2 | `2026-10-17_19-17-59` | `src/testdata/missionlog/real_35/` (69 files) | `handoff/tacview/P14_Probe_2G_run2.zip.acmi` | 33:40 |
+| 3 | `2026-10-17_19-52-59` | `src/testdata/missionlog/real_36/` (69 files) | `handoff/tacview/P14_Probe_2G_run3.zip.acmi` | 33:55 |
+
+Replay against the frozen files: no dead links in any run. The unobserved successors are the Zone IN, `EXTEND` and late `HARD STOP` branches that the empty targets and the leave cut off, as planned.
+
+### The server kept up; timing as predicted
+
+- **Mission time ran at 1.00× wall time in all three runs** (log file times). No overload message in the menu at about 1,000 s in run 1.
+- `WP 1` came within 0.4 s of the prediction (START + 264.1 s) in every cell of every run, GA included (it moves the area, not `WP 1`). Every `DONE HUB` fired at its attack end (624.8 … 1,944.8 s).
+- The slot before `WP 1` was the same in every cell: 40 m behind, 41–46 m right, 7 m below. Skill does not change the slot. GX's lead did not slow down after the Loose order (`WaitForWingmen = 1`): 543–556 km/h from `WP 1` + 5 to + 20 s, as in GC.
+- No aircraft had an attacker.
+
+### Spacing and losses (Tacview)
+
+Nearest aircraft of the same flight; "under 20 m" counts aircraft-seconds sampled once a second; "closest" is at Tacview's 0.2 s frames (`tools/p14/flight2g_spacing.py`). Losses are aircraft destroyed, out of 4 per cell per run.
+
+| Cell | Change | Closest (runs 1, 2, 3) | When, after `WP 1` | Under 20 m (runs 1, 2, 3) | Lost (runs 1, 2, 3) |
+|---|---|---|---|---|---|
+| GC | as shipped | 4.2, 9.4, **2.9 m** | + 12–13 s | 2, 6, 8 | 2, 0, 2 |
+| G3 | Veteran | 6.5, 6.0, **1.7 m** | + 12–13 s | 2, 12, 4 | 0, 1, 2 |
+| G4 | Ace | **6.2, 4.9**, 7.4 m | + 12–13 s (run 3: + 136 s; its + 13 s contact fell between frames) | 2, 12, 16 | 2, 2, 2 |
+| GX | Loose from `WP 1` | 26.9, 18.7, 19.1 m | + 17.5, + 182, + 18.5 s | 0, 0, 0 | 0, 0, 0 |
+| GA | area 3 km ahead | 5.6, 26.1, **4.5 m** | + 23–24 s | 2, 0, 4 | 2, 0, 2 |
+
+- **GC repeated the fault**: the Blue pair came within 10 m at `WP 1` + 12–13 s in every run and collided in runs 1 and 3. Pairs at Safe as shipped now has nine runs (2E, 2F, 2G): within 10 m in all nine, collisions in five.
+- **Skill makes no difference.** Veteran and Ace wingmen crossed at the same second, as close, and collided: G3 in runs 2 and 3 (run 2: an attitude jump at the + 12 s pass, 9.7 m, and Blue 21 lost at + 64 s), G4 in all three runs (6 of 12 aircraft lost, the most of any cell).
+- **GX lost nothing and kept every one-second sample above 20 m.** Its closest passes were 18.7–26.9 m, each with the wingman 16–21 m below its lead (the Loose slot's vertical step). Pairs at Loose throughout (2F PL) did a little better: 23.0, 31.8, 31.5 m.
+- **GA moved the collision, not the fault**: the Red pair collided at + 23–24 s in runs 1 and 3. In run 1 the two pairs' leads, both orbiting the moved centre, also passed 1.7 m apart at + 158 s (no attitude jump; 14 aircraft-seconds under 20 m between the pairs); that Blue 21 was lost at + 202 s at 1,114 m with no aircraft near.
+- Three losses came about 133 s after a contact at + 13 s, at about 1,140 m with no aircraft near (GC run 1, G4 runs 1 and 3), as in 2E run 3: damaged aircraft, not new collisions.
+
+### Every crossing of the lead's track (Tacview)
+
+`tools/p14/flight2g_crossover.py`: the wingman's offset in its lead's frame from `WP 1` − 5 s to the delete, and every sign change of its sideways offset.
+
+- **The lead's left-then-right is its attack entry, not its arrival over the centre.** In every cell the lead banks left within 1.3 s of `WP 1`. As shipped it reverses right at + 3 to + 4 s (Red lead) or + 6 to + 7 s (Blue lead), and the Blue wingman, now inside, crosses at + 12–13 s, 3–9 m behind and 2–6 m below. In GA the lead still turns left at `WP 1`, about 40° over 14 s, away from an area straight ahead, then reverses right at + 16 to + 19 s, and the Red wingman crosses at + 23 s, 5 m behind and level. Moving the area only delays the reversal.
+- **GX**: on the Loose order the wingman swings out to about 245 m during the lead's left leg, then crosses its lead's track at + 18 s, 6–20 m behind and 18–21 m below, closest 19–27 m. A steady-turn crossing at + 182 s in run 2 came to 18.7 m (16 m below). As in 2F's PL, the clearance comes from the slot's vertical step, not from avoidance.
+- Steady-turn crossings on station came within 20 m in GC (16.8 m), G3 (13.0–13.5 m) and G4 (7.4–17.7 m; 8.3 m at + 68 s in run 2, 7.4 m at + 136 s in run 3), mostly 9–13 m below: the second kind of crossing (2F), at Safe, at every skill.
+
+### What this changes (reading)
+
+- **AI skill is not a workaround.** A Veteran or Ace wingman crosses through its lead exactly as a Normal one does. Raising skill would also change every AI fight, for nothing.
+- **Moving the attack area is not a workaround.** The reversal belongs to the AI's attack entry (a left turn at `WP 1` wherever the area is), so the crossover only comes later; in GA the two pairs also ended up orbiting together.
+- **Loosening at `WP 1` works about as well as Loose throughout, not better**: no losses, closest 18.7–26.9 m against 2F PL's 23.0–31.8 m, for 1 MCU per flight. Its only gain is the shipped Safe look in transit, where no collision has been recorded.
+- For decision 0020: **option A (Pairs at Loose, a value, no MCUs) stays the recommendation**; GX is a costlier, slightly closer alternative. For decision 0021's table: skill and area placement were tried and rejected; GX was tried and is not recommended.
+- Three runs per cell are few; the repeat of the + 12–13 s crossing in every Safe cell of every run is the stronger evidence. Not flown: Wedge fours with GX (the steady-turn kind), the F-51 ArmedRecon at Loose.
+
+## Flight 2H (does Pairs at Loose hold for the F-51 ArmedRecon?) — 2026-10-18, three runs, Tacview recorded
+
+Probe `P14_Probe_2H_traced` (`handoff/p14-probes/flight2h/`; design `handoff/sessions/2026-10-18-flight-2h.md`; prompt `handoff/P14-flight-2h-codex-prompt.md`), built from `claude/p14-flight-2h` (`87eb0b6`) as `P14_Probe_2H_20261018` without the resaver, hosted by the game client on this PC (game `261013`) and flown by Claude at the keyboard. Three copies of the F-51 ArmedRecon built-in (`1950_US_F51_ArmedRecon_2plus2`, S3: the Red pair attacks at 900 m with a 1,200 s AttackArea; the Blue pair covers it from 2,400 m with `MCU_CMD_Cover`), placed and wrapped as Air Tasking does, with only their two Formation commands set after placement: **HS** Pairs at Safe, as shipped (the control, flight 2E's EA on its own target), **HL1** and **HL2** Pairs at Loose (decision 0020's option A). Starts 60, 90, 120 s; 12 aircraft at once. Empty targets, area COLD, no enemy. The host spectated, pressed LCtrl+R and left after 28:00.
+
+Why: the user accepted decision 0020 option A (Pairs fly Loose) on 2026-10-18 from Yak evidence and asked to fly the other Pairs built-in at Loose before A is built.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-18_02-29-27` | `src/testdata/missionlog/real_37/` (61 files) | `handoff/tacview/P14_Probe_2H_run1.zip.acmi` | 30:06 |
+| 2 | `2026-10-18_03-00-54` | `src/testdata/missionlog/real_38/` (124 files) | `handoff/tacview/P14_Probe_2H_run2.zip.acmi` | 64:39 (a taskbar preview held focus; the host left late) |
+| 3 | `2026-10-18_04-06-54` | `src/testdata/missionlog/real_39/` (60 files) | `handoff/tacview/P14_Probe_2H_run3.zip.acmi` | 29:04 |
+
+Replay against the frozen files: no dead links in any run.
+
+### Load and timing
+
+- **Mission time ran at 1.00× wall time** in all three runs (12 aircraft).
+- HS reached `WP 1` on the prediction (378.4 s, START + 318.5 s). **The Loose copies arrived late**: HL1 at 417.4–418.2 s (+ 9 s), HL2 at 442.6–443.6 s (+ 4–5 s). A Loose formation slows the transit a little. Every `DONE HUB` fired 1,200.5 s after its `WP 1`, before the leave. Times below are after the measured `WP 1`.
+- No aircraft had an attacker.
+
+### Spacing and losses (Tacview)
+
+Nearest aircraft of the same pair; "under 20 m" in aircraft-seconds sampled once a second; "closest" at Tacview's 0.2 s frames (`tools/p14/flight2h_spacing.py`, `flight2h_crossover.py`).
+
+| Cell | Formation | Closest (runs 1, 2, 3) | Where | Under 20 m (runs 1, 2, 3) | Lost |
+|---|---|---|---|---|---|
+| HS | Pairs, Safe (as shipped) | 9.9, 18.4, 20.3 m | Blue on station (+ 996 s, 10 m below); Red on station (+ 161 s, 11 m below); Blue in transit | 10, 2, 0 | 0 |
+| HL1 | Pairs, Loose | 14.4, 19.2, 25.3 m | Blue in transit (199 s, 163 s); Red at `WP 1` + 15 s | 2, 2, 0 | 0 |
+| HL2 | Pairs, Loose | **7.7 m (collision)**, 12.8, 23.0 m | Blue in transit (214 s); Red at `WP 1` + 15 s (15 m below); Blue in transit | 6, 4, 0 | **2 (run 1)** |
+
+- **Loose did not keep the F-51's pairs apart.** Of six Loose samples, three came under 20 m and one collided: HL2's Blue pair in run 1, both aircraft destroyed in the same tick at 214.3 s, in transit at 1,056 m, 224 s before `WP 1`.
+- **Safe, as shipped, lost nothing** here either: with flight 2E's EA, the F-51 at Safe has six runs, no losses, closest 9.9–20.3 m.
+
+### The cover pair weaves in transit
+
+The Blue pair's Cover order makes it descend from 2,400 m toward the Red pair at about 900 m while weaving in 50–60° banked S-turns, a reversal every 10–20 s, for the whole transit (`WP 1` − 300 s to about − 200 s).
+
+- **At Safe** the wingman banks with its lead and stays on its own side, 18–105 m to the right: no crossing in transit.
+- **At Loose** every reversal swings the wingman 150–400 m from one side to the other, across the lead's track. In HL2 run 1 the lead reversed left at about 202 s while its wingman was 160–400 m out on that side; the wingman closed in and they collided at 214 s, 12 m apart in height 2 s before. HL1's two close passes (14.4 and 19.2 m) are the same weave.
+- The Red (attack) pair at Loose crossed its lead at the entry reversal, `WP 1` + 15 s, 12.8 m (run 2, 15 m below) and 25.3 m (run 3). Loose's vertical step on the F-51 varied from 22 m above to 19 m below, unlike the Yak's steady 17 m below.
+
+### What this changes (reading)
+
+- **Decision 0020's option A is confirmed for the Yak raid, not for the F-51 ArmedRecon.** For the F-51, Loose was no better than Safe in three runs and collided once, in a manoeuvre the Yak never flies: the covering pair's transit weave. A wider slot turns each of its reversals into a crossing.
+- Three runs per cell are few, and the F-51 has not collided at Safe in six; the weave evidence (Tacview, every run) is stronger than the counts.
+- What to write for this built-in is the user's call: `docs/decisions/0022-f51-armed-recon-at-loose.md` (Proposed).
+
+## Flight 2I (the two Pairs built-ins as shipped under decisions 0020 A and 0022 A2) — 2026-10-18, three runs, Tacview recorded
+
+Probe `P14_Probe_2I_traced` (`handoff/p14-probes/flight2i/`; design `handoff/sessions/2026-10-18-flight-2i.md`; prompt `handoff/P14-flight-2i-codex-prompt.md`), built from `claude/p14-flight-2i` (`611bb08`, on top of the 0020 A / 0022 A2 build `b0d640e`) as `P14_Probe_2I_20261018` without the resaver, hosted by the game client on this PC (game `261013`) and flown by Claude at the keyboard. The two Pairs built-ins exactly as the app now ships and places them, nothing changed after placement: **IF1, IF2** the F-51 ArmedRecon (Red attack pair at Loose, Blue covering pair at Safe); **IY1 to IY4** the Yak airfield raid (both pairs Loose), in two waves. Starts 60, 90, 120, 150, 800, 830 s; at most 16 aircraft at once. Empty targets, area COLD, no enemy. The host left at about 28:00.
+
+Why: confirm the build of decisions 0020 A and 0022 A2 with the shipped files, before the branch is merged.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-18_09-11-24` | `src/testdata/missionlog/real_40/` (61 files) | `handoff/tacview/P14_Probe_2I_run1.zip.acmi` | 28:58 |
+| 2 | `2026-10-18_09-41-40` | `src/testdata/missionlog/real_41/` (61 files) | `handoff/tacview/P14_Probe_2I_run2.zip.acmi` | 28:56 |
+| 3 | `2026-10-18_10-11-55` | `src/testdata/missionlog/real_42/` (61 files) | `handoff/tacview/P14_Probe_2I_run3.zip.acmi` | 28:54 |
+
+Replay against the frozen files: no dead links in any run.
+
+### Load and timing
+
+- **Mission time ran at 1.00× wall time** in all three runs (up to 16 aircraft).
+- Every `WP 1` came within 0.4 s of the prediction (F-51 START + 318.5 s, Yak START + 264.1 s). The F-51 with only its Red pair at Loose was not late (2H's all-Loose F-51 was 4–9 s late).
+- No aircraft had an attacker.
+
+### Spacing and losses (Tacview)
+
+Closest same-pair pass at Tacview's 0.2 s frames (`tools/p14/flight2i_spacing.py`, `flight2i_crossover.py`).
+
+| Cell | As shipped now | Closest (runs 1, 2, 3) | Lost |
+|---|---|---|---|
+| IF1 | F-51: Red Loose, Blue (Cover) Safe | 19.3, 17.0, 17.1 m | 0 |
+| IF2 | the same | **8.1 m**, 33.5, 13.7 m | **1 (run 1)** |
+| IY1 | Yak: both pairs Loose | 25.2, 16.4, 20.7 m | 0 |
+| IY2 | the same | 32.7, 32.9, **9.7 m** | 0 |
+| IY3 | the same | 23.3, 19.0, **10.8 m** | 0 |
+| IY4 | the same | 29.8, 26.7, 26.8 m | 0 |
+
+- **The Yak raid lost nothing in twelve raids.** As shipped before decision 0020 (Pairs at Safe) it came within 10 m in nine runs of nine and collided in five. Its entry reversal now clears 23–33 m (the Loose slot, as in 2F and 2G).
+- **But Loose does not stop the steady-turn crossing.** On station, two Yak wingmen crossed their leads at 9.7 m (IY2 run 3, `WP 1` + 280 s, 10 m below) and 10.8 m (IY3 run 3, + 77 s, nearly level), and four more passes came to 16–20 m. No contact.
+- **The F-51's attack pair at Loose held** (17–57 m). **Its covering pair at Safe crossed its lead on station**: IF2 run 1, `WP 1` + 803 s, at 437 m: the wingman climbed from 83 m below into a steady 36° turn and crossed 6 m ahead and 4 m above its lead (8.1 m), then rolled to 129°; the lead held its turn 6 s, pitched down and was lost at + 813 s (reading: contact damage). IF2 run 3 came to 13.7 m the same way. 2H's Safe control had the same on-station crossing (9.9 m). The covering pair's transit weave, which collided at Loose in 2H, stayed clear at Safe: closest in transit 17.1–49.5 m (17.1 and 19.3 m in IF1 runs 3 and 1), and no crossing of the lead's track within 20 m.
+
+### What this changes (reading)
+
+- **Decisions 0020 A and 0022 A2 work as intended for the crossing they target**: the Yak's entry-reversal collision is gone (0 losses in 12 raids against 5 collisions in 9), and the F-51's covering pair no longer crosses in its transit weave.
+- **The steady-turn crossing (the second kind, flight 2F) remains at every setting**: Yak pairs at Loose and the F-51's covering pair at Safe both crossed within 10 m on station, and one F-51 was lost (1 of 72 aircraft-sorties in this flight). No formation value removes it; it is the game bug of decision 0021.
+- **No further change is proposed.** The build stands; the residual on-station risk is recorded in decision 0021 and bug report 3.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -546,7 +952,12 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | new | a sortie whose target has no enemy aircraft within 35 km ends at WP 1 arrival (Zone Out fires at once); the shell's own Delete removes all its aircraft 60.6 s after `DONE HUB` | flight 2 |
 | g, again | event 13 fires once for a crash with no damage and no attacker (event 2 first); events 0 and 5 do not | flight 2 |
 | new | decision 0018 works on all four paths: an empty target holds a sortie for its on-station time (`COLD` ends it, `HOT` extends it once); an enemy seen on arrival or later arms Zone Out, which ends the sortie 0.02 s after the enemy is gone | flight 2B |
-| new | HVAR F-80C 4-ships on an AttackArea over an empty target lose aircraft with no attacker: in three runs, four of seven such flights lost one or two, 1.7 to 4.1 minutes after arriving (ground impacts, one apparent wingman collision). On station they fly at 370 to 410 m; AirAlert stays near 1,150 m and lost none. The cause is inferred, not seen | flight 2B, runs 1 to 3 |
-| new | no Tacview recording is written by a host on the briefing screen or spectating, even with `tacviewrecord = 1` and the server's TacView box ticked; a recorded track is probably needed | flight 2B runs 2 and 3; upstream load test |
+| new | HVAR F-80C 4-ships on an AttackArea over an empty target lose aircraft with no attacker: in three runs, four of seven such flights lost one or two, 1.7 to 4.1 minutes after arriving (ground impacts, one apparent wingman collision). On station they fly at 370 to 410 m; AirAlert stays near 1,150 m and lost none. The cause is inferred, not seen. **Revised by flight 2C:** the height came from the target's place, and the losses seen with Tacview were collisions inside the formation | flight 2B, runs 1 to 3 |
+| new | no Tacview recording is written by a host on the briefing screen or spectating, even with `tacviewrecord = 1` and the server's TacView box ticked; a recorded track is probably needed. **Revised by flight 2C:** in runs 2 and 3 `startup.cfg` most likely said 0 (the game rewrites it on exit), and nobody pressed LCtrl+R | flight 2B runs 2 and 3; upstream load test |
+| new | a spectating host records Tacview for the whole mission: `tacviewrecord = 1` set while the game is closed, Spectate, LCtrl+R. The `.acmi` holds every AI aircraft (position, altitude, height above ground) | flight 2C |
+| new | under server overload (mission time at 0.4× wall time) every traced MCU fired at its predicted mission time, to the tick | flight 2C |
+| new | on an AttackArea over an empty target, HVAR, HVAR without rockets, HVAR with an air order after 120 s, and AirAlert all come down from 3,050 m to a few hundred metres above the ground and hold one altitude, set by the target's place. Losses seen with Tacview were all collisions inside a formation, in every phase; the no-rocket cell lost the most | flight 2C, two runs |
+| new | 16 AI aircraft run at 1.0× wall time on this PC with no overload message (48 overloaded it). On a healthy server the as-shipped Dense Wedge still collides; `FormationDensity` sets the spacing: Dense about 100 m, Safe about 140 m, Loose about 500 m. Safe and Loose had no pass under 20 m and no loss in three runs; Pairs at Dense flew closest | flight 2D, three runs |
+| new | AI wingman collisions are the formation, not server load: the Yak raid's shipped Pairs at Safe collided at 1.00× wall time with 8 aircraft, at the same `WP 1` + 12–13 s turn reversal as under 20 aircraft, and every Tacview attitude jump starts at a contact. Of Dense, Safe and Loose in Pairs and Wedge two-ships, only Loose kept every pass above 20 m | flight 2F, three runs |
 
 Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.
