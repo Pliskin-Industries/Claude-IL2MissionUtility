@@ -398,7 +398,8 @@ fn trace_off_changes_nothing() {
         }
     }
     // Decision 0016: Fighter Pack death events target each aircraft's Delay Delete.
-    // Decision 0019: aircraft FormationDensity is Safe (1).
+    // This baseline's Heavy Wedge stays Safe (1), per decision 0019.
+    // Pairs fly Loose except under Cover (decisions 0020/0022).
     assert_eq!(fingerprint, 0x3b860e163e2b4cbe);
 
     fn check_source(dir: &Path) {

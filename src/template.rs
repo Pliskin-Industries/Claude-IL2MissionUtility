@@ -627,14 +627,22 @@ pub struct FormationPreset {
     pub density: i32,
 }
 
-/// Decision 0019: aircraft fly at Safe density until Dense is fixed.
+/// Safe under decision 0019; a game-bug workaround under decision 0021.
 pub const SAFE_AIR_FORMATION_DENSITY: i32 = 1;
+/// Loose for Pairs unless flying Cover (0020/0022); a game-bug workaround (0021).
+pub const LOOSE_AIR_FORMATION_DENSITY: i32 = 2;
+/// Pairs' formation id in `TemplateExamples/FormationTypes.Group`.
+pub const PAIRS_AIR_FORMATION_TYPE: i32 = 19;
 
 const fn air_form(id: i32, label: &'static str) -> FormationPreset {
     FormationPreset {
         id,
         label,
-        density: SAFE_AIR_FORMATION_DENSITY,
+        density: if id == PAIRS_AIR_FORMATION_TYPE {
+            LOOSE_AIR_FORMATION_DENSITY
+        } else {
+            SAFE_AIR_FORMATION_DENSITY
+        },
     }
 }
 
@@ -648,7 +656,7 @@ const fn ground_form(id: i32, label: &'static str, density: i32) -> FormationPre
 
 /// Aircraft formations from `TemplateExamples/FormationTypes.Group`.
 pub const AIR_FORMATIONS: &[FormationPreset] = &[
-    air_form(19, "Pairs"),
+    air_form(PAIRS_AIR_FORMATION_TYPE, "Pairs"),
     air_form(20, "Wedge"),
     air_form(21, "Right"),
     air_form(22, "Left"),
@@ -693,23 +701,45 @@ pub fn formation_density(id: i32, kind: UnitKind) -> i32 {
         })
 }
 
-/// Apply decision 0019 to an output copy, identifying aircraft by entity links.
+/// Set aircraft formation density on an output copy, identifying aircraft by entity links.
 /// Formation types alone do not identify the units commanded by a loaded group.
 pub fn set_air_formation_density(root: &mut Il2Entity) {
     let mut plane_entities = HashSet::new();
+    let mut plane_links = HashMap::new();
+    let mut cover_objects = HashSet::new();
     root.for_each(&mut |node| {
+        if node.block_type == "MCU_CMD_Cover" {
+            cover_objects.extend(node.objects.iter().copied());
+        }
         if node.block_type != "Plane" {
             return;
         }
         if let Some(entity) = node.property("LinkTrId").and_then(|id| id.parse::<i32>().ok()) {
             plane_entities.insert(entity);
+            if let Some(index) = node.index {
+                plane_links.insert(index, entity);
+            }
         }
     });
+    // Loaded Cover orders may name the Plane instead of its linked entity.
+    let cover_entities: HashSet<_> = cover_objects.into_iter()
+        .map(|id| plane_links.get(&id).copied().unwrap_or(id)).collect();
     root.for_each_mut(&mut |node| {
         if node.block_type == "MCU_CMD_Formation"
             && node.objects.iter().any(|id| plane_entities.contains(id))
         {
-            node.set_property("FormationDensity", SAFE_AIR_FORMATION_DENSITY.to_string());
+            // Decisions 0019, 0020 and 0022: Pairs fly Loose unless they fly a
+            // Cover order; all other aircraft formations fly Safe. Decision 0021
+            // treats this as a workaround for a game bug, to remove when the game is fixed.
+            let density = if node.objects.iter().any(|id| cover_entities.contains(id)) {
+                SAFE_AIR_FORMATION_DENSITY
+            } else {
+                node.property("FormationType")
+                    .and_then(|id| id.parse::<i32>().ok())
+                    .map(|id| formation_density(id, UnitKind::Plane))
+                    .unwrap_or(SAFE_AIR_FORMATION_DENSITY)
+            };
+            node.set_property("FormationDensity", density.to_string());
         }
     });
 }
@@ -3255,6 +3285,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
         root.children.push(orders_g);
     }
     root.children.push(wps_g);
+    set_air_formation_density(&mut root);
     Ok(root)
 }
 
@@ -6274,16 +6305,30 @@ mod tests {
     }
 
     #[test]
-    fn air_formations_and_unknown_air_ids_generate_safe_density() {
+    fn air_formations_and_unknown_air_ids_use_loose_pairs_and_safe_other_types() {
         const UNKNOWN_FORMATION: i32 = 999;
+        const AIR_DENSITIES: [(i32, i32); 8] = [
+            (19, 2), (20, 1), (21, 1), (22, 1), (23, 1), (24, 1), (26, 1), (27, 1),
+        ];
         assert!(!AIR_FORMATIONS.iter().any(|formation| formation.id == UNKNOWN_FORMATION));
         assert_eq!(SAFE_AIR_FORMATION_DENSITY, 1);
-        for id in AIR_FORMATIONS.iter().map(|formation| formation.id).chain([UNKNOWN_FORMATION]) {
-            assert_eq!(formation_density(id, UnitKind::Plane), 1, "air formation {id}");
+        assert_eq!(LOOSE_AIR_FORMATION_DENSITY, 2);
+        assert_eq!(PAIRS_AIR_FORMATION_TYPE, 19);
+        assert_eq!(AIR_FORMATIONS.iter().map(|formation| (formation.id, formation.density)).collect::<Vec<_>>(),
+            AIR_DENSITIES);
+        for (id, density) in AIR_DENSITIES.into_iter().chain([(UNKNOWN_FORMATION, SAFE_AIR_FORMATION_DENSITY)]) {
+            assert_eq!(formation_density(id, UnitKind::Plane), density, "air formation {id}");
             let mut opts = four_migs();
             opts.seats[0].orders[0].formation_type = id;
-            let root = generate_template(&opts).unwrap();
-            assert_eq!(root.find_by_name("Formation").unwrap().property("FormationDensity"), Some("1"), "air formation {id}");
+            let mut root = generate_template(&opts).unwrap();
+            let expected_density = density.to_string();
+            assert_eq!(root.find_by_name("Formation").unwrap().property("FormationDensity"), Some(expected_density.as_str()), "generated air formation {id}");
+            let expected = root.clone();
+            root.find_by_name_mut("Formation").unwrap().set_property("FormationDensity", "0");
+            set_air_formation_density(&mut root);
+            assert_eq!(root, expected, "loaded air formation {id}: only density changes");
+            set_air_formation_density(&mut root);
+            assert_eq!(root, expected, "air formation {id}: idempotent");
         }
         for (id, density) in [(4, 0), (18, 1), (10, 0), (11, 0), (UNKNOWN_FORMATION, 0)] {
             assert_eq!(formation_density(id, UnitKind::Vehicle), density, "vehicle formation {id}");
@@ -6291,7 +6336,7 @@ mod tests {
     }
 
     #[test]
-    fn safe_air_formations_change_only_density_on_plane_entity_commands() {
+    fn air_formation_density_changes_only_density_on_plane_entity_commands() {
         use formation_test_support::mixed_template;
         for density in ["0", "2"] {
             let mut source = mixed_template();
@@ -6310,6 +6355,174 @@ mod tests {
             set_air_formation_density(&mut copy);
             assert_eq!(copy, expected, "source density {density}: idempotent");
         }
+    }
+
+    #[test]
+    fn pairs_cover_exception_uses_command_objects_across_groups() {
+        let mut root = parse_group_file(r#"Group {
+            Group {
+                Plane { Index = 1; LinkTrId = 101; }
+                Plane { Index = 2; LinkTrId = 102; }
+                Plane { Index = 3; LinkTrId = 103; }
+                Vehicle { Index = 4; LinkTrId = 104; }
+                MCU_TR_Entity { Index = 101; MisObjID = 1; }
+                MCU_TR_Entity { Index = 102; MisObjID = 2; }
+                MCU_TR_Entity { Index = 103; MisObjID = 3; }
+                MCU_TR_Entity { Index = 104; MisObjID = 4; }
+            }
+            Group {
+                MCU_CMD_Formation { Name = "Covered target"; Objects = [101]; FormationType = 19; FormationDensity = 0; }
+                MCU_CMD_Formation { Name = "Covering pair"; Objects = [102]; FormationType = 19; FormationDensity = 2; }
+                MCU_CMD_Formation { Name = "Shared formation"; Objects = [103,102]; FormationType = 19; FormationDensity = 0; }
+                MCU_CMD_Formation { Name = "Vehicle formation"; Objects = [104]; FormationType = 19; FormationDensity = 0; }
+                MCU_CMD_Formation { Name = "Plane object instead of entity"; Objects = [1]; FormationType = 19; FormationDensity = 0; }
+            }
+            Group {
+                MCU_CMD_Cover { Objects = [102]; Targets = [101]; FormationDensity = 2; }
+            }
+        }"#).expect("nested aircraft, vehicle and Cover fixture");
+        let mut expected = root.clone();
+        for (name, density) in [("Covered target", "2"), ("Covering pair", "1"), ("Shared formation", "1")] {
+            expected.find_by_name_mut(name).unwrap().set_property("FormationDensity", density);
+        }
+        set_air_formation_density(&mut root);
+        assert_eq!(root, expected, "only aircraft FormationDensity changes, using every Objects entry");
+        assert_eq!(serialize_group(&root), serialize_group(&expected), "all other bytes preserved");
+        set_air_formation_density(&mut root);
+        assert_eq!(root, expected, "Pairs and Cover exception are idempotent");
+    }
+
+    #[test]
+    fn pairs_cover_exception_resolves_plane_objects_to_entities() {
+        let mut root = parse_group_file(r#"Group {
+            MCU_CMD_Cover { Objects = [2]; Targets = [1]; }
+            Group {
+                Plane { Index = 1; LinkTrId = 101; }
+                Plane { Index = 2; LinkTrId = 102; }
+                MCU_TR_Entity { Index = 101; MisObjID = 1; }
+                MCU_TR_Entity { Index = 102; MisObjID = 2; }
+                MCU_CMD_Formation { Name = "Covered target"; Objects = [101]; FormationType = 19; FormationDensity = 0; }
+                MCU_CMD_Formation { Name = "Covering pair"; Objects = [102]; FormationType = 19; FormationDensity = 2; }
+            }
+        }"#).expect("Cover naming Plane indexes before their entity links");
+        let mut expected = root.clone();
+        expected.find_by_name_mut("Covered target").expect("covered target Formation")
+            .set_property("FormationDensity", LOOSE_AIR_FORMATION_DENSITY.to_string());
+        expected.find_by_name_mut("Covering pair").expect("covering pair Formation")
+            .set_property("FormationDensity", SAFE_AIR_FORMATION_DENSITY.to_string());
+        set_air_formation_density(&mut root);
+        assert_eq!(root, expected, "Cover Objects resolve to entities; its Targets do not fly Cover");
+        assert_eq!(serialize_group(&root), serialize_group(&expected), "only FormationDensity bytes change");
+        set_air_formation_density(&mut root);
+        assert_eq!(root, expected, "Plane-index Cover exception is idempotent");
+    }
+
+    #[test]
+    fn template_shared_cover_keeps_both_commanded_leads_safe() {
+        let mut opts = four_migs();
+        for lead in [0, 2, 3] {
+            opts.seats[lead].role = FlightRole::Lead;
+            opts.seats[lead].orders = vec![OrderSpec {
+                kind: OrderKind::Formation, formation_type: PAIRS_AIR_FORMATION_TYPE,
+                ..OrderSpec::default()
+            }];
+        }
+        opts.seats[0].orders.push(OrderSpec {
+            kind: OrderKind::Cover, cover_lead: Some(3), shared_with: vec![2],
+            ..OrderSpec::default()
+        });
+        let root = generate_template(&opts).expect("template with a Cover shared through Also apply to");
+        assert_eq!(root.count_block_type("MCU_CMD_Cover"), 1, "shared Cover command count");
+        let cover = root.find_by_name("Cover").expect("shared Cover command");
+        assert_eq!(cover.objects.len(), 2, "both leads receive the same Cover");
+        assert_eq!(cover.targets.len(), 1, "one covered lead");
+        assert!(cover.objects.iter().all(|id| !cover.targets.contains(id)), "covered lead flies no Cover");
+        assert_eq!(root.count_block_type("MCU_CMD_Formation"), 3, "one Formation per lead");
+        let mut safe_leads = Vec::new();
+        let mut loose_leads = Vec::new();
+        root.for_each(&mut |node| {
+            if node.block_type == "MCU_CMD_Formation" {
+                assert_eq!(node.objects.len(), 1, "one lead per Formation");
+                assert_eq!(node.property("FormationType"), Some(PAIRS_AIR_FORMATION_TYPE.to_string().as_str()));
+                let density = if cover.objects.contains(&node.objects[0]) {
+                    safe_leads.push(node.objects[0]);
+                    SAFE_AIR_FORMATION_DENSITY
+                } else {
+                    loose_leads.push(node.objects[0]);
+                    LOOSE_AIR_FORMATION_DENSITY
+                };
+                assert_eq!(node.property("FormationDensity"), Some(density.to_string().as_str()), "Formation {:?}", node.index);
+            }
+        });
+        assert_eq!(safe_leads, cover.objects, "both covering leads fly Safe");
+        assert_eq!(loose_leads, cover.targets, "the covered lead flies Loose");
+    }
+
+    #[test]
+    fn template_shared_pairs_formation_is_safe_if_any_lead_covers() {
+        for (owner, other_lead) in [(0, 2), (2, 0)] {
+            let mut opts = four_migs();
+            opts.seats[2].role = FlightRole::Lead;
+            opts.seats[3].role = FlightRole::Follows(2);
+            opts.seats[0].orders.clear();
+            opts.seats[2].orders.clear();
+            opts.seats[owner].orders.push(OrderSpec {
+                kind: OrderKind::Formation, formation_type: PAIRS_AIR_FORMATION_TYPE,
+                shared_with: vec![other_lead], ..OrderSpec::default()
+            });
+            opts.seats[2].orders.push(OrderSpec {
+                kind: OrderKind::Cover, cover_lead: Some(0), ..OrderSpec::default()
+            });
+            let root = generate_template(&opts).expect("Formation shared by a covering and a covered lead");
+            assert_eq!(root.count_block_type("MCU_CMD_Formation"), 1, "shared Formation command count");
+            assert_eq!(root.count_block_type("MCU_CMD_Cover"), 1, "Cover command count");
+            let formation = root.find_by_name("Formation").expect("shared Formation command");
+            let cover = root.find_by_name("Cover").expect("covering lead's command");
+            assert_eq!(cover.objects.len(), 1, "only one lead flies Cover");
+            assert_eq!(cover.targets.len(), 1, "one covered lead");
+            assert_ne!(cover.objects, cover.targets);
+            let expected_objects: Vec<_> = if owner == 0 {
+                cover.targets.iter().chain(&cover.objects).copied().collect()
+            } else {
+                cover.objects.iter().chain(&cover.targets).copied().collect()
+            };
+            assert_eq!(formation.objects, expected_objects, "both leads share Formation in owner order");
+            assert_eq!(formation.property("FormationType"), Some(PAIRS_AIR_FORMATION_TYPE.to_string().as_str()));
+            assert_eq!(formation.property("FormationDensity"), Some(SAFE_AIR_FORMATION_DENSITY.to_string().as_str()),
+                "any covering entity in Formation Objects requires Safe");
+        }
+    }
+
+    #[test]
+    fn template_pairs_covering_lead_stays_safe_and_covered_lead_flies_loose() {
+        let mut opts = four_migs();
+        opts.seats[0].orders[0].formation_type = 19;
+        opts.seats[2].role = FlightRole::Lead;
+        opts.seats[3].role = FlightRole::Follows(2);
+        opts.seats[2].orders = vec![
+            OrderSpec { kind: OrderKind::Formation, formation_type: 19, ..OrderSpec::default() },
+            OrderSpec { kind: OrderKind::Cover, cover_lead: Some(0), ..OrderSpec::default() },
+        ];
+        let root = generate_template(&opts).unwrap();
+        let cover = root.find_by_name("Cover").expect("covering lead's order");
+        assert_eq!(cover.objects.len(), 1);
+        assert_eq!(cover.targets.len(), 1);
+        assert_ne!(cover.objects, cover.targets);
+        let mut formations = 0;
+        root.for_each(&mut |node| {
+            if node.block_type == "MCU_CMD_Formation" {
+                assert_eq!(node.property("FormationType"), Some("19"));
+                let density = if node.objects == cover.objects {
+                    "1"
+                } else {
+                    assert_eq!(node.objects, cover.targets, "the other pair is the covered lead");
+                    "2"
+                };
+                assert_eq!(node.property("FormationDensity"), Some(density));
+                formations += 1;
+            }
+        });
+        assert_eq!(formations, 2);
     }
 
     #[test]

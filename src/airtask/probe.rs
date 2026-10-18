@@ -181,7 +181,8 @@ impl Flight {
     fn is_frozen(self) -> bool {
         // 0018 changed flight 2's shell. 0019 changes placement in 1M's Y1
         // and every sortie in 2B/2C/2D, even with their original Dense inputs.
-        matches!(self, Self::OneM | Self::Two | Self::TwoB | Self::TwoC | Self::TwoD)
+        // 0020 and 0022 change the placed Pairs densities in 2E and 2G.
+        matches!(self, Self::OneM | Self::Two | Self::TwoB | Self::TwoC | Self::TwoD | Self::TwoE | Self::TwoG)
     }
 
     fn regenerates_flown_files(self) -> bool {
@@ -4512,8 +4513,8 @@ fn build_empty_target_probe(p: &mut Probe, flight: Flight) {
         .unwrap_or_else(|| panic!("{} {}: missing variant row", flight.stem(), cell.key));
     let (shape, _) = add_sortie_probe_source(p, &row.sortie(), empty_target_source(row));
     if let EmptyTargetVariant::BuiltInFormation { formation, .. } = row.variant {
-        // Placement resets air FormationDensity to Safe. Change only the two
-        // formation properties on the placed, wrapped copy, retaining its ids.
+        // Placement applies the current Pairs/Cover density rule. Restore the
+        // experiment's two formation properties on the wrapped copy, retaining its ids.
         let copy = p.root.find_by_name_mut(&format!("{} sortie", cell.key))
             .unwrap_or_else(|| panic!("{} {}: missing placed sortie", flight.stem(), cell.key));
         set_placed_probe_formation(copy, cell.key, &shape, formation);
@@ -4521,8 +4522,9 @@ fn build_empty_target_probe(p: &mut Probe, flight: Flight) {
     observe_sortie_probe(p, row.prefix, &shape);
     if let EmptyTargetVariant::BuiltInChange { change, .. } = row.variant {
         // Probe-only experiments for decision 0021: placement has finished
-        // snapping AttackAreas and setting Safe. Observe first so GX's commands
-        // follow every existing WP 1 target, including its breadcrumb.
+        // snapping AttackAreas and applying the Pairs/Cover density rule.
+        // Observe first so GX's commands follow every existing WP 1 target,
+        // including its breadcrumb.
         let copy = p.root.find_by_name_mut(&format!("{} sortie", cell.key))
             .unwrap_or_else(|| panic!("{} {}: missing placed sortie", flight.stem(), cell.key));
         apply_placed_probe_change(copy, cell.key, &shape, change, &mut p.next_id);
@@ -4941,7 +4943,7 @@ fn formation_schedule(root: &Il2Entity) -> String {
     }, &input);
     let mut report = format!("# Flight 2D run sheet\n\n\
 Spectate, then LCtrl+R to record Tacview. Note the first mission time the server overload message shows and the latest START cue (4, 8, 12, then 16 aircraft). These are scheduled counts; collisions can reduce the live count. Mark any overloaded run. Leave the server at 15:00 ({TWO_D_LEAVE_S} s mission time); the reminder is at {TWO_D_LEAVE_CUE_S} s. Confirm Leave Server promptly so the end-of-mission list retains every live aircraft. Do not wait for the {TWO_D_CLOSE_S} s safety close.\n\n\
-One HVAR four-ship per cell, 16 NATO AI aircraft in all. D0 is the as-shipped control. Only FormationType and FormationDensity on the source Formation command vary. All four stand-in areas stay COLD, with no HOT switch or enemy aircraft. No pilot spawn rows: both .spawns.json files contain []. Spectator recording works (2026-10-15 loader/log facts).\n\n\
+One HVAR four-ship per cell, 16 NATO AI aircraft in all. D0 is the Dense Wedge control as shipped before decision 0019. Only FormationType and FormationDensity on the source Formation command vary. The flown files retain those densities; current placement writes DP Pairs at Loose and the Wedges at Safe (0019/0020/0022). All four stand-in areas stay COLD, with no HOT switch or enemy aircraft. No pilot spawn rows: both .spawns.json files contain []. Spectator recording works (2026-10-15 loader/log facts).\n\n\
 WP 1 predictions use flight 2B's measured HVAR transit constant, {TWO_B_HVAR_TRANSIT_S} s from START. Placement retains the {TWO_TRANSIT_S} s distance. The walker uses Restart, normal target order and timer cancellation. ON STATION starts at WP 1 + 0.5 s and lasts {TWO_D_ATTACK_TIME_S} s. At 900 s the last cell has held for 373.5 s; no scheduled DONE HUB has fired. Aircraft dynamics and collisions are not simulated; losing all four aircraft can end a sortie earlier.\n\n\
 Targets are exactly flight 2C's C1b, C2c, C2b and C1c, whose measured settled heights were similar. The built-in terrain mask checks land only; this checkout has no ground-height grid (decision 0003). Every target is at least 45 km from the others.\n\n\
 | Cell | Formation / density | Prefix | START s | Predicted WP 1 s | ON STATION start s | ON STATION end s | Target X m | Target Z m | Nearest target km |\n\
@@ -5044,7 +5046,7 @@ fn builtin_sortie_schedule(root: &Il2Entity) -> String {
     }, &input);
     let mut report = format!("# Flight 2E run sheet\n\n\
 Spectate, then LCtrl+R to record Tacview. Note the first mission time the server overload message shows against the START cues: 4, 8, 16, then 20 aircraft. EC at 240 s takes the scheduled count from 16 to 20. Losses can reduce the live count. Mark any overloaded run; its losses alone are not formation evidence. Leave the server at 15:00 ({TWO_E_LEAVE_S} s mission time); the reminder is at {TWO_E_LEAVE_CUE_S} s. Confirm Leave Server promptly. Do not wait for the {TWO_E_CLOSE_S} s safety close.\n\n\
-Four built-ins as shipped after decision 0019, parsed without probe edits, then placed and wrapped as in the app. Every Formation command flies at density 1 (Safe). EA and EY use Pairs (19); EI and EC use Wedge (20). All four stand-in areas stay COLD, with no HOT switch or enemy aircraft at the targets. No pilot spawn rows: both .spawns.json files contain [].\n\n\
+Four built-ins, parsed without probe edits, then placed and wrapped as in the app. The frozen flight used Safe (1) throughout, as shipped after decision 0019 and before decisions 0020 and 0022. Current placement writes EA Red and both EY pairs at Loose (2), EA Blue under Cover at Safe (1), and EI and EC Wedges at Safe (1). EA and EY use Pairs (19); EI and EC use Wedge (20). All four stand-in areas stay COLD, with no HOT switch or enemy aircraft at the targets. No pilot spawn rows: both .spawns.json files contain [].\n\n\
 WP 1 predictions are nominal, not measured: START + {TWO_TRANSIT_S} s, from the placement distance (WP 1 speed times 300 s). No F-80 measured transit is reused. Restart, normal target order and timer cancellation give ON STATION at WP 1 + 0.5 s. Aircraft dynamics and collisions are not simulated.\n\n\
 Targets are exactly flight 2C C2c, C0c, C0b and C0a. The terrain mask checks land only; ground heights along the paths are unavailable (decision 0003). Distances below use the placed navigation lead Plane and WP 1, measuring the closest points of the complete heading-zero segments. Every pair is at least 45 km apart; every NATO path is at least 90 km from each DPRK path.\n\n\
 | Cell | Built-in file | Side | Shape | Prefix | START s | Predicted WP 1 s | ON STATION start s | ON STATION end s | DONE HUB s | DELETE DELAY s | Target X m | Target Z m | Spawn X m | Spawn Z m | Closest path | Distance km |\n\
@@ -5122,7 +5124,7 @@ fn builtin_formation_schedule(root: &Il2Entity) -> String {
     }, &input);
     let mut report = format!("# Flight 2F run sheet\n\n\
 Spectate, then LCtrl+R to record Tacview. Check the menu now and then for the server overload message. Leave the server at 38:30 ({TWO_F_LEAVE_S} s mission time); the reminder is at {TWO_F_LEAVE_CUE_S} s. Confirm Leave Server promptly. Safety close is at {TWO_F_CLOSE_S} s.\n\n\
-Six copies of 1950_DPRK_Yak_AirfieldRaid_2plus2.Group: S4, four DPRK aircraft each, 24 written in all. PS is the as-shipped Pairs/Safe control. The source passed to placement is untouched; only FormationType and FormationDensity on both placed Formation commands change. All six stand-in areas stay COLD, with no HOT switch or enemy aircraft. No pilot spawn rows: both .spawns.json files contain [].\n\n\
+Six copies of 1950_DPRK_Yak_AirfieldRaid_2plus2.Group: S4, four DPRK aircraft each, 24 written in all. PS is the Pairs/Safe control, as shipped before decisions 0020 and 0022. The source passed to placement is untouched; only FormationType and FormationDensity on both placed Formation commands change. All six stand-in areas stay COLD, with no HOT switch or enemy aircraft. No pilot spawn rows: both .spawns.json files contain [].\n\n\
 Predicted WP 1 uses flight 2E's measured Yak transit: START + {TWO_F_YAK_TRANSIT_S} s (EY arrived at 384.1 s for START 120 s, three runs within 0.1 s). Placement retains the nominal {TWO_TRANSIT_S} s distance at 500 km/h. The shipped 300 s attack is unchanged. Restart, normal target order and timer cancellation give the timings below; ON STATION IN marks the hold start. Both S4 leads' attack timers and their shared WP 1 are observed, as in flight 2E.\n\n\
 A is flight 2C C0c / 2E EY; B is flight 2C C2a. Both targets are over land. Coordinates and path separation use each placed navigation lead Plane and WP 1. The terrain mask provides no ground heights. Each target is reused only after the previous cell's predicted DELETE DELAY.\n\n\
 | Cell | FormationType / name | FormationDensity / name | Prefix | Target | START s | Predicted WP 1 s | ON STATION start s | ON STATION end s | DONE HUB s | DELETE DELAY s | Target X m | Target Z m | Spawn X m | Spawn Z m |\n\
@@ -5177,7 +5179,7 @@ fn builtin_change_schedule(root: &Il2Entity) -> String {
     }, &input);
     let mut report = format!("# Flight 2G run sheet\n\n\
 Spectate, click the sky, then LCtrl+R to record Tacview. Check the menu now and then for the server overload message. Leave the server at 33:00 ({TWO_G_LEAVE_S} s mission time); the reminder is at {TWO_G_LEAVE_CUE_S} s. Confirm Leave Server promptly. Safety close is at {TWO_G_CLOSE_S} s.\n\n\
-Five copies of 1950_DPRK_Yak_AirfieldRaid_2plus2.Group: source S4, four DPRK aircraft each, 20 written in all. Placement adds RTB, so its inspected shape is S7. GC is the as-shipped Pairs/Safe control on flight 2F PS's target B. Every source passed to placement is the untouched parsed file. Each named change is applied only to the placed, wrapped copy. All five stand-in areas stay COLD, with no HOT switch or enemy aircraft. No pilot spawn rows: both .spawns.json files contain [].\n\n\
+Five copies of 1950_DPRK_Yak_AirfieldRaid_2plus2.Group: source S4, four DPRK aircraft each, 20 written in all. Placement adds RTB, so its inspected shape is S7. GC flew as the Pairs/Safe control on flight 2F PS's target B, before decisions 0020 and 0022. Current placement writes all original Pairs commands at Loose; the frozen files retain the flown Safe settings. The change labels and cues below describe the flown experiment; the Formation rows show current output. Every source passed to placement is the untouched parsed file. Each named change is applied only to the placed, wrapped copy. All five stand-in areas stay COLD, with no HOT switch or enemy aircraft. No pilot spawn rows: both .spawns.json files contain [].\n\n\
 Predicted WP 1 uses flight 2E's measured Yak transit: START + {TWO_F_YAK_TRANSIT_S} s. Placement retains the nominal {TWO_TRANSIT_S} s distance at 500 km/h. GA moves the AttackAreas, not WP 1. The shipped 300 s attack is unchanged. Restart, normal target order and timer cancellation give the timings below; ON STATION IN marks the hold start. Both S4 leads' attack timers and their shared WP 1 are observed. GX's two new Formation commands fire with WP 1 and have no separate breadcrumbs or switch back to Safe.\n\n\
 A is flight 2C C0c / 2E EY; B is flight 2C C2a. Both targets and GA's moved AttackArea centre are over land. Coordinates and path separation use each placed navigation lead Plane and WP 1. The terrain mask provides no ground heights. Each target is reused only after the previous cell's predicted DELETE DELAY.\n\n\
 | Cell | Change after placement | Prefix | Target | START s | Predicted WP 1 s | ON STATION start s | ON STATION end s | DONE HUB s | DELETE DELAY s | Target X m | Target Z m | AttackArea X m | AttackArea Z m | Spawn X m | Spawn Z m |\n\
@@ -5255,7 +5257,7 @@ fn armed_recon_formation_schedule(root: &Il2Entity) -> String {
     }, &input);
     let mut report = format!("# Flight 2H run sheet\n\n\
 Spectate, click the sky, then LCtrl+R to record Tacview. Leave the server at 28:00 ({TWO_H_LEAVE_S} s mission time); the reminder is at {TWO_H_LEAVE_CUE_S} s. Confirm Leave Server promptly. Safety close is at {TWO_H_CLOSE_S} s.\n\n\
-Three copies of 1950_US_F51_ArmedRecon_2plus2.Group: source S3, four NATO aircraft each, 12 written in all. Placement adds RTB, so its inspected shape is S7. HS is the as-shipped Pairs/Safe control on flight 2E EA's target; HL1 and HL2 fly Pairs/Loose. Every source passed to placement is the untouched parsed file. Only FormationType and FormationDensity on the two placed Formation commands are set. All three stand-in areas stay COLD, with no HOT switch or enemy aircraft. No pilot spawn rows: both .spawns.json files contain [].\n\n\
+Three copies of 1950_US_F51_ArmedRecon_2plus2.Group: source S3, four NATO aircraft each, 12 written in all. Placement adds RTB, so its inspected shape is S7. HS is the Pairs/Safe control, as shipped before decisions 0020 and 0022, on flight 2E EA's target; HL1 and HL2 fly Pairs/Loose. Every source passed to placement is the untouched parsed file. Only FormationType and FormationDensity on the two placed Formation commands are set. All three stand-in areas stay COLD, with no HOT switch or enemy aircraft. No pilot spawn rows: both .spawns.json files contain [].\n\n\
 Predicted WP 1 uses flight 2E's measured F-51 transit: START + {TWO_H_F51_TRANSIT_S} s (EA arrived at 378.5 s for START 60 s in all three runs). Placement retains the nominal {TWO_TRANSIT_S} s distance at the shipped 520 km/h. The shipped 1200 s attack is unchanged. Restart, normal target order and timer cancellation give the timings below; ON STATION IN marks the hold start. Red's one attack timer and WP 1 are observed; Blue covers Red and has no path waypoint or attack timer.\n\n\
 HS uses (230, -90) km relative to K14; A and B are flight 2F's targets (230, 0) and (140, 0) km. All three targets are over land. Coordinates and path separation use each placed navigation lead Plane and WP 1. The F-51's 520 km/h makes the A/B gap 46.667 km (the Yak at 500 km/h has 48.333 km); every pair of paths remains at least 45 km apart. The terrain mask provides no ground heights.\n\n\
 | Cell | FormationType / name | FormationDensity / name | Prefix | Target | START s | Predicted WP 1 s | ON STATION start s | ON STATION end s | DONE HUB s | DELETE DELAY s | Target X m | Target Z m | Spawn X m | Spawn Z m |\n\
@@ -5396,9 +5398,9 @@ fn serialize_probe(root: &Il2Entity) -> String {
 }
 
 fn write_probe(flight: Flight, carrier: TraceCarrier) {
-    // Decisions 0018/0019: these builders test current code; their flown
+    // Decisions 0018/0019/0020/0022: these builders test current code; their flown
     // artifacts must remain the evidence of the old shell/placement.
-    assert!(!flight.is_frozen(), "decisions 0018/0019: {} is frozen; use a new flight name", flight.stem());
+    assert!(!flight.is_frozen(), "decisions 0018/0019/0020/0022: {} is frozen; use a new flight name", flight.stem());
     let dir = Path::new("target/p14");
     std::fs::create_dir_all(dir).expect("create target/p14");
     let probe = build(flight);
@@ -5810,8 +5812,8 @@ fn flight2_frozen_files_parse_and_links_resolve() {
 
 #[test]
 fn placement_frozen_files_parse_and_links_resolve() {
-    for flight in [Flight::OneM, Flight::TwoB, Flight::TwoC, Flight::TwoD] {
-        assert!(flight.is_frozen(), "{}: placement changed under 0019", flight.stem());
+    for flight in [Flight::OneM, Flight::TwoB, Flight::TwoC, Flight::TwoD, Flight::TwoE, Flight::TwoG] {
+        assert!(flight.is_frozen(), "{}: placement changed under 0019/0020/0022", flight.stem());
         assert_frozen_files_parse_and_links_resolve(flight);
     }
 }
@@ -5866,7 +5868,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     let mut compared = 0;
     for flight in Flight::ALL {
         // 0018 freezes flight 2's shell; 0019 freezes placement in 1M,
-        // 2B, 2C and 2D. Load is unflown. All other flown files regenerate.
+        // 2B, 2C and 2D. 0020/0022 freeze 2E and 2G's placed Pairs.
+        // Load is unflown. All other flown files regenerate, including 2F and 2H.
         if !flight.regenerates_flown_files() {
             continue;
         }
@@ -5900,9 +5903,76 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     }
     // 56 minus 1M, 2B, 2C and 2D (four files each); flight 2 was already
     // excluded by 0018. The remaining flights use unchanged or frozen inputs.
-    // Flight 2E (flown 2026-10-16) adds its four files, flights 2F and 2G (flown 2026-10-17) four more each,
-    // flight 2H (flown 2026-10-18) four more.
-    assert_eq!(compared, 56);
+    // 2F (flown 2026-10-17) and 2H (flown 2026-10-18) add four files each.
+    // 0020/0022 remove 2E and 2G's eight files from the previous total of 56.
+    assert_eq!(compared, 48);
+}
+
+fn flown_formation_probe(flight: Flight) -> Il2Entity {
+    let number = flight.stem().strip_prefix("P14_Probe_").expect("formation probe flight name");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes")
+        .join(format!("flight{}", number.to_lowercase()))
+        .join(format!("{}_traced.Group", flight.stem()));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let root = parse_group_file(&text).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    assert_eq!(serialize_probe(&root), text, "{}: preserve every flown byte", path.display());
+    root
+}
+
+fn assert_flown_formation_density(flown: &Il2Entity, cell: &str, formations: &[i32], density: &str) {
+    assert!(!formations.is_empty(), "{cell}: missing flown Formation commands");
+    for &index in formations {
+        let command = by_id(flown, index);
+        assert_eq!(command.block_type, "MCU_CMD_Formation", "{cell}: flown Formation {index}");
+        assert_eq!(command.property("FormationDensity"), Some(density), "{cell}: Formation {index} flew density {density}");
+    }
+}
+
+fn placement_at_flown_density(current: &Il2Entity, cell: &str, density: &str) -> Il2Entity {
+    let formations = block_ids(current, "MCU_CMD_Formation");
+    assert!(!formations.is_empty(), "{cell}: missing placed Formation commands");
+    let mut flown = current.clone();
+    for index in formations {
+        by_id_mut(&mut flown, index).set_property("FormationDensity", density);
+    }
+    flown
+}
+
+#[test]
+fn flight2e_and_2g_change_only_the_flown_pairs_density_bytes() {
+    for (flight, changed_leads) in [
+        (Flight::TwoE, vec![("EA", "Red 11"), ("EY", "Red 11"), ("EY", "Blue 21")]),
+        (Flight::TwoG, vec![
+            ("GC", "Red 11"), ("GC", "Blue 21"), ("G3", "Red 11"), ("G3", "Blue 21"),
+            ("G4", "Red 11"), ("G4", "Blue 21"), ("GX", "Red 11"), ("GX", "Blue 21"),
+            ("GA", "Red 11"), ("GA", "Blue 21"),
+        ]),
+    ] {
+        let flown = flown_formation_probe(flight);
+        let (current, _) = build(flight).traced(TraceCarrier::default());
+        let mut expected = flown.clone();
+        for &(cell, lead_name) in &changed_leads {
+            let copy = named(&flown, &format!("{cell} sortie"));
+            let lead = number(named(copy, lead_name), "LinkTrId") as i32;
+            let commands: Vec<_> = block_ids(copy, "MCU_CMD_Formation").into_iter().filter(|&index| {
+                let command = by_id(copy, index);
+                command.objects == [lead] && command.name() == Some("Formation")
+            }).collect();
+            assert_eq!(commands.len(), 1, "{cell}: original Formation for {lead_name}");
+            let index = commands[0];
+            assert_eq!(by_id(&flown, index).property("FormationType"), Some("19"), "{cell}: flown Pairs");
+            assert_flown_formation_density(&flown, cell, &[index], "1");
+            assert_eq!(by_id(&current, index).property("FormationDensity"), Some("2"), "{cell}: current placement is Loose");
+            by_id_mut(&mut expected, index).set_property("FormationDensity", "2");
+        }
+        // serialize_probe omits Group X/Z run-sheet metadata from exported files.
+        let before = serialize_probe(&flown);
+        let after = serialize_probe(&current);
+        assert_eq!(after, serialize_probe(&expected), "{}: only the listed density values may change", flight.stem());
+        assert_eq!(before.len(), after.len(), "{}: unchanged output length", flight.stem());
+        let changed: Vec<_> = before.bytes().zip(after.bytes()).filter(|(a, b)| a != b).collect();
+        assert_eq!(changed, vec![(b'1', b'2'); changed_leads.len()], "{}: exact changed bytes", flight.stem());
+    }
 }
 
 #[test]
@@ -6280,15 +6350,16 @@ fn flight2d_sources_and_placed_copies_change_only_formation() {
         copy
     }
     let root = generate_probe_2d();
+    let flown = flown_formation_probe(Flight::TwoD);
     let control = normalized_copy(&root, "D0", "SN01");
     let original = sortie_probe_source(&TWO_D_SORTIES[0].sortie());
     assert_eq!(block_ids(&original, "MCU_CMD_Formation"), [35]);
     assert_eq!(by_id(&original, 35).objects, [7]);
     assert_eq!(by_id(&original, 35).property("FormationType"), Some("20"));
     assert_eq!(by_id(&original, 35).property("FormationDensity"), Some("1"));
-    for (cell, prefix, formation_type, formation_density) in [
-        ("D0", "SN01", "20", "0"), ("D1", "SN02", "20", "1"),
-        ("D2", "SN03", "20", "2"), ("DP", "SN04", "19", "0"),
+    for (cell, prefix, formation_type, formation_density, placed_density) in [
+        ("D0", "SN01", "20", "0", "1"), ("D1", "SN02", "20", "1", "1"),
+        ("D2", "SN03", "20", "2", "1"), ("DP", "SN04", "19", "0", "2"),
     ] {
         let row = TWO_D_SORTIES.iter().find(|row| row.cell == cell).unwrap();
         assert_eq!(row.sortie().file, "1950_US_F80_HVAR_Strike_4ship.Group");
@@ -6301,9 +6372,11 @@ fn flight2d_sources_and_placed_copies_change_only_formation() {
         assert_eq!(block_ids(&source, "MCU_CMD_Formation"), [35]);
         let copy = named(&root, &format!("{cell} sortie"));
         assert_eq!(number(named(copy, &format!("{prefix} ON STATION")), "Time"), 600.0);
-        // The experiment's source variants remain explicit; current placement
-        // enforces Safe on all of them. The flown variants are checked frozen.
-        for (tree, density) in [(&source, formation_density), (copy, "1")] {
+        // Keep the experiment's flown values; 0020/0022 now place DP at Loose.
+        let flown_formation = named(named(&flown, &format!("{cell} sortie")), "Formation");
+        assert_eq!(flown_formation.property("FormationType"), Some(formation_type), "{cell}: flown type");
+        assert_flown_formation_density(&flown, cell, &[flown_formation.index.expect("flown Formation index")], formation_density);
+        for (tree, density) in [(&source, formation_density), (copy, placed_density)] {
             assert_eq!(tree.count_block_type("MCU_CMD_Formation"), 1, "{cell}: Formation count");
             let formation = named(tree, "Formation");
             assert_eq!(formation.property("FormationType"), Some(formation_type), "{cell}");
@@ -6483,7 +6556,8 @@ fn flight2d_run_sheet_and_cues_match_plan() {
         "| D2 | 20 Wedge / 2 Loose | SN03 | 180 | 466 | 466.5 | 1066.5 | 290934 | 224477 | 45.0 |",
         "| DP | 19 Pairs / 0 Dense | SN04 | 240 | 526 | 526.5 | 1126.5 | 335934 | 314477 | 100.6 |",
         "Leave the server at 15:00 (900 s mission time)", "both .spawns.json files contain []",
-        "D0 is the as-shipped control", "no HOT switch or enemy aircraft", "Formation commands as written",
+        "D0 is the Dense Wedge control as shipped before decision 0019",
+        "no HOT switch or enemy aircraft", "Formation commands as written",
         "373.5 s", "Predicted pulse and command schedule",
     ] { assert!(report.contains(line), "flight 2D run sheet missing {line}"); }
 }
@@ -6494,8 +6568,8 @@ fn flight2e_cells_match_table_and_land_path_separation() {
     use super::library::{TestedShape::{S1, S3, S4}, inspect_sortie};
     let root = generate_probe_2e();
     assert_eq!(root.name(), Some("P14_Probe_2E"));
-    assert!(!Flight::TwoE.is_frozen());
-    assert!(Flight::TwoE.regenerates_flown_files());
+    assert!(Flight::TwoE.is_frozen());
+    assert!(!Flight::TwoE.regenerates_flown_files());
     assert!(Flight::TwoE.writes_schedule());
     assert_eq!(RUN_SHEET_2E.len(), 4);
     assert_eq!(TWO_E_SORTIES.len(), 4);
@@ -6558,11 +6632,12 @@ fn flight2e_cells_match_table_and_land_path_separation() {
 fn flight2e_sources_and_placed_copies_match_builtins() {
     use super::library::{TestedShape::{S1, S3, S4}, inspect_sortie};
     let root = generate_probe_2e();
-    for (cell, prefix, file, kind, attack_time_s, country, types, speed) in [
-        ("EA", "SN01", "1950_US_F51_ArmedRecon_2plus2.Group", S3, 1200.0, "601", vec!["19", "19"], 520.0),
-        ("EY", "SN02", "1950_DPRK_Yak_AirfieldRaid_2plus2.Group", S4, 300.0, "503", vec!["19", "19"], 500.0),
-        ("EI", "SN03", "1950_DPRK_Il10_KimpoAttack_2x4.Group", S4, 600.0, "503", vec!["20", "20"], 390.0),
-        ("EC", "SN04", "1950_US_F51_CloseSupport_4ship.Group", S1, 900.0, "601", vec!["20"], 520.0),
+    let flown = flown_formation_probe(Flight::TwoE);
+    for (cell, prefix, file, kind, attack_time_s, country, types, densities, speed) in [
+        ("EA", "SN01", "1950_US_F51_ArmedRecon_2plus2.Group", S3, 1200.0, "601", vec!["19", "19"], vec!["2", "1"], 520.0),
+        ("EY", "SN02", "1950_DPRK_Yak_AirfieldRaid_2plus2.Group", S4, 300.0, "503", vec!["19", "19"], vec!["2", "2"], 500.0),
+        ("EI", "SN03", "1950_DPRK_Il10_KimpoAttack_2x4.Group", S4, 600.0, "503", vec!["20", "20"], vec!["1", "1"], 390.0),
+        ("EC", "SN04", "1950_US_F51_CloseSupport_4ship.Group", S1, 900.0, "601", vec!["20"], vec!["1"], 520.0),
     ] {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("TemplateExamples/Historical1950").join(file);
         let original = parse_group_file(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -6577,13 +6652,20 @@ fn flight2e_sources_and_placed_copies_match_builtins() {
         assert_eq!(number(named(copy, &format!("{prefix} ON STATION")), "Time"), attack_time_s, "{cell}");
         let path = sortie_probe_path(copy);
         assert!((path.target.0 - path.spawn.0 - speed / 3.6 * 300.0).abs() < 0.001, "{cell}: placement distance");
+        let flown_copy = named(&flown, &format!("{cell} sortie"));
+        let flown_formations = block_ids(flown_copy, "MCU_CMD_Formation");
+        assert_eq!(flown_formations.len(), types.len(), "{cell}: flown Formation count");
+        assert_flown_formation_density(&flown, cell, &flown_formations, "1");
+        for (index, &formation_type) in flown_formations.into_iter().zip(&types) {
+            assert_eq!(by_id(flown_copy, index).property("FormationType"), Some(formation_type), "{cell}: flown type");
+        }
         for tree in [&source, copy] {
             let formations = block_ids(tree, "MCU_CMD_Formation");
             assert_eq!(formations.len(), types.len(), "{cell}: every Formation");
-            for (&index, &formation_type) in formations.iter().zip(&types) {
+            for ((&index, &formation_type), &density) in formations.iter().zip(&types).zip(&densities) {
                 let command = by_id(tree, index);
                 assert_eq!(command.property("FormationType"), Some(formation_type), "{cell}: Formation {index}");
-                assert_eq!(command.property("FormationDensity"), Some("1"), "{cell}: Formation {index}");
+                assert_eq!(command.property("FormationDensity"), Some(density), "{cell}: current Formation {index}");
             }
             for plane in block_ids(tree, "Plane") {
                 assert_eq!(by_id(tree, plane).property("Country"), Some(country), "{cell}: Plane {plane}");
@@ -6867,6 +6949,9 @@ fn flight2h_sources_and_placed_formations_match_f51() {
         .join("TemplateExamples/Historical1950/1950_US_F51_ArmedRecon_2plus2.Group");
     let original = parse_group_file(&std::fs::read_to_string(path).unwrap()).unwrap();
     let root = generate_probe_2h();
+    let flown = flown_formation_probe(Flight::TwoH);
+    let flown_control = named(&flown, "HS sortie");
+    assert_flown_formation_density(&flown, "HS", &block_ids(flown_control, "MCU_CMD_Formation"), "1");
     for (cell, prefix, density) in [("HS", "SN01", "1"), ("HL1", "SN02", "2"), ("HL2", "SN03", "2")] {
         let row = TWO_H_SORTIES.iter().find(|row| row.cell == cell).unwrap();
         let source = empty_target_source(row);
@@ -6887,13 +6972,13 @@ fn flight2h_sources_and_placed_formations_match_f51() {
         assert_eq!(number(named(copy, &format!("{prefix} ON STATION")), "Time"), 1200.0, "{cell}");
         let formations = block_ids(copy, "MCU_CMD_Formation");
         assert_eq!(formations.len(), 2, "{cell}: both Formation commands");
-        for (placed_id, (source_id, source_lead, lead_name)) in formations.into_iter().zip([
-            (35, 7, "Red 11"), (41, 11, "Blue 21"),
+        for (placed_id, (source_id, source_lead, lead_name, source_density)) in formations.into_iter().zip([
+            (35, 7, "Red 11", "2"), (41, 11, "Blue 21", "1"),
         ]) {
             let source_command = by_id(&source, source_id);
             assert_eq!(source_command.objects, [source_lead], "{cell}: source Objects");
             assert_eq!(source_command.property("FormationType"), Some("19"), "{cell}: source FormationType");
-            assert_eq!(source_command.property("FormationDensity"), Some("1"), "{cell}: source FormationDensity");
+            assert_eq!(source_command.property("FormationDensity"), Some(source_density), "{cell}: current source FormationDensity");
             let command = by_id(copy, placed_id);
             assert_eq!(command.property("FormationType"), Some("19"), "{cell}: Formation {placed_id}");
             assert_eq!(command.property("FormationDensity"), Some(density), "{cell}: Formation {placed_id}");
@@ -6925,7 +7010,7 @@ fn flight2h_only_formation_properties_differ_from_shipped_placement() {
     ] {
         shipped.start_cell(Cell { key: cell, centre_km: km, arm_s: start, close_s: 2100.0 });
         let row = SortieProbe { cell, prefix, file: "1950_US_F51_ArmedRecon_2plus2.Group" };
-        // The same as-shipped path, including all observation ids between cells.
+        // The same placement path, including all observation ids between cells.
         let (shape, _) = add_sortie_probe(&mut shipped, &row);
         assert_eq!(shape.kind, super::library::TestedShape::S7, "{cell}: inspected placed copy has RTB");
         assert_eq!(shape.attack_time_s, 1200.0, "{cell}: placed attack time");
@@ -6933,15 +7018,22 @@ fn flight2h_only_formation_properties_differ_from_shipped_placement() {
         close_sortie_probe(&mut shipped, shape.side);
         let actual = named(&root, &format!("{cell} sortie"));
         let expected = named(&shipped.root, &format!("{cell} sortie"));
-        if cell == "HS" {
-            assert_eq!(actual, expected, "HS: no AST difference from as shipped");
-            assert_eq!(serialize_probe(actual), serialize_probe(expected), "HS: byte-identical placement");
-        }
+        let flown_placement = placement_at_flown_density(expected, cell, "1");
         let mut restored = actual.clone();
-        for index in block_ids(&restored, "MCU_CMD_Formation") {
+        let formations = block_ids(expected, "MCU_CMD_Formation");
+        assert_eq!(formations.len(), 2, "{cell}: both current Formation commands");
+        for (index, (lead_name, placed_density)) in formations.into_iter().zip([("Red 11", "2"), ("Blue 21", "1")]) {
+            let command = by_id(expected, index);
+            assert_eq!(command.objects, [number(named(expected, lead_name), "LinkTrId") as i32]);
+            assert_eq!(command.property("FormationType"), Some("19"));
+            assert_eq!(command.property("FormationDensity"), Some(placed_density), "{cell}: current placement");
             let command = by_id_mut(&mut restored, index);
             command.set_property("FormationType", "19");
-            command.set_property("FormationDensity", "1");
+            command.set_property("FormationDensity", placed_density);
+        }
+        if cell == "HS" {
+            assert_eq!(actual, &flown_placement, "HS: retain the flown Safe placement as evidence");
+            assert_eq!(serialize_probe(actual), serialize_probe(&flown_placement), "HS: byte-identical flown placement");
         }
         assert_eq!(&restored, expected, "{cell}: only FormationType/FormationDensity may differ");
         assert_eq!(serialize_probe(&restored), serialize_probe(expected), "{cell}: all other bytes preserved");
@@ -7240,6 +7332,9 @@ fn flight2f_sources_and_placed_formations_match_yak() {
         .join("TemplateExamples/Historical1950/1950_DPRK_Yak_AirfieldRaid_2plus2.Group");
     let original = parse_group_file(&std::fs::read_to_string(path).unwrap()).unwrap();
     let root = generate_probe_2f();
+    let flown = flown_formation_probe(Flight::TwoF);
+    let flown_control = named(&flown, "PS sortie");
+    assert_flown_formation_density(&flown, "PS", &block_ids(flown_control, "MCU_CMD_Formation"), "1");
     for (cell, prefix, formation_type, density) in [
         ("PD", "SN01", "19", "0"), ("PS", "SN02", "19", "1"), ("PL", "SN03", "19", "2"),
         ("WD", "SN04", "20", "0"), ("WS", "SN05", "20", "1"), ("WL", "SN06", "20", "2"),
@@ -7263,7 +7358,7 @@ fn flight2f_sources_and_placed_formations_match_yak() {
             let source_command = by_id(&source, source_id);
             assert_eq!(source_command.objects, [source_lead], "{cell}: source Objects");
             assert_eq!(source_command.property("FormationType"), Some("19"));
-            assert_eq!(source_command.property("FormationDensity"), Some("1"));
+            assert_eq!(source_command.property("FormationDensity"), Some("2"), "{cell}: current Yak source is Loose");
             let command = by_id(copy, placed_id);
             assert_eq!(command.property("FormationType"), Some(formation_type), "{cell}: Formation {placed_id}");
             assert_eq!(command.property("FormationDensity"), Some(density), "{cell}: Formation {placed_id}");
@@ -7295,21 +7390,29 @@ fn flight2f_only_formation_properties_differ_from_shipped_placement() {
     ] {
         shipped.start_cell(Cell { key: cell, centre_km: km, arm_s: start, close_s: 2700.0 });
         let row = SortieProbe { cell, prefix, file: "1950_DPRK_Yak_AirfieldRaid_2plus2.Group" };
-        // Flight 2E's as-shipped path, including observation ids between cells.
+        // Flight 2E's placement path, including observation ids between cells.
         let (shape, _) = add_sortie_probe(&mut shipped, &row);
         observe_sortie_probe(&mut shipped, prefix, &shape);
         close_sortie_probe(&mut shipped, shape.side);
         let actual = named(&root, &format!("{cell} sortie"));
         let expected = named(&shipped.root, &format!("{cell} sortie"));
+        let flown_placement = placement_at_flown_density(expected, cell, "1");
+        let formations = block_ids(expected, "MCU_CMD_Formation");
+        assert_eq!(formations.len(), 2, "{cell}: both current Formation commands");
+        for index in formations {
+            let command = by_id(expected, index);
+            assert_eq!(command.property("FormationType"), Some("19"));
+            assert_eq!(command.property("FormationDensity"), Some("2"), "{cell}: current placement is Loose");
+        }
         if cell == "PS" {
-            assert_eq!(actual, expected, "PS: no AST difference from as shipped");
-            assert_eq!(serialize_probe(actual), serialize_probe(expected), "PS: byte-identical placement");
+            assert_eq!(actual, &flown_placement, "PS: retain the flown Safe placement as evidence");
+            assert_eq!(serialize_probe(actual), serialize_probe(&flown_placement), "PS: byte-identical flown placement");
         }
         let mut restored = actual.clone();
         for index in block_ids(&restored, "MCU_CMD_Formation") {
             let command = by_id_mut(&mut restored, index);
             command.set_property("FormationType", "19");
-            command.set_property("FormationDensity", "1");
+            command.set_property("FormationDensity", "2");
         }
         assert_eq!(&restored, expected, "{cell}: only FormationType/FormationDensity may differ");
         assert_eq!(serialize_probe(&restored), serialize_probe(expected), "{cell}: all other bytes preserved");
@@ -7603,8 +7706,8 @@ fn flight2g_cells_changes_and_land_paths_match_table() {
     let root = generate_probe_2g();
     assert_eq!(root.name(), Some("P14_Probe_2G"));
     assert!(Flight::ALL.contains(&Flight::TwoG));
-    assert!(!Flight::TwoG.is_frozen());
-    assert!(Flight::TwoG.regenerates_flown_files(), "2G flew; its frozen files regenerate");
+    assert!(Flight::TwoG.is_frozen());
+    assert!(!Flight::TwoG.regenerates_flown_files(), "2G keeps the flown Safe evidence under 0020/0022");
     assert!(Flight::TwoG.writes_schedule());
     assert_eq!(RUN_SHEET_2G.len(), 5);
     assert_eq!(TWO_G_SORTIES.len(), 5);
@@ -7703,6 +7806,7 @@ fn flight2g_sources_countries_and_attack_times_stay_shipped() {
 #[test]
 fn flight2g_only_named_change_differs_from_shipped_placement() {
     let root = generate_probe_2g();
+    let flown = flown_formation_probe(Flight::TwoG);
     let mut shipped = Probe::new(Flight::TwoG);
     for (cell, prefix, km, start) in [
         ("GC", "SN01", (140.0, 0.0), 60.0), ("G3", "SN02", (230.0, 0.0), 390.0),
@@ -7716,7 +7820,7 @@ fn flight2g_only_named_change_differs_from_shipped_placement() {
         observe_sortie_probe(&mut shipped, prefix, &shape);
         let added = if cell == "GX" {
             // Reserve GX's two added IDs without adding or changing any node
-            // in the as-shipped copy. Later cells retain the same allocator.
+            // in the comparison copy. Later cells retain the same allocator.
             let ids = vec![shipped.next_id, shipped.next_id + 1];
             shipped.next_id += 2;
             ids
@@ -7724,9 +7828,15 @@ fn flight2g_only_named_change_differs_from_shipped_placement() {
         close_sortie_probe(&mut shipped, shape.side);
         let actual = named(&root, &format!("{cell} sortie"));
         let expected = named(&shipped.root, &format!("{cell} sortie"));
+        let formations = block_ids(expected, "MCU_CMD_Formation");
+        assert_eq!(formations.len(), 2, "{cell}: original Formation commands");
+        assert_flown_formation_density(&flown, cell, &formations, "1");
+        for index in formations {
+            assert_eq!(by_id(expected, index).property("FormationDensity"), Some("2"), "{cell}: current placement is Loose");
+        }
         let mut restored = actual.clone();
         match cell {
-            "GC" => assert_eq!(actual, expected, "GC: as-shipped control, no AST difference"),
+            "GC" => assert_eq!(actual, expected, "GC: control uses current placement, no AST difference"),
             "G3" | "G4" => {
                 let level = if cell == "G3" { "3" } else { "4" };
                 let planes = block_ids(actual, "Plane");
@@ -8098,6 +8208,7 @@ fn flight2g_run_sheet_and_cues_match_plan() {
     use super::shell::test_support::{ticks, times};
     use super::testkit::{WalkerConfig, walk};
     let root = generate_probe_2g();
+    let flown = flown_formation_probe(Flight::TwoG);
     let cues: Vec<_> = CUES.iter().filter(|cue| cue.flight == Flight::TwoG).map(|cue| (cue.time_s, cue.text)).collect();
     assert_eq!(cues, [
         (0.0, "Flight 2G: spectate, click the sky, then LCtrl+R to record. Check the menu now and then for the server overload message. Leave the server at 33:00"),
@@ -8140,8 +8251,10 @@ fn flight2g_run_sheet_and_cues_match_plan() {
         assert_eq!(commands.len(), formations, "{cell}: all written Formation rows");
         for index in commands {
             let command = by_id(copy, index);
-            let density = if command.name() == Some("Formation Loose at WP 1") { "2" } else { "1" };
-            assert!(report.contains(&format!("| {cell} | {index} | 19 | {density} | {:?} |", command.objects)), "{cell}: command {index}");
+            let flown_density = if command.name() == Some("Formation Loose at WP 1") { "2" } else { "1" };
+            assert_flown_formation_density(&flown, cell, &[index], flown_density);
+            assert_eq!(command.property("FormationDensity"), Some("2"), "{cell}: current placement and WP 1 both use Loose");
+            assert!(report.contains(&format!("| {cell} | {index} | 19 | 2 | {:?} |", command.objects)), "{cell}: command {index}");
         }
     }
     let gx = named(&root, "GX sortie");

@@ -21,8 +21,8 @@ Treat the collisions as a defect in the game's AI, not in the app. Every formati
 | Workaround | Where | Status |
 |---|---|---|
 | Every AI air formation at density 1 (Safe) | Air Tasking placement, the six built-ins, Template Builder (`SAFE_AIR_FORMATION_DENSITY`, `src/template.rs`) | Decision 0019, built on `claude/formation-safe-0019`, not merged |
-| Pairs at density 2 (Loose) | the same three places | Decision 0020, Accepted 2026-10-18 (option A), not built |
-| A flight flying a Cover order keeps Safe even when Pairs | the same three places | Decision 0022, Accepted 2026-10-18 (A2), not built (flight 2H: a covering F-51 pair at Loose collided in its transit weave) |
+| Pairs at density 2 (Loose) | the same three places (`set_air_formation_density`, `src/template.rs`) | Decision 0020, Accepted 2026-10-18 (option A); built on `claude/pairs-loose-0020`, not merged |
+| A flight flying a Cover order keeps Safe even when Pairs | the same three places | Decision 0022, Accepted 2026-10-18 (A2); built on `claude/pairs-loose-0020`, not merged (flight 2H: a covering F-51 pair at Loose collided in its transit weave) |
 | Pairs at Safe in transit, a Formation command to Loose at `WP 1` (1 MCU per flight) | Air Tasking shell | Flight 2G: no losses, closest 18.7–26.9 m. Decision 0020's recorded alternative (E), not taken: A gives as much for no MCUs |
 | AI skill raised to Veteran or Ace | the Planes' `AILevel` | Flight 2G: **rejected**, the wingman crosses and collides at the same second |
 | AttackArea centre moved ahead of `WP 1` | Air Tasking placement | Flight 2G: **rejected**, the lead's attack entry still reverses and the pair collides later |
