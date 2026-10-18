@@ -30,16 +30,29 @@ Wedge at Safe held for every type flown. Pairs at Safe did not: in every run the
 
 The collision repeated on a server that kept up, at the same second after `WP 1` as in 2E, and every Tacview attitude jump in 2E and 2F starts at a contact: **the cause is the formation, not the load.** Only Loose kept every pass above 20 m. Pairs at Loose holds the wingman about 200 m out (Wedge at Loose about 1,200 m).
 
+**Flight 2G (2026-10-17, `handoff/P14-probe-results.md`, "Flight 2G")** looked for a cheaper workaround that keeps Pairs at Safe, three runs, at most 8 aircraft (1.00×):
+
+| Yak raid at Pairs Safe, plus | Closest (runs 1, 2, 3) | Aircraft lost of 12 | Cost |
+|---|---|---|---|
+| nothing (the control) | 4.2, 9.4, 2.9 m | 4 | — |
+| AILevel 3 (Veteran) | 6.5, 6.0, 1.7 m | 3 | a value; changes every AI fight |
+| AILevel 4 (Ace) | 6.2, 4.9, 7.4 m | 6 | a value; changes every AI fight |
+| a Formation command to Loose, fired by `WP 1` | 26.9, 18.7, 19.1 m | 0 | 1 MCU per flight |
+| AttackArea centre 3 km ahead of `WP 1` | 5.6, 26.1, 4.5 m | 4 | a placement change |
+
+Skill changes nothing: Veteran and Ace wingmen cross at the same `WP 1` + 12–13 s. Moving the area only delays the lead's reversal (its left turn at `WP 1` is the attack entry), and the pair collides at + 23 s. Loose from `WP 1` works, but its clearance comes from the same Loose slot, a little closer than Loose throughout (2F: 23.0–31.8 m).
+
 ## Options
 
 - **A. Pairs fly Loose (density 2); every other air formation stays Safe.** One value, chosen per formation type, in the same three places as 0019 (Air Tasking placement, the built-ins, Template Builder). Flight 2F flew it with the Yak raid: no pass under 20 m in three runs, the wingman about 200 m out. Not flown with the F-51 ArmedRecon.
 - **B. The two Pairs built-ins switch to Wedge** (formation 20) at Safe, and Pairs stays available but Safe. Fixes what the app ships; a user who picks Pairs still gets the colliding setting. In flight 2F a two-ship Wedge at Safe came to 18 m in two of three runs, so this is marginal for pairs.
 - **C. Template Builder and Air Tasking stop using Pairs** (write Wedge instead). Strongest; removes a formation the user may want for historical reasons (the sources fly elements in pairs).
 - **D. Accept the losses for Pairs.** Not recommended: the Yak raid lost half its sorties in three runs.
+- **E. Pairs fly Safe in transit and switch to Loose at `WP 1`** (one Formation command per flight, fired by the path waypoint; flight 2G's GX). No losses in three runs, closest 18.7–26.9 m. Keeps the shipped look in transit, where no Pairs collision has been recorded, but costs one MCU per flight and gave a little less clearance than A.
 
 ## Recommendation
 
-Flight 2F (above) was that probe. Loose Pairs kept every pass above 20 m and Wedge at Safe did not quite, so **take A**: Pairs fly Loose, every other air formation stays Safe. It is one value per formation type in the three places 0019 already touches, and no MCUs. Optional before or after the ruling: fly the F-51 ArmedRecon at Loose, the other Pairs built-in.
+Flight 2F (above) was that probe. Loose Pairs kept every pass above 20 m and Wedge at Safe did not quite, so **take A**: Pairs fly Loose, every other air formation stays Safe. It is one value per formation type in the three places 0019 already touches, and no MCUs. Flight 2G found nothing cheaper: AI skill and moving the attack area do not help, and E (Loose from `WP 1`) costs an MCU per flight for no better clearance. Optional before or after the ruling: fly the F-51 ArmedRecon at Loose, the other Pairs built-in.
 
 ## Consequences
 

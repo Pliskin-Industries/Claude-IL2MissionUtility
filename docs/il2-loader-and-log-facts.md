@@ -118,3 +118,13 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **When every aircraft has been deleted, the log has no end-of-mission (`AType:4`) list**, so no ammunition check is possible.
 - **Leaving after the last run can loop:** a Leave Server from the results screen that comes a few seconds late starts another load; leaving from the next briefing reached the results screen and loaded again. A window-close request (`(Get-Process IL2Series).CloseMainWindow()`) closed the game cleanly.
 - **Keyboard focus for computer use:** `AppActivate` sometimes leaves the keys with Claude's own window. A left click on the sky in the spectator view gives the game focus without side effects.
+
+## Found on 2026-10-17 (flight 2G, game 1.005)
+
+- **AI skill does not stop the formation crossover.** Yak-9P wingmen at `AILevel` 3 (Veteran) and 4 (Ace) held the same Pairs-at-Safe slot as at 2 (Normal), crossed their lead at the same `WP 1` + 12–13 s and collided (Ace in all three runs).
+- **An AI lead's AttackArea entry starts with a left turn at the waypoint, wherever the area is.** With the area centre 3 km straight ahead of `WP 1`, the lead still banked left at `WP 1`, turned about 40° over 14 s, then reversed right toward the area; the wingman crossed at + 23 s instead of + 12 s.
+- **A Formation command sent in flight is obeyed without slowing the lead:** a copy of the lead's own command (`WaitForWingmen = 1`) set to Loose and fired by `WP 1` moved the wingman out to the Loose slot within about 10 s; the lead's speed did not change.
+- **Tacview reuses a destroyed aircraft's object id for its wreck fragments** (`CAirplaneFragment_<id>`); scripts that key tracks by id must drop frames after the name changes (`tools/p14/flight2g_crossover.py`).
+- **The game's `.acmi` in `data/Tracks` is plain text**; the repository keeps tracks zipped as `<name>.zip.acmi`.
+- **Hosting from the client, mission rotation:** clicking a mission only selects it; scroll the settings page to reach Remove (rotation) and Add to rotation (available list).
+- **Keys in spectator view:** a plain key press sometimes does not reach the game; holding Escape for 0.3 s opens the menu reliably. Click the sky first, then send the key as a separate action.

@@ -95,4 +95,6 @@ Status: **drafts, not posted.** The user decides whether, where and when to post
 - Mission time ran at 1.00× wall time with at most 8 aircraft (flight 2F); attitude jumps in Tacview start only at the contacts.
 - Attachments: `handoff/tacview/P14_Probe_2F_run3.zip.acmi` (collision at 666.8 s, Blue 21 and 22 of the second raid) and `run1`, `run2`; `handoff/tacview/P14_Probe_2E_run1.zip.acmi` and `run3`; logs `src/testdata/missionlog/real_31` to `real_33`; mission group `handoff/p14-probes/flight2f/P14_Probe_2F_traced.Group`.
 
-**Workaround:** density 2 (Loose) kept every pass above 20 m in both formations (flight 2F). Decisions 0019 to 0021.
+- AI skill does not change it (flight 2G, three runs): Veteran and Ace wingmen crossed at the same `WP 1` + 12–13 s and collided, Ace in all three runs. With the AttackArea centre 3 km past the waypoint, the leader still turns left at the waypoint and reverses later; the crossing and collision come at + 23 s. Tracks: `handoff/tacview/P14_Probe_2G_run{1,2,3}.zip.acmi`.
+
+**Workaround:** density 2 (Loose) kept every pass above 20 m in both formations (flight 2F); switching to Loose at the waypoint also prevented losses (flight 2G). Decisions 0019 to 0021.

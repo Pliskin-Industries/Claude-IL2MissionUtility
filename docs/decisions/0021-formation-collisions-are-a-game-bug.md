@@ -22,7 +22,11 @@ Treat the collisions as a defect in the game's AI, not in the app. Every formati
 |---|---|---|
 | Every AI air formation at density 1 (Safe) | Air Tasking placement, the six built-ins, Template Builder (`SAFE_AIR_FORMATION_DENSITY`, `src/template.rs`) | Decision 0019, built on `claude/formation-safe-0019`, not merged |
 | Pairs at density 2 (Loose) | the same three places | Decision 0020, Proposed (recommended A) |
-| Formation changes or other MCUs from flight 2G | to be decided | Flight 2G, not built |
+| Pairs at Safe in transit, a Formation command to Loose at `WP 1` (1 MCU per flight) | Air Tasking shell | Flight 2G: no losses, closest 18.7–26.9 m; not recommended (A gives as much for no MCUs) |
+| AI skill raised to Veteran or Ace | the Planes' `AILevel` | Flight 2G: **rejected**, the wingman crosses and collides at the same second |
+| AttackArea centre moved ahead of `WP 1` | Air Tasking placement | Flight 2G: **rejected**, the lead's attack entry still reverses and the pair collides later |
+
+*Rows for flight 2G added on 2026-10-17 (results `handoff/P14-probe-results.md`, "Flight 2G"); the decision itself is unchanged. The rejected rows are kept so they are not tried again.*
 
 ## Consequences
 

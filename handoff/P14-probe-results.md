@@ -770,6 +770,61 @@ Not resolved: two 2C run 2 losses (one in transit 27 s after activation; one who
 - For decision 0020: **option A (Pairs fly Loose) is the only option that kept every pass above 20 m.** Option B (Wedge at Safe for the two Pairs built-ins) came to 18 m in two of three runs for a two-ship. What to write is the user's call: `docs/decisions/0020-pairs-formations-after-flight-2e.md` (Proposed, evidence added).
 - Three runs per cell are few; the close-pass counts and the repeat of the 12 s reversal are the stronger evidence. Not flown: the F-51 ArmedRecon pairs at Loose (the other Pairs built-in).
 
+## Flight 2G (can a setting or an MCU stop the wingman crossing its lead? Skill, Loose at `WP 1`, attack area ahead) — 2026-10-17, three runs, Tacview recorded
+
+Probe `P14_Probe_2G_traced` (`handoff/p14-probes/flight2g/`; design `handoff/sessions/2026-10-17-flight-2g.md`; prompt `handoff/P14-flight-2g-codex-prompt.md`), built from `claude/p14-flight-2g-be3801` (`29b9a5f`) as `P14_Probe_2G_20261017` without the resaver, hosted by the game client on this PC (game `261013`) and flown by Claude at the keyboard. Five copies of the Yak airfield raid (`1950_DPRK_Yak_AirfieldRaid_2plus2`, two pairs sharing one `WP 1`), each placed and wrapped as Air Tasking ships it (Pairs at Safe, AILevel 2), with one change on the placed copy: **GC** none (the control: 2F's PS on the same target B), **G3** AILevel 3 (Veteran) on all four aircraft, **G4** AILevel 4 (Ace), **GX** one Formation command per flight, Pairs at Loose, fired by `WP 1` (2 MCUs per raid, no switch back), **GA** both AttackArea centres 3 km straight ahead of `WP 1`. Starts 330 s apart (60 … 1,380 s) on targets B and A in turn, so **at most 8 aircraft flew at once**. Empty targets, area COLD, no enemy. The host spectated, pressed LCtrl+R and left at 33:00.
+
+Why: decision 0021 rules the crossover a game bug and asks for the smallest workaround. Flight 2G asks whether the AI's skill, loosening the pair only for the attack, or a different arrival geometry stops the wingman crossing through its lead while the shipped Pairs at Safe stays.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-17_18-43-00` | `src/testdata/missionlog/real_34/` (69 files) | `handoff/tacview/P14_Probe_2G_run1.zip.acmi` | 33:40 |
+| 2 | `2026-10-17_19-17-59` | `src/testdata/missionlog/real_35/` (69 files) | `handoff/tacview/P14_Probe_2G_run2.zip.acmi` | 33:40 |
+| 3 | `2026-10-17_19-52-59` | `src/testdata/missionlog/real_36/` (69 files) | `handoff/tacview/P14_Probe_2G_run3.zip.acmi` | 33:55 |
+
+Replay against the frozen files: no dead links in any run. The unobserved successors are the Zone IN, `EXTEND` and late `HARD STOP` branches that the empty targets and the leave cut off, as planned.
+
+### The server kept up; timing as predicted
+
+- **Mission time ran at 1.00× wall time in all three runs** (log file times). No overload message in the menu at about 1,000 s in run 1.
+- `WP 1` came within 0.4 s of the prediction (START + 264.1 s) in every cell of every run, GA included (it moves the area, not `WP 1`). Every `DONE HUB` fired at its attack end (624.8 … 1,944.8 s).
+- The slot before `WP 1` was the same in every cell: 40 m behind, 41–46 m right, 7 m below. Skill does not change the slot. GX's lead did not slow down after the Loose order (`WaitForWingmen = 1`): 543–556 km/h from `WP 1` + 5 to + 20 s, as in GC.
+- No aircraft had an attacker.
+
+### Spacing and losses (Tacview)
+
+Nearest aircraft of the same flight; "under 20 m" counts aircraft-seconds sampled once a second; "closest" is at Tacview's 0.2 s frames (`tools/p14/flight2g_spacing.py`). Losses are aircraft destroyed, out of 4 per cell per run.
+
+| Cell | Change | Closest (runs 1, 2, 3) | When, after `WP 1` | Under 20 m (runs 1, 2, 3) | Lost (runs 1, 2, 3) |
+|---|---|---|---|---|---|
+| GC | as shipped | 4.2, 9.4, **2.9 m** | + 12–13 s | 2, 6, 8 | 2, 0, 2 |
+| G3 | Veteran | 6.5, 6.0, **1.7 m** | + 12–13 s | 2, 12, 4 | 0, 1, 2 |
+| G4 | Ace | **6.2, 4.9**, 7.4 m | + 12–13 s (run 3: + 136 s; its + 13 s contact fell between frames) | 2, 12, 16 | 2, 2, 2 |
+| GX | Loose from `WP 1` | 26.9, 18.7, 19.1 m | + 17.5, + 182, + 18.5 s | 0, 0, 0 | 0, 0, 0 |
+| GA | area 3 km ahead | 5.6, 26.1, **4.5 m** | + 23–24 s | 2, 0, 4 | 2, 0, 2 |
+
+- **GC repeated the fault**: the Blue pair came within 10 m at `WP 1` + 12–13 s in every run and collided in runs 1 and 3. Pairs at Safe as shipped now has nine runs (2E, 2F, 2G): within 10 m in all nine, collisions in five.
+- **Skill makes no difference.** Veteran and Ace wingmen crossed at the same second, as close, and collided: G3 in runs 2 and 3 (run 2: an attitude jump at the + 12 s pass, 9.7 m, and Blue 21 lost at + 64 s), G4 in all three runs (6 of 12 aircraft lost, the most of any cell).
+- **GX lost nothing and kept every one-second sample above 20 m.** Its closest passes were 18.7–26.9 m, each with the wingman 16–21 m below its lead (the Loose slot's vertical step). Pairs at Loose throughout (2F PL) did a little better: 23.0, 31.8, 31.5 m.
+- **GA moved the collision, not the fault**: the Red pair collided at + 23–24 s in runs 1 and 3. In run 1 the two pairs' leads, both orbiting the moved centre, also passed 1.7 m apart at + 158 s (no attitude jump; 14 aircraft-seconds under 20 m between the pairs); that Blue 21 was lost at + 202 s at 1,114 m with no aircraft near.
+- Three losses came about 133 s after a contact at + 13 s, at about 1,140 m with no aircraft near (GC run 1, G4 runs 1 and 3), as in 2E run 3: damaged aircraft, not new collisions.
+
+### Every crossing of the lead's track (Tacview)
+
+`tools/p14/flight2g_crossover.py`: the wingman's offset in its lead's frame from `WP 1` − 5 s to the delete, and every sign change of its sideways offset.
+
+- **The lead's left-then-right is its attack entry, not its arrival over the centre.** In every cell the lead banks left within 1.3 s of `WP 1`. As shipped it reverses right at + 3 to + 4 s (Red lead) or + 6 to + 7 s (Blue lead), and the Blue wingman, now inside, crosses at + 12–13 s, 3–9 m behind and 2–6 m below. In GA the lead still turns left at `WP 1`, about 40° over 14 s, away from an area straight ahead, then reverses right at + 16 to + 19 s, and the Red wingman crosses at + 23 s, 5 m behind and level. Moving the area only delays the reversal.
+- **GX**: on the Loose order the wingman swings out to about 245 m during the lead's left leg, then crosses its lead's track at + 18 s, 6–20 m behind and 18–21 m below, closest 19–27 m. A steady-turn crossing at + 182 s in run 2 came to 18.7 m (16 m below). As in 2F's PL, the clearance comes from the slot's vertical step, not from avoidance.
+- Steady-turn crossings on station came within 20 m in GC (16.8 m), G3 (13.0–13.5 m) and G4 (7.4–17.7 m; 8.3 m at + 68 s in run 2, 7.4 m at + 136 s in run 3), mostly 9–13 m below: the second kind of crossing (2F), at Safe, at every skill.
+
+### What this changes (reading)
+
+- **AI skill is not a workaround.** A Veteran or Ace wingman crosses through its lead exactly as a Normal one does. Raising skill would also change every AI fight, for nothing.
+- **Moving the attack area is not a workaround.** The reversal belongs to the AI's attack entry (a left turn at `WP 1` wherever the area is), so the crossover only comes later; in GA the two pairs also ended up orbiting together.
+- **Loosening at `WP 1` works about as well as Loose throughout, not better**: no losses, closest 18.7–26.9 m against 2F PL's 23.0–31.8 m, for 1 MCU per flight. Its only gain is the shipped Safe look in transit, where no collision has been recorded.
+- For decision 0020: **option A (Pairs at Loose, a value, no MCUs) stays the recommendation**; GX is a costlier, slightly closer alternative. For decision 0021's table: skill and area placement were tried and rejected; GX was tried and is not recommended.
+- Three runs per cell are few; the repeat of the + 12–13 s crossing in every Safe cell of every run is the stronger evidence. Not flown: Wedge fours with GX (the steady-turn kind), the F-51 ArmedRecon at Loose.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
