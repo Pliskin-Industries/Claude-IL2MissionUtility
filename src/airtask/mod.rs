@@ -10,6 +10,7 @@ mod budget;
 mod clock;
 mod library;
 mod place;
+mod pool;
 #[cfg(test)]
 mod probe;
 mod shell;
@@ -24,7 +25,8 @@ mod zone;
 #[allow(unused_imports)] // P14: removed in step 9
 pub use library::{builtin_library, load_user_sortie}; // fn builtin_library() -> Vec<AirSortie>; fn load_user_sortie(path: &std::path::Path) -> Result<AirSortie, String>
 #[allow(unused_imports)] // P14: removed in step 9
-pub use timing::{derived_timing, f80_transit_s}; // fn derived_timing(t: &ThresholdSpec) -> DerivedTiming; fn f80_transit_s(radius_m: f64) -> f64
+pub use timing::{derived_timing, f80_cruise_kmh, f80_transit_s, hard_stop, HardStop}; // fn derived_timing(t: &ThresholdSpec) -> DerivedTiming; fn f80_transit_s(radius_m: f64) -> f64
+pub use pool::{add_entry, auto_fill, entry_status, remove_library_item, resolve_target, target_choices, EntryStatus, TargetChoice, TargetKind};
 
 /// Index convention for every per-side array (`schedule`, `AirBudget::per_side`, preview slot rows).
 pub const DPRK: usize = 0;

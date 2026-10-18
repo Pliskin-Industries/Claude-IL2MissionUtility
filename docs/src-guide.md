@@ -9,7 +9,7 @@
 - Binary crate (`src/main.rs` only — there is no `lib.rs`). It generates
   IL-2 Sturmovik: Great Battles `.Group` / `.Mission` text files for the
   Korea map.
-- `ui.rs` is the GUI entry point. The other egui files are `shell.rs`
+- `ui.rs` is the GUI entry point. Its Air Tasking page is `ui/air.rs`. The other egui files are `shell.rs`
   (shared page chrome and widgets), `theme.rs` (design tokens, fonts,
   visuals) and `help.rs` (detached Help window). Every other file is
   logic/data with no egui imports.
@@ -34,7 +34,7 @@
 
 ### `ui.rs` — egui front-end
 The single GUI entry point. Owns `GroupGeneratorApp` (all state), the
-six mode tabs, every panel, drag/drop map editing, order-tree widgets,
+seven mode tabs, every panel, drag/drop map editing, order-tree widgets,
 map UV/world/`Pos2` conversions, SVG/JPEG loading, and
 `save_with_sidecars`. Calls into logic modules only through their public
 APIs; contains no AST work and no generation logic. Help content is
@@ -65,8 +65,20 @@ Mode rail, page header with the `Ctrl G` primary button, status bar with
 Undo, cards, blueprint panels, section titles, hints with "Help ›",
 28 px links, tags, segmented controls, map tool buttons and banner,
 settings sections, confirmation dialog, `Undo<T>`, side markers, and
-`read_shortcuts` (Ctrl G / O / Z / Y / 1–6, F1, Esc, map keys 1–6).
+`read_shortcuts` (Ctrl G / O / Z / Y / 1–7, F1, Esc, map keys 1–6).
 Presentation only. **All modes.**
+
+### `ui/air.rs` — Air Tasking rail tab
+The library, target picker, editable pool, slot strip, plan checks and settings.
+Builds the Map context and calls the public `airtask` API; owns presentation,
+undo snapshots and the standalone file dialog. `draw_slot_strip` also serves
+the future Map Air dock. **Air Tasking.**
+
+### `airtask/pool.rs` — targets and pool edits
+`target_choices`, `resolve_target` (50 m tolerance), `entry_status`, `add_entry`,
+`auto_fill` and `remove_library_item`. Keeps target numbering, side/date checks
+and duplicate prevention shared between the rail tab and future Map dock.
+**Air Tasking.**
 
 ### `ast.rs` — `Il2Entity`: the .Group AST
 The schema-agnostic in-memory tree every loaded or generated `.Group`

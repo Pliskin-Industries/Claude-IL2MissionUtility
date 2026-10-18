@@ -29,13 +29,14 @@ pub enum HelpTopic {
     Recon,
     Airfield,
     Front,
+    AirTasking,
     Language,
     Import,
     Troubleshooting,
 }
 
 impl HelpTopic {
-    pub const ALL: [HelpTopic; 11] = [
+    pub const ALL: [HelpTopic; 12] = [
         HelpTopic::Overview,
         HelpTopic::Shortcuts,
         HelpTopic::Template,
@@ -44,6 +45,7 @@ impl HelpTopic {
         HelpTopic::Exclusive,
         HelpTopic::Airfield,
         HelpTopic::Front,
+        HelpTopic::AirTasking,
         HelpTopic::Language,
         HelpTopic::Import,
         HelpTopic::Troubleshooting,
@@ -59,6 +61,7 @@ impl HelpTopic {
             HelpTopic::Recon => "Army Generator",
             HelpTopic::Airfield => "Airfield",
             HelpTopic::Front => "Map",
+            HelpTopic::AirTasking => "Air Tasking",
             HelpTopic::Language => "Language files",
             HelpTopic::Import => "Importing into the mission editor",
             HelpTopic::Troubleshooting => "Troubleshooting",
@@ -360,7 +363,7 @@ mod tests {
     fn shortcuts_section_lists_every_key() {
         let s = section_for(HelpTopic::Shortcuts);
         for key in [
-            "Ctrl G", "Ctrl O", "Ctrl Z", "Ctrl Y", "Ctrl 1–6", "F1", "Esc", "Enter", "1–6", "← →", "Shift",
+            "Ctrl G", "Ctrl O", "Ctrl Z", "Ctrl Y", "Ctrl 1–7", "F1", "Esc", "Enter", "1–6", "← →", "Shift",
         ] {
             assert!(s.contains(key), "Keyboard shortcuts misses {key}");
         }

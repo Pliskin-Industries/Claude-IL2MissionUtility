@@ -12,7 +12,7 @@ Use **Help** (or **F1**) on any page to open this manual at that topic. **Esc** 
 
 You author small, well-named templates in the IL-2 editor, then use this app to clone, randomize, and link them. The output is a `.Group` plus language sidecar files (`.eng`, `.chs`, …). Drop the group into a mission, move the copies onto the map, and save.
 
-### The six modes
+### The seven modes
 
 - **Template Builder** — author one memory-efficient unit group (activate or spawn, checkzones, per-unit orders) that Exclusive Activation and Army Generator can load.
 - **Army Generator** — many ground (or ship) copies; a waterfall picks an activate count, or **Spawn all** so every copy starts.
@@ -20,12 +20,13 @@ You author small, well-named templates in the IL-2 editor, then use this app to 
 - **Exclusive Activation** — several preplanned groups (bombers, recon, artillery) where only one plan can start at a time.
 - **Airfield** — strip Freeflight / single-player logic from an airfield exported from `_gen.mission` so it works in multiplayer.
 - **Map** — Korean War 1950–1953 map icons. Draw a box on the peninsula to clip the front, areas of influence, airfields, and towns.
+- **Air Tasking** — choose air sorties and Map targets, then edit their timing and limits.
 
 ### Typical workflow
 
 1. Pick a mode.
 2. Load templates or set options (Map needs no extra template beyond `References/`).
-3. Click **Generate File** / **Generate Base Map** (or **Ctrl G**; **Ctrl O** is the tab's Load… / Add…, **Ctrl 1–6** switches tabs, **F1** opens this help) (Airfield: **Generate File**) and choose a save path.
+3. Click **Generate File** / **Generate Base Map** (or **Ctrl G**; **Ctrl O** is the tab's Load… / Add…, **Ctrl 1–7** switches tabs, **F1** opens this help) (Airfield: **Generate File**) and choose a save path.
 4. In the IL-2 mission editor, import the `.Group`. Keep the sidecar files next to it.
 5. Move groups from the parking grid onto the map. Do not break the MCU names this app relies on.
 
@@ -51,7 +52,7 @@ Every shortcut also shows in its button's hover text.
 - **Ctrl G** — the tab's primary button: **Generate File**, or **Generate Base Map** on Map. Nothing happens while that button is disabled.
 - **Ctrl O** — the tab's first header button, **Load…** or **Add…** (Fighter Pack has none). Load asks first when it would replace unsaved edits.
 - **Ctrl Z** — undo the last **Remove**, **Clear** or **Reset** on this tab (Template, Army Generator, Exclusive Activation, Map). The status bar names what it will undo, with an **Undo** link that does the same.
-- **Ctrl 1–6** — switch tab, in rail order.
+- **Ctrl 1–7** — switch tab, in rail order.
 - **F1** — open Help at this tab's topic.
 - **Esc** — close a dialog (same as **Cancel**), or this Help window.
 - **Enter** — confirm a dialog, unless **Cancel** has the keyboard focus.
@@ -508,6 +509,12 @@ To match a strategic-map animation (ANZAC / DVA style), supply one west→east p
 After import, generate again with a different box if you need a tighter AO.
 
 ---
+
+## Air Tasking
+
+Open **Air Tasking** with **Ctrl 7**. Pick a library sortie, choose one of its side's Map objectives or arrows, and click **Add to pool**. **Auto-fill from objectives** adds the available sorties for both sides without repeating existing pairs. The Map date decides which sorties are valid.
+
+Each pool row has an on/off switch, weight, trigger mode and maximum runs. Select a row to set its heading and see its hard stop. The right panel holds the budget, player threshold, schedules, zone triggers and output totals. The threshold is fixed at one player. **Add template…** (**Ctrl O**) adds a supported file to the library. Removing a user template removes its entries too. **Reset** clears the pool and restores the settings while keeping the library; **Ctrl Z** undoes an edit, removal or reset. **Generate File** writes the air sorties as one group.
 
 ## Language files
 

@@ -80,7 +80,7 @@ fn template_page(&mut self, ctx: &egui::Context) {
 
 | Region | Size | Contents |
 |---|---|---|
-| Mode rail | 172 px wide, full height | "IL-2 GROUP / GENERATOR" in Condensed 17 px; six 32 px rows showing a two-digit index and the label; "Ctrl 1–6" hint; Help + `F1` at the bottom |
+| Mode rail | 172 px wide, full height | "IL-2 GROUP / GENERATOR" in Condensed 17 px; seven 32 px rows showing a two-digit index and the label; "Ctrl 1–7" hint; Help + `F1` at the bottom |
 | Header | 54 px tall, 18 px side padding | Title (Heading, uppercase), optional leading control, file name (italic, NEUTRAL_700); on the right: secondary buttons, then the primary button with a `Ctrl G` hint |
 | Left panel | per tab (§5) | Inputs: files, units, templates, plans |
 | Center | fills | Canvas or output preview |
@@ -262,7 +262,7 @@ Only panels scroll, and the rail, header and status bar never move. Settings sec
 | `Ctrl G` | This tab's primary action. Ignored if the button is disabled |
 | `Ctrl O` | This tab's Load… / Add… (first secondary button) |
 | `Ctrl Z` / `Ctrl Y` | Undo / redo (redo is Map drawings only, as today) |
-| `Ctrl 1–6` | Switch tab |
+| `Ctrl 1–7` | Switch tab |
 | `F1` | Help for this tab (`open_help(page_help_topic())`) |
 | `Esc` | Close dialog → cancel map line → back to Select |
 | `1–6` (Map, not typing) | Pick map tool |

@@ -1,8 +1,8 @@
 //! # ui.rs — egui front-end for the IL-2 Group Generator
 //!
 //! The GUI entry point. Boots the eframe window, holds all UI state in
-//! [`GroupGeneratorApp`], and routes the six mode tabs (Template, Army
-//! Generator, Fighter Pack, Exclusive Activation, Airfield, Map) to their
+//! [`GroupGeneratorApp`], and routes the seven mode tabs (Template, Army
+//! Generator, Fighter Pack, Exclusive Activation, Airfield, Map, Air Tasking) to their
 //! panels. The detached Help viewport lives in [`crate::help`]; this file
 //! is otherwise the only egui code.
 //!
@@ -78,6 +78,8 @@ use crate::help::{self, HelpTopic};
 use crate::shell::{self, Severity};
 use crate::terrain::HeightStore;
 use crate::theme::{self, c};
+
+mod air;
 
 /// Native file dialogs. Tests swap in `ui_tests::dialog`, which answers
 /// from a queue of prepared paths instead of opening a window.
@@ -173,6 +175,7 @@ enum AppMode {
     Recon,
     Airfield,
     Map,
+    AirTasking,
 }
 
 /// Index of `mode` in `MODES` (the per-tab status slots follow it).
@@ -180,14 +183,15 @@ fn mode_slot(mode: AppMode) -> usize {
     MODES.iter().position(|(m, _)| *m == mode).unwrap_or(0)
 }
 
-/// Rail order (docs/ui-redesign/README.md §4). Ctrl 1–6 follow it.
-const MODES: [(AppMode, &str); 6] = [
+/// Rail order (docs/ui-redesign/README.md §4). Ctrl 1–7 follow it.
+const MODES: [(AppMode, &str); 7] = [
     (AppMode::Template, "Template"),
     (AppMode::Recon, "Army Generator"),
     (AppMode::Fighter, "Fighter Pack"),
     (AppMode::Exclusive, "Exclusive Activation"),
     (AppMode::Airfield, "Airfield"),
     (AppMode::Map, "Map"),
+    (AppMode::AirTasking, "Air Tasking"),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -274,6 +278,7 @@ enum MapAction {
 enum Confirm {
     ResetTemplate,
     ResetFighter,
+    ResetAirPlan,
     LoadTemplate,
     LoadBaseMap,
 }
@@ -592,7 +597,13 @@ struct GroupGeneratorApp {
     help_topic: HelpTopic,
     status: Status,
     /// Each tab's status while another tab is shown, in `MODES` order (`set_mode` swaps).
-    tab_status: [Status; 6],
+    tab_status: [Status; 7],
+    air_plan: crate::airtask::AirPlan,
+    air_undo: shell::Undo<crate::airtask::AirPlan>,
+    air_selected: Option<usize>,
+    air_library_selected: Option<usize>,
+    air_picked_target: Option<crate::airtask::TargetChoice>,
+    air_editing: Option<egui::Id>,
     /// Status text last seen, and the tab's edit fingerprint when it appeared (`age_status`).
     status_seen: String,
     status_fp: u64,
@@ -1828,6 +1839,12 @@ impl Default for GroupGeneratorApp {
             help_topic: HelpTopic::Overview,
             status: Status::Idle,
             tab_status: Default::default(),
+            air_plan: Self::new_air_plan(),
+            air_undo: shell::Undo::default(),
+            air_selected: None,
+            air_library_selected: Some(0),
+            air_picked_target: None,
+            air_editing: None,
             status_seen: String::new(),
             status_fp: 0,
             tpl_path: None,
@@ -1918,6 +1935,7 @@ impl GroupGeneratorApp {
             AppMode::Exclusive => self.bomber_page(ctx),
             AppMode::Airfield => self.airfield_page(ctx),
             AppMode::Map => self.map_page(ctx),
+            AppMode::AirTasking => self.air_page(ctx),
         }
         self.confirm_dialogs(ctx);
         help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
@@ -1935,6 +1953,7 @@ impl GroupGeneratorApp {
             AppMode::Recon => HelpTopic::Recon,
             AppMode::Airfield => HelpTopic::Airfield,
             AppMode::Map => HelpTopic::Front,
+            AppMode::AirTasking => HelpTopic::AirTasking,
         }
     }
 
@@ -2061,6 +2080,7 @@ impl GroupGeneratorApp {
             }
             AppMode::Airfield => vec![Check::new(self.airfield_info.is_some(), "An airfield file loaded")],
             AppMode::Map => Vec::new(),
+            AppMode::AirTasking => self.air_readiness(),
         }
     }
 
@@ -2081,6 +2101,7 @@ impl GroupGeneratorApp {
             AppMode::Exclusive => self.generate_bomber_file(),
             AppMode::Airfield => self.export_airfield(),
             AppMode::Map => self.generate_front_file(),
+            AppMode::AirTasking => self.generate_air_file(),
         }
     }
 
@@ -2098,6 +2119,7 @@ impl GroupGeneratorApp {
             AppMode::Fighter => {}
             AppMode::Exclusive => self.add_bomber_template(),
             AppMode::Airfield => self.load_airfield(),
+            AppMode::AirTasking => self.add_air_template(),
         }
     }
 
@@ -2108,6 +2130,7 @@ impl GroupGeneratorApp {
             name.and_then(|n| n.to_str()).map(str::to_owned)
         }
         let (title, file, primary) = match self.mode {
+            AppMode::AirTasking => ("Air Tasking", Some(self.air_header_label()), "Generate File"),
             AppMode::Template => (
                 "Template Builder",
                 file_label(&self.tpl_loaded_path, true).map(|n| format!("Editing {n}")),
@@ -2170,6 +2193,7 @@ impl GroupGeneratorApp {
             },
             // Right-to-left: the button added last sits leftmost.
             |ui| match mode {
+                AppMode::AirTasking => Self::air_header_buttons(ui, &mut load, &mut reset),
                 AppMode::Template => {
                     reset = ui
                         .button("Reset")
@@ -2215,6 +2239,7 @@ impl GroupGeneratorApp {
         self.recon_submode = new_submode;
         if reset {
             self.confirm = match mode {
+                AppMode::AirTasking => Some(Confirm::ResetAirPlan),
                 AppMode::Fighter => Some(Confirm::ResetFighter),
                 _ if self.tpl_seats.is_empty() => {
                     self.reset_template_confirmed();
@@ -5321,6 +5346,7 @@ impl GroupGeneratorApp {
     /// Everything a user can edit on the current tab, as text (selection excluded).
     fn tab_edit_text(&self) -> String {
         match self.mode {
+            AppMode::AirTasking => self.air_fingerprint(),
             AppMode::Template => self.tpl_fingerprint(),
             AppMode::Map => self.map_fingerprint(),
             AppMode::Recon => {
@@ -5372,6 +5398,7 @@ impl GroupGeneratorApp {
                 let fp = hash(self.tpl_fingerprint());
                 self.tpl_undo.settle(fp);
             }
+            AppMode::AirTasking => self.air_undo.settle(hash(self.air_fingerprint())),
             AppMode::Recon => {
                 let slots = match self.recon_submode {
                     ReconSubmode::New => &self.recon_slots,
@@ -5423,6 +5450,7 @@ impl GroupGeneratorApp {
     /// The undo label shown in the status bar for the current tab.
     fn undo_label(&self) -> Option<&str> {
         match self.mode {
+            AppMode::AirTasking => self.air_undo.label(),
             AppMode::Template => self.tpl_undo.label(),
             AppMode::Recon => self.recon_undo.label(),
             AppMode::Exclusive => self.bomber_undo.label(),
@@ -5436,6 +5464,7 @@ impl GroupGeneratorApp {
     fn undo_current_tab(&mut self) {
         let label = self.undo_label().map(str::to_owned);
         match self.mode {
+            AppMode::AirTasking => self.undo_air_plan(),
             AppMode::Template => {
                 if let Some(s) = self.tpl_undo.take() {
                     self.tpl_restore(s);
@@ -5544,6 +5573,7 @@ impl GroupGeneratorApp {
             return;
         };
         let (title, body, button) = match kind {
+            Confirm::ResetAirPlan => self.air_reset_prompt(),
             Confirm::ResetTemplate => {
                 let orders: usize = self.tpl_seats.iter().map(|s| s.orders.len()).sum();
                 (
@@ -5574,6 +5604,7 @@ impl GroupGeneratorApp {
         let mut open = true;
         if shell::confirm_dialog(ctx, &mut open, title, &body, button) {
             match kind {
+                Confirm::ResetAirPlan => self.reset_air_plan(),
                 Confirm::ResetTemplate => self.reset_template_confirmed(),
                 Confirm::ResetFighter => self.reset_fighter_pack(),
                 Confirm::LoadTemplate => self.load_template_now(),
@@ -10396,6 +10427,7 @@ impl GroupGeneratorApp {
 
     fn idle_hint(&self) -> &'static str {
         match self.mode {
+            AppMode::AirTasking => "Pick a library sortie and a target, then Add to pool.",
             AppMode::Template => "Add units, choose Activate or Spawn, then generate a proximity-triggered group.",
             AppMode::Fighter => "Ready — no template file required.",
             AppMode::Exclusive => {
@@ -10422,6 +10454,7 @@ impl GroupGeneratorApp {
     /// that blocks Generate on this tab (Exclusive Activation plans).
     fn idle_problem(&self) -> Option<String> {
         match self.mode {
+            AppMode::AirTasking => self.air_idle_problem(),
             AppMode::Exclusive => exclusive_first_problem(&self.bomber_slots),
             _ => None,
         }

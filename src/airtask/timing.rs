@@ -1,6 +1,6 @@
 //! F-80 transit and threshold timings, shared by the P14 builders and UI.
 
-use super::{DerivedTiming, ThresholdSpec};
+use super::{AirPlan, AirSortie, DerivedTiming, ThresholdSpec};
 use crate::model_spec;
 
 /// Probe T-n may calibrate P14 without changing Template Builder's cruise data.
@@ -8,16 +8,21 @@ pub const F80_CRUISE_OVERRIDE_KMH: Option<f64> = None;
 
 /// Seconds to fly the diameter of a zone at F-80 cruise speed.
 pub fn f80_transit_s(radius_m: f64) -> f64 {
-    f80_transit_with_override(radius_m, F80_CRUISE_OVERRIDE_KMH)
+    2.0 * radius_m / (f80_cruise_kmh().0 / 3.6)
 }
 
-fn f80_transit_with_override(radius_m: f64, cruise_override_kmh: Option<f64>) -> f64 {
+/// Cruise speed and whether it comes from the measured P14 override.
+pub fn f80_cruise_kmh() -> (f64, bool) {
+    cruise_with_override(F80_CRUISE_OVERRIDE_KMH)
+}
+
+fn cruise_with_override(cruise_override_kmh: Option<f64>) -> (f64, bool) {
     let speed_kmh = cruise_override_kmh.unwrap_or_else(|| {
         model_spec::spec_for("f80c10")
             .and_then(|spec| spec.cruise_kmh)
             .expect("the F-80C model must have a cruise speed") as f64
     });
-    2.0 * radius_m / (speed_kmh / 3.6)
+    (speed_kmh, cruise_override_kmh.is_some())
 }
 
 /// Window/dwell default independently to the rounded transit. Hold defaults to
@@ -33,9 +38,56 @@ pub fn derived_timing(t: &ThresholdSpec) -> DerivedTiming {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HardStop {
+    pub clock_s: f64,
+    pub zone_s: f64,
+}
+
+/// Final cutoff after arrival, attack, margin and the one permitted extension (§4.3).
+pub fn hard_stop(sortie: &AirSortie, plan: &AirPlan) -> HardStop {
+    let after_arrival = sortie.attack_time_s + (plan.stop.margin_min + plan.stop.extension_min) * 60.0;
+    HardStop {
+        clock_s: plan.schedule[sortie.side.idx()].arrive_min * 60.0 + after_arrival,
+        zone_s: plan.zone.spawn_dist_km * 1000.0 / (sortie.wp_speed_kmh / 3.6) + after_arrival,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn f80_transit_with_override(radius_m: f64, cruise_override_kmh: Option<f64>) -> f64 {
+        2.0 * radius_m / (cruise_with_override(cruise_override_kmh).0 / 3.6)
+    }
+
+    #[test]
+    fn hard_stop_matches_hvar_and_armed_recon_defaults() {
+        let library = crate::airtask::builtin_library();
+        let plan = AirPlan::default();
+        let hvar = hard_stop(&library[1], &plan);
+        assert_eq!(hvar.clock_s, 2100.0);
+        assert!((hvar.zone_s - 1963.6363636).abs() < 0.0001);
+        assert_eq!(hard_stop(&library[3], &plan).clock_s, 2700.0);
+    }
+
+    #[test]
+    fn hard_stop_uses_side_schedule_speed_and_stop_settings() {
+        let sortie = &crate::airtask::builtin_library()[5];
+        let mut plan = AirPlan::default();
+        plan.schedule[sortie.side.idx()].arrive_min = 7.0;
+        plan.zone.spawn_dist_km = 39.0;
+        plan.stop.margin_min = 2.0;
+        plan.stop.extension_min = 3.0;
+        assert_eq!(hard_stop(sortie, &plan), HardStop { clock_s: 1320.0, zone_s: 1260.0 });
+    }
+
+    #[test]
+    fn f80_cruise_reports_value_and_measured_flag() {
+        assert_eq!(f80_cruise_kmh(), (732.0, false));
+        assert_eq!(cruise_with_override(Some(700.0)), (700.0, true));
+        assert_eq!(cruise_with_override(None), (732.0, false));
+    }
 
     #[test]
     fn f80_transit_and_derived_timing() {
