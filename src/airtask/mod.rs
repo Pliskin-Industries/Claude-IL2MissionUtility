@@ -302,10 +302,10 @@ pub enum CensusImpl {
 } // §3.3, probe E7
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PresenceCheckImpl {
+    TriggerReactivate, // the area's Complex Trigger switched on again; flight 2J: misses a plane already inside
     #[default]
-    TriggerReactivate, // the area's Complex Trigger is switched on again (k1, probe 2J)
-    ZonePulse, // a pulsed coalition check zone at r_in (risk c, flight 1A)
-} // decision 0023
+    ZonePulse, // a pulsed coalition check zone at r_in (risk c, flight 1A; flown in 2J)
+} // decisions 0023, 0024
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Strategies {
