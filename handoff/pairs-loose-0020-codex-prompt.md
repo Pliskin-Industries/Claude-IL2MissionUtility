@@ -1,6 +1,6 @@
 # Delegation prompt: decisions 0020 A and 0022 A2 (Pairs fly Loose, except a flight flying a Cover order)
 
-One job, in the worktree `distracted-taussig-b9259d` on `claude/pairs-loose-0020` (cut from `claude/p14-flight-2h` at `12c14f1`, plus this prompt, committed). Sent with `codex_start`, `reasoning_effort` = `max`, `sandbox` = `workspace-write`, `max_idle_seconds` = 1200. Model: the config default.
+One job, in the worktree `distracted-taussig-b9259d` on `claude/pairs-loose-0020` (cut from `claude/p14-flight-2h` at `12c14f1`, plus this prompt, committed). Sent with `codex_start`, `reasoning_effort` = `max`, `sandbox` = `workspace-write`, `max_idle_seconds` = 1200. Model: the config default. First job `20261018090728-9f2eb929` stopped before editing: flight 2D's `DP` cell test asserts placed Pairs at 1; scope widened to the 2D tests.
 
 ---
 
@@ -11,7 +11,7 @@ Read first, in this order:
 1. `docs/decisions/0019-air-formations-fly-at-safe-density.md`, `0020-pairs-formations-after-flight-2e.md`, `0021-formation-collisions-are-a-game-bug.md`, `0022-f51-armed-recon-at-loose.md`.
 2. `CLAUDE.md`, `.cursorrules`, `docs/src-guide.md` (module map).
 3. Commit `077e14b` (`git show 077e14b`): how decision 0019 was built. This change follows the same shape.
-4. Code: `src/template.rs` (`SAFE_AIR_FORMATION_DENSITY`, `FormationPreset`, `air_form`, `AIR_FORMATIONS`, `formations_for`, `formation_density`, `set_safe_air_formations`, the Formation branch of the order writer near `OrderKind::Formation`, `generate_template`, `OrderKind::Cover`, and the tests that assert density 1); every caller of `set_safe_air_formations` (`src/airtask/place.rs`, `src/airfield.rs`, `src/bombers.rs`, `src/frontlines.rs`, `src/pack.rs`, `src/recon.rs`); `src/airtask/library.rs` (the built-in test that asserts density 1); `src/airtask/probe.rs` (`Flight::is_frozen`, `regenerates_flown_files`, `flown_probes_regenerate_byte_for_byte_except_flight2`, the `flight2e_…` to `flight2h_…` tests).
+4. Code: `src/template.rs` (`SAFE_AIR_FORMATION_DENSITY`, `FormationPreset`, `air_form`, `AIR_FORMATIONS`, `formations_for`, `formation_density`, `set_safe_air_formations`, the Formation branch of the order writer near `OrderKind::Formation`, `generate_template`, `OrderKind::Cover`, and the tests that assert density 1); every caller of `set_safe_air_formations` (`src/airtask/place.rs`, `src/airfield.rs`, `src/bombers.rs`, `src/frontlines.rs`, `src/pack.rs`, `src/recon.rs`); `src/airtask/library.rs` (the built-in test that asserts density 1); `src/airtask/probe.rs` (`Flight::is_frozen`, `regenerates_flown_files`, `flown_probes_regenerate_byte_for_byte_except_flight2`, the `flight2d_…` to `flight2h_…` tests).
 5. `TemplateExamples/Historical1950/` (six built-ins; CRLF line endings, `.gitattributes` is `* -text`; `README.md`).
 
 What to build:
@@ -30,7 +30,7 @@ C. **Built-ins** (`TemplateExamples/Historical1950/`), byte-exact edits, CRLF ke
    The files must equal what the shared function writes for them (a test checks it).
 
 D. **Flown probe evidence.** Flights whose regenerated output now changes because placement writes Pairs at Loose (expected: 2E and 2G, whose Pairs cells take placement's value) are frozen like 1M, 2B, 2C and 2D were for 0019: add them to `Flight::is_frozen` with a comment naming 0020 and 0022, and lower the compared count in `flown_probes_regenerate_byte_for_byte_except_flight2` accordingly. Flights 2F and 2H set their formation after placement and are expected to still regenerate byte for byte; if any other flight's output changes, stop and report which file and why before freezing it. Never edit a file under `handoff/p14-probes/` or `src/testdata/`.
-   Tests of 2E to 2H that assert "equals the as-shipped placement" for a cell whose shipped value changes must not be deleted or weakened: make them state the old value as the flown evidence and assert the new shipped value separately.
+   Tests of 2D to 2H that assert "equals the as-shipped placement", or assert placement's density, for a cell whose placed value changes (for example 2D's `DP`, Pairs at Dense in its source) must not be deleted or weakened: make them state the old value as the flown evidence and assert the new placed value separately.
 
 E. **Tests**, each stating its own literals:
    - the rule: Pairs → 2; Pairs whose lead flies a Cover → 1; Pairs whose lead is the *target* of someone else's Cover (but flies none) → 2; Wedge and every other air type in `AIR_FORMATIONS` → 1; an unknown air type → 1; vehicle formations unchanged; applying it twice changes nothing; only `FormationDensity` of aircraft Formation commands changes;
@@ -47,7 +47,7 @@ Acceptance:
 - Every file under `handoff/p14-probes/` is unchanged; the flown-file test passes with its new count; 2F and 2H still regenerate byte for byte.
 - `cargo test --offline write_p14_probe_2h -- --ignored` still writes its files; nothing under `handoff/` changes.
 
-Files in scope: `src/template.rs`, the callers listed in 4 only where the rename touches them, `src/airtask/library.rs` and `src/airtask/place.rs` tests, `src/airtask/probe.rs` (freezing and the 2E–2H tests only), the two built-in files in C, `USER_MANUAL.md`, `TemplateExamples/Historical1950/README.md`, `docs/src-guide.md`.
+Files in scope: `src/template.rs`, the callers listed in 4 only where the rename touches them, `src/airtask/library.rs` and `src/airtask/place.rs` tests, `src/airtask/probe.rs` (freezing and the 2D–2H tests only, plus any other probe test that asserts what placement writes for Pairs; report each), the two built-in files in C, `USER_MANUAL.md`, `TemplateExamples/Historical1950/README.md`, `docs/src-guide.md`.
 
 Do not touch: `src/airtask/shell.rs`, `budget.rs`, `assemble.rs`, `testkit.rs`, `src/trace.rs`, `src/ui.rs` (unless a label there states the density; then stop and report), `src/testdata/`, `handoff/` (all of it), `docs/decisions/`, `STATE.md`, `Cargo.toml`, `Cargo.lock`, `.gitattributes`, the four other built-ins, and the game folder. If the work cannot be done inside scope, stop and report exactly what and why.
 </task>
