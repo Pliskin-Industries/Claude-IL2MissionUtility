@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-18, after probe flight 2H (F-51 ArmedRecon at Loose, three runs): Loose did not hold for its covering pair; decision 0022 (Proposed) asks whether A gets a Cover exception. A is not built yet.
+> Last updated: 2026-10-18: decision 0022 accepted (A2): Pairs fly Loose except a flight flying a Cover order, which stays Safe. Not built yet; the build plan waits on the user's go-ahead.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -64,7 +64,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 0. **Merge `codex/p14-3b` (or `codex/p14-2c`, which contains it) into `claude/p14-air-tasking`?** Step 3 has flown in flights 2, 2B and 2C. Open from it: the formation collisions (decision 0019, below), and the extension and RTB turn, still unseen. Tacview now works (`docs/il2-loader-and-log-facts.md`, 2026-10-15).
 0a. **Two game bug reports are drafted, not posted** (`handoff/il2-bug-report-drafts.md`): AI wingmen collide at Dense; OnEvent 4 (`OnPlaneDestroyed`) never fires. Whether, where and when to post them is the user's call.
 0b. **Decision 0020 accepted (2026-10-18): option A, Pairs fly Loose, every other air formation stays Safe.** Loose at the waypoint (one Formation command per flight, flight 2G's GX) is recorded as the alternative. **Not built yet.** Flight 2H flew the F-51 ArmedRecon at Loose: see 0d.
-0d. **Decision 0022 (Proposed): Pairs at Loose does not hold for a covering pair.** Options: build A as decided (A1), A with Cover-flown flights kept at Safe (A2, recommended), A with the F-51 built-in kept at Safe (A3), fly more first (A4). Building A waits on this.
+0d. **Decision 0022 accepted (2026-10-18): A2.** Pairs fly Loose, except a flight flying a Cover order, which stays Safe. Build 0020 A with this exception next.
 0c. **Decision 0021 (Accepted, 2026-10-17): the formation collisions are a game bug.** Every crossing traced with Tacview (flights 2C to 2F) is an aircraft crossing its leader's track in a turn. The app's formation settings are workarounds to remove when the game is fixed; draft game report 3 in `handoff/il2-bug-report-drafts.md` (not posted). Flight 2G flew AI skill, a Formation change at `WP 1` and the attack area moved ahead: its rows are now in 0021's workaround table (skill and area rejected; Loose at `WP 1` tried, not recommended). Report 3 has the 2G evidence.
 1. **The load test is with the upstream author:** https://github.com/eszyman/IL2MissionUtility/issues/2 (posted 2026-10-14; mission text log and Tacview recording requested). The text names the rebuilt file `P14_Load_3_20261014` (decision 0018 shell, 48 check zones per side); **the zip attached to the issue is still the old `P14_Load_2` and must be replaced** with `target/p14/missions/P14_Load_3_20261014/P14_Load_3_20261014.zip` (step 3b worktree). This PC is a test bed: its load numbers are not used.
 2. **The upstream issue is posted** (2026-10-14, https://github.com/eszyman/IL2MissionUtility/issues/1; text in `handoff/upstream-issue-draft.md`). Waiting on the upstream author's reply; offering patches for 1 to 3 is the next step if they want them.
@@ -76,7 +76,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
 2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-3. Merge `claude/formation-safe-0019` (user; it contains `codex/p14-3b`, `-2c` and `-2d`). Flights 2E to 2H have flown and decision 0020 is accepted (A); rule on decision 0022 (Cover exception), then build A on top (Pairs at Loose in the three places 0019 writes, marked as a 0021 workaround).
+3. Merge `claude/formation-safe-0019` (user; it contains `codex/p14-3b`, `-2c` and `-2d`). Flights 2E to 2H have flown and decision 0020 is accepted (A); build A with decision 0022's Cover exception on top (Pairs at Loose in the three places 0019 writes, marked as a 0021 workaround).
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 5. Optional probes, if they matter later: the go-home timer without Force Complete when it fires more than once (1P's H3 did not test it), and what makes the game raise event 7 at activation.
 

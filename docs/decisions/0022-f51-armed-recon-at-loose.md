@@ -1,8 +1,8 @@
 # 0022. Pairs at Loose does not hold for a covering pair: what the app writes for the F-51 ArmedRecon
 
-- **Status:** Proposed
+- **Status:** Accepted (option A2)
 - **Date:** 2026-10-18
-- **Decided by:** open, for the user; proposed by Claude from flight 2H
+- **Decided by:** the user ("A2 is decision"), on Claude's proposal from flight 2H
 
 ## Context
 
@@ -26,7 +26,11 @@ So A helps a pair that reverses once on arrival (the Yak) and hurts a pair that 
 - **A3. Build A, and keep the F-51 ArmedRecon built-in's own pairs at Safe** (an exception for one file). Simplest to state, but a Template Builder user who makes a covering Pairs flight still gets Loose.
 - **A4. Hold A and fly more first** (for example the A2 combination, three runs). Costs a flight; the Yak keeps colliding meanwhile in the app as shipped.
 
-## Recommendation
+## Decision
+
+**A2. Pairs fly Loose (decision 0020 A), except a flight flying a Cover order, which keeps its formation at Safe.** Written wherever 0019 and 0020 write formation density (Air Tasking placement, the built-ins, Template Builder), as a value, no MCUs; marked in the code as a workaround for the game bug of decision 0021. The combination (attack pair Loose, cover pair Safe) has not been flown as one; a confirmation flight after the build is optional.
+
+## Recommendation (before the decision)
 
 **A2**: Pairs fly Loose except a flight flying a Cover order, which stays Safe. It keeps A's fix for the Yak, avoids the one failure 2H showed, and stays a value change. If the user wants the combination flown before it ships, fly it as flight 2I (one mission, three runs, about 1 h 40 min) after A2 is built.
 
