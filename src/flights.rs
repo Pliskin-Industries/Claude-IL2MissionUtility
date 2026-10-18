@@ -15,9 +15,11 @@
 //! ## Public API
 //! * `struct FlightConfig` — GUI inputs: flight count (clamped 1–10),
 //!   max per flight (clamped 1–8), aircraft `type_ids` + recommended
-//!   `type_skills` (0–4), country, cooldown / reinforcement /
-//!   delete-order seconds, altitude range. `Default`: 4 flights, max 4,
-//!   mig15bis + la11 (skills 3/2), country 501, 180/300/60 s,
+//!   `type_skills` (0–4), country, cooldown / delete-order seconds,
+//!   altitude range. `reinforcement` is kept on the config but not written:
+//!   the respawn timer is omitted so it cannot pulse SPAWN UNITS during
+//!   cleanup. `Default`: 4 flights, max 4,
+//!   mig15bis + la11 (skills 3/2), country 501, 180 s cooldown, 60 s delete,
 //!   1000–5500 m.
 //! * `fn configure_aircraft` — replace Group 1 on a linked-pack root.
 //! * `fn flight_sizes` — size per flight (`max - (i % max)`; 4/4 → 4,3,2,1).
@@ -52,6 +54,8 @@ pub struct FlightConfig {
     pub type_skills: Vec<i32>,
     pub country: i32,
     pub cooldown: f32,
+    /// Kept for saved settings. Not written: the reinforcement MCU is omitted.
+    #[allow(dead_code)]
     pub reinforcement: f32,
     pub delete_orders: f32,
     pub altitude_min: f32,
@@ -379,10 +383,6 @@ fn install_pack_logic(
         .find_by_name("Zone IN")
         .and_then(|e| e.index)
         .ok_or("missing Zone IN")?;
-    let spawn_units_id = group
-        .find_by_name("SPAWN UNITS")
-        .and_then(|e| e.index)
-        .ok_or("missing SPAWN UNITS")?;
 
     let entity_ids = unit_entity_ids(group);
     let flights = split_flights(&entity_ids, sizes)?;
@@ -413,7 +413,6 @@ fn install_pack_logic(
         }
     }
 
-    patch_plane_links(group, &flights, &spawners, &death_ids, old_spawn_id, old_death_id)?;
     install_plane_ends(
         group,
         &entity_ids,
@@ -427,6 +426,7 @@ fn install_pack_logic(
         cfg.delete_orders,
         &mut next_id,
     )?;
+    patch_plane_links(group, &flights, &spawners, old_spawn_id, old_death_id)?;
 
     let mut enable = clone_mcu(&proto_act, &mut next_id, "Enable Spawner");
     enable.set_targets(vec![zone_in_id]);
@@ -439,14 +439,10 @@ fn install_pack_logic(
     delete_orders.set_property("Random", "100");
     delete_orders.set_targets(vec![mission_end_id]);
 
-    let mut reenf = clone_mcu(&proto_timer, &mut next_id, "REENFORCEMENTS (33%)");
-    reenf.set_property("Time", format_time(cfg.reinforcement));
-    reenf.set_property("Random", "33");
-    reenf.set_targets(vec![spawn_units_id]);
-    let reenf_id = reenf.index.ok_or("reinforcement missing Index")?;
-
+    // Reinforcement timer is omitted. It pulsed SPAWN UNITS again on a 33%
+    // roll, which could start another flight while cleanup was running.
     if let Some(spawn_units) = group.find_by_name_mut("SPAWN UNITS") {
-        spawn_units.set_targets(vec![input_id, reenf_id]);
+        spawn_units.set_targets(vec![input_id]);
     }
     if let Some(cool) = group.find_by_name_mut("COOLDOWN") {
         cool.set_targets(vec![input_id]);
@@ -472,7 +468,6 @@ fn install_pack_logic(
         logic.children.push(enable);
         logic.children.push(disable);
         logic.children.push(delete_orders);
-        logic.children.push(reenf);
     }
 
     let mut randomizer = Il2Entity::new("Group");
@@ -530,9 +525,6 @@ fn layout_pack_mcus(group: &mut Il2Entity, plane_count: usize) {
     }
     if let Some(e) = group.find_by_name_mut("Disable Spawner") {
         set_xz(e, (origin.0 + MCU_GAP, origin.1 + MCU_GAP));
-    }
-    if let Some(e) = group.find_by_name_mut("REENFORCEMENTS (33%)") {
-        set_xz(e, left_xz(origin, 0, -2));
     }
     if let Some(e) = group.find_by_name_mut("Delete Orders") {
         set_xz(e, right_xz(origin, 0, -1));
@@ -751,25 +743,43 @@ fn patch_plane_links(
     group: &mut Il2Entity,
     flights: &[BuiltFlight],
     spawners: &[Il2Entity],
-    death_ids: &[i32],
     old_spawn_id: i32,
     old_death_id: i32,
 ) -> Result<(), String> {
-    let Some(units) = group.find_by_name_mut("Units") else {
-        return Ok(());
-    };
+    let group_name = group.name().unwrap_or("unnamed group").to_owned();
+    let mut seat = 0;
     for (f, flight) in flights.iter().enumerate() {
-        let death_id = *death_ids.get(f).ok_or("DeathCount missing Index")?;
-        let spawner_id = spawners[f].index.ok_or("Spawner missing Index")?;
-        for node in units.children.iter_mut() {
-            if node.block_type != "MCU_TR_Entity" {
-                continue;
-            }
-            let Some(id) = node.index else { continue };
-            if !flight.entity_ids.contains(&id) {
-                continue;
-            }
-            replace_nested_id(node, "OnEvent", "TarId", old_death_id, death_id);
+        let flight_number = f + 1;
+        let spawner_id = spawners[f].index
+            .ok_or_else(|| format!("{group_name} flight {flight_number}: Spawn {flight_number} missing Index"))?;
+        for &id in &flight.entity_ids {
+            seat += 1;
+            let context = format!("{group_name} flight {flight_number} plane {seat} entity {id}");
+            let delay_id = group.find_by_name(&format!("Delay Delete {seat}"))
+                .and_then(|timer| timer.index)
+                .ok_or_else(|| format!("{context}: Delay Delete {seat} missing timer or Index"))?;
+            let node = group.find_by_name_mut("Units")
+                .and_then(|units| units.children.iter_mut().find(|node| {
+                    node.block_type == "MCU_TR_Entity" && node.index == Some(id)
+                }))
+                .ok_or_else(|| format!("{context}: missing entity in Units"))?;
+            let death_event = node
+                .children
+                .iter_mut()
+                .filter(|wrapper| wrapper.block_type == "OnEvents")
+                .flat_map(|wrapper| &mut wrapper.children)
+                .find(|event| {
+                    crate::template::read_event(event)
+                        == Some((EntityEvent::OnKilled.type_id(), old_death_id))
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "{context}: missing OnKilled (13) targeting DeathCount {old_death_id}"
+                    )
+                })?;
+            // Decision 0016: a restarted cleanup timer fires once, so it is the
+            // aircraft's only feed to DeathCount, including after a kill.
+            death_event.set_property("TarId", delay_id.to_string());
             replace_nested_id(node, "OnReport", "CmdId", old_spawn_id, spawner_id);
         }
     }
@@ -1281,9 +1291,14 @@ mod tests {
         let root = configured(cfg);
         let g1 = root.find_by_name("Group 1").unwrap();
         assert_eq!(g1.find_by_name("COOLDOWN").unwrap().property("Time"), Some("90"));
+        assert!(g1.find_by_name("REENFORCEMENTS (33%)").is_none());
         assert_eq!(
-            g1.find_by_name("REENFORCEMENTS (33%)").unwrap().property("Time"),
-            Some("120")
+            g1.find_by_name("SPAWN UNITS").unwrap().targets,
+            vec![g1
+                .find_by_name("Randomizer:INPUT")
+                .unwrap()
+                .index
+                .unwrap()]
         );
         assert_eq!(g1.find_by_name("Delay Delete").unwrap().property("Time"), Some("45"));
         let y11: f64 = g1.find_by_name("Red 11").unwrap().property("YPos").unwrap().parse().unwrap();
@@ -1500,6 +1515,116 @@ mod tests {
                 !spawned.targets.is_empty(),
                 "OnSpawned {i} has no next order"
             );
+        }
+    }
+
+    #[test]
+    fn on_killed_counts_each_aircraft_once_through_its_cleanup_timer() {
+        let root = configured(FlightConfig {
+            flight_count: 3,
+            max_in_flight: 3,
+            type_ids: vec!["f51d".into()],
+            ..FlightConfig::default()
+        });
+        let pack = generate_pack(&root, 2).expect("fighter pack");
+        let mut death_ids = Vec::new();
+        pack.for_each(&mut |node| {
+            if node.name() == Some("DeathCount") {
+                death_ids.push(node.index.unwrap());
+            }
+        });
+        assert_eq!(death_ids.len(), 6);
+        for name in ["Group 1", "Group 2"] {
+            let group = pack.find_by_name(name).expect("missing fighter group");
+            let deaths: Vec<_> = group
+                .find_by_name("Logic")
+                .unwrap()
+                .children
+                .iter()
+                .filter(|node| node.name() == Some("DeathCount"))
+                .collect();
+            assert_eq!(deaths.len(), 3, "{name}: one DeathCount per flight");
+            assert_eq!(group.count_block_type("Plane"), 6);
+            let units = group.find_by_name("Units").unwrap();
+            let mut seat = 0;
+            for (flight, size) in [3, 2, 1].into_iter().enumerate() {
+                let death = deaths[flight];
+                assert_eq!(
+                    death.property("Counter").unwrap().parse::<usize>().unwrap(),
+                    size
+                );
+                let spawner = group.find_by_name(&format!("Spawn {}", flight + 1)).unwrap();
+                assert_eq!(spawner.objects.len(), size);
+                for entity_id in &spawner.objects {
+                    seat += 1;
+                    let context = format!("{name} flight {} plane {seat} entity {entity_id}", flight + 1);
+                    let entity = units
+                        .children
+                        .iter()
+                        .find(|node| node.index == Some(*entity_id))
+                        .unwrap_or_else(|| panic!("{context}: missing entity"));
+                    let delay = group.find_by_name(&format!("Delay Delete {seat}")).unwrap();
+                    let deact = group.find_by_name(&format!("Deactivate {seat}")).unwrap();
+                    let cleanup = group.find_by_name(&format!("CLEANUP {seat}")).unwrap();
+                    let complete = group.find_by_name(&format!("Mission Complete {seat}")).unwrap();
+                    let mut event_nodes = Vec::new();
+                    collect_blocks(entity, "OnEvent", &mut event_nodes);
+                    let events: Vec<_> = event_nodes
+                        .iter()
+                        .map(|event| crate::template::read_event(event).expect("valid OnEvent"))
+                        .collect();
+                    let killed: Vec<_> = events.iter().copied().filter(|(kind, _)| *kind == 13).collect();
+                    assert_eq!(killed, [(13, delay.index.unwrap())], "{context}: one death feed");
+                    assert!(events.iter().all(|(kind, _)| *kind != 4), "{context}: no legacy death event");
+                    assert_eq!(delay.block_type, "MCU_Timer");
+                    assert_eq!(delay.property("Time"), Some("60"));
+                    assert_eq!(
+                        delay.targets,
+                        [deact.index.unwrap(), death.index.unwrap()],
+                        "{context}: timer deactivates and counts only this aircraft"
+                    );
+                    assert_eq!(deact.objects, [*entity_id], "{context}: own Deactivate");
+                    assert!(cleanup.targets.contains(&delay.index.unwrap()));
+                    assert_eq!(complete.targets, [cleanup.index.unwrap()]);
+                    for event_type in [1, 3, 7, 8] {
+                        let hooks: Vec<_> = events.iter().copied()
+                            .filter(|(kind, _)| *kind == event_type).collect();
+                        assert_eq!(
+                            hooks, [(event_type, complete.index.unwrap())],
+                            "{context}: event {event_type} keeps its CLEANUP hook"
+                        );
+                    }
+                }
+            }
+            assert_eq!(seat, 6, "{name}: every aircraft checked");
+        }
+        pack.for_each(&mut |node| {
+            if let Some((kind, target)) = crate::template::read_event(node) {
+                assert!(
+                    !death_ids.contains(&target),
+                    "event {kind} must not target DeathCount {target} directly"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn trigger_delete_lists_spawned_entities_after_pack_reindexing() {
+        let root = configured(FlightConfig::default());
+        let pack = generate_pack(&root, 2).unwrap();
+        for name in ["Group 1", "Group 2"] {
+            let group = pack.find_by_name(name).expect("missing fighter group");
+            let mut entities = Vec::new();
+            group.for_each(&mut |node| {
+                if node.block_type == "MCU_TR_Entity" {
+                    entities.push(node.index.unwrap());
+                }
+            });
+            assert_eq!(entities.len(), 10);
+            let delete = group.find_by_name("Trigger Delete").expect("missing Trigger Delete");
+            assert_eq!(delete.objects, entities);
+            let delay = group.find_by_name("DELETE DELAY").expect("missing DELETE DELAY");
+            assert_eq!(delay.targets, [delete.index.unwrap()]);
         }
     }
 

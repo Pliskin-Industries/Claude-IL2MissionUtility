@@ -4,7 +4,8 @@
 //! `Logic` (Zone IN / Zone Out checkzones, `ENABLE / PULSE IN` pulse,
 //! Activate or Spawn bring-up with optional `DeathCount` → `COOLDOWN`
 //! repeat, and the `MISSION END` cleanup hub — `Force Complete - High`,
-//! optional `RTB DELAY` → `RTB East/West n`, then deactivate → delete),
+//! optional `RTB DELAY` → `RTB East/West n`, then deactivate, plus delete
+//! in Spawn mode),
 //! `Units` (cloned object + `MCU_TR_Entity` pairs, wingmen target-linked
 //! to their lead), `Orders` (command MCUs), and `Waypoints` (`WP n` path
 //! hops). Owns the seat model and its bookkeeping — catalog loading
@@ -25,8 +26,8 @@
 //! * Seats: `TemplateSeat`, `CatalogUnit`, `FlightRole`, `PlaneStart`,
 //!   `append_seat`, `replace_seat_unit`, `copy_seat_attributes`,
 //!   `move_seat`, `apply_formation_numbers`, `last_lead_index`,
-//!   `apply_auto_altitude` / `apply_auto_altitude_all` (50% ceiling;
-//!   wingmen match their lead) / `match_lead_altitude`,
+//!   `apply_plane_start` / `AIR_START_ALTITUDE_M` (airstart defaults to
+//!   1500 m for every aircraft),
 //!   `remap_seat_index` / `remap_index_vec` / `remap_event_then`.
 //! * Orders / events: `OrderSpec` (`for_kind` / `for_unit`), `OrderKind`,
 //!   `EntityEvent`, `EventHook` / `EventThen`, `normalize_order_chain`,
@@ -57,7 +58,7 @@
 //!   tree, zones, waypoints). Load group → `load_template`; Generate →
 //!   `serialize_group`.
 //! * bombers.rs (Exclusive mode) — `inspect_plan` / cleanup validation
-//!   reads the generated `MISSION END` / `Trigger Delete` graph.
+//!   reads the generated `MISSION END` cleanup graph.
 
 
 use std::collections::{HashMap, HashSet};
@@ -84,7 +85,7 @@ const MISSION_END_ORDERS_TIME: f64 = 0.05;
 const RTB_DELAY: f64 = 0.5;
 const DELAYED_END_TIME: f64 = 2.0;
 const RTB_DEACTIVATE_DELAY: f64 = 60.0;
-const DELETE_WAIT: f64 = 0.5;
+pub(crate) const DELETE_WAIT: f64 = 0.5;
 pub const DEFAULT_TIME_ON_TARGET_S: f32 = 180.0;
 /// Configurable pause (`MCU_Timer`) between sequential orders.
 pub const DEFAULT_TIMER_S: f32 = 5.0;
@@ -598,13 +599,10 @@ impl EntityEvent {
         }
     }
 
-    pub fn default_for(kind: UnitKind) -> Self {
-        match kind {
-            UnitKind::Plane => EntityEvent::OnPlaneDestroyed,
-            _ => EntityEvent::OnKilled,
-        }
-    }
 }
+
+/// Aircraft and ground units both report destruction through OnKilled.
+pub const DEFAULT_DEATH_EVENT: EntityEvent = EntityEvent::OnKilled;
 
 /// Bring units in by enabling parked entities, or by spawning them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -629,11 +627,22 @@ pub struct FormationPreset {
     pub density: i32,
 }
 
+/// Safe under decision 0019; a game-bug workaround under decision 0021.
+pub const SAFE_AIR_FORMATION_DENSITY: i32 = 1;
+/// Loose for Pairs unless flying Cover (0020/0022); a game-bug workaround (0021).
+pub const LOOSE_AIR_FORMATION_DENSITY: i32 = 2;
+/// Pairs' formation id in `TemplateExamples/FormationTypes.Group`.
+pub const PAIRS_AIR_FORMATION_TYPE: i32 = 19;
+
 const fn air_form(id: i32, label: &'static str) -> FormationPreset {
     FormationPreset {
         id,
         label,
-        density: 0,
+        density: if id == PAIRS_AIR_FORMATION_TYPE {
+            LOOSE_AIR_FORMATION_DENSITY
+        } else {
+            SAFE_AIR_FORMATION_DENSITY
+        },
     }
 }
 
@@ -647,7 +656,7 @@ const fn ground_form(id: i32, label: &'static str, density: i32) -> FormationPre
 
 /// Aircraft formations from `TemplateExamples/FormationTypes.Group`.
 pub const AIR_FORMATIONS: &[FormationPreset] = &[
-    air_form(19, "Pairs"),
+    air_form(PAIRS_AIR_FORMATION_TYPE, "Pairs"),
     air_form(20, "Wedge"),
     air_form(21, "Right"),
     air_form(22, "Left"),
@@ -686,7 +695,53 @@ pub fn formation_density(id: i32, kind: UnitKind) -> i32 {
         .iter()
         .find(|f| f.id == id)
         .map(|f| f.density)
-        .unwrap_or(0)
+        .unwrap_or(match kind {
+            UnitKind::Plane => SAFE_AIR_FORMATION_DENSITY,
+            _ => 0,
+        })
+}
+
+/// Set aircraft formation density on an output copy, identifying aircraft by entity links.
+/// Formation types alone do not identify the units commanded by a loaded group.
+pub fn set_air_formation_density(root: &mut Il2Entity) {
+    let mut plane_entities = HashSet::new();
+    let mut plane_links = HashMap::new();
+    let mut cover_objects = HashSet::new();
+    root.for_each(&mut |node| {
+        if node.block_type == "MCU_CMD_Cover" {
+            cover_objects.extend(node.objects.iter().copied());
+        }
+        if node.block_type != "Plane" {
+            return;
+        }
+        if let Some(entity) = node.property("LinkTrId").and_then(|id| id.parse::<i32>().ok()) {
+            plane_entities.insert(entity);
+            if let Some(index) = node.index {
+                plane_links.insert(index, entity);
+            }
+        }
+    });
+    // Loaded Cover orders may name the Plane instead of its linked entity.
+    let cover_entities: HashSet<_> = cover_objects.into_iter()
+        .map(|id| plane_links.get(&id).copied().unwrap_or(id)).collect();
+    root.for_each_mut(&mut |node| {
+        if node.block_type == "MCU_CMD_Formation"
+            && node.objects.iter().any(|id| plane_entities.contains(id))
+        {
+            // Decisions 0019, 0020 and 0022: Pairs fly Loose unless they fly a
+            // Cover order; all other aircraft formations fly Safe. Decision 0021
+            // treats this as a workaround for a game bug, to remove when the game is fixed.
+            let density = if node.objects.iter().any(|id| cover_entities.contains(id)) {
+                SAFE_AIR_FORMATION_DENSITY
+            } else {
+                node.property("FormationType")
+                    .and_then(|id| id.parse::<i32>().ok())
+                    .map(|id| formation_density(id, UnitKind::Plane))
+                    .unwrap_or(SAFE_AIR_FORMATION_DENSITY)
+            };
+            node.set_property("FormationDensity", density.to_string());
+        }
+    });
 }
 
 #[derive(Clone, Debug)]
@@ -1124,9 +1179,15 @@ pub struct EventHook {
 }
 
 impl EventHook {
-    pub fn default_for(kind: UnitKind) -> Self {
+    pub fn default_for(_kind: UnitKind) -> Self {
+        Self::default()
+    }
+}
+
+impl Default for EventHook {
+    fn default() -> Self {
         Self {
-            kind: EntityEvent::default_for(kind),
+            kind: DEFAULT_DEATH_EVENT,
             then: EventThen::ForceComplete,
         }
     }
@@ -1210,6 +1271,9 @@ impl PlaneStart {
         Self::stored_for_altitude(stored, altitude)
     }
 }
+
+/// Airstart height for every aircraft. Ground starts stay at 0 m.
+pub const AIR_START_ALTITUDE_M: f32 = 1500.0;
 
 #[derive(Clone, Debug)]
 pub struct TemplateSeat {
@@ -1413,73 +1477,27 @@ pub fn replace_seat_unit(seat: &mut TemplateSeat, unit: CatalogUnit) {
     }
 }
 
-/// Auto altitude for seat `index`. A wingman matches its flight lead
-/// (capped at its own ceiling; a lead on the ground keeps the wingman on
-/// the ground with the same engine state). Any other plane goes to half
-/// its service ceiling as an airstart, and a lead then brings its
-/// wingmen along. Ground units, trains, and ships are left alone.
-pub fn apply_auto_altitude(seats: &mut [TemplateSeat], index: usize) {
-    if !seats.get(index).is_some_and(|s| s.unit.is_air()) {
+/// Apply a start choice on one plane. Airstart from the ground uses
+/// [`AIR_START_ALTITUDE_M`], the same height for every aircraft, capped at
+/// that plane's ceiling. An airstart that already has a height keeps it.
+/// A ground start clears altitude. Ground units are left alone.
+pub fn apply_plane_start(seat: &mut TemplateSeat, start: PlaneStart) {
+    if !seat.unit.is_air() {
         return;
     }
-    if is_follower(seats, index) {
-        let lead = flight_lead_of(seats, index);
-        if seats[lead].unit.is_air() {
-            let (alt, start) = (seats[lead].altitude, seats[lead].start_type);
-            set_wingman_altitude(&mut seats[index], alt, start);
-            return;
+    match start {
+        PlaneStart::Air => {
+            if seat.altitude <= 0.0 {
+                let ceiling = crate::model_spec::ceiling_m(&seat.unit.script);
+                seat.altitude = AIR_START_ALTITUDE_M.min(ceiling).max(0.0);
+            }
+            seat.start_type = PlaneStart::Air.as_i32();
+        }
+        ground => {
+            seat.altitude = 0.0;
+            seat.start_type = ground.as_i32();
         }
     }
-    let seat = &mut seats[index];
-    seat.altitude = crate::model_spec::auto_altitude_m(&seat.unit.script);
-    seat.start_type = PlaneStart::stored_for_altitude(seat.start_type, seat.altitude);
-    match_lead_altitude(seats, index);
-}
-
-/// [`apply_auto_altitude`] on every seat: leads and independents first,
-/// then wingmen, so list order does not matter.
-pub fn apply_auto_altitude_all(seats: &mut [TemplateSeat]) {
-    for i in 0..seats.len() {
-        if !is_follower(seats, i) {
-            apply_auto_altitude(seats, i);
-        }
-    }
-    for i in 0..seats.len() {
-        if is_follower(seats, i) {
-            apply_auto_altitude(seats, i);
-        }
-    }
-}
-
-/// Copy the altitude of plane `lead` onto every plane that follows it.
-/// No-op when `lead` has no wingmen or is not a plane.
-pub fn match_lead_altitude(seats: &mut [TemplateSeat], lead: usize) {
-    let Some((alt, start)) = seats
-        .get(lead)
-        .filter(|s| s.unit.is_air())
-        .map(|s| (s.altitude, s.start_type))
-    else {
-        return;
-    };
-    for i in 0..seats.len() {
-        if i != lead
-            && seats[i].unit.is_air()
-            && is_follower(seats, i)
-            && flight_lead_of(seats, i) == lead
-        {
-            set_wingman_altitude(&mut seats[i], alt, start);
-        }
-    }
-}
-
-fn set_wingman_altitude(seat: &mut TemplateSeat, lead_alt: f32, lead_start: i32) {
-    let ceiling = crate::model_spec::ceiling_m(&seat.unit.script);
-    seat.altitude = lead_alt.min(ceiling).max(0.0);
-    seat.start_type = if seat.altitude > 0.0 {
-        PlaneStart::Air.as_i32()
-    } else {
-        PlaneStart::stored_for_altitude(lead_start, 0.0)
-    };
 }
 
 /// Path waypoint `Area` in metres: 300 for any aircraft, 100 for ground-only.
@@ -2577,7 +2595,6 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     };
 
     let entity_ids: Vec<i32> = placed.iter().map(|p| p.entity_id).collect();
-    let object_ids: Vec<i32> = placed.iter().map(|p| p.object_id).collect();
     let lead_indexes = order_seat_indexes(&opts.seats);
     let lead_entity_ids: Vec<i32> = lead_indexes.iter().map(|&i| placed[i].entity_id).collect();
 
@@ -2710,14 +2727,21 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     );
     deactivate_units.set_objects(entity_ids.clone());
 
-    let mut delete = mcu(
-        "MCU_Delete",
-        "Trigger Delete",
-        &mut next_id,
-        del_ox,
-        del_oz,
-    );
-    delete.set_objects(object_ids.clone());
+    // Decisions 0013/0014: delete spawned waves by entity; activated units
+    // must remain in the mission so the re-armed zone can activate them again.
+    let delete = if bring_up == BringUp::Spawn {
+        let mut delete = mcu(
+            "MCU_Delete",
+            "Trigger Delete",
+            &mut next_id,
+            del_ox,
+            del_oz,
+        );
+        delete.set_objects(entity_ids.clone());
+        Some(delete)
+    } else {
+        None
+    };
 
     let mut mission_end = timer("MISSION END", MISSION_END_TIME, &mut next_id, end_tx, end_tz);
     let (meo_tx, meo_tz) = right_timer(0, 1);
@@ -2736,7 +2760,11 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     let (del_tx, del_tz) = right_timer(0, 2);
     let mut delayed_end = timer("DELAYED END ORDERS", delayed_time, &mut next_id, del_tx, del_tz);
     let (dwait_tx, dwait_tz) = right_timer(0, 3);
-    let mut delete_wait = timer("DELETE DELAY", DELETE_WAIT, &mut next_id, dwait_tx, dwait_tz);
+    let delete_wait = delete.as_ref().map(|delete| {
+        let mut wait = timer("DELETE DELAY", DELETE_WAIT, &mut next_id, dwait_tx, dwait_tz);
+        wait.set_targets(vec![delete.index.expect("Trigger Delete missing Index")]);
+        wait
+    });
 
     let mut rtb_wait = None;
     let mut rtb_waypoints: Vec<Il2Entity> = Vec::new();
@@ -2989,12 +3017,10 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     let pulse_out_id = pulse_out.index.unwrap();
     let force_id = force.index.unwrap();
     let deactivate_id = deactivate_units.index.unwrap();
-    let delete_id = delete.index.unwrap();
     let mission_end_id = mission_end.index.unwrap();
     let mission_end_orders_id = mission_end_orders.index.unwrap();
     let delayed_end_id = delayed_end.index.unwrap();
     let rtb_wait_id = rtb_wait.as_ref().and_then(|t| t.index);
-    let delete_wait_id = delete_wait.index.unwrap();
     let bring_up_timer_id = bring_up_timer.index.unwrap();
     let after_bring_up_id = after_bring_up.index.unwrap();
     let deact_in_id = deact_in.index.unwrap();
@@ -3131,8 +3157,11 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     if let Some(wait) = rtb_wait.as_mut() {
         wait.set_targets(rtb_waypoints.iter().filter_map(|w| w.index).collect());
     }
-    delayed_end.set_targets(vec![deactivate_id, delete_wait_id]);
-    delete_wait.set_targets(vec![delete_id]);
+    let mut cleanup_targets = vec![deactivate_id];
+    if let Some(wait) = &delete_wait {
+        cleanup_targets.push(wait.index.expect("DELETE DELAY missing Index"));
+    }
+    delayed_end.set_targets(cleanup_targets);
 
     for (si, steps) in emitted.iter().enumerate() {
         if !receives_orders(&opts.seats, si) {
@@ -3184,9 +3213,8 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     }
 
     if let Some(id) = death_count_id {
-        for (i, unit) in placed.iter_mut().enumerate() {
-            let kind = opts.seats.get(i).map(|s| s.unit.kind).unwrap_or(UnitKind::Plane);
-            attach_event(&mut unit.entity, EntityEvent::default_for(kind).type_id(), id);
+        for unit in &mut placed {
+            attach_event(&mut unit.entity, DEFAULT_DEATH_EVENT.type_id(), id);
         }
     }
 
@@ -3203,14 +3231,15 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
         cooldown,
         force,
         deactivate_units,
-        delete,
+    ]);
+    logic.children.extend(delete);
+    logic.children.extend([
         mission_end,
         mission_end_orders,
         delayed_end,
-        delete_wait,
-        bring_up_timer,
-        after_bring_up,
     ]);
+    logic.children.extend(delete_wait);
+    logic.children.extend([bring_up_timer, after_bring_up]);
     if let Some(wait) = rtb_wait {
         logic.children.push(wait);
     }
@@ -3256,11 +3285,11 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
         root.children.push(orders_g);
     }
     root.children.push(wps_g);
+    set_air_formation_density(&mut root);
     Ok(root)
 }
 
 struct PlacedUnit {
-    object_id: i32,
     entity_id: i32,
     object: Il2Entity,
     entity: Il2Entity,
@@ -3571,7 +3600,6 @@ fn place_unit(
     entity.set_objects(Vec::new());
 
     Ok(PlacedUnit {
-        object_id,
         entity_id,
         object,
         entity,
@@ -3783,7 +3811,7 @@ fn build_order(
     cmd
 }
 
-fn checkzone(
+pub(crate) fn checkzone(
     name: &str,
     radius: f64,
     closer: bool,
@@ -3800,21 +3828,36 @@ fn checkzone(
     e
 }
 
-fn timer(name: &str, time: f64, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
+pub(crate) fn timer(name: &str, time: f64, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
     let mut e = mcu("MCU_Timer", name, next_id, x, z);
     e.set_property("Time", format_time(time));
     e.set_property("Random", "100");
     e
 }
 
-fn counter(name: &str, count: i32, drop: i32, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
+/// A timer with the given Random percentage.
+#[allow(dead_code)] // P14
+pub(crate) fn timer_random(
+    name: &str,
+    time: f64,
+    pct: u8,
+    next_id: &mut i32,
+    x: f64,
+    z: f64,
+) -> Il2Entity {
+    let mut e = timer(name, time, next_id, x, z);
+    e.set_property("Random", pct.to_string());
+    e
+}
+
+pub(crate) fn counter(name: &str, count: i32, drop: i32, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
     let mut e = mcu("MCU_Counter", name, next_id, x, z);
     e.set_property("Counter", count.to_string());
     e.set_property("Dropcount", drop.to_string());
     e
 }
 
-fn modifier_set_val(name: &str, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
+pub(crate) fn modifier_set_val(name: &str, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
     let mut e = mcu("MCU_ModifierSetVal", name, next_id, x, z);
     e.set_property("ParamIndex", "0");
     e.set_property("Data0", "0");
@@ -3832,7 +3875,7 @@ fn format_time(t: f64) -> String {
     }
 }
 
-fn mcu(block: &str, name: &str, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
+pub(crate) fn mcu(block: &str, name: &str, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
     let mut e = Il2Entity::new(block);
     let id = *next_id;
     *next_id += 1;
@@ -3862,7 +3905,7 @@ fn named_group(name: &str, next_id: &mut i32) -> Il2Entity {
     g
 }
 
-fn attach_event(entity: &mut Il2Entity, event_type: i32, tar_id: i32) {
+pub(crate) fn attach_event(entity: &mut Il2Entity, event_type: i32, tar_id: i32) {
     let mut ev = Il2Entity::new("OnEvent");
     ev.set_property("Type", event_type.to_string());
     ev.set_property("TarId", tar_id.to_string());
@@ -3875,6 +3918,17 @@ fn attach_event(entity: &mut Il2Entity, event_type: i32, tar_id: i32) {
     wrap.children.push(ev);
     entity.children.retain(|c| c.block_type != "OnEvents");
     entity.children.push(wrap);
+}
+
+/// Read an OnEvent's type and target, rejecting other blocks and malformed links.
+pub(crate) fn read_event(event: &Il2Entity) -> Option<(i32, i32)> {
+    if event.block_type != "OnEvent" {
+        return None;
+    }
+    Some((
+        event.property("Type")?.parse().ok()?,
+        event.property("TarId")?.parse().ok()?,
+    ))
 }
 
 fn attach_report(entity: &mut Il2Entity, report_type: i32, cmd_id: i32, tar_id: i32) {
@@ -3980,6 +4034,9 @@ pub struct TemplateLoad {
     pub warnings: Vec<String>,
 }
 
+const LEGACY_AIRCRAFT_DEATH_WARNING: &str = "On Plane Destroyed (4) death links will be regenerated as On Killed (13). The next wave will now arrive after the whole group has been destroyed.";
+const ACTIVATE_DELETE_NOTE: &str = "Generate will remove the old Delete chain from this Activate-mode template. The units will be switched off as before and can be activated again.";
+
 /// Template Builder files keep `ENABLE / PULSE IN`, `Zone IN`, `MISSION END`,
 /// and a `Units` subgroup. Other groups are rebuilt from units + orders.
 pub fn looks_like_generated_template(root: &Il2Entity) -> bool {
@@ -4038,6 +4095,16 @@ pub fn load_template(root: &Il2Entity, catalog: &[CatalogUnit]) -> Result<Templa
     opts.seats = seats;
 
     read_bring_up(root, &mut opts, &mut consumed, &mut warnings);
+    if opts.bring_up == BringUp::Activate
+        && root
+            .find_by_name("Trigger Delete")
+            .is_some_and(|node| node.block_type == "MCU_Delete")
+        && root
+            .find_by_name("DELETE DELAY")
+            .is_some_and(|node| node.block_type == "MCU_Timer")
+    {
+        warnings.push(ACTIVATE_DELETE_NOTE.into());
+    }
     read_zones(root, &mut opts, native_format, &mut consumed, &mut warnings);
 
     let mut timer_to_order: HashMap<i32, (usize, usize)> = HashMap::new();
@@ -4395,6 +4462,7 @@ fn read_zones(
         "MISSION END",
         "MISSION END ORDERS",
         "DELAYED END ORDERS",
+        // Spawn cleanup names are also consumed in legacy Activate files.
         "DELETE DELAY",
         "Trigger Delete",
         "Deactivate Units",
@@ -5005,6 +5073,7 @@ fn read_events(
         .values()
         .find(|e| e.name() == Some("Force Complete - High"))
         .and_then(|e| e.index);
+    let mut legacy_aircraft_death = false;
     for unit in loaded {
         let Some(&si) = unit.entity.index.and_then(|id| entity_to_seat.get(&id)) else {
             continue;
@@ -5015,12 +5084,15 @@ fn read_events(
                 continue;
             }
             for ev in &wrap.children {
-                if ev.block_type != "OnEvent" {
+                let Some((typ, tar)) = read_event(ev) else {
                     continue;
-                }
-                let typ = prop_i32(ev, "Type", -1);
-                let tar = prop_i32(ev, "TarId", -1);
+                };
                 if death_id == Some(tar) {
+                    if opts.seats[si].unit.kind == UnitKind::Plane
+                        && typ == EntityEvent::OnPlaneDestroyed.type_id()
+                    {
+                        legacy_aircraft_death = true;
+                    }
                     continue;
                 }
                 let Some(kind) = EntityEvent::from_type_id(typ) else {
@@ -5052,6 +5124,9 @@ fn read_events(
                 opts.seats[si].events.push(EventHook { kind, then });
             }
         }
+    }
+    if legacy_aircraft_death {
+        warnings.push(LEGACY_AIRCRAFT_DEATH_WARNING.into());
     }
 }
 
@@ -5297,6 +5372,50 @@ fn distinctive_drop(e: &Il2Entity) -> bool {
             | "2s"
             | "3s"
     )
+}
+
+#[cfg(test)]
+pub(crate) mod formation_test_support {
+    use super::*;
+    use crate::parser::{parse_group_file, parse_il2_document};
+
+    /// Loaded aircraft and vehicle templates with deliberately different densities.
+    pub fn mixed_template() -> Il2Entity {
+        let mut air = parse_group_file(include_str!("../TemplateExamples/ImprovedCooldownLogic.Group"))
+            .expect("ImprovedCooldownLogic.Group");
+        let mut ground = parse_il2_document(include_str!("../TemplateExamples/Simple Vehicle Formation 2 way column.Group"))
+            .expect("Simple Vehicle Formation 2 way column.Group");
+        for (root, name, density) in [(&mut air, "Air formation", "0"), (&mut ground, "Ground formation", "2")] {
+            root.for_each_mut(&mut |node| {
+                if node.block_type == "MCU_CMD_Formation" {
+                    node.set_name(name);
+                    node.set_property("FormationDensity", density);
+                    // Both use the same type so only Plane entity links can distinguish them.
+                    node.set_property("FormationType", "23");
+                }
+            });
+        }
+        let mut next_id = air.max_index() + 1;
+        air.children.push(duplicate_template(&ground, &mut next_id).0);
+        air
+    }
+
+    pub fn assert_safe_air_and_unchanged_ground(root: &Il2Entity) {
+        let mut counts = [0, 0];
+        root.for_each(&mut |node| {
+            if node.block_type != "MCU_CMD_Formation" {
+                return;
+            }
+            let (slot, expected) = match node.name() {
+                Some("Air formation") => (0, "1"),
+                Some("Ground formation") => (1, "2"),
+                name => panic!("mixed formation template: unexpected Formation {name:?}"),
+            };
+            counts[slot] += 1;
+            assert_eq!(node.property("FormationDensity"), Some(expected), "{:?} in {:?}", node.name(), root.name());
+        });
+        assert!(counts.iter().all(|count| *count > 0), "{:?}: missing air or ground Formation", root.name());
+    }
 }
 
 #[cfg(test)]
@@ -5750,7 +5869,7 @@ mod tests {
         assert!(!text.contains("NodeGates"));
         let formation = pack.find_by_name("Formation").unwrap();
         assert_eq!(formation.property("FormationType"), Some("23"));
-        assert_eq!(formation.property("FormationDensity"), Some("0"));
+        assert_eq!(formation.property("FormationDensity"), Some("1"));
         assert_eq!(formation.property("FlightSize"), Some("1"));
     }
 
@@ -5763,8 +5882,8 @@ mod tests {
     #[test]
     fn mission_end_is_cleanup_hub() {
         let pack = generate_template(&four_migs()).unwrap();
-        let delete = pack.find_by_name("Trigger Delete").unwrap();
-        assert_eq!(delete.objects.len(), 4);
+        let deactivate = pack.find_by_name("Deactivate Units").unwrap();
+        assert_eq!(deactivate.objects.len(), 4);
         let hub = pack.find_by_name("MISSION END").unwrap();
         let end_orders = pack.find_by_name("MISSION END ORDERS").unwrap();
         let delayed = pack.find_by_name("DELAYED END ORDERS").unwrap();
@@ -5776,15 +5895,59 @@ mod tests {
         assert!(pack.find_by_name("RTB").is_none());
         assert!(pack.find_by_name("RTB DELAY").is_none());
         assert!(!end_orders.targets.contains(&pack.find_by_name("Deactivate Units").unwrap().index.unwrap()));
-        assert!(delayed.targets.contains(&pack.find_by_name("DELETE DELAY").unwrap().index.unwrap()));
-        assert!(pack.find_by_name("Deactivate Units").is_some());
+        assert_eq!(delayed.targets, [deactivate.index.unwrap()]);
         let info = crate::bombers::inspect_plan(&pack).unwrap();
         assert_eq!(info.suggested_completion, hub.index);
         assert!(
             info.cleanup_warnings.get(&hub.index.unwrap()).is_none(),
-            "MISSION END should reach Delete covering every unit, got {:?}",
+            "MISSION END should reach Deactivate covering every unit, got {:?}",
             info.cleanup_warnings.get(&hub.index.unwrap())
         );
+    }
+
+    #[test]
+    fn spawn_cleanup_deletes_entities_in_one_shot_and_repeat_modes() {
+        for allow_multiple_spawns in [false, true] {
+            let mut opts = one_mig();
+            opts.seats.push(opts.seats[0].clone());
+            opts.bring_up = BringUp::Spawn;
+            opts.allow_multiple_spawns = allow_multiple_spawns;
+            let pack = generate_template(&opts).unwrap();
+            let mut entities = Vec::new();
+            collect_block(&pack, "MCU_TR_Entity", &mut entities);
+            let entity_ids: Vec<_> = entities.iter().map(|e| e.index.unwrap()).collect();
+            assert_eq!(entity_ids, [7, 9]);
+            let delete = pack.find_by_name("Trigger Delete").expect("missing Trigger Delete");
+            assert_eq!(delete.objects, entity_ids, "repeat = {allow_multiple_spawns}");
+            let wait = pack.find_by_name("DELETE DELAY").expect("missing DELETE DELAY");
+            assert_eq!(wait.property("Time"), Some("0.50"));
+            assert_eq!(wait.targets, [delete.index.unwrap()]);
+            let deactivate = pack.find_by_name("Deactivate Units").unwrap();
+            assert_eq!(deactivate.objects, entity_ids);
+            let delayed = pack.find_by_name("DELAYED END ORDERS").unwrap();
+            assert_eq!(delayed.targets, [deactivate.index.unwrap(), wait.index.unwrap()]);
+        }
+    }
+
+    #[test]
+    fn activate_cleanup_preserves_units_for_reactivation() {
+        for allow_multiple_spawns in [false, true] {
+            let mut opts = four_migs();
+            opts.bring_up = BringUp::Activate;
+            opts.allow_multiple_spawns = allow_multiple_spawns;
+            let pack = generate_template(&opts).unwrap();
+            assert!(pack.find_by_name("Trigger Delete").is_none());
+            assert!(pack.find_by_name("DELETE DELAY").is_none());
+            assert_eq!(pack.count_block_type("MCU_Delete"), 0);
+            let deactivate = pack.find_by_name("Deactivate Units").unwrap();
+            assert_eq!(deactivate.objects, [7, 9, 11, 13]);
+            let delayed = pack.find_by_name("DELAYED END ORDERS").unwrap();
+            assert_eq!(delayed.targets, [deactivate.index.unwrap()]);
+            let cooldown = pack.find_by_name("COOLDOWN").unwrap();
+            let rearm = pack.find_by_name("Zone In ReActivate").unwrap();
+            assert!(cooldown.targets.contains(&rearm.index.unwrap()));
+            assert_eq!(rearm.targets, [pack.find_by_name("Zone IN").unwrap().index.unwrap()]);
+        }
     }
 
     #[test]
@@ -5877,11 +6040,42 @@ mod tests {
         assert_repeat_spawn_graph(&root);
         let death = root.find_by_name("DeathCount").unwrap();
         let events = entity_events(&root);
+        // This shipped example keeps its historical event 4; decision 0012
+        // changes generated files, not the examples.
         let hits = events
             .iter()
             .filter(|(t, tar)| *t == 4 && *tar == death.index.unwrap())
             .count();
         assert_eq!(hits, 4);
+    }
+
+    #[test]
+    fn default_death_event_is_on_killed_for_every_unit_kind() {
+        assert_eq!(DEFAULT_DEATH_EVENT.type_id(), 13);
+        assert_eq!(EventHook::default().kind, EntityEvent::OnKilled);
+        assert_eq!(EventHook::default().then, EventThen::ForceComplete);
+        for kind in UnitKind::ALL {
+            assert!(
+                EntityEvent::available(kind).contains(&DEFAULT_DEATH_EVENT),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn read_event_requires_on_event_with_integer_type_and_target() {
+        let mut entity = Il2Entity::new("MCU_TR_Entity");
+        attach_event(&mut entity, 13, 42);
+        let event = &entity.children[0].children[0];
+        assert_eq!(read_event(event), Some((13, 42)));
+        assert_eq!(read_event(&entity), None);
+        for key in ["Type", "TarId"] {
+            let mut malformed = event.clone();
+            malformed.set_property(key, "invalid");
+            assert_eq!(read_event(&malformed), None);
+            malformed.properties.retain(|(name, _)| name != key);
+            assert_eq!(read_event(&malformed), None);
+        }
     }
 
     #[test]
@@ -5911,17 +6105,11 @@ mod tests {
         assert_eq!(death.property("Counter"), Some("1"));
         assert_repeat_spawn_graph(&pack);
         let delete = pack.find_by_name("Trigger Delete").unwrap();
-        let mut planes = Vec::new();
-        pack.for_each(&mut |e| {
-            if e.block_type == "Plane" {
-                planes.push(e.index.unwrap());
-            }
-        });
-        assert_eq!(delete.objects, planes);
+        assert_eq!(delete.objects, entities);
         let events = entity_events(&pack);
         assert!(
-            events.iter().any(|(t, tar)| *t == 4 && *tar == death.index.unwrap()),
-            "aircraft OnPlaneDestroyed should pulse DeathCount, got {events:?}"
+            events.iter().any(|(t, tar)| *t == 13 && *tar == death.index.unwrap()),
+            "aircraft OnKilled (13) should pulse DeathCount, got {events:?}"
         );
         let text = serialize_group(&pack);
         assert!(text.contains("MCU_ModifierSetVal"));
@@ -5951,13 +6139,25 @@ mod tests {
         assert_eq!(death.property("Counter"), Some("3"));
         let death_id = death.index.unwrap();
         let events = entity_events(&pack);
-        let hits = events.iter().filter(|(t, tar)| *t == 4 && *tar == death_id).count();
+        let hits = events.iter().filter(|(t, tar)| *t == 13 && *tar == death_id).count();
         assert_eq!(hits, 3);
         assert_repeat_spawn_graph(&pack);
         let zone_out = pack.find_by_name("Zone Out").unwrap();
         let mission_end = pack.find_by_name("MISSION END").unwrap();
         assert!(zone_out.targets.contains(&mission_end.index.unwrap()));
         assert!(!death.targets.contains(&mission_end.index.unwrap()));
+    }
+
+    #[test]
+    fn repeat_spawn_counts_aircraft_and_ground_on_killed() {
+        let mut opts = one_mig();
+        opts.bring_up = BringUp::Spawn;
+        opts.allow_multiple_spawns = true;
+        opts.seats.push(TemplateSeat::new(catalog_vehicle()));
+        let pack = generate_template(&opts).unwrap();
+        let death = pack.find_by_name("DeathCount").unwrap();
+        assert_eq!(death.property("Counter"), Some("2"));
+        assert_eq!(entity_events(&pack), vec![(13, death.index.unwrap()); 2]);
     }
 
     #[test]
@@ -5987,6 +6187,8 @@ mod tests {
         let pack = generate_template(&opts).unwrap();
         assert_eq!(pack.count_block_type("MCU_Spawner"), 0);
         assert!(pack.find_by_name("Activate Units").is_some());
+        assert!(pack.find_by_name("Trigger Delete").is_none());
+        assert!(pack.find_by_name("DELETE DELAY").is_none());
     }
 
     #[test]
@@ -6100,6 +6302,227 @@ mod tests {
         assert_eq!(AIR_FORMATIONS[0].label, "Pairs");
         assert_eq!(formation_label(23, UnitKind::Plane), "Heavy Wedge");
         assert_eq!(formation_label(4, UnitKind::Vehicle), "Road Column 1 way");
+    }
+
+    #[test]
+    fn air_formations_and_unknown_air_ids_use_loose_pairs_and_safe_other_types() {
+        const UNKNOWN_FORMATION: i32 = 999;
+        const AIR_DENSITIES: [(i32, i32); 8] = [
+            (19, 2), (20, 1), (21, 1), (22, 1), (23, 1), (24, 1), (26, 1), (27, 1),
+        ];
+        assert!(!AIR_FORMATIONS.iter().any(|formation| formation.id == UNKNOWN_FORMATION));
+        assert_eq!(SAFE_AIR_FORMATION_DENSITY, 1);
+        assert_eq!(LOOSE_AIR_FORMATION_DENSITY, 2);
+        assert_eq!(PAIRS_AIR_FORMATION_TYPE, 19);
+        assert_eq!(AIR_FORMATIONS.iter().map(|formation| (formation.id, formation.density)).collect::<Vec<_>>(),
+            AIR_DENSITIES);
+        for (id, density) in AIR_DENSITIES.into_iter().chain([(UNKNOWN_FORMATION, SAFE_AIR_FORMATION_DENSITY)]) {
+            assert_eq!(formation_density(id, UnitKind::Plane), density, "air formation {id}");
+            let mut opts = four_migs();
+            opts.seats[0].orders[0].formation_type = id;
+            let mut root = generate_template(&opts).unwrap();
+            let expected_density = density.to_string();
+            assert_eq!(root.find_by_name("Formation").unwrap().property("FormationDensity"), Some(expected_density.as_str()), "generated air formation {id}");
+            let expected = root.clone();
+            root.find_by_name_mut("Formation").unwrap().set_property("FormationDensity", "0");
+            set_air_formation_density(&mut root);
+            assert_eq!(root, expected, "loaded air formation {id}: only density changes");
+            set_air_formation_density(&mut root);
+            assert_eq!(root, expected, "air formation {id}: idempotent");
+        }
+        for (id, density) in [(4, 0), (18, 1), (10, 0), (11, 0), (UNKNOWN_FORMATION, 0)] {
+            assert_eq!(formation_density(id, UnitKind::Vehicle), density, "vehicle formation {id}");
+        }
+    }
+
+    #[test]
+    fn air_formation_density_changes_only_density_on_plane_entity_commands() {
+        use formation_test_support::mixed_template;
+        for density in ["0", "2"] {
+            let mut source = mixed_template();
+            source.find_by_name_mut("Air formation").unwrap().set_property("FormationDensity", density);
+            let mut unrelated = source.find_by_name("Air formation").unwrap().clone();
+            unrelated.index = Some(source.max_index() + 1);
+            unrelated.set_property("Index", unrelated.index.unwrap().to_string());
+            unrelated.set_name("Unlinked formation");
+            unrelated.set_objects(Vec::new());
+            source.children.push(unrelated);
+            let mut expected = source.clone();
+            expected.find_by_name_mut("Air formation").unwrap().set_property("FormationDensity", "1");
+            let mut copy = source.clone();
+            set_air_formation_density(&mut copy);
+            assert_eq!(copy, expected, "source density {density}: only aircraft FormationDensity may change");
+            set_air_formation_density(&mut copy);
+            assert_eq!(copy, expected, "source density {density}: idempotent");
+        }
+    }
+
+    #[test]
+    fn pairs_cover_exception_uses_command_objects_across_groups() {
+        let mut root = parse_group_file(r#"Group {
+            Group {
+                Plane { Index = 1; LinkTrId = 101; }
+                Plane { Index = 2; LinkTrId = 102; }
+                Plane { Index = 3; LinkTrId = 103; }
+                Vehicle { Index = 4; LinkTrId = 104; }
+                MCU_TR_Entity { Index = 101; MisObjID = 1; }
+                MCU_TR_Entity { Index = 102; MisObjID = 2; }
+                MCU_TR_Entity { Index = 103; MisObjID = 3; }
+                MCU_TR_Entity { Index = 104; MisObjID = 4; }
+            }
+            Group {
+                MCU_CMD_Formation { Name = "Covered target"; Objects = [101]; FormationType = 19; FormationDensity = 0; }
+                MCU_CMD_Formation { Name = "Covering pair"; Objects = [102]; FormationType = 19; FormationDensity = 2; }
+                MCU_CMD_Formation { Name = "Shared formation"; Objects = [103,102]; FormationType = 19; FormationDensity = 0; }
+                MCU_CMD_Formation { Name = "Vehicle formation"; Objects = [104]; FormationType = 19; FormationDensity = 0; }
+                MCU_CMD_Formation { Name = "Plane object instead of entity"; Objects = [1]; FormationType = 19; FormationDensity = 0; }
+            }
+            Group {
+                MCU_CMD_Cover { Objects = [102]; Targets = [101]; FormationDensity = 2; }
+            }
+        }"#).expect("nested aircraft, vehicle and Cover fixture");
+        let mut expected = root.clone();
+        for (name, density) in [("Covered target", "2"), ("Covering pair", "1"), ("Shared formation", "1")] {
+            expected.find_by_name_mut(name).unwrap().set_property("FormationDensity", density);
+        }
+        set_air_formation_density(&mut root);
+        assert_eq!(root, expected, "only aircraft FormationDensity changes, using every Objects entry");
+        assert_eq!(serialize_group(&root), serialize_group(&expected), "all other bytes preserved");
+        set_air_formation_density(&mut root);
+        assert_eq!(root, expected, "Pairs and Cover exception are idempotent");
+    }
+
+    #[test]
+    fn pairs_cover_exception_resolves_plane_objects_to_entities() {
+        let mut root = parse_group_file(r#"Group {
+            MCU_CMD_Cover { Objects = [2]; Targets = [1]; }
+            Group {
+                Plane { Index = 1; LinkTrId = 101; }
+                Plane { Index = 2; LinkTrId = 102; }
+                MCU_TR_Entity { Index = 101; MisObjID = 1; }
+                MCU_TR_Entity { Index = 102; MisObjID = 2; }
+                MCU_CMD_Formation { Name = "Covered target"; Objects = [101]; FormationType = 19; FormationDensity = 0; }
+                MCU_CMD_Formation { Name = "Covering pair"; Objects = [102]; FormationType = 19; FormationDensity = 2; }
+            }
+        }"#).expect("Cover naming Plane indexes before their entity links");
+        let mut expected = root.clone();
+        expected.find_by_name_mut("Covered target").expect("covered target Formation")
+            .set_property("FormationDensity", LOOSE_AIR_FORMATION_DENSITY.to_string());
+        expected.find_by_name_mut("Covering pair").expect("covering pair Formation")
+            .set_property("FormationDensity", SAFE_AIR_FORMATION_DENSITY.to_string());
+        set_air_formation_density(&mut root);
+        assert_eq!(root, expected, "Cover Objects resolve to entities; its Targets do not fly Cover");
+        assert_eq!(serialize_group(&root), serialize_group(&expected), "only FormationDensity bytes change");
+        set_air_formation_density(&mut root);
+        assert_eq!(root, expected, "Plane-index Cover exception is idempotent");
+    }
+
+    #[test]
+    fn template_shared_cover_keeps_both_commanded_leads_safe() {
+        let mut opts = four_migs();
+        for lead in [0, 2, 3] {
+            opts.seats[lead].role = FlightRole::Lead;
+            opts.seats[lead].orders = vec![OrderSpec {
+                kind: OrderKind::Formation, formation_type: PAIRS_AIR_FORMATION_TYPE,
+                ..OrderSpec::default()
+            }];
+        }
+        opts.seats[0].orders.push(OrderSpec {
+            kind: OrderKind::Cover, cover_lead: Some(3), shared_with: vec![2],
+            ..OrderSpec::default()
+        });
+        let root = generate_template(&opts).expect("template with a Cover shared through Also apply to");
+        assert_eq!(root.count_block_type("MCU_CMD_Cover"), 1, "shared Cover command count");
+        let cover = root.find_by_name("Cover").expect("shared Cover command");
+        assert_eq!(cover.objects.len(), 2, "both leads receive the same Cover");
+        assert_eq!(cover.targets.len(), 1, "one covered lead");
+        assert!(cover.objects.iter().all(|id| !cover.targets.contains(id)), "covered lead flies no Cover");
+        assert_eq!(root.count_block_type("MCU_CMD_Formation"), 3, "one Formation per lead");
+        let mut safe_leads = Vec::new();
+        let mut loose_leads = Vec::new();
+        root.for_each(&mut |node| {
+            if node.block_type == "MCU_CMD_Formation" {
+                assert_eq!(node.objects.len(), 1, "one lead per Formation");
+                assert_eq!(node.property("FormationType"), Some(PAIRS_AIR_FORMATION_TYPE.to_string().as_str()));
+                let density = if cover.objects.contains(&node.objects[0]) {
+                    safe_leads.push(node.objects[0]);
+                    SAFE_AIR_FORMATION_DENSITY
+                } else {
+                    loose_leads.push(node.objects[0]);
+                    LOOSE_AIR_FORMATION_DENSITY
+                };
+                assert_eq!(node.property("FormationDensity"), Some(density.to_string().as_str()), "Formation {:?}", node.index);
+            }
+        });
+        assert_eq!(safe_leads, cover.objects, "both covering leads fly Safe");
+        assert_eq!(loose_leads, cover.targets, "the covered lead flies Loose");
+    }
+
+    #[test]
+    fn template_shared_pairs_formation_is_safe_if_any_lead_covers() {
+        for (owner, other_lead) in [(0, 2), (2, 0)] {
+            let mut opts = four_migs();
+            opts.seats[2].role = FlightRole::Lead;
+            opts.seats[3].role = FlightRole::Follows(2);
+            opts.seats[0].orders.clear();
+            opts.seats[2].orders.clear();
+            opts.seats[owner].orders.push(OrderSpec {
+                kind: OrderKind::Formation, formation_type: PAIRS_AIR_FORMATION_TYPE,
+                shared_with: vec![other_lead], ..OrderSpec::default()
+            });
+            opts.seats[2].orders.push(OrderSpec {
+                kind: OrderKind::Cover, cover_lead: Some(0), ..OrderSpec::default()
+            });
+            let root = generate_template(&opts).expect("Formation shared by a covering and a covered lead");
+            assert_eq!(root.count_block_type("MCU_CMD_Formation"), 1, "shared Formation command count");
+            assert_eq!(root.count_block_type("MCU_CMD_Cover"), 1, "Cover command count");
+            let formation = root.find_by_name("Formation").expect("shared Formation command");
+            let cover = root.find_by_name("Cover").expect("covering lead's command");
+            assert_eq!(cover.objects.len(), 1, "only one lead flies Cover");
+            assert_eq!(cover.targets.len(), 1, "one covered lead");
+            assert_ne!(cover.objects, cover.targets);
+            let expected_objects: Vec<_> = if owner == 0 {
+                cover.targets.iter().chain(&cover.objects).copied().collect()
+            } else {
+                cover.objects.iter().chain(&cover.targets).copied().collect()
+            };
+            assert_eq!(formation.objects, expected_objects, "both leads share Formation in owner order");
+            assert_eq!(formation.property("FormationType"), Some(PAIRS_AIR_FORMATION_TYPE.to_string().as_str()));
+            assert_eq!(formation.property("FormationDensity"), Some(SAFE_AIR_FORMATION_DENSITY.to_string().as_str()),
+                "any covering entity in Formation Objects requires Safe");
+        }
+    }
+
+    #[test]
+    fn template_pairs_covering_lead_stays_safe_and_covered_lead_flies_loose() {
+        let mut opts = four_migs();
+        opts.seats[0].orders[0].formation_type = 19;
+        opts.seats[2].role = FlightRole::Lead;
+        opts.seats[3].role = FlightRole::Follows(2);
+        opts.seats[2].orders = vec![
+            OrderSpec { kind: OrderKind::Formation, formation_type: 19, ..OrderSpec::default() },
+            OrderSpec { kind: OrderKind::Cover, cover_lead: Some(0), ..OrderSpec::default() },
+        ];
+        let root = generate_template(&opts).unwrap();
+        let cover = root.find_by_name("Cover").expect("covering lead's order");
+        assert_eq!(cover.objects.len(), 1);
+        assert_eq!(cover.targets.len(), 1);
+        assert_ne!(cover.objects, cover.targets);
+        let mut formations = 0;
+        root.for_each(&mut |node| {
+            if node.block_type == "MCU_CMD_Formation" {
+                assert_eq!(node.property("FormationType"), Some("19"));
+                let density = if node.objects == cover.objects {
+                    "1"
+                } else {
+                    assert_eq!(node.objects, cover.targets, "the other pair is the covered lead");
+                    "2"
+                };
+                assert_eq!(node.property("FormationDensity"), Some(density));
+                formations += 1;
+            }
+        });
+        assert_eq!(formations, 2);
     }
 
     #[test]
@@ -6395,134 +6818,44 @@ mod tests {
             .expect("unit in bundled catalog")
     }
 
-    fn wingman_of(unit: CatalogUnit, lead: usize) -> TemplateSeat {
-        let mut seat = TemplateSeat::new(unit);
-        seat.role = FlightRole::Follows(lead);
-        seat
-    }
-
-    fn lead_seat(unit: CatalogUnit) -> TemplateSeat {
-        let mut seat = TemplateSeat::new(unit);
-        seat.role = FlightRole::Lead;
-        seat
-    }
-
     #[test]
-    fn auto_altitude_puts_plane_at_half_ceiling_airstart() {
-        let mut seats = vec![TemplateSeat::new(catalog_plane("mig15bis"))];
-        seats[0].altitude = 1234.0;
-        apply_auto_altitude(&mut seats, 0);
-        assert_eq!(seats[0].altitude, 7500.0);
-        assert_eq!(seats[0].start_type, PlaneStart::Air.as_i32());
-    }
-
-    #[test]
-    fn auto_altitude_lifts_ground_start_plane() {
-        let mut seats = vec![TemplateSeat::new(catalog_plane("f86a5"))];
-        seats[0].altitude = 0.0;
-        seats[0].start_type = PlaneStart::Running.as_i32();
-        apply_auto_altitude(&mut seats, 0);
-        assert_eq!(seats[0].altitude, 7620.0);
-        assert_eq!(seats[0].start_type, PlaneStart::Air.as_i32());
-    }
-
-    #[test]
-    fn auto_altitude_leaves_ground_units_alone() {
-        let mut seats = vec![TemplateSeat::new(catalog_vehicle())];
-        let start = seats[0].start_type;
-        apply_auto_altitude(&mut seats, 0);
-        assert_eq!(seats[0].altitude, 0.0);
-        assert_eq!(seats[0].start_type, start);
-        apply_auto_altitude(&mut seats, 5); // out of range is a no-op
-    }
-
-    #[test]
-    fn auto_altitude_all_uses_each_models_ceiling() {
-        let mut seats = vec![
-            TemplateSeat::new(catalog_plane("mig15bis")),
-            TemplateSeat::new(catalog_vehicle()),
-            TemplateSeat::new(catalog_plane("f86a5")),
-        ];
-        apply_auto_altitude_all(&mut seats);
-        assert_eq!(seats[0].altitude, 7500.0);
-        assert_eq!(seats[1].altitude, 0.0);
-        assert_eq!(seats[2].altitude, 7620.0);
-        assert_eq!(seats[0].start_type, PlaneStart::Air.as_i32());
-        assert_eq!(seats[2].start_type, PlaneStart::Air.as_i32());
-    }
-
-    #[test]
-    fn auto_altitude_wingman_matches_lead_not_own_ceiling() {
-        let mut seats = vec![
-            lead_seat(catalog_plane("mig15bis")),
-            wingman_of(catalog_plane("la11"), 0),
-        ];
-        apply_auto_altitude(&mut seats, 1);
-        assert_eq!(seats[1].altitude, seats[0].altitude);
-        apply_auto_altitude(&mut seats, 0);
-        // Lead goes to 7500 m and brings its La-11 wingman (own 50% would be 5075 m).
-        assert_eq!(seats[0].altitude, 7500.0);
-        assert_eq!(seats[1].altitude, 7500.0);
-        assert_eq!(seats[1].start_type, PlaneStart::Air.as_i32());
-    }
-
-    #[test]
-    fn auto_altitude_wingman_capped_at_own_ceiling() {
-        let mut seats = vec![
-            lead_seat(catalog_plane("mig15bis")),
-            wingman_of(catalog_script("il10"), 0),
-        ];
-        apply_auto_altitude_all(&mut seats);
-        assert_eq!(seats[0].altitude, 7500.0);
-        assert_eq!(seats[1].altitude, 6950.0);
-    }
-
-    #[test]
-    fn auto_altitude_all_is_order_independent_for_wingmen() {
-        // Wingman listed before its lead still ends at the lead's new height.
-        let mut seats = vec![
-            wingman_of(catalog_plane("la11"), 1),
-            lead_seat(catalog_plane("f86a5")),
-        ];
-        seats[0].altitude = 100.0;
-        apply_auto_altitude_all(&mut seats);
-        assert_eq!(seats[1].altitude, 7620.0);
-        assert_eq!(seats[0].altitude, 7620.0);
-    }
-
-    #[test]
-    fn wingman_of_ground_start_lead_stays_on_ground() {
-        let mut seats = vec![
-            lead_seat(catalog_plane("mig15bis")),
-            wingman_of(catalog_plane("mig15bis"), 0),
-        ];
-        seats[0].altitude = 0.0;
-        seats[0].start_type = PlaneStart::Cold.as_i32();
-        seats[1].altitude = 3000.0;
-        apply_auto_altitude(&mut seats, 1);
-        assert_eq!(seats[1].altitude, 0.0);
-        assert_eq!(seats[1].start_type, PlaneStart::Cold.as_i32());
-    }
-
-    #[test]
-    fn match_lead_altitude_moves_only_that_leads_wingmen() {
-        let mut seats = vec![
-            lead_seat(catalog_plane("mig15bis")),
-            wingman_of(catalog_plane("mig15bis"), 0),
-            lead_seat(catalog_plane("f86a5")),
-            wingman_of(catalog_plane("f86a5"), 2),
-            TemplateSeat::new(catalog_plane("la11")),
-        ];
-        for s in &mut seats {
-            s.altitude = 1000.0;
+    fn airstart_defaults_to_1500_for_every_aircraft() {
+        for script in ["mig15bis", "f86a5", "f51d", "b29", "il10"] {
+            let mut seat = TemplateSeat::new(catalog_script(script));
+            seat.altitude = 0.0;
+            seat.start_type = PlaneStart::Running.as_i32();
+            apply_plane_start(&mut seat, PlaneStart::Air);
+            assert_eq!(seat.altitude, AIR_START_ALTITUDE_M, "{script}");
+            assert_eq!(seat.start_type, PlaneStart::Air.as_i32(), "{script}");
         }
-        seats[0].altitude = 4200.0;
-        match_lead_altitude(&mut seats, 0);
-        assert_eq!(seats[1].altitude, 4200.0);
-        assert_eq!(seats[3].altitude, 1000.0);
-        assert_eq!(seats[4].altitude, 1000.0);
-        match_lead_altitude(&mut seats, 4); // no wingmen: no-op
-        assert_eq!(seats[4].altitude, 1000.0);
+    }
+
+    #[test]
+    fn airstart_keeps_an_existing_height() {
+        let mut seat = TemplateSeat::new(catalog_plane("mig15bis"));
+        seat.altitude = 2200.0;
+        seat.start_type = PlaneStart::Air.as_i32();
+        apply_plane_start(&mut seat, PlaneStart::Air);
+        assert_eq!(seat.altitude, 2200.0);
+        assert_eq!(seat.start_type, PlaneStart::Air.as_i32());
+    }
+
+    #[test]
+    fn ground_start_clears_altitude() {
+        let mut seat = TemplateSeat::new(catalog_plane("f86a5"));
+        seat.altitude = AIR_START_ALTITUDE_M;
+        apply_plane_start(&mut seat, PlaneStart::Cold);
+        assert_eq!(seat.altitude, 0.0);
+        assert_eq!(seat.start_type, PlaneStart::Cold.as_i32());
+    }
+
+    #[test]
+    fn plane_start_leaves_ground_units_alone() {
+        let mut seat = TemplateSeat::new(catalog_vehicle());
+        let start = seat.start_type;
+        apply_plane_start(&mut seat, PlaneStart::Air);
+        assert_eq!(seat.altitude, 0.0);
+        assert_eq!(seat.start_type, start);
     }
 
     #[test]
@@ -6700,25 +7033,9 @@ mod tests {
         ];
         seats[0].altitude = 12_000.0;
         copy_seat_attributes(&mut seats, 0);
-        assert_eq!(seats[1].altitude, 6950.0, "IL-10 capped at its ceiling");
+        assert_eq!(seats[1].altitude, 7250.0, "IL-10 capped at its ceiling");
         assert_eq!(seats[2].altitude, 12_000.0, "MiG ceiling is above 12000 m");
         assert_eq!(seats[1].start_type, PlaneStart::Air.as_i32());
-    }
-
-    #[test]
-    fn match_lead_altitude_copies_ground_engine_state() {
-        let mut seats = vec![
-            lead_seat(catalog_plane("mig15bis")),
-            wingman_of(catalog_plane("mig15bis"), 0),
-        ];
-        for s in &mut seats {
-            s.altitude = 0.0;
-            s.start_type = PlaneStart::Running.as_i32();
-        }
-        seats[0].start_type = PlaneStart::Warm.as_i32();
-        match_lead_altitude(&mut seats, 0);
-        assert_eq!(seats[1].altitude, 0.0);
-        assert_eq!(seats[1].start_type, PlaneStart::Warm.as_i32());
     }
 
     #[test]
@@ -6853,8 +7170,11 @@ mod tests {
         let rtb_wait = pack.find_by_name("RTB DELAY").unwrap();
         assert!(end_orders.targets.contains(&rtb_wait.index.unwrap()));
         assert!(!end_orders.targets.contains(&pack.find_by_name("RTB East 1").unwrap().index.unwrap()));
-        let delete = pack.find_by_name("Trigger Delete").unwrap();
-        assert_eq!(delete.objects.len(), 2);
+        let deactivate = pack.find_by_name("Deactivate Units").unwrap();
+        assert_eq!(deactivate.objects.len(), 2);
+        assert_eq!(delayed.targets, [deactivate.index.unwrap()]);
+        assert!(pack.find_by_name("Trigger Delete").is_none());
+        assert!(pack.find_by_name("DELETE DELAY").is_none());
     }
 
     #[test]
@@ -6893,7 +7213,12 @@ mod tests {
         assert!((activate.1 - (ORIGIN_Z - 300.0)).abs() < 0.1);
         let force = pack.find_by_name("Force Complete - High").unwrap().pos_xz().unwrap();
         assert!((force.1 - (ORIGIN_Z + 300.0)).abs() < 0.1);
-        let delete = pack.find_by_name("Trigger Delete").unwrap().pos_xz().unwrap();
+        let deactivate = pack.find_by_name("Deactivate Units").unwrap().pos_xz().unwrap();
+        assert!((deactivate.1 - (ORIGIN_Z + 300.0)).abs() < 0.1);
+        let mut spawn_opts = one_mig();
+        spawn_opts.bring_up = BringUp::Spawn;
+        let spawned = generate_template(&spawn_opts).unwrap();
+        let delete = spawned.find_by_name("Trigger Delete").unwrap().pos_xz().unwrap();
         assert!((delete.1 - (ORIGIN_Z + 300.0)).abs() < 0.1);
         let form = pack.find_by_name("Formation").unwrap().pos_xz().unwrap();
         let form_tm = pack.find_by_name("Formation 1").unwrap().pos_xz().unwrap();
@@ -7079,16 +7404,16 @@ mod tests {
         let takeoff = pack.find_by_name("Take Off").unwrap();
         let took_tm = pack.find_by_name("OnTookOff 1").unwrap();
         let reports = entity_reports(&pack);
-        assert!(
-            reports.iter().any(|(t, c, tar)| {
-                *t == 3 && *c == takeoff.index.unwrap() && *tar == took_tm.index.unwrap()
-            })
-        );
+        assert!(reports.iter().any(|(t, c, tar)| {
+            *t == 3 && *c == takeoff.index.unwrap() && *tar == took_tm.index.unwrap()
+        }));
         let force = pack.find_by_name("Force Complete - High").unwrap();
         let form_tm = pack.find_by_name("Formation 1").unwrap();
         let events = entity_events(&pack);
-        assert!(events.contains(&(4, force.index.unwrap())));
-        assert!(events.contains(&(0, form_tm.index.unwrap())));
+        assert_eq!(
+            events,
+            [(4, force.index.unwrap()), (0, form_tm.index.unwrap())]
+        );
     }
 
     #[test]
@@ -8011,6 +8336,112 @@ mod tests {
         assert_eq!(seats[0].events[0].then, EventThen::Order(0));
     }
 
+    fn activate_cleanup_templates() -> [Il2Entity; 2] {
+        let legacy = parse_group_file(include_str!(
+            "../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group"
+        )).unwrap();
+        let catalog = builtin_plane_catalog();
+        let opts = load_template(&legacy, &catalog).unwrap().options;
+        let current = generate_template(&opts).unwrap();
+        [legacy, current]
+    }
+
+    fn link_activate_exclusive(pack: &Il2Entity) -> Il2Entity {
+        let info = crate::bombers::inspect_plan(pack).unwrap();
+        let input = crate::bombers::BomberInput {
+            label: info.name,
+            source_key: "cleanup compatibility".into(),
+            root: pack.clone(),
+            trigger_zone_ids: info.suggested_triggers,
+            completion_timer_id: pack.find_by_name("MISSION END").unwrap().index.unwrap(),
+        };
+        crate::bombers::link_bomber_plans(&[input.clone(), input]).unwrap()
+    }
+
+    fn link_activate_recon(pack: &Il2Entity) -> Il2Entity {
+        let info = crate::recon::inspect_unit(pack).unwrap();
+        crate::recon::generate_recon_ex(
+            &[crate::recon::ReconInput {
+                label: info.name,
+                root: pack.clone(),
+                trigger_zone_ids: info.suggested_triggers,
+                copies: 2,
+            }],
+            crate::recon::ReconBuild::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn activate_templates_with_or_without_delete_load() {
+        let catalog = builtin_plane_catalog();
+        let expected_warnings = [
+            vec![
+                "Generate will remove the old Delete chain from this Activate-mode template. The units will be switched off as before and can be activated again.",
+            ],
+            vec![],
+        ];
+        for (pack, warnings) in activate_cleanup_templates()
+            .into_iter()
+            .zip(expected_warnings)
+        {
+            let loaded = load_template(&pack, &catalog).unwrap();
+            assert!(loaded.native_format);
+            assert_eq!(loaded.options.bring_up, BringUp::Activate);
+            assert_eq!(loaded.warnings, warnings);
+            let regenerated = generate_template(&loaded.options).unwrap();
+            assert_eq!(regenerated.count_block_type("MCU_Delete"), 0);
+            assert!(regenerated.find_by_name("DELETE DELAY").is_none());
+        }
+    }
+
+    #[test]
+    fn activate_templates_with_or_without_delete_link_exclusive() {
+        for (pack, expected_deletes) in activate_cleanup_templates().into_iter().zip([2, 0]) {
+            let info = crate::bombers::inspect_plan(&pack).unwrap();
+            let end = pack.find_by_name("MISSION END").unwrap().index.unwrap();
+            assert_eq!(info.suggested_completion, Some(end));
+            assert_eq!(
+                info.cleanup_warnings.get(&end).map(String::as_str),
+                if expected_deletes == 2 {
+                    Some(
+                        "Delete \"Trigger Delete\" lists unit block indexes and will not remove those units. In the mission editor, change its Objects links to the units' entity indexes.",
+                    )
+                } else {
+                    None
+                }
+            );
+            assert_eq!(
+                link_activate_exclusive(&pack).count_block_type("MCU_Delete"),
+                expected_deletes
+            );
+        }
+    }
+
+    #[test]
+    fn activate_templates_with_or_without_delete_link_recon() {
+        for (pack, expected_deletes) in activate_cleanup_templates().into_iter().zip([4, 2]) {
+            let recon = link_activate_recon(&pack);
+            assert_eq!(recon.count_block_type("MCU_Delete"), expected_deletes);
+            assert!(recon.find_by_name("Dump unused 1").is_some());
+            assert!(recon.find_by_name("Dump unused 2").is_some());
+        }
+    }
+
+    #[test]
+    fn activate_templates_with_or_without_delete_keep_links_resolved() {
+        for pack in activate_cleanup_templates() {
+            for linked in [link_activate_exclusive(&pack), link_activate_recon(&pack)] {
+                let indexed = collect_by_index(&linked);
+                linked.for_each(&mut |node| {
+                    for target in node.targets.iter().chain(&node.objects) {
+                        assert!(indexed.contains_key(target), "missing link target {target}");
+                    }
+                });
+            }
+        }
+    }
+
     #[test]
     fn load_round_trips_generated_four_migs() {
         let src = four_migs();
@@ -8095,6 +8526,50 @@ mod tests {
         assert!(got.seats[0].events.iter().any(|e| {
             e.kind == EntityEvent::OnPlaneDestroyed && e.then == EventThen::ForceComplete
         }));
+    }
+
+    #[test]
+    fn load_legacy_aircraft_death_event_regenerates_on_killed() {
+        let mut opts = one_mig();
+        opts.seats = vec![opts.seats[0].clone(); 4];
+        opts.bring_up = BringUp::Spawn;
+        opts.allow_multiple_spawns = true;
+        let mut pack = generate_template(&opts).unwrap();
+        let death_id = pack
+            .find_by_name("DeathCount")
+            .unwrap()
+            .index
+            .unwrap()
+            .to_string();
+        let mut changed = 0;
+        pack.for_each_mut(&mut |node| {
+            if node.block_type == "OnEvent" && node.property("TarId") == Some(death_id.as_str()) {
+                node.set_property("Type", "4");
+                changed += 1;
+            }
+        });
+        assert_eq!(changed, 4);
+        let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
+        assert!(loaded.options.allow_multiple_spawns);
+        assert!(
+            loaded
+                .options
+                .seats
+                .iter()
+                .all(|seat| seat.events.is_empty())
+        );
+        assert_eq!(
+            loaded.warnings,
+            [
+                "On Plane Destroyed (4) death links will be regenerated as On Killed (13). The next wave will now arrive after the whole group has been destroyed."
+            ]
+        );
+        let rebuilt = generate_template(&loaded.options).unwrap();
+        let death = rebuilt.find_by_name("DeathCount").unwrap();
+        assert_eq!(entity_events(&rebuilt), vec![(13, death.index.unwrap()); 4]);
+        let reloaded = load_template(&rebuilt, &builtin_plane_catalog()).unwrap();
+        assert!(reloaded.warnings.is_empty(), "{:?}", reloaded.warnings);
+        assert!(reloaded.options.seats[0].events.is_empty());
     }
 
     #[test]

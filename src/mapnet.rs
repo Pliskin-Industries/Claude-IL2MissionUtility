@@ -325,7 +325,7 @@ fn heading_diff(a: f64, b: f64) -> f64 {
     if d > 180.0 { 360.0 - d } else { d }
 }
 
-fn is_rtb_waypoint(entity: &Il2Entity) -> bool {
+pub(crate) fn is_rtb_waypoint(entity: &Il2Entity) -> bool {
     entity.name().is_some_and(|n| n.starts_with("RTB"))
 }
 

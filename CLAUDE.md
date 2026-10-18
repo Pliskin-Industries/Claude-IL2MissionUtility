@@ -1,6 +1,20 @@
-# UI redesign (egui)
+# IL-2 Mission Utility
 
-Start every session with `HANDOFF.md`; coding rules are in `.cursorrules`.
+Start every session with `STATE.md`; coding rules are in `.cursorrules`.
+
+## Keeping the record
+
+The repo must be enough for someone with no access to the chats. Before a session stops or parks:
+
+1. **Overwrite `STATE.md`.** Keep it to one page: where the work is, what is in progress, what waits on the user, the next steps. Do not append history to it.
+2. **Write a decision record** in `docs/decisions/` for each decision made in the session, and for each open question the user must decide (status `Proposed`). Include the rejected options. Never edit a decided record; supersede it.
+3. **Write a session note** in `handoff/sessions/YYYY-MM-DD-topic.md` only for detail that is still in flight. One file per session, so two people never edit the same file.
+4. **Add game facts** learned the hard way to `docs/il2-loader-and-log-facts.md`.
+5. Anything saved to Claude's local memory that another person would need goes in the repo too. Local memory stays on one machine.
+
+Do not add to `HANDOFF.md`; it is a pointer. Where an older document says to add a row to the `HANDOFF.md` session log, update `STATE.md` instead; test and warning counts go on its "Last recorded test run" line.
+
+## UI redesign (egui)
 
 The spec for the current UI work is `docs/ui-redesign/README.md`. Read it before touching `src/ui.rs`.
 

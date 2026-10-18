@@ -280,10 +280,58 @@ pub fn snap_ground_attack_areas(entity: &mut Il2Entity, x: f64, z: f64) {
     });
 }
 
+/// Move air AttackArea MCUs onto `xz`, preserving their altitude and settings.
+#[allow(dead_code)] // P14
+pub fn snap_air_attack_areas(entity: &mut Il2Entity, x: f64, z: f64) {
+    entity.for_each_mut(&mut |e| {
+        if e.block_type == "MCU_CMD_AttackArea"
+            && e.property("AttackAir").is_some_and(|v| v.trim_matches('"') == "1")
+        {
+            e.set_property("XPos", format!("{x:.3}"));
+            e.set_property("ZPos", format!("{z:.3}"));
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::Il2Entity;
+
+    #[test]
+    fn snap_air_attack_areas_moves_only_air() {
+        let mut root = crate::parser::parse_group_file(include_str!(
+            "../TemplateExamples/Historical1950/1950_US_F80_AirAlert_4ship.Group"
+        ))
+        .unwrap();
+        let before = root.clone();
+        snap_air_attack_areas(&mut root, 123_456.789, 234_567.125);
+        fn check(before: &Il2Entity, after: &Il2Entity, counts: &mut (usize, usize)) {
+            let mut expected = before.clone();
+            if before.block_type == "MCU_CMD_AttackArea" {
+                if before.property("AttackAir") == Some("1") {
+                    counts.0 += 1;
+                    assert_ne!(before.pos_xz(), after.pos_xz());
+                    assert_eq!(after.pos_xz(), Some((123_456.789, 234_567.125)));
+                    expected.set_property("XPos", "123456.789");
+                    expected.set_property("ZPos", "234567.125");
+                } else if is_ground_attack_area(before) {
+                    counts.1 += 1;
+                    assert_eq!(before, after, "ground AttackArea must stay verbatim");
+                }
+            }
+            // Compare every other property and typed field, including altitude.
+            expected.children = after.children.clone();
+            assert_eq!(&expected, after, "{:?}", before.name());
+            assert_eq!(before.children.len(), after.children.len());
+            for (a, b) in before.children.iter().zip(&after.children) {
+                check(a, b, counts);
+            }
+        }
+        let mut counts = (0, 0);
+        check(&before, &root, &mut counts);
+        assert_eq!(counts, (1, 1), "exercise both air and ground AttackAreas");
+    }
 
     #[test]
     fn infantry_scripts_are_detected() {

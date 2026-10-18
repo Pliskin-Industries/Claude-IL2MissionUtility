@@ -11,7 +11,6 @@
 //! * `enum ModelClass` / `struct ModelSpec`
 //! * `fn spec_for` / `fn class_for` / `fn classes_in`
 //! * `fn ceiling_m` / `fn format_cruise` / `fn suggested_waypoint_speed_kmh`
-//! * `fn auto_altitude_m` / `AUTO_ALTITUDE_FRACTION` — Template auto altitude
 //! * `fn script_id` — filename stem from a Script path
 //! * `fn png_for_script` / `PLACEHOLDER_PNG` (from generated `model_images.rs`)
 //!
@@ -149,19 +148,34 @@ impl ModelSpec {
 
 const SPECS: &[ModelSpec] = &[
     // Planes
+    // Ceilings: docs/historical-reference/aircraft-service-ceilings.md.
+    // The game's own handbook figures are listed there for comparison.
+    // USAF Characteristics Summary, 9 March 1949: combat ceiling, 35,000 ft at 100,000 lb.
     spec("b29", "B-29 Superfortress", ModelClass::Bomber, 350.0, 10668.0, ""),
+    // USAF Characteristics Summary, 9 March 1949: combat ceiling, 35,000 ft at 100,000 lb.
     spec("simpleb29", "B-29 (simple)", ModelClass::Bomber, 350.0, 10668.0, ""),
-    spec("c47b", "C-47B Skytrain", ModelClass::Transport, 257.0, 6096.0, ""),
-    spec("f51d", "F-51D Mustang", ModelClass::Fighter, 583.0, 11278.0, ""),
-    spec("f80c10", "F-80C-10 Shooting Star", ModelClass::Fighter, 732.0, 13716.0, ""),
-    spec("f84e", "F-84E Thunderjet", ModelClass::FighterBomber, 770.0, 12192.0, ""),
-    spec("f86a5", "F-86A-5 Sabre", ModelClass::Fighter, 800.0, 15240.0, ""),
-    spec("il10", "Il-10", ModelClass::Attack, 436.0, 6950.0, ""),
-    spec("la11", "La-11", ModelClass::Fighter, 500.0, 10150.0, ""),
-    spec("li2t", "Li-2T", ModelClass::Transport, 240.0, 6800.0, ""),
-    spec("mig15bis", "MiG-15bis", ModelClass::Fighter, 850.0, 15000.0, ""),
-    spec("tu2", "Tu-2", ModelClass::Bomber, 465.0, 10500.0, ""),
-    spec("yak9p", "Yak-9P", ModelClass::Fighter, 554.0, 10600.0, ""),
+    // Secondary: Francillon 1988, 26,400 ft at 26,000 lb, two-speed blower working.
+    spec("c47b", "C-47B Skytrain", ModelClass::Transport, 257.0, 8047.0, ""),
+    // Wright Field Memo Report TSCEP5E-1908, 15 June 1945: 41,600 ft at 9,760 lb.
+    spec("f51d", "F-51D Mustang", ModelClass::Fighter, 583.0, 12680.0, ""),
+    // Knaack 1978 (official USAF history), p. 11: 42,750 ft.
+    spec("f80c10", "F-80C-10 Shooting Star", ModelClass::Fighter, 732.0, 13030.0, ""),
+    // Knaack 1978 (official USAF history), p. 50: 45,000 ft.
+    spec("f84e", "F-84E Thunderjet", ModelClass::FighterBomber, 770.0, 13716.0, ""),
+    // Secondary: Wagner 1963 via Baugher, 48,000 ft.
+    spec("f86a5", "F-86A-5 Sabre", ModelClass::Fighter, 800.0, 14630.0, ""),
+    // Secondary: airwar.ru, practical ceiling at 6,300 kg.
+    spec("il10", "Il-10", ModelClass::Attack, 436.0, 7250.0, ""),
+    // Secondary: Shavrov via airpages.ru, practical ceiling at 3,730 kg.
+    spec("la11", "La-11", ModelClass::Fighter, 500.0, 10250.0, ""),
+    // Secondary: ru.wikipedia, passenger Li-2 with M-62IR.
+    spec("li2t", "Li-2T", ModelClass::Transport, 240.0, 5600.0, ""),
+    // Secondary: Gordon 2001; Arsenyev and Krylov 1999, practical ceiling.
+    spec("mig15bis", "MiG-15bis", ModelClass::Fighter, 850.0, 15500.0, ""),
+    // Secondary: Shavrov via airpages.ru, Tu-2S with ASh-82FN at 10,360 kg.
+    spec("tu2", "Tu-2", ModelClass::Bomber, 465.0, 9500.0, ""),
+    // Secondary: airpages.ru, 1947 all-metal Yak-9P at 3,550 kg.
+    spec("yak9p", "Yak-9P", ModelClass::Fighter, 554.0, 10500.0, ""),
     // Vehicles
     spec("ba64b", "BA-64B", ModelClass::Armor, 80.0, 0.0, ""),
     spec("dodgewc52", "Dodge WC-52", ModelClass::Jeep, 80.0, 0.0, ""),
@@ -340,15 +354,6 @@ pub fn ceiling_m(script: &str) -> f32 {
         .unwrap_or(8_000.0)
 }
 
-/// Share of the service ceiling used by Template Builder auto altitude.
-pub const AUTO_ALTITUDE_FRACTION: f32 = 0.5;
-
-/// Auto airstart height: half the service ceiling, rounded to the metre
-/// (MiG-15bis 7500 m, F-86A-5 7620 m, unknown 4000 m).
-pub fn auto_altitude_m(script: &str) -> f32 {
-    (ceiling_m(script) * AUTO_ALTITUDE_FRACTION).round()
-}
-
 /// 90% of the slowest moving unit’s cruise, rounded to 10 km/h (minimum 10).
 /// Stationary and unknown cruise values are ignored. `100` if none apply.
 pub fn suggested_waypoint_speed_kmh<'a>(scripts: impl IntoIterator<Item = &'a str>) -> f32 {
@@ -414,22 +419,35 @@ mod tests {
 
     #[test]
     fn ceiling_values_for_aircraft() {
-        assert_eq!(spec_for("mig15bis").unwrap().ceiling_m, 15000.0);
-        assert_eq!(spec_for("f86a5").unwrap().ceiling_m, 15240.0);
+        assert_eq!(spec_for("mig15bis").unwrap().ceiling_m, 15500.0);
+        assert_eq!(spec_for("f86a5").unwrap().ceiling_m, 14630.0);
         assert_eq!(spec_for("b29").unwrap().ceiling_m, 10668.0);
         // Non-aircraft should be 0.0
         assert_eq!(spec_for("t34-85").unwrap().ceiling_m, 0.0);
         assert_eq!(spec_for("boforsl60").unwrap().ceiling_m, 0.0);
-        assert_eq!(ceiling_m("mig15bis"), 15000.0);
+        assert_eq!(ceiling_m("mig15bis"), 15500.0);
         assert_eq!(ceiling_m("t34-85"), 8_000.0);
     }
 
     #[test]
-    fn auto_altitude_is_half_the_ceiling() {
-        assert_eq!(auto_altitude_m("mig15bis"), 7500.0);
-        assert_eq!(auto_altitude_m("f86a5"), 7620.0);
-        assert_eq!(auto_altitude_m("b29"), 5334.0);
-        assert_eq!(auto_altitude_m("no_such_plane"), 4000.0);
+    fn all_aircraft_ceilings_match_documented_figures() {
+        for (script, expected) in [
+            ("b29", 10668.0),
+            ("simpleb29", 10668.0),
+            ("c47b", 8047.0),
+            ("f51d", 12680.0),
+            ("f80c10", 13030.0),
+            ("f84e", 13716.0),
+            ("f86a5", 14630.0),
+            ("il10", 7250.0),
+            ("la11", 10250.0),
+            ("li2t", 5600.0),
+            ("mig15bis", 15500.0),
+            ("tu2", 9500.0),
+            ("yak9p", 10500.0),
+        ] {
+            assert_eq!(spec_for(script).unwrap().ceiling_m, expected, "{script}");
+        }
     }
 
     #[test]

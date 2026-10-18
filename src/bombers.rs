@@ -283,6 +283,7 @@ pub fn link_bomber_plans_with(
     let mut mapped_completion: Vec<i32> = Vec::with_capacity(plans.len());
     for (i, plan) in plans.iter().enumerate() {
         let (mut clone, id_map) = duplicate_template(&plan.root, &mut next_id);
+        crate::template::set_air_formation_density(&mut clone);
         if !keep_positions {
             placement::move_to_grid(&mut clone, i, plans.len());
         }
@@ -655,8 +656,9 @@ fn collect_cleanup_from_timer<'a>(root: &'a Il2Entity, timer: &'a Il2Entity) -> 
     out
 }
 
-/// Warn when a timer's linked Deactivate/Delete MCUs do not list every
-/// Plane / Vehicle / Train / Ship (by Index or LinkTrId).
+const BLOCK_INDEX_DELETE_WARNING: &str = "lists unit block indexes and will not remove those units. In the mission editor, change its Objects links to the units' entity indexes.";
+
+/// Warn about incomplete clean-up coverage and Deletes that name unit blocks.
 pub fn cleanup_coverage_warning(root: &Il2Entity, timer_id: i32) -> Option<String> {
     let timer = find_index(root, timer_id)?;
     if timer.block_type != "MCU_Timer" {
@@ -680,6 +682,18 @@ pub fn cleanup_coverage_warning(root: &Il2Entity, timer_id: i32) -> Option<Strin
             continue;
         }
         let covered: HashSet<i32> = mcu.objects.iter().copied().collect();
+        let kind = if mcu.block_type == "MCU_Delete" {
+            "Delete"
+        } else {
+            "Deactivate"
+        };
+        let mcu_name = mcu.name().unwrap_or(kind);
+        if mcu.block_type == "MCU_Delete" && units.iter().any(|unit| covered.contains(&unit.index))
+        {
+            lines.push(format!(
+                "Delete \"{mcu_name}\" {BLOCK_INDEX_DELETE_WARNING}"
+            ));
+        }
         let missing: Vec<&str> = units
             .iter()
             .filter(|u| !unit_is_covered(u, &covered))
@@ -688,12 +702,6 @@ pub fn cleanup_coverage_warning(root: &Il2Entity, timer_id: i32) -> Option<Strin
         if missing.is_empty() {
             continue;
         }
-        let kind = if mcu.block_type == "MCU_Delete" {
-            "Delete"
-        } else {
-            "Deactivate"
-        };
-        let mcu_name = mcu.name().unwrap_or(kind);
         lines.push(format!(
             "{kind} \"{mcu_name}\" does not cover {}: {}.",
             count_label(missing.len(), "unit"),
@@ -881,6 +889,18 @@ mod tests {
     }
 
     #[test]
+    fn linked_copies_use_safe_air_density_and_preserve_vehicle_density() {
+        use crate::template::formation_test_support::{assert_safe_air_and_unchanged_ground, mixed_template};
+        let source = mixed_template();
+        let plans = [input("mixed aircraft and vehicles", source.clone())];
+        for keep_positions in [false, true] {
+            let out = link_bomber_plans_with(&plans, keep_positions).unwrap();
+            assert_safe_air_and_unchanged_ground(&out);
+            assert_eq!(plans[0].root, source, "loaded bomber template must not change");
+        }
+    }
+
+    #[test]
     fn inspect_dprk_one_start_zone() {
         let info = inspect_plan(&dprk()).unwrap();
         assert_eq!(info.suggested_triggers.len(), 1);
@@ -916,6 +936,41 @@ mod tests {
                 zone.index,
                 info.trigger_warnings.get(&zone.index)
             );
+        }
+    }
+
+    #[test]
+    fn inspect_warns_when_cleanup_delete_lists_unit_blocks() {
+        for file in [
+            "1950_US_F80_AirAlert_4ship.Group",
+            "1950_US_F80_HVAR_Strike_4ship.Group",
+            "1950_US_F51_CloseSupport_4ship.Group",
+            "1950_US_F51_ArmedRecon_2plus2.Group",
+            "1950_DPRK_Yak_AirfieldRaid_2plus2.Group",
+            "1950_DPRK_Il10_KimpoAttack_2x4.Group",
+        ] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("TemplateExamples/Historical1950")
+                .join(file);
+            let mut root = parse_group_file(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let end = root.find_by_name("MISSION END").unwrap().index.unwrap();
+            let info = inspect_plan(&root).unwrap();
+            assert_eq!(info.suggested_completion, Some(end));
+            assert_eq!(
+                info.cleanup_warnings.get(&end).map(String::as_str),
+                Some(
+                    "Delete \"Trigger Delete\" lists unit block indexes and will not remove those units. In the mission editor, change its Objects links to the units' entity indexes."
+                )
+            );
+            let entities = root
+                .find_by_name("Deactivate Units")
+                .unwrap()
+                .objects
+                .clone();
+            root.find_by_name_mut("Trigger Delete")
+                .unwrap()
+                .set_objects(entities);
+            assert_eq!(cleanup_coverage_warning(&root, end), None);
         }
     }
 

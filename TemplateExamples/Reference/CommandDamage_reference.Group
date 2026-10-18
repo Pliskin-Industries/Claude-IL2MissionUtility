@@ -1,0 +1,17 @@
+MCU_CMD_Damage
+{
+  Index = 3;
+  Name = "command Damage";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 25226.105;
+  YPos = 0.000;
+  ZPos = 25640.630;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Damage = 2;
+  Type = 1;
+}
+

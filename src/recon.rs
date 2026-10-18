@@ -431,7 +431,8 @@ pub fn combine_placed_packs(
             if !keep_types.iter().any(|k| k == &ty) {
                 continue;
             }
-            let (cloned, _) = duplicate_template(copy, &mut next_id);
+            let (mut cloned, _) = duplicate_template(copy, &mut next_id);
+            crate::template::set_air_formation_density(&mut cloned);
             copies.push(cloned);
         }
     }
@@ -598,6 +599,7 @@ pub fn generate_recon_ex(plans: &[ReconInput], build: ReconBuild) -> Result<Il2E
         let (ox, oz) = origins.next().unwrap_or((placement::MAP_MIN, placement::MAP_MIN));
         for local in 0..plan.copies {
             let (mut clone, id_map) = duplicate_template(&plan.root, &mut next_id);
+            crate::template::set_air_formation_density(&mut clone);
             let mut start = mission_begin_targets(&clone);
             if start.is_empty() {
                 if let Some(id) = clone.find_by_name("ENABLE / PULSE IN").and_then(|e| e.index) {
@@ -1678,7 +1680,7 @@ fn mission_begin_targets(root: &Il2Entity) -> Vec<i32> {
 }
 
 /// IL-2 still runs Mission Begin when Enabled = 0. Empty the target list.
-fn silence_clone_starts(root: &mut Il2Entity) {
+pub(crate) fn silence_clone_starts(root: &mut Il2Entity) {
     root.for_each_mut(&mut |e| {
         if e.block_type == "MCU_TR_MissionBegin" {
             e.set_property("Enabled", "0");
@@ -1724,13 +1726,13 @@ fn first_pos(root: &Il2Entity) -> Option<(f64, f64, f64)> {
     root.children.iter().find_map(first_pos)
 }
 
-fn clone_named(proto: &Il2Entity, next_id: &mut i32, name: &str) -> Il2Entity {
+pub(crate) fn clone_named(proto: &Il2Entity, next_id: &mut i32, name: &str) -> Il2Entity {
     let (mut cloned, _) = duplicate_template(proto, next_id);
     cloned.set_name(name);
     cloned
 }
 
-fn synthesize_mcu(block_type: &str, next_id: &mut i32, name: &str) -> Il2Entity {
+pub(crate) fn synthesize_mcu(block_type: &str, next_id: &mut i32, name: &str) -> Il2Entity {
     let mut e = Il2Entity::new(block_type);
     e.index = Some(*next_id);
     e.set_property("Index", next_id.to_string());
@@ -1822,6 +1824,32 @@ mod tests {
             root.children.push(wp);
         }
         root
+    }
+
+    #[test]
+    fn generated_copies_use_safe_air_density_and_preserve_vehicle_density() {
+        use crate::template::formation_test_support::{assert_safe_air_and_unchanged_ground, mixed_template};
+        let source = mixed_template();
+        let plans = [input("mixed aircraft and vehicles", source.clone(), 2)];
+        for build in [ReconBuild::default(), ReconBuild { spawn_all: true, ..ReconBuild::default() }] {
+            let out = generate_recon_ex(&plans, build).unwrap();
+            assert_safe_air_and_unchanged_ground(&out);
+            assert_eq!(plans[0].root, source, "loaded recon template must not change");
+        }
+    }
+
+    #[test]
+    fn combined_packs_use_safe_air_density_and_preserve_vehicle_density() {
+        use crate::template::formation_test_support::{assert_safe_air_and_unchanged_ground, mixed_template};
+        let mut source = Il2Entity::new("Group");
+        source.set_name("Random Ground Units 1");
+        let mut copy = mixed_template();
+        copy.set_name("Mixed formations [1]");
+        source.children.push(copy);
+        let loaded = [source.clone()];
+        let out = combine_placed_packs(&loaded, &["Mixed formations".into()]).unwrap();
+        assert_safe_air_and_unchanged_ground(&out);
+        assert_eq!(loaded[0], source, "loaded placed pack must not change");
     }
 
     #[test]

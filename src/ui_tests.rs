@@ -1772,3 +1772,38 @@ fn terrain_heights_on_export_start_off() {
     let n = h.find("Apply terrain heights on export");
     assert_eq!(n.toggled, Some(false));
 }
+
+#[test]
+#[ignore = "records P14 UI baseline; run only before Part B or with explicit approval"]
+fn write_p14_baseline_ui() {
+    let mut h = Harness::new("p14_baseline_ui_writer");
+    h.app.east_objectives = vec![(180_000.0, 240_000.0), (190_000.0, 260_000.0)];
+    h.app.nato_objectives = vec![(140_000.0, 220_000.0), (150_000.0, 250_000.0)];
+    h.app.attack_arrows = vec![((140_000.0, 220_000.0), (130_000.0, 240_000.0))];
+    h.app.front_t = 8.0;
+    h.app.terrain_apply = false;
+    let dir = crate::baseline_tests::baseline_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("base_map_ui.Group");
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    assert_eq!(dialog::pending(), 0);
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    assert_group_file(&out);
+}
+
+#[test]
+fn map_generate_without_air_matches_baseline() {
+    let mut h = Harness::new("p14_baseline_ui_check");
+    h.app.east_objectives = vec![(180_000.0, 240_000.0), (190_000.0, 260_000.0)];
+    h.app.nato_objectives = vec![(140_000.0, 220_000.0), (150_000.0, 250_000.0)];
+    h.app.attack_arrows = vec![((140_000.0, 220_000.0), (130_000.0, 240_000.0))];
+    h.app.front_t = 8.0;
+    h.app.terrain_apply = false;
+    let out = h.out("base_map_ui.Group");
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    assert_eq!(dialog::pending(), 0);
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    crate::baseline_tests::assert_fixture_matches(&out);
+}
