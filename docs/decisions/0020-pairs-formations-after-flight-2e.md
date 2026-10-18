@@ -65,3 +65,5 @@ Flight 2F (above) was that probe. Loose Pairs kept every pass above 20 m and Wed
 - Until A is built, the app keeps writing Pairs at Safe, as 0019 says. Build A where 0019 is built (`SAFE_AIR_FORMATION_DENSITY` in `src/template.rs` and its uses), marking it as a 0021 workaround in the code.
 - Pairs will look wider than period doctrine (the wingman about 200 m out, 17 m below) until the game is fixed.
 - The game bug draft (`handoff/il2-bug-report-drafts.md`) now has report 3: wingmen cross over through their lead in turns, at any density. Decision 0021 treats this as a game bug and whatever 0020 chooses as a workaround to remove when it is fixed.
+
+*Note added 2026-10-18 (the decision is unchanged): flight 2H flew the F-51 ArmedRecon at Loose. Loose did not help its covering pair, which weaves in transit and collided once at Loose. Whether A gets an exception for covering flights is decision 0022 (Proposed).*

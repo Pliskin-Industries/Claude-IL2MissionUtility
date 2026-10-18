@@ -825,6 +825,53 @@ Nearest aircraft of the same flight; "under 20 m" counts aircraft-seconds sample
 - For decision 0020: **option A (Pairs at Loose, a value, no MCUs) stays the recommendation**; GX is a costlier, slightly closer alternative. For decision 0021's table: skill and area placement were tried and rejected; GX was tried and is not recommended.
 - Three runs per cell are few; the repeat of the + 12–13 s crossing in every Safe cell of every run is the stronger evidence. Not flown: Wedge fours with GX (the steady-turn kind), the F-51 ArmedRecon at Loose.
 
+## Flight 2H (does Pairs at Loose hold for the F-51 ArmedRecon?) — 2026-10-18, three runs, Tacview recorded
+
+Probe `P14_Probe_2H_traced` (`handoff/p14-probes/flight2h/`; design `handoff/sessions/2026-10-18-flight-2h.md`; prompt `handoff/P14-flight-2h-codex-prompt.md`), built from `claude/p14-flight-2h` (`87eb0b6`) as `P14_Probe_2H_20261018` without the resaver, hosted by the game client on this PC (game `261013`) and flown by Claude at the keyboard. Three copies of the F-51 ArmedRecon built-in (`1950_US_F51_ArmedRecon_2plus2`, S3: the Red pair attacks at 900 m with a 1,200 s AttackArea; the Blue pair covers it from 2,400 m with `MCU_CMD_Cover`), placed and wrapped as Air Tasking does, with only their two Formation commands set after placement: **HS** Pairs at Safe, as shipped (the control, flight 2E's EA on its own target), **HL1** and **HL2** Pairs at Loose (decision 0020's option A). Starts 60, 90, 120 s; 12 aircraft at once. Empty targets, area COLD, no enemy. The host spectated, pressed LCtrl+R and left after 28:00.
+
+Why: the user accepted decision 0020 option A (Pairs fly Loose) on 2026-10-18 from Yak evidence and asked to fly the other Pairs built-in at Loose before A is built.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-18_02-29-27` | `src/testdata/missionlog/real_37/` (61 files) | `handoff/tacview/P14_Probe_2H_run1.zip.acmi` | 30:06 |
+| 2 | `2026-10-18_03-00-54` | `src/testdata/missionlog/real_38/` (124 files) | `handoff/tacview/P14_Probe_2H_run2.zip.acmi` | 64:39 (a taskbar preview held focus; the host left late) |
+| 3 | `2026-10-18_04-06-54` | `src/testdata/missionlog/real_39/` (60 files) | `handoff/tacview/P14_Probe_2H_run3.zip.acmi` | 29:04 |
+
+Replay against the frozen files: no dead links in any run.
+
+### Load and timing
+
+- **Mission time ran at 1.00× wall time** in all three runs (12 aircraft).
+- HS reached `WP 1` on the prediction (378.4 s, START + 318.5 s). **The Loose copies arrived late**: HL1 at 417.4–418.2 s (+ 9 s), HL2 at 442.6–443.6 s (+ 4–5 s). A Loose formation slows the transit a little. Every `DONE HUB` fired 1,200.5 s after its `WP 1`, before the leave. Times below are after the measured `WP 1`.
+- No aircraft had an attacker.
+
+### Spacing and losses (Tacview)
+
+Nearest aircraft of the same pair; "under 20 m" in aircraft-seconds sampled once a second; "closest" at Tacview's 0.2 s frames (`tools/p14/flight2h_spacing.py`, `flight2h_crossover.py`).
+
+| Cell | Formation | Closest (runs 1, 2, 3) | Where | Under 20 m (runs 1, 2, 3) | Lost |
+|---|---|---|---|---|---|
+| HS | Pairs, Safe (as shipped) | 9.9, 18.4, 20.3 m | Blue on station (+ 996 s, 10 m below); Red on station (+ 161 s, 11 m below); Blue in transit | 10, 2, 0 | 0 |
+| HL1 | Pairs, Loose | 14.4, 19.2, 25.3 m | Blue in transit (199 s, 163 s); Red at `WP 1` + 15 s | 2, 2, 0 | 0 |
+| HL2 | Pairs, Loose | **7.7 m (collision)**, 12.8, 23.0 m | Blue in transit (214 s); Red at `WP 1` + 15 s (15 m below); Blue in transit | 6, 4, 0 | **2 (run 1)** |
+
+- **Loose did not keep the F-51's pairs apart.** Of six Loose samples, three came under 20 m and one collided: HL2's Blue pair in run 1, both aircraft destroyed in the same tick at 214.3 s, in transit at 1,056 m, 224 s before `WP 1`.
+- **Safe, as shipped, lost nothing** here either: with flight 2E's EA, the F-51 at Safe has six runs, no losses, closest 9.9–20.3 m.
+
+### The cover pair weaves in transit
+
+The Blue pair's Cover order makes it descend from 2,400 m toward the Red pair at about 900 m while weaving in 50–60° banked S-turns, a reversal every 10–20 s, for the whole transit (`WP 1` − 300 s to about − 200 s).
+
+- **At Safe** the wingman banks with its lead and stays on its own side, 18–105 m to the right: no crossing in transit.
+- **At Loose** every reversal swings the wingman 150–400 m from one side to the other, across the lead's track. In HL2 run 1 the lead reversed left at about 202 s while its wingman was 160–400 m out on that side; the wingman closed in and they collided at 214 s, 12 m apart in height 2 s before. HL1's two close passes (14.4 and 19.2 m) are the same weave.
+- The Red (attack) pair at Loose crossed its lead at the entry reversal, `WP 1` + 15 s, 12.8 m (run 2, 15 m below) and 25.3 m (run 3). Loose's vertical step on the F-51 varied from 22 m above to 19 m below, unlike the Yak's steady 17 m below.
+
+### What this changes (reading)
+
+- **Decision 0020's option A is confirmed for the Yak raid, not for the F-51 ArmedRecon.** For the F-51, Loose was no better than Safe in three runs and collided once, in a manoeuvre the Yak never flies: the covering pair's transit weave. A wider slot turns each of its reversals into a crossing.
+- Three runs per cell are few, and the F-51 has not collided at Safe in six; the weave evidence (Tacview, every run) is stronger than the counts.
+- What to write for this built-in is the user's call: `docs/decisions/0022-f51-armed-recon-at-loose.md` (Proposed).
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.

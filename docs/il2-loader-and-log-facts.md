@@ -128,3 +128,9 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **The game's `.acmi` in `data/Tracks` is plain text**; the repository keeps tracks zipped as `<name>.zip.acmi`.
 - **Hosting from the client, mission rotation:** clicking a mission only selects it; scroll the settings page to reach Remove (rotation) and Add to rotation (available list).
 - **Keys in spectator view:** a plain key press sometimes does not reach the game; holding Escape for 0.3 s opens the menu reliably. Click the sky first, then send the key as a separate action.
+
+## Found on 2026-10-18 (flight 2H, game 1.005)
+
+- **A pair flying `MCU_CMD_Cover` weaves in transit.** The F-51 ArmedRecon's Blue pair, covering the Red pair 1,500 m below, flies 50–60° banked S-turns with a reversal every 10–20 s while it descends to the Red pair's height. At Pairs Safe its wingman stays on its side; at Pairs Loose it swings 150–400 m across the lead's track at each reversal (one collision in three runs).
+- **A Loose formation arrives later:** F-51 pairs at Loose reached `WP 1` 4–9 s after the same raid at Safe (318.5 s transit).
+- **Computer use, in spectator view:** a slow press on the sky (button down, 0.5 s, up), then 3 s before the key, gave the game keyboard focus where a quick click did not. `open_application` on the running game starts a second copy, which only shows an "already running" error; dismiss it with OK. A taskbar preview (from a remote-desktop window) can take focus from the game; only the user could dismiss it.

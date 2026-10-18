@@ -57,5 +57,6 @@ What this makes easier, harder or necessary.
 | [0019](0019-air-formations-fly-at-safe-density.md) | Every AI air formation flies at density 1 (Safe) until Dense is fixed | Accepted |
 | [0020](0020-pairs-formations-after-flight-2e.md) | Pairs formations still collide at Safe: Pairs fly Loose (A); Loose at the waypoint is the recorded alternative | Accepted |
 | [0021](0021-formation-collisions-are-a-game-bug.md) | AI formation collisions are a game bug; the app's formation settings are workarounds to revisit | Accepted |
+| [0022](0022-f51-armed-recon-at-loose.md) | Pairs at Loose does not hold for a covering pair: what the app writes for the F-51 ArmedRecon | Proposed |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
