@@ -58,5 +58,6 @@ What this makes easier, harder or necessary.
 | [0020](0020-pairs-formations-after-flight-2e.md) | Pairs formations still collide at Safe: Pairs fly Loose (A); Loose at the waypoint is the recorded alternative | Accepted |
 | [0021](0021-formation-collisions-are-a-game-bug.md) | AI formation collisions are a game bug; the app's formation settings are workarounds to revisit | Accepted |
 | [0022](0022-f51-armed-recon-at-loose.md) | Pairs at Loose does not hold for a covering pair: a flight flying a Cover order stays Safe | Accepted |
+| [0023](0023-step-4-threshold-one-complex-trigger-per-area.md) | Step 4 threshold: one Complex Trigger per area, re-activated as the presence check | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
