@@ -377,12 +377,12 @@ h2.part{margin:8px 0 0;font:600 20px/1.1 var(--f-head);letter-spacing:.06em;text
 
   <div class="intro">
     <h2 class="part">Decisions, 2026-10-18</h2>
-    <p>Each one was a place where plan §6.1 was unclear or conflicted with the redesign rules. You approved the mockup and every recommendation; they are recorded in decisions 0024 and 0025.</p>
+    <p>Each one was a place where plan §6.1 was unclear or conflicted with the redesign rules. You approved the mockup and every recommendation; they are recorded in decisions 0027 and 0028.</p>
   </div>
   <div class="qs">
     <article class="q" id="q1"><div class="qh"><i class="pinsw">1</i><h3>How does an entry get into the pool on this tab?</h3></div>
       <p>§6.1 gives the rail tab no way to add an entry. Only the Map dock's "Auto-fill from objectives" adds entries, and that is step 9, which waits for the upstream merge. Until then the pool could not be filled, and the step 8 tests that need an entry could only set it in code.</p>
-      <p class="rec"><b>Decided:</b> "Add to pool" on the selected library card, with a target list of that side's Map objectives and arrows; and "Auto-fill from objectives" in the pool header. The auto-fill rule is plan logic, so it goes into <code>airtask</code> as one public function that step 9's dock button calls too. Also, as its own step after the upstream merge (decision 0025): upstream's "+ Mission" CAP / Strike builder makes library sorties, and Map › Missions snap targets (tanks, truck routes, rail, ships, airbases, bridges, dams) become pool targets.</p></article>
+      <p class="rec"><b>Decided:</b> "Add to pool" on the selected library card, with a target list of that side's Map objectives and arrows; and "Auto-fill from objectives" in the pool header. The auto-fill rule is plan logic, so it goes into <code>airtask</code> as one public function that step 9's dock button calls too. Also, as its own step after the upstream merge (decision 0028): upstream's "+ Mission" CAP / Strike builder makes library sorties, and Map › Missions snap targets (tanks, truck routes, rail, ships, airbases, bridges, dams) become pool targets.</p></article>
 
     <article class="q" id="q2"><div class="qh"><i class="pinsw">2</i><h3>A nine-column pool table does not fit</h3></div>
       <p>At 1280 px the centre is about 534 px. §6.1's nine columns (Sortie, Side, Target, Weight, Mode, Runs, Heading, Valid, ✖) need more, and the redesign puts "the current selection first" in the right panel.</p>

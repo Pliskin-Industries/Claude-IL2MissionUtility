@@ -1,4 +1,4 @@
-# 0024. The Air Tasking rail tab (P14 step 8): layout, adding entries, and behaviour before step 7
+# 0027. The Air Tasking rail tab (P14 step 8): layout, adding entries, and behaviour before step 7
 
 - **Status:** Accepted
 - **Date:** 2026-10-18
@@ -10,7 +10,7 @@ Step 8 builds the 7th rail tab, Air Tasking (Ctrl 7), before the backend steps 4
 
 ## Decision
 
-1. **Adding entries.** The tab adds pool entries itself: "Add to pool" on the selected library card with a target list (that side's Map objectives and arrows), and "Auto-fill from objectives" in the pool header. The target list, target resolution, entry status, add, auto-fill and library removal are plan logic: they live in `airtask` (a new `airtask/pool.rs`) and step 9's Map dock calls the same functions. A third way in, upstream's air-group builders, is decision 0025.
+1. **Adding entries.** The tab adds pool entries itself: "Add to pool" on the selected library card with a target list (that side's Map objectives and arrows), and "Auto-fill from objectives" in the pool header. The target list, target resolution, entry status, add, auto-fill and library removal are plan logic: they live in `airtask` (a new `airtask/pool.rs`) and step 9's Map dock calls the same functions. A third way in, upstream's air-group builders, is decision 0028.
 2. **Pool table.** Columns: on/off, Sortie (side marker + name, cut with "…", full name on hover), Target, Weight, Mode, Runs, OK, ✖. Weight, Mode and Runs edit in the row. The Side column of §6.1 becomes the marker; Heading override moves to the selected-entry block.
 3. **On/off.** `PoolEntry.enabled` is a checkbox in the first column; a switched-off row is grey and left out of Generate.
 4. **Slot timeline.** One panel in the centre under the pool, both sides on one 0–3 h axis, drawn by the helper step 9's dock reuses. The Schedule sections keep only their fields.
