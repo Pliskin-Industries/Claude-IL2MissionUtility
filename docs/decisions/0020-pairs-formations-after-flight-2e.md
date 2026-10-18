@@ -1,8 +1,8 @@
 # 0020. Pairs formations still collide at Safe: what the app writes for Pairs
 
-- **Status:** Proposed
-- **Date:** 2026-10-16
-- **Decided by:** open, for the user; proposed by Claude from flight 2E
+- **Status:** Accepted (option A)
+- **Date:** proposed 2026-10-16; decided 2026-10-18
+- **Decided by:** the user ("Decision A for 0020. Let's mark Loose at WPs as an alternative in the decisions log"), on Claude's proposal from flights 2E, 2F and 2G
 
 ## Context
 
@@ -50,11 +50,18 @@ Skill changes nothing: Veteran and Ace wingmen cross at the same `WP 1` + 12–1
 - **D. Accept the losses for Pairs.** Not recommended: the Yak raid lost half its sorties in three runs.
 - **E. Pairs fly Safe in transit and switch to Loose at `WP 1`** (one Formation command per flight, fired by the path waypoint; flight 2G's GX). No losses in three runs, closest 18.7–26.9 m. Keeps the shipped look in transit, where no Pairs collision has been recorded, but costs one MCU per flight and gave a little less clearance than A.
 
-## Recommendation
+## Decision
+
+**A. Pairs fly Loose (density 2); every other AI air formation stays Safe (decision 0019).** One value per formation type, written in the three places 0019 touches: Air Tasking placement, the built-ins, Template Builder. No MCUs. It is a workaround for the game bug of decision 0021 and is listed in its table.
+
+**Recorded alternative: E, Loose at the waypoint.** Pairs fly Safe in transit and get one Formation command to Loose, fired by the path waypoint (`WP 1`), per flight. Flight 2G flew it: no losses, closest 18.7–26.9 m. Not taken now, because A gives as much clearance with no MCUs; E is kept for the case where a tighter pair in transit matters more than one MCU per flight (for example, if Loose transit looks wrong for escort or cover). B, C and D are not taken.
+
+## Recommendation (before the decision)
 
 Flight 2F (above) was that probe. Loose Pairs kept every pass above 20 m and Wedge at Safe did not quite, so **take A**: Pairs fly Loose, every other air formation stays Safe. It is one value per formation type in the three places 0019 already touches, and no MCUs. Flight 2G found nothing cheaper: AI skill and moving the attack area do not help, and E (Loose from `WP 1`) costs an MCU per flight for no better clearance. Optional before or after the ruling: fly the F-51 ArmedRecon at Loose, the other Pairs built-in.
 
 ## Consequences
 
-- Until this is decided, the app keeps writing Pairs at Safe, as 0019 says.
+- Until A is built, the app keeps writing Pairs at Safe, as 0019 says. Build A where 0019 is built (`SAFE_AIR_FORMATION_DENSITY` in `src/template.rs` and its uses), marking it as a 0021 workaround in the code.
+- Pairs will look wider than period doctrine (the wingman about 200 m out, 17 m below) until the game is fixed.
 - The game bug draft (`handoff/il2-bug-report-drafts.md`) now has report 3: wingmen cross over through their lead in turns, at any density. Decision 0021 treats this as a game bug and whatever 0020 chooses as a workaround to remove when it is fixed.
