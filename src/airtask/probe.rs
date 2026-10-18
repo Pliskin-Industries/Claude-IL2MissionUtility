@@ -190,7 +190,7 @@ impl Flight {
 
     fn regenerates_flown_files(self) -> bool {
         match self {
-            Self::TwoI | Self::Load => false,
+            Self::Load => false,
             _ => !self.is_frozen(),
         }
     }
@@ -6046,7 +6046,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     // excluded by 0018. The remaining flights use unchanged or frozen inputs.
     // 2F (flown 2026-10-17) and 2H (flown 2026-10-18) add four files each.
     // 0020/0022 remove 2E and 2G's eight files from the previous total of 56.
-    assert_eq!(compared, 48);
+    // 2I (flown 2026-10-18) adds four files.
+    assert_eq!(compared, 52);
 }
 
 fn flown_formation_probe(flight: Flight) -> Il2Entity {
@@ -7033,7 +7034,7 @@ fn flight2i_cells_match_table_and_land_path_separation() {
     assert_eq!(root.name(), Some("P14_Probe_2I"));
     assert!(Flight::ALL.contains(&Flight::TwoI));
     assert!(!Flight::TwoI.is_frozen());
-    assert!(!Flight::TwoI.regenerates_flown_files(), "2I has not flown");
+    assert!(Flight::TwoI.regenerates_flown_files(), "2I flew; its frozen files regenerate");
     assert!(Flight::TwoI.writes_schedule());
     assert_eq!(RUN_SHEET_2I.len(), 6);
     assert_eq!(TWO_I_SORTIES.len(), 6);
