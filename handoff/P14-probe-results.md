@@ -872,6 +872,49 @@ The Blue pair's Cover order makes it descend from 2,400 m toward the Red pair at
 - Three runs per cell are few, and the F-51 has not collided at Safe in six; the weave evidence (Tacview, every run) is stronger than the counts.
 - What to write for this built-in is the user's call: `docs/decisions/0022-f51-armed-recon-at-loose.md` (Proposed).
 
+## Flight 2I (the two Pairs built-ins as shipped under decisions 0020 A and 0022 A2) — 2026-10-18, three runs, Tacview recorded
+
+Probe `P14_Probe_2I_traced` (`handoff/p14-probes/flight2i/`; design `handoff/sessions/2026-10-18-flight-2i.md`; prompt `handoff/P14-flight-2i-codex-prompt.md`), built from `claude/p14-flight-2i` (`611bb08`, on top of the 0020 A / 0022 A2 build `b0d640e`) as `P14_Probe_2I_20261018` without the resaver, hosted by the game client on this PC (game `261013`) and flown by Claude at the keyboard. The two Pairs built-ins exactly as the app now ships and places them, nothing changed after placement: **IF1, IF2** the F-51 ArmedRecon (Red attack pair at Loose, Blue covering pair at Safe); **IY1 to IY4** the Yak airfield raid (both pairs Loose), in two waves. Starts 60, 90, 120, 150, 800, 830 s; at most 16 aircraft at once. Empty targets, area COLD, no enemy. The host left at about 28:00.
+
+Why: confirm the build of decisions 0020 A and 0022 A2 with the shipped files, before the branch is merged.
+
+| Run | Session | Logs | Tacview | Mission end |
+|---|---|---|---|---|
+| 1 | `2026-10-18_09-11-24` | `src/testdata/missionlog/real_40/` (61 files) | `handoff/tacview/P14_Probe_2I_run1.zip.acmi` | 28:58 |
+| 2 | `2026-10-18_09-41-40` | `src/testdata/missionlog/real_41/` (61 files) | `handoff/tacview/P14_Probe_2I_run2.zip.acmi` | 28:56 |
+| 3 | `2026-10-18_10-11-55` | `src/testdata/missionlog/real_42/` (61 files) | `handoff/tacview/P14_Probe_2I_run3.zip.acmi` | 28:54 |
+
+Replay against the frozen files: no dead links in any run.
+
+### Load and timing
+
+- **Mission time ran at 1.00× wall time** in all three runs (up to 16 aircraft).
+- Every `WP 1` came within 0.4 s of the prediction (F-51 START + 318.5 s, Yak START + 264.1 s). The F-51 with only its Red pair at Loose was not late (2H's all-Loose F-51 was 4–9 s late).
+- No aircraft had an attacker.
+
+### Spacing and losses (Tacview)
+
+Closest same-pair pass at Tacview's 0.2 s frames (`tools/p14/flight2i_spacing.py`, `flight2i_crossover.py`).
+
+| Cell | As shipped now | Closest (runs 1, 2, 3) | Lost |
+|---|---|---|---|
+| IF1 | F-51: Red Loose, Blue (Cover) Safe | 19.3, 17.0, 17.1 m | 0 |
+| IF2 | the same | **8.1 m**, 33.5, 13.7 m | **1 (run 1)** |
+| IY1 | Yak: both pairs Loose | 25.2, 16.4, 20.7 m | 0 |
+| IY2 | the same | 32.7, 32.9, **9.7 m** | 0 |
+| IY3 | the same | 23.3, 19.0, **10.8 m** | 0 |
+| IY4 | the same | 29.8, 26.7, 26.8 m | 0 |
+
+- **The Yak raid lost nothing in twelve raids.** As shipped before decision 0020 (Pairs at Safe) it came within 10 m in nine runs of nine and collided in five. Its entry reversal now clears 23–33 m (the Loose slot, as in 2F and 2G).
+- **But Loose does not stop the steady-turn crossing.** On station, two Yak wingmen crossed their leads at 9.7 m (IY2 run 3, `WP 1` + 280 s, 10 m below) and 10.8 m (IY3 run 3, + 77 s, nearly level), and four more passes came to 16–20 m. No contact.
+- **The F-51's attack pair at Loose held** (17–57 m). **Its covering pair at Safe crossed its lead on station**: IF2 run 1, `WP 1` + 803 s, at 437 m: the wingman climbed from 83 m below into a steady 36° turn and crossed 6 m ahead and 4 m above its lead (8.1 m), then rolled to 129°; the lead held its turn 6 s, pitched down and was lost at + 813 s (reading: contact damage). IF2 run 3 came to 13.7 m the same way. 2H's Safe control had the same on-station crossing (9.9 m). The covering pair's transit weave, which collided at Loose in 2H, stayed clear at Safe: closest in transit 17.1–49.5 m (17.1 and 19.3 m in IF1 runs 3 and 1), and no crossing of the lead's track within 20 m.
+
+### What this changes (reading)
+
+- **Decisions 0020 A and 0022 A2 work as intended for the crossing they target**: the Yak's entry-reversal collision is gone (0 losses in 12 raids against 5 collisions in 9), and the F-51's covering pair no longer crosses in its transit weave.
+- **The steady-turn crossing (the second kind, flight 2F) remains at every setting**: Yak pairs at Loose and the F-51's covering pair at Safe both crossed within 10 m on station, and one F-51 was lost (1 of 72 aircraft-sorties in this flight). No formation value removes it; it is the game bug of decision 0021.
+- **No further change is proposed.** The build stands; the residual on-station risk is recorded in decision 0021 and bug report 3.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.

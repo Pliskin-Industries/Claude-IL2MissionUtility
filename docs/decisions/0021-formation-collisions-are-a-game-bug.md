@@ -35,3 +35,5 @@ Treat the collisions as a defect in the game's AI, not in the app. Every formati
 - **Downstream, in MCU needs:** any MCU added for this bug (for example a Formation command at `WP 1`) costs the budget per flight; prefer value changes.
 - **When the game updates:** re-fly the shipped Pairs at Safe Yak raid (flight 2F's PS cell regenerates byte for byte from `handoff/p14-probes/flight2f/`). If the wingman no longer crosses within 20 m in three runs, propose removing the workarounds in the order of the table, last first.
 - The game bug report (draft 3) is the user's to post.
+
+*Note added 2026-10-18 (the decision is unchanged): flight 2I flew the two Pairs built-ins as shipped under 0020 A and 0022 A2. The Yak raid lost nothing in twelve raids (the entry-reversal crossing is gone), but steady-turn crossings on station remain at every setting: Yak pairs at Loose came within 9.7 m, and the F-51's covering pair at Safe crossed at 8.1 m and lost an aircraft (1 of 72 aircraft-sorties). No formation value removes that kind; it waits for the game fix.*

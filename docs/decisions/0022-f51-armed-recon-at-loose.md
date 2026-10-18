@@ -38,3 +38,5 @@ So A helps a pair that reverses once on arrival (the Yak) and hurts a pair that 
 
 - Decision 0021's workaround table gets the result as a row; the exception is itself a workaround for the same game bug.
 - Bug report 3 (`handoff/il2-bug-report-drafts.md`) gains the covering pair's weave as a second way the crossing happens.
+
+*Note added 2026-10-18 (the decision is unchanged): flight 2I flew the build. The F-51's covering pair at Safe kept clear in its transit weave (closest 17.1 m, no crossing within 20 m), as intended; on station it crossed its lead in steady turns at 8.1 m (one aircraft lost) and 13.7 m, as 2H's Safe control did (9.9 m). Loose would not help there (2F, 2I: Loose pairs also cross in steady turns).*

@@ -96,6 +96,7 @@ Status: **drafts, not posted.** The user decides whether, where and when to post
 - Attachments: `handoff/tacview/P14_Probe_2F_run3.zip.acmi` (collision at 666.8 s, Blue 21 and 22 of the second raid) and `run1`, `run2`; `handoff/tacview/P14_Probe_2E_run1.zip.acmi` and `run3`; logs `src/testdata/missionlog/real_31` to `real_33`; mission group `handoff/p14-probes/flight2f/P14_Probe_2F_traced.Group`.
 
 - It also happens in a straight transit when a pair flies a Cover order (flight 2H): the covering pair weaves in 50–60° S-turns, and at density 2 (Loose) the wingman swings across the leader's track at each reversal; one collision in three runs. Track: `handoff/tacview/P14_Probe_2H_run1.zip.acmi`, 214 s.
+- Loose density does not stop the steady-turn kind (flight 2I): Yak pairs at Loose crossed their leads on station at 9.7 and 10.8 m, and an F-51 covering pair at Safe crossed at 8.1 m and lost its lead (`handoff/tacview/P14_Probe_2I_run1.zip.acmi`, 1,212 s).
 - AI skill does not change it (flight 2G, three runs): Veteran and Ace wingmen crossed at the same `WP 1` + 12–13 s and collided, Ace in all three runs. With the AttackArea centre 3 km past the waypoint, the leader still turns left at the waypoint and reverses later; the crossing and collision come at + 23 s. Tracks: `handoff/tacview/P14_Probe_2G_run{1,2,3}.zip.acmi`.
 
 **Workaround:** density 2 (Loose) kept every pass above 20 m in both formations (flight 2F); switching to Loose at the waypoint also prevented losses (flight 2G). Decisions 0019 to 0021.
