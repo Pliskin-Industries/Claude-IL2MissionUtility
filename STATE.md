@@ -35,7 +35,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | `codex/fix-0016`, `codex/p14-0k` and the older `codex/*` branches | `Claude-IL2MissionUtility-0e` (on `codex/p14-0k`), `-0b` | Already merged. Leftover worktrees. |
 | `claude/docs-layout-trial` | `Claude-IL2MissionUtility-docs` | This document layout. Merged 2026-10-10. A leftover worktree. |
 
-Last recorded test run on the active branch: 577 passed, 0 failed, 19 ignored (`cargo test --offline`, 2026-10-14, after step 0k). Warnings on 2026-10-14: 69 build, 251 clippy. Probe writers: 11; the 44 flown probe files of flights 0 to 1P regenerate byte for byte. Record each new run on this line. Latest on any branch: `claude/p14-flight-2i`, 2026-10-18: 707 passed, 0 failed, 28 ignored; 69 / 251 warnings; 52 flown probe files byte-identical (2E and 2G frozen by decisions 0020 and 0022).
+Last recorded test run on the active branch: 707 passed, 0 failed, 28 ignored (`cargo test --offline`, 2026-10-18, after merging flights 2C to 2I and decisions 0019 to 0022). Warnings: 69 build, 251 clippy. 52 flown probe files regenerate byte for byte; flights 2, 1M, 2B to 2E and 2G are frozen (decisions 0018 to 0022). Record each new run on this line.
 
 ## In progress: P14 Air Tasking (issues #28, #29)
 
