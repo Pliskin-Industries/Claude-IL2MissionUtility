@@ -3,6 +3,7 @@
 .aider*
 
 # Terrain height probes and editor exports (tens of GB)
+/HeightHelper/
 /References/HeightGrid/
 /References/Korea Map Aux/
 

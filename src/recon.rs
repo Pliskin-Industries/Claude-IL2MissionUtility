@@ -61,11 +61,11 @@
 
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;
-use crate::mapground::{attack_across_front, GroundKind, GroundSpot};
+use crate::mapground::{GroundKind, GroundSpot, attack_across_front};
 use crate::mapnet;
 use crate::placement;
 use crate::weapon_range::{
-    group_has_ground_attack_area, group_weapon_range, UNKNOWN_ARMOR_M, UNKNOWN_ARTILLERY_M,
+    UNKNOWN_ARMOR_M, UNKNOWN_ARTILLERY_M, group_has_ground_attack_area, group_weapon_range,
 };
 
 /// Same 500 ms stagger as the fighter-pack randomizer. 100 ms is too tight.
@@ -102,13 +102,7 @@ impl Default for ReconBuild {
     }
 }
 
-const WORLD_TYPES: &[&str] = &[
-    "Vehicle",
-    "Ship",
-    "Plane",
-    "Block",
-    "MCU_TR_Entity",
-];
+const WORLD_TYPES: &[&str] = &["Vehicle", "Ship", "Plane", "Block", "MCU_TR_Entity"];
 
 #[derive(Debug, Clone)]
 pub struct McuChoice {
@@ -338,7 +332,11 @@ fn looks_like_pack_here(root: &Il2Entity) -> bool {
     {
         return true;
     }
-    if root.children.iter().any(|c| c.name() == Some(RANDOMIZER_NAME)) {
+    if root
+        .children
+        .iter()
+        .any(|c| c.name() == Some(RANDOMIZER_NAME))
+    {
         return true;
     }
     let copies = top_level_copies(root);
@@ -596,13 +594,18 @@ pub fn generate_recon_ex(plans: &[ReconInput], build: ReconBuild) -> Result<Il2E
         if plan.copies == 0 {
             continue;
         }
-        let (ox, oz) = origins.next().unwrap_or((placement::MAP_MIN, placement::MAP_MIN));
+        let (ox, oz) = origins
+            .next()
+            .unwrap_or((placement::MAP_MIN, placement::MAP_MIN));
         for local in 0..plan.copies {
             let (mut clone, id_map) = duplicate_template(&plan.root, &mut next_id);
             crate::template::set_air_formation_density(&mut clone);
             let mut start = mission_begin_targets(&clone);
             if start.is_empty() {
-                if let Some(id) = clone.find_by_name("ENABLE / PULSE IN").and_then(|e| e.index) {
+                if let Some(id) = clone
+                    .find_by_name("ENABLE / PULSE IN")
+                    .and_then(|e| e.index)
+                {
                     start.push(id);
                 }
             }
@@ -949,20 +952,21 @@ pub fn park_army_mixed(
     let packed = pack_root_mut(root);
     let mut si = 0usize;
     let mut gi = 0usize;
-    let mut apply = |child: &mut Il2Entity, kind: crate::weapon_range::ArmyUnitKind, copy: &ArmyCopyInfo| {
-        if kind == crate::weapon_range::ArmyUnitKind::Ship {
-            if let Some(&(x, z, heading)) = ships.get(si) {
-                let delta = crate::placement::heading_delta(copy.heading, heading);
-                crate::placement::apply_group_heading(child, delta);
-                let from = child.first_xz().unwrap_or((0.0, 0.0));
-                crate::placement::move_anchor_to(child, from, (x, z));
-                si += 1;
+    let mut apply =
+        |child: &mut Il2Entity, kind: crate::weapon_range::ArmyUnitKind, copy: &ArmyCopyInfo| {
+            if kind == crate::weapon_range::ArmyUnitKind::Ship {
+                if let Some(&(x, z, heading)) = ships.get(si) {
+                    let delta = crate::placement::heading_delta(copy.heading, heading);
+                    crate::placement::apply_group_heading(child, delta);
+                    let from = child.first_xz().unwrap_or((0.0, 0.0));
+                    crate::placement::move_anchor_to(child, from, (x, z));
+                    si += 1;
+                }
+            } else if let Some(spot) = ground.get(gi) {
+                park_one_ground_copy_from(child, spot, copy);
+                gi += 1;
             }
-        } else if let Some(spot) = ground.get(gi) {
-            park_one_ground_copy_from(child, spot, copy);
-            gi += 1;
-        }
-    };
+        };
     if looks_like_pack_here(packed) && top_level_copies(packed).len() > 0 {
         let mut ci = 0usize;
         for child in &mut packed.children {
@@ -1119,9 +1123,7 @@ fn chains_from_type_percents(
         let idxs: Vec<usize> = copies
             .iter()
             .enumerate()
-            .filter(|(i, c)| {
-                !used[*i] && copy_type_name(c.name().unwrap_or("")) == *type_name
-            })
+            .filter(|(i, c)| !used[*i] && copy_type_name(c.name().unwrap_or("")) == *type_name)
             .map(|(i, _)| i)
             .collect();
         for &i in &idxs {
@@ -1270,22 +1272,14 @@ fn build_randomizer(
             if local + 1 < g {
                 let mut closer = match proto_deact {
                     Some(proto) => clone_named(proto, next_id, "Close_Remaining_Output(s)"),
-                    None => synthesize_mcu(
-                        "MCU_Deactivate",
-                        next_id,
-                        "Close_Remaining_Output(s)",
-                    ),
+                    None => synthesize_mcu("MCU_Deactivate", next_id, "Close_Remaining_Output(s)"),
                 };
                 closer.set_objects(vec![]);
                 set_pos(&mut closer, gx + dx, gy, gz + dz + 45.0);
                 closers.push(closer);
             }
 
-            let mut delete_tmr = clone_named(
-                proto_timer,
-                next_id,
-                &format!("Delete unused {n}"),
-            );
+            let mut delete_tmr = clone_named(proto_timer, next_id, &format!("Delete unused {n}"));
             delete_tmr.set_property("Time", format_time(delete_s));
             delete_tmr.set_property("Random", "100");
             delete_tmr.set_objects(vec![]);
@@ -1311,15 +1305,14 @@ fn build_randomizer(
         }
     }
 
-    let unwrap_mcu = |slots: Vec<Option<Il2Entity>>, kind: &str| -> Result<Vec<Il2Entity>, String> {
-        slots
-            .into_iter()
-            .enumerate()
-            .map(|(i, e)| {
-                e.ok_or_else(|| format!("copy {i} was not assigned a {kind} slot"))
-            })
-            .collect()
-    };
+    let unwrap_mcu =
+        |slots: Vec<Option<Il2Entity>>, kind: &str| -> Result<Vec<Il2Entity>, String> {
+            slots
+                .into_iter()
+                .enumerate()
+                .map(|(i, e)| e.ok_or_else(|| format!("copy {i} was not assigned a {kind} slot")))
+                .collect()
+        };
     let mut randoms = unwrap_mcu(randoms, "random")?;
     let mut outs = unwrap_mcu(outs, "out")?;
     let mut deletes = unwrap_mcu(deletes, "delete")?;
@@ -1392,8 +1385,7 @@ fn build_randomizer(
 /// Remove every `Recon Randomizer` group. Placed unit copies stay where they are.
 pub fn strip_randomizer(root: &mut Il2Entity) -> usize {
     let before = root.children.len();
-    root.children
-        .retain(|c| c.name() != Some(RANDOMIZER_NAME));
+    root.children.retain(|c| c.name() != Some(RANDOMIZER_NAME));
     let mut n = before - root.children.len();
     for child in &mut root.children {
         n += strip_randomizer(child);
@@ -1416,9 +1408,7 @@ pub fn restore_start_choices(root: &Il2Entity) -> Vec<RestoreChoice> {
         if name.is_empty() {
             return;
         }
-        let closer = e
-            .property("Closer")
-            .and_then(|v| v.parse::<i32>().ok());
+        let closer = e.property("Closer").and_then(|v| v.parse::<i32>().ok());
         by_id.push((index, e.block_type.clone(), name, e.targets.clone(), closer));
     });
     let closer_ids: std::collections::HashSet<i32> = by_id
@@ -1444,7 +1434,10 @@ pub fn restore_start_choices(root: &Il2Entity) -> Vec<RestoreChoice> {
                 .collect();
             let recommended = pulse || !linked.is_empty();
             let hint = if pulse && !linked.is_empty() {
-                format!("usual start — timer targets Closer checkzone \"{}\"", linked[0])
+                format!(
+                    "usual start — timer targets Closer checkzone \"{}\"",
+                    linked[0]
+                )
             } else if pulse {
                 "usual start timer (ENABLE / PULSE IN)".into()
             } else if !linked.is_empty() {
@@ -1799,10 +1792,8 @@ mod tests {
     }
 
     fn debug_group() -> Il2Entity {
-        parse_group_file(include_str!(
-            "../TemplateExamples/GroundUnits/Debug.Group"
-        ))
-        .expect("debug")
+        parse_group_file(include_str!("../TemplateExamples/GroundUnits/Debug.Group"))
+            .expect("debug")
     }
 
     fn tanks_with_path_waypoints() -> Il2Entity {
@@ -1854,7 +1845,10 @@ mod tests {
 
     #[test]
     fn allocate_splits_by_weight() {
-        assert_eq!(allocate_copies(&[1, 1, 1, 1, 1], 100), vec![20, 20, 20, 20, 20]);
+        assert_eq!(
+            allocate_copies(&[1, 1, 1, 1, 1], 100),
+            vec![20, 20, 20, 20, 20]
+        );
         assert_eq!(allocate_copies(&[50, 30, 20], 10), vec![5, 3, 2]);
         assert_eq!(allocate_copies(&[1, 0], 8), vec![8, 0]);
         let mix = allocate_mix(&[50, 50], 10, 50);
@@ -1954,7 +1948,10 @@ mod tests {
             .unwrap();
         assert!(out1.targets.contains(&keep));
         assert!(out1.targets.contains(&pulse.index.unwrap()));
-        assert!(!r1.targets.contains(&keep), "win goes through Out, then Close remaining");
+        assert!(
+            !r1.targets.contains(&keep),
+            "win goes through Out, then Close remaining"
+        );
         assert!(rnd.find_by_name("Random 1:50% 500ms").is_some());
         assert!(rnd.find_by_name("Pick 1:50%").is_none());
     }
@@ -2006,8 +2003,15 @@ mod tests {
             .find(|id| *id != out1.index.unwrap())
             .unwrap();
         let closer = find_index(rnd, closer_id).unwrap();
-        assert!(closer.targets.contains(&rnd.find_by_name("Out 5").unwrap().index.unwrap()));
-        assert_eq!(last.targets, vec![rnd.find_by_name("Out 5").unwrap().index.unwrap()]);
+        assert!(
+            closer
+                .targets
+                .contains(&rnd.find_by_name("Out 5").unwrap().index.unwrap())
+        );
+        assert_eq!(
+            last.targets,
+            vec![rnd.find_by_name("Out 5").unwrap().index.unwrap()]
+        );
     }
 
     #[test]
@@ -2046,20 +2050,18 @@ mod tests {
             }
         });
         assert!(subtitles >= 1);
-        assert!(out
-            .find_by_name("DPRK Forces - Static Truck Line [2]")
-            .is_some());
+        assert!(
+            out.find_by_name("DPRK Forces - Static Truck Line [2]")
+                .is_some()
+        );
         let text = serialize_group(&out);
         parse_group_file(&text).expect("reparse debug");
     }
 
     #[test]
     fn mixed_templates_unique_indexes() {
-        let out = generate_recon(
-            &[input("truck", truck(), 3), input("bm13", bm13(), 2)],
-            20,
-        )
-        .unwrap();
+        let out =
+            generate_recon(&[input("truck", truck(), 3), input("bm13", bm13(), 2)], 20).unwrap();
         assert!(out.find_by_name("DPRK Truck Run [1]").is_some());
         assert!(out.find_by_name("Russian BM13 Artillery [4]").is_some());
         let mut ids = Vec::new();
@@ -2085,11 +2087,8 @@ mod tests {
 
     #[test]
     fn each_template_gets_its_own_square() {
-        let out = generate_recon(
-            &[input("truck", truck(), 4), input("bm13", bm13(), 1)],
-            20,
-        )
-        .unwrap();
+        let out =
+            generate_recon(&[input("truck", truck(), 4), input("bm13", bm13(), 1)], 20).unwrap();
         let t1 = first_pos(out.find_by_name("DPRK Truck Run [1]").unwrap()).unwrap();
         let arty = first_pos(out.find_by_name("Russian BM13 Artillery [5]").unwrap()).unwrap();
         let origins = crate::placement::template_square_origins(&[4, 1]);
@@ -2164,11 +2163,15 @@ mod tests {
     fn restore_choices_prefer_timers_that_target_closer_zones() {
         let choices = restore_start_choices(&truck());
         assert!(
-            choices.iter().any(|c| c.name == "ENABLE / PULSE IN" && c.recommended),
+            choices
+                .iter()
+                .any(|c| c.name == "ENABLE / PULSE IN" && c.recommended),
             "ENABLE / PULSE IN should be recommended"
         );
         assert!(
-            choices.iter().any(|c| c.name == "Trigger Timer" && c.recommended),
+            choices
+                .iter()
+                .any(|c| c.name == "Trigger Timer" && c.recommended),
             "timer that targets a Closer checkzone should be recommended"
         );
         let zone = choices.iter().find(|c| c.name == "Zone IN").unwrap();
@@ -2189,7 +2192,11 @@ mod tests {
         assert!(pack.find_by_name(RANDOMIZER_NAME).is_none());
         assert_eq!(pack.name(), Some("Ground Units 2"));
         let copy = pack.find_by_name("DPRK Truck Run [1]").unwrap();
-        let pulse = copy.find_by_name("ENABLE / PULSE IN").unwrap().index.unwrap();
+        let pulse = copy
+            .find_by_name("ENABLE / PULSE IN")
+            .unwrap()
+            .index
+            .unwrap();
         let mut begins = 0;
         copy.for_each(&mut |e| {
             if e.block_type == "MCU_TR_MissionBegin" {
@@ -2262,18 +2269,19 @@ mod tests {
 
     #[test]
     fn inspect_biggroup_export_groups_types() {
-        let pack = parse_group_file(include_str!("../TemplateExamples/BigGroup.Group"))
-            .expect("BigGroup");
+        let pack =
+            parse_group_file(include_str!("../TemplateExamples/BigGroup.Group")).expect("BigGroup");
         let info = inspect_placed_pack(&pack).unwrap();
         assert_eq!(info.copy_count, 60);
         assert_eq!(placed_copy_count(&pack), 60);
         assert_eq!(info.name, "Random Ground Units 60");
         assert!(info.has_randomizer);
         assert!(info.types.iter().all(|t| !t.unit.checkzones.is_empty()));
-        assert!(info
-            .types
-            .iter()
-            .all(|t| !t.unit.suggested_triggers.is_empty()));
+        assert!(
+            info.types
+                .iter()
+                .all(|t| !t.unit.suggested_triggers.is_empty())
+        );
         let by_name = |n: &str| {
             info.types
                 .iter()
@@ -2294,16 +2302,20 @@ mod tests {
     #[test]
     fn combine_packs_merges_copies_and_skips_dropped_types() {
         let trucks = generate_recon(&[input("truck", truck(), 2)], 50).unwrap();
-        let mixed = generate_recon(
-            &[input("truck", truck(), 1), input("bm13", bm13(), 2)],
-            50,
-        )
-        .unwrap();
+        let mixed =
+            generate_recon(&[input("truck", truck(), 1), input("bm13", bm13(), 2)], 50).unwrap();
         let keep = vec!["DPRK Truck Run".into(), "Russian BM13 Artillery".into()];
         let out = combine_placed_packs(&[trucks, mixed.clone()], &keep).unwrap();
         assert_eq!(placed_copy_count(&out), 5);
         let info = inspect_placed_pack(&out).unwrap();
-        assert_eq!(info.types.iter().find(|t| t.name == "DPRK Truck Run").unwrap().copy_count, 3);
+        assert_eq!(
+            info.types
+                .iter()
+                .find(|t| t.name == "DPRK Truck Run")
+                .unwrap()
+                .copy_count,
+            3
+        );
         assert_eq!(
             info.types
                 .iter()
@@ -2326,22 +2338,30 @@ mod tests {
 
         let trucks_only = combine_placed_packs(&[mixed], &["DPRK Truck Run".into()]).unwrap();
         assert_eq!(placed_copy_count(&trucks_only), 1);
-        assert!(trucks_only.find_by_name("Russian BM13 Artillery [2]").is_none());
-        assert!(trucks_only.find_by_name("Russian BM13 Artillery [3]").is_none());
+        assert!(
+            trucks_only
+                .find_by_name("Russian BM13 Artillery [2]")
+                .is_none()
+        );
+        assert!(
+            trucks_only
+                .find_by_name("Russian BM13 Artillery [3]")
+                .is_none()
+        );
     }
 
     #[test]
     fn apply_typed_keeps_per_type_activate_ratio() {
-        let mut pack = generate_recon(
-            &[input("truck", truck(), 2), input("bm13", bm13(), 2)],
-            50,
-        )
-        .unwrap();
+        let mut pack =
+            generate_recon(&[input("truck", truck(), 2), input("bm13", bm13(), 2)], 50).unwrap();
         let types = vec![
             ("DPRK Truck Run".into(), 50_u32),
             ("Russian BM13 Artillery".into(), 100_u32),
         ];
-        assert_eq!(apply_randomizer_typed(&mut pack, &types, 0.0, 0.0).unwrap(), 4);
+        assert_eq!(
+            apply_randomizer_typed(&mut pack, &types, 0.0, 0.0).unwrap(),
+            4
+        );
         let rnd = pack.find_by_name(RANDOMIZER_NAME).unwrap();
         assert!(rnd.find_by_name("Random 1:50% 500ms").is_some());
         assert!(rnd.find_by_name("Random 3:100% 500ms").is_some());
@@ -2422,17 +2442,27 @@ mod tests {
     fn inspect_army_copies_classifies_template_and_pack() {
         let truck_info = inspect_army_copies(&truck());
         assert_eq!(truck_info.len(), 1);
-        assert_eq!(truck_info[0].kind, crate::weapon_range::ArmyUnitKind::Supply);
+        assert_eq!(
+            truck_info[0].kind,
+            crate::weapon_range::ArmyUnitKind::Supply
+        );
         assert!(truck_info[0].route.as_ref().is_some_and(|r| !r.rail));
 
         let arty_info = inspect_army_copies(&bm13());
         assert_eq!(arty_info.len(), 1);
-        assert_eq!(arty_info[0].kind, crate::weapon_range::ArmyUnitKind::Artillery);
+        assert_eq!(
+            arty_info[0].kind,
+            crate::weapon_range::ArmyUnitKind::Artillery
+        );
 
         let pack = generate_recon(&[input("truck", truck(), 2)], 50).unwrap();
         let copies = inspect_army_copies(&pack);
         assert_eq!(copies.len(), 2);
-        assert!(copies.iter().all(|c| c.kind == crate::weapon_range::ArmyUnitKind::Supply));
+        assert!(
+            copies
+                .iter()
+                .all(|c| c.kind == crate::weapon_range::ArmyUnitKind::Supply)
+        );
     }
 
     #[test]
@@ -2449,12 +2479,17 @@ mod tests {
             &[(110_000.0, 210_000.0), (120_000.0, 220_000.0)],
             &[0.0, 0.0],
         );
-        snap_army_attack_areas(
-            &mut pack,
-            &[Some((1.0, 2.0)), Some((3.0, 4.0))],
-        );
-        let a = pack.find_by_name("DPRK Truck Run [1]").unwrap().first_xz().unwrap();
-        let b = pack.find_by_name("DPRK Truck Run [2]").unwrap().first_xz().unwrap();
+        snap_army_attack_areas(&mut pack, &[Some((1.0, 2.0)), Some((3.0, 4.0))]);
+        let a = pack
+            .find_by_name("DPRK Truck Run [1]")
+            .unwrap()
+            .first_xz()
+            .unwrap();
+        let b = pack
+            .find_by_name("DPRK Truck Run [2]")
+            .unwrap()
+            .first_xz()
+            .unwrap();
         assert!((a.0 - 110_000.0).abs() < 1.0);
         assert!((b.0 - 120_000.0).abs() < 1.0);
     }
@@ -2465,14 +2500,7 @@ mod tests {
         let front = vec![(140_000.0, 80_000.0), (140_000.0, 220_000.0)];
         let from = (145_000.0, 150_000.0);
         let heading = 180.0;
-        let spot = GroundSpot::at(
-            from.0,
-            from.1,
-            true,
-            heading,
-            GroundKind::Artillery,
-            None,
-        );
+        let spot = GroundSpot::at(from.0, from.1, true, heading, GroundKind::Artillery, None);
         park_army_group(&mut tmpl, &[from], &[heading]);
         snap_placed_attack_areas(&mut tmpl, &[spot], &front, true);
         let mut area_xz = None;
@@ -2502,14 +2530,7 @@ mod tests {
         assert_eq!(copies.len(), 1);
         assert_eq!(copies[0].wp_ahead.len(), 2);
 
-        let mut spot = GroundSpot::at(
-            145_000.0,
-            150_000.0,
-            true,
-            180.0,
-            GroundKind::Armor,
-            None,
-        );
+        let mut spot = GroundSpot::at(145_000.0, 150_000.0, true, 180.0, GroundKind::Armor, None);
         spot.wp_ahead = dists;
         spot.waypoints = vec![(141_000.0, 150_000.0), (137_000.0, 150_000.0)];
         park_army_group_spots(&mut tmpl, &[spot]);

@@ -29,21 +29,14 @@ const ID_POINTER_KEYS: &[&str] = &["LinkTrId", "MisObjID", "TarId", "CmdId"];
 
 /// Recursively clone `template`, assigning sequentially higher unique integers
 /// to every `Index`. Returns the clone and a map of old Index → new Index.
-pub fn reallocate_ids(
-    template: &Il2Entity,
-    next_id: &mut i32,
-) -> (Il2Entity, HashMap<i32, i32>) {
+pub fn reallocate_ids(template: &Il2Entity, next_id: &mut i32) -> (Il2Entity, HashMap<i32, i32>) {
     let mut map = HashMap::new();
     let mut clone = template.clone();
     reallocate_recursive(&mut clone, next_id, &mut map);
     (clone, map)
 }
 
-fn reallocate_recursive(
-    entity: &mut Il2Entity,
-    next_id: &mut i32,
-    map: &mut HashMap<i32, i32>,
-) {
+fn reallocate_recursive(entity: &mut Il2Entity, next_id: &mut i32, map: &mut HashMap<i32, i32>) {
     if let Some(old) = entity.index {
         let new = *next_id;
         *next_id += 1;
@@ -137,9 +130,7 @@ pub fn generate_groups(template: &Il2Entity, count: usize) -> Il2Entity {
 
 /// Apply GUI overrides: `Country` on Plane/Vehicle, Script/Model on Plane.
 pub fn apply_overrides(entity: &mut Il2Entity, aircraft_asset_path: &str, coalition: i32) {
-    if entity.block_type == "Plane"
-        || entity.block_type == "Vehicle"
-        || entity.block_type == "Ship"
+    if entity.block_type == "Plane" || entity.block_type == "Vehicle" || entity.block_type == "Ship"
     {
         entity.set_property("Country", coalition.to_string());
     }
@@ -312,7 +303,10 @@ mod tests {
             }
         }
         collect(&out, &mut seen);
-        assert!(seen.values().all(|&n| n == 1), "Indexes must be unique: {seen:?}");
+        assert!(
+            seen.values().all(|&n| n == 1),
+            "Indexes must be unique: {seen:?}"
+        );
     }
 
     #[test]

@@ -85,8 +85,10 @@ pub fn install_fonts(ctx: &egui::Context) {
     );
     fonts.font_data.insert(
         "barlow_condensed".into(),
-        FontData::from_static(include_bytes!("../assets/fonts/BarlowCondensed-SemiBold.ttf"))
-            .into(),
+        FontData::from_static(include_bytes!(
+            "../assets/fonts/BarlowCondensed-SemiBold.ttf"
+        ))
+        .into(),
     );
     // Barlow first; egui's defaults stay behind it for symbols (⚠ ▶ ▼ ✔). ✓ and ✗ are in none of them; ui_tests checks every glyph the UI uses.
     // Hack (egui's monospace) goes last: it is the only bundled font with

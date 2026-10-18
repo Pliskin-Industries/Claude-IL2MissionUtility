@@ -360,26 +360,11 @@ mod tests {
             range_for_script("LuaScripts\\WorldObjects\\fixedobjects\\m2a1-105mm.txt"),
             Some(11_430.0)
         );
-        assert_eq!(
-            range_for_script("fixedobjects\\m30.txt"),
-            Some(11_800.0)
-        );
-        assert_eq!(
-            range_for_script("fixedobjects\\m30-mortar.txt"),
-            None
-        );
-        assert_eq!(
-            range_for_script("vehicles\\t34-85.txt"),
-            Some(1_500.0)
-        );
-        assert_eq!(
-            range_for_script("fixedobjects\\dshk.txt"),
-            Some(2_000.0)
-        );
-        assert_eq!(
-            range_for_script("vehicles\\studebakerus6.txt"),
-            None
-        );
+        assert_eq!(range_for_script("fixedobjects\\m30.txt"), Some(11_800.0));
+        assert_eq!(range_for_script("fixedobjects\\m30-mortar.txt"), None);
+        assert_eq!(range_for_script("vehicles\\t34-85.txt"), Some(1_500.0));
+        assert_eq!(range_for_script("fixedobjects\\dshk.txt"), Some(2_000.0));
+        assert_eq!(range_for_script("vehicles\\studebakerus6.txt"), None);
     }
 
     #[test]
@@ -396,8 +381,14 @@ mod tests {
 
     #[test]
     fn mg_attack_area_shrinks_to_effective_range() {
-        assert_eq!(attack_area_radius_m("fixedobjects\\dshk.txt", 3000.0), 2000.0);
-        assert_eq!(attack_area_radius_m("fixedobjects\\ml20.txt", 3000.0), 3000.0);
+        assert_eq!(
+            attack_area_radius_m("fixedobjects\\dshk.txt", 3000.0),
+            2000.0
+        );
+        assert_eq!(
+            attack_area_radius_m("fixedobjects\\ml20.txt", 3000.0),
+            3000.0
+        );
         assert_eq!(
             attack_area_radius_m("fixedobjects\\squad-mg-1950-dprk.txt", 3000.0),
             1000.0

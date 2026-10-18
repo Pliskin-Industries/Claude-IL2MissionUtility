@@ -16,6 +16,7 @@
 //!
 //! ## Public API
 //! * `apply_terrain_heights(&mut Il2Entity, &HeightStore) -> ApplyReport`
+//! * `ground_placement_y` — that same ground-unit Y at one X/Z
 //! * `ApplyReport` (`summary`), `Unmeasured`, `UnitKind`, `ON_GROUND_TOLERANCE_M`
 //!
 //! ## Used by
@@ -25,7 +26,7 @@
 use std::collections::HashMap;
 
 use crate::ast::Il2Entity;
-use crate::terrain::{ground_margin_m, parked_plane_margin_m, HeightStore};
+use crate::terrain::{HeightStore, ground_margin_m, parked_plane_margin_m};
 
 /// Within this of the measured ground a unit counts as already on it.
 pub const ON_GROUND_TOLERANCE_M: f64 = 5.0;
@@ -42,8 +43,11 @@ impl UnitKind {
         match e.block_type.as_str() {
             "Vehicle" | "Train" => Some(Self::Ground),
             "Ship" => Some(Self::Ship),
-            "Plane" => matches!(e.property("StartType").map(str::trim), Some("1" | "2" | "3"))
-                .then_some(Self::ParkedPlane),
+            "Plane" => matches!(
+                e.property("StartType").map(str::trim),
+                Some("1" | "2" | "3")
+            )
+            .then_some(Self::ParkedPlane),
             _ => None,
         }
     }
@@ -81,7 +85,8 @@ pub struct ApplyReport {
 
 impl ApplyReport {
     pub fn touched_anything(&self) -> bool {
-        self.placed + self.already_on_ground + self.ships + self.waypoints + self.unmeasured.len() > 0
+        self.placed + self.already_on_ground + self.ships + self.waypoints + self.unmeasured.len()
+            > 0
     }
 
     /// One status-bar sentence, e.g. "Terrain: 12 units placed on the ground,
@@ -105,7 +110,11 @@ impl ApplyReport {
                 .take(3)
                 .map(|u| format!("{} {}", u.kind.label(), u.name))
                 .collect();
-            let more = if self.unmeasured.len() > 3 { ", …" } else { "" };
+            let more = if self.unmeasured.len() > 3 {
+                ", …"
+            } else {
+                ""
+            };
             s.push_str(&format!(
                 "; {} outside measured terrain kept their height — snap them in the editor ({}{more})",
                 self.unmeasured.len(),
@@ -122,7 +131,18 @@ fn num(e: &Il2Entity, key: &str) -> Option<f64> {
 }
 
 fn link_id(e: &Il2Entity) -> Option<i32> {
-    e.property("LinkTrId")?.trim().parse().ok().filter(|&id| id > 0)
+    e.property("LinkTrId")?
+        .trim()
+        .parse()
+        .ok()
+        .filter(|&id| id > 0)
+}
+
+/// Y [`apply_terrain_heights`] writes for a ground unit at (x, z): the
+/// measured height plus the same margin. `None` when that ground is not
+/// measured closely enough to place a unit.
+pub fn ground_placement_y(store: &HeightStore, x: f64, z: f64) -> Option<f64> {
+    target_y(store, UnitKind::Ground, x, z).map(|(_ground, target)| target)
 }
 
 /// Ground height + margin for `kind` at (x, z), or `None` if not measured
@@ -155,15 +175,24 @@ pub fn apply_terrain_heights(root: &mut Il2Entity, store: &HeightStore) -> Apply
     // units: new Y, and how far each moved (for its entity)
     let mut shift: HashMap<i32, f64> = HashMap::new();
     root.for_each_mut(&mut |e| {
-        let Some(kind) = e.index.and_then(|i| kinds.get(&i).copied()) else { return };
-        let (Some(x), Some(y), Some(z)) = (num(e, "XPos"), num(e, "YPos"), num(e, "ZPos")) else { return };
+        let Some(kind) = e.index.and_then(|i| kinds.get(&i).copied()) else {
+            return;
+        };
+        let (Some(x), Some(y), Some(z)) = (num(e, "XPos"), num(e, "YPos"), num(e, "ZPos")) else {
+            return;
+        };
         let new_y = match (kind, target_y(store, kind, x, z)) {
             (UnitKind::Ship, _) => {
                 rep.ships += 1;
                 0.0
             }
             (_, None) => {
-                rep.unmeasured.push(Unmeasured { kind, name: e.name().unwrap_or("").to_string(), x, z });
+                rep.unmeasured.push(Unmeasured {
+                    kind,
+                    name: e.name().unwrap_or("").to_string(),
+                    x,
+                    z,
+                });
                 return;
             }
             (_, Some((ground, target))) => {
@@ -189,13 +218,20 @@ pub fn apply_terrain_heights(root: &mut Il2Entity, store: &HeightStore) -> Apply
         .collect();
     root.for_each_mut(&mut |e| match e.block_type.as_str() {
         "MCU_TR_Entity" => {
-            let moved = e.index.and_then(|i| owner.get(&i)).and_then(|u| shift.get(u)).copied();
+            let moved = e
+                .index
+                .and_then(|i| owner.get(&i))
+                .and_then(|u| shift.get(u))
+                .copied();
             if let (Some(d), Some(y)) = (moved, num(e, "YPos")) {
                 e.set_ypos(y + d);
             }
         }
         "MCU_Waypoint" if e.objects.iter().any(|o| ground_entities.contains(o)) => {
-            let (Some(x), Some(y), Some(z)) = (num(e, "XPos"), num(e, "YPos"), num(e, "ZPos")) else { return };
+            let (Some(x), Some(y), Some(z)) = (num(e, "XPos"), num(e, "YPos"), num(e, "ZPos"))
+            else {
+                return;
+            };
             if let Some((ground, target)) = target_y(store, UnitKind::Ground, x, z)
                 && (y - ground).abs() > ON_GROUND_TOLERANCE_M
             {
@@ -213,7 +249,7 @@ mod tests {
     use super::*;
     use crate::parser::parse_group_file;
     use crate::serialize::serialize_group;
-    use crate::terrain::{KOREA_MAP_ID, DEFAULT_GROUND_MARGIN_M, DEFAULT_PARKED_PLANE_MARGIN_M};
+    use crate::terrain::{DEFAULT_GROUND_MARGIN_M, DEFAULT_PARKED_PLANE_MARGIN_M, KOREA_MAP_ID};
 
     /// 100 m cells around X 390,000–390,500 / Z 362,000–362,500, all at 400 m,
     /// except a hill node; nothing measured further away.
@@ -234,39 +270,87 @@ mod tests {
     }
 
     fn group(children: &[String]) -> Il2Entity {
-        let text = format!("Group\r\n{{\r\n  Name = \"G\";\r\n  Index = 1;\r\n{}}}\r\n", children.concat());
+        let text = format!(
+            "Group\r\n{{\r\n  Name = \"G\";\r\n  Index = 1;\r\n{}}}\r\n",
+            children.concat()
+        );
         parse_group_file(&text).unwrap()
     }
 
     fn y(root: &Il2Entity, name: &str) -> f64 {
-        root.find_by_name(name).unwrap().property("YPos").unwrap().parse().unwrap()
+        root.find_by_name(name)
+            .unwrap()
+            .property("YPos")
+            .unwrap()
+            .parse()
+            .unwrap()
     }
 
     #[test]
     fn places_ground_units_parked_planes_and_ships() {
         let mut root = group(&[
-            block("Vehicle", 10, "Tank", 390_150.0, 15.26, 362_250.0, "    LinkTrId = 11;\r\n"),
-            block("MCU_TR_Entity", 11, "Tank entity", 390_150.0, 15.46, 362_250.0, "    MisObjID = 10;\r\n"),
-            block("Plane", 12, "Parked", 390_250.0, 0.0, 362_350.0, "    StartType = 2;\r\n"),
-            block("Plane", 13, "Airborne", 390_250.0, 1500.0, 362_350.0, "    StartType = 0;\r\n"),
+            block(
+                "Vehicle",
+                10,
+                "Tank",
+                390_150.0,
+                15.26,
+                362_250.0,
+                "    LinkTrId = 11;\r\n",
+            ),
+            block(
+                "MCU_TR_Entity",
+                11,
+                "Tank entity",
+                390_150.0,
+                15.46,
+                362_250.0,
+                "    MisObjID = 10;\r\n",
+            ),
+            block(
+                "Plane",
+                12,
+                "Parked",
+                390_250.0,
+                0.0,
+                362_350.0,
+                "    StartType = 2;\r\n",
+            ),
+            block(
+                "Plane",
+                13,
+                "Airborne",
+                390_250.0,
+                1500.0,
+                362_350.0,
+                "    StartType = 0;\r\n",
+            ),
             block("Ship", 14, "Boat", 390_250.0, 3.0, 362_350.0, ""),
             block("Block", 15, "House", 390_250.0, -2.526, 362_350.0, ""),
         ]);
         let rep = apply_terrain_heights(&mut root, &store());
         assert_eq!(y(&root, "Tank"), 400.0 + DEFAULT_GROUND_MARGIN_M);
-        assert!((y(&root, "Tank entity") - (400.2 + DEFAULT_GROUND_MARGIN_M)).abs() < 1e-6, "entity keeps its 0.2 m offset");
+        assert!(
+            (y(&root, "Tank entity") - (400.2 + DEFAULT_GROUND_MARGIN_M)).abs() < 1e-6,
+            "entity keeps its 0.2 m offset"
+        );
         assert_eq!(y(&root, "Parked"), 400.0 + DEFAULT_PARKED_PLANE_MARGIN_M);
         assert_eq!(y(&root, "Airborne"), 1500.0, "airborne planes untouched");
         assert_eq!(y(&root, "Boat"), 0.0);
         assert_eq!(y(&root, "House"), -2.526, "static objects untouched");
         assert_eq!((rep.placed, rep.ships, rep.already_on_ground), (2, 1, 0));
         assert!(rep.unmeasured.is_empty());
-        assert!(rep.summary().starts_with("Terrain: 2 unit(s) placed on the ground"));
+        assert!(
+            rep.summary()
+                .starts_with("Terrain: 2 unit(s) placed on the ground")
+        );
     }
 
     #[test]
     fn keeps_units_already_on_the_ground() {
-        let mut root = group(&[block("Vehicle", 10, "Snapped", 390_150.0, 403.2, 362_250.0, "")]);
+        let mut root = group(&[block(
+            "Vehicle", 10, "Snapped", 390_150.0, 403.2, 362_250.0, "",
+        )]);
         let rep = apply_terrain_heights(&mut root, &store());
         assert_eq!(y(&root, "Snapped"), 403.2);
         assert_eq!((rep.placed, rep.already_on_ground), (0, 1));
@@ -276,12 +360,23 @@ mod tests {
     fn unmeasured_units_keep_their_height_and_are_listed() {
         let mut root = group(&[
             block("Vehicle", 10, "Far tank", 250_000.0, 15.0, 250_000.0, ""),
-            block("Plane", 11, "Far plane", 250_000.0, 0.0, 250_000.0, "    StartType = 1;\r\n"),
+            block(
+                "Plane",
+                11,
+                "Far plane",
+                250_000.0,
+                0.0,
+                250_000.0,
+                "    StartType = 1;\r\n",
+            ),
         ]);
         let rep = apply_terrain_heights(&mut root, &store());
         assert_eq!(y(&root, "Far tank"), 15.0);
         assert_eq!(rep.unmeasured.len(), 2);
-        assert!(rep.summary().contains("2 outside measured terrain kept their height"));
+        assert!(
+            rep.summary()
+                .contains("2 outside measured terrain kept their height")
+        );
         assert!(rep.summary().contains("ground unit Far tank"));
     }
 
@@ -300,13 +395,53 @@ mod tests {
     #[test]
     fn ground_waypoints_follow_and_air_waypoints_do_not() {
         let wp = |idx: i32, name: &str, obj: i32| {
-            block("MCU_Waypoint", idx, name, 390_350.0, 0.0, 362_150.0, &format!("    Objects = [{obj}];\r\n"))
+            block(
+                "MCU_Waypoint",
+                idx,
+                name,
+                390_350.0,
+                0.0,
+                362_150.0,
+                &format!("    Objects = [{obj}];\r\n"),
+            )
         };
         let mut root = group(&[
-            block("Vehicle", 10, "Tank", 390_150.0, 15.0, 362_250.0, "    LinkTrId = 11;\r\n"),
-            block("MCU_TR_Entity", 11, "Tank entity", 390_150.0, 15.2, 362_250.0, ""),
-            block("Plane", 12, "Fighter", 390_250.0, 1500.0, 362_350.0, "    StartType = 0;\r\n    LinkTrId = 13;\r\n"),
-            block("MCU_TR_Entity", 13, "Fighter entity", 390_250.0, 1500.2, 362_350.0, ""),
+            block(
+                "Vehicle",
+                10,
+                "Tank",
+                390_150.0,
+                15.0,
+                362_250.0,
+                "    LinkTrId = 11;\r\n",
+            ),
+            block(
+                "MCU_TR_Entity",
+                11,
+                "Tank entity",
+                390_150.0,
+                15.2,
+                362_250.0,
+                "",
+            ),
+            block(
+                "Plane",
+                12,
+                "Fighter",
+                390_250.0,
+                1500.0,
+                362_350.0,
+                "    StartType = 0;\r\n    LinkTrId = 13;\r\n",
+            ),
+            block(
+                "MCU_TR_Entity",
+                13,
+                "Fighter entity",
+                390_250.0,
+                1500.2,
+                362_350.0,
+                "",
+            ),
             wp(20, "WP ground", 11),
             wp(21, "WP air", 13),
         ]);
@@ -320,8 +455,24 @@ mod tests {
     #[test]
     fn applying_twice_changes_nothing_more() {
         let mut root = group(&[
-            block("Vehicle", 10, "Tank", 390_150.0, 15.0, 362_250.0, "    LinkTrId = 11;\r\n"),
-            block("MCU_TR_Entity", 11, "Tank entity", 390_150.0, 15.2, 362_250.0, ""),
+            block(
+                "Vehicle",
+                10,
+                "Tank",
+                390_150.0,
+                15.0,
+                362_250.0,
+                "    LinkTrId = 11;\r\n",
+            ),
+            block(
+                "MCU_TR_Entity",
+                11,
+                "Tank entity",
+                390_150.0,
+                15.2,
+                362_250.0,
+                "",
+            ),
         ]);
         apply_terrain_heights(&mut root, &store());
         let once = serialize_group(&root);
@@ -343,7 +494,7 @@ mod tests {
 mod real_data {
     use super::*;
     use crate::parser::parse_il2_document;
-    use crate::terrain::{default_store_path, KOREA_MAP_ID};
+    use crate::terrain::{KOREA_MAP_ID, default_store_path};
 
     /// `cargo test --offline real_template -- --ignored --nocapture` (needs the
     /// user's store with the 0835 test grid).
@@ -351,7 +502,9 @@ mod real_data {
     #[ignore]
     fn real_template_on_measured_terrain() {
         let store = HeightStore::load(&default_store_path(), KOREA_MAP_ID).unwrap();
-        let text = std::fs::read_to_string("TemplateExamples/GroundUnits/DropIns/DPRK Tank Company.Group").unwrap();
+        let text =
+            std::fs::read_to_string("TemplateExamples/GroundUnits/DropIns/DPRK Tank Company.Group")
+                .unwrap();
         let mut root = parse_il2_document(&text).unwrap();
         let (x0, z0) = root.first_xz().unwrap();
         root.translate_xz(392_000.0 - x0, 376_000.0 - z0);
@@ -369,7 +522,10 @@ mod real_data {
         let mut v = Vec::new();
         root.for_each(&mut |e| {
             if let Some(y) = e.property("YPos") {
-                v.push((format!("{} {}", e.block_type, e.name().unwrap_or("")), y.to_string()));
+                v.push((
+                    format!("{} {}", e.block_type, e.name().unwrap_or("")),
+                    y.to_string(),
+                ));
             }
         });
         v

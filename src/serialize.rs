@@ -39,7 +39,6 @@
 //! fixtures, including the full parse → duplicate → override → serialize
 //! pipeline.
 
-
 use crate::ast::Il2Entity;
 
 const NEWLINE: &str = "\r\n";
@@ -120,7 +119,8 @@ mod tests {
 
     #[test]
     fn serialize_simple_group_formatting() {
-        let src = "Group\r\n{\r\n  Name = \"Truck Run\";\r\n  Index = 43322;\r\n  Desc = \"\";\r\n}\r\n";
+        let src =
+            "Group\r\n{\r\n  Name = \"Truck Run\";\r\n  Index = 43322;\r\n  Desc = \"\";\r\n}\r\n";
         let entity = parse_group_file(src).expect("parse");
         let out = serialize_group(&entity);
         assert_eq!(out, src);

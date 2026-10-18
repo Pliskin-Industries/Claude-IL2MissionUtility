@@ -29,12 +29,14 @@
 //! * `fn zone_in_radius` — Group 1 Zone IN radius (metres, default 16 km).
 //! * `fn group_anchor_xz` — world X/Z of a group's Zone IN (internal
 //!   parking; not called from ui.rs).
+//! * `fn is_linked_fighter_pack` / `fn linked_group_count` — a saved pack
+//!   has top-level `Group 1` and `NodeGates`; the count is how many
+//!   `Group N` children it places.
 //!
 //! ## Used by
 //! * ui.rs (Fighter Pack) — generate/export a linked pack from the configured template.
 //! * ui.rs (Map) — fighter packs at explicit positions (`generate_pack_at` + `park_rtbs`).
 //! * flights.rs tests — `builtin_template` + `generate_pack` round-trips.
-
 
 use crate::aircraft::linked_fighter_pack_name;
 use crate::ast::Il2Entity;
@@ -84,16 +86,42 @@ pub fn builtin_template() -> Result<Il2Entity, String> {
 #[allow(dead_code)]
 pub fn inspect_pack(root: &Il2Entity) -> Result<PackInfo, String> {
     let group1 = require_group(root, 1)?;
-    let gates = root
-        .children
-        .iter()
-        .find(|c| c.name() == Some("NodeGates"));
+    let gates = root.children.iter().find(|c| c.name() == Some("NodeGates"));
     Ok(PackInfo {
         existing_groups: count_named_groups(root),
         plane_count: group1.count_block_type("Plane"),
         spawn_choices: count_spawn_choices(group1),
         has_node_gates: gates.is_some(),
     })
+}
+
+/// `Group N`'s AttackArea as an offset from that group's Zone IN, plus the
+/// MCU `AttackArea` radius in metres.
+pub fn group_attack_orbit(root: &Il2Entity, slot: u32) -> Option<(f64, f64, f64)> {
+    let name = format!("Group {slot}");
+    let group = root
+        .children
+        .iter()
+        .find(|c| c.block_type == "Group" && c.name() == Some(name.as_str()))?;
+    let (ax, az) = group_anchor_xz(group);
+    let mut found = None;
+    group.for_each(&mut |e| {
+        if found.is_some() || e.block_type != "MCU_CMD_AttackArea" {
+            return;
+        }
+        let radius = e
+            .property("AttackArea")
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        if radius <= 0.0 {
+            return;
+        }
+        let Some((x, z)) = e.pos_xz() else {
+            return;
+        };
+        found = Some((x - ax, z - az, radius));
+    });
+    found
 }
 
 /// Radius of Group 1's `Zone IN` checkzone (metres). Defaults to 16 km.
@@ -159,16 +187,20 @@ fn first_plane_country(root: &Il2Entity) -> i32 {
 pub fn park_rtbs(pack: &mut Il2Entity, targets: &[(f64, f64)]) {
     for (i, &target) in targets.iter().enumerate() {
         let name = format!("RTB - {}", i + 1);
-        if let Some(wp) = pack.children.iter_mut().find(|c| {
-            c.block_type == "MCU_Waypoint" && c.name() == Some(name.as_str())
-        }) {
+        if let Some(wp) = pack
+            .children
+            .iter_mut()
+            .find(|c| c.block_type == "MCU_Waypoint" && c.name() == Some(name.as_str()))
+        {
             let from = wp.pos_xz().unwrap_or((0.0, 0.0));
             placement::move_anchor_to(wp, from, target);
         }
         let group_name = format!("Group {}", i + 1);
-        if let Some(group) = pack.children.iter_mut().find(|c| {
-            c.block_type == "Group" && c.name() == Some(group_name.as_str())
-        }) {
+        if let Some(group) = pack
+            .children
+            .iter_mut()
+            .find(|c| c.block_type == "Group" && c.name() == Some(group_name.as_str()))
+        {
             snap_rtb_flights(group, target);
         }
     }
@@ -177,7 +209,8 @@ pub fn park_rtbs(pack: &mut Il2Entity, targets: &[(f64, f64)]) {
 fn snap_rtb_flights(group: &mut Il2Entity, xz: (f64, f64)) {
     group.for_each_mut(&mut |e| {
         if e.block_type == "MCU_Waypoint"
-            && e.name().is_some_and(|n| n.starts_with("RTB Plane") || n.starts_with("RTB Flight"))
+            && e.name()
+                .is_some_and(|n| n.starts_with("RTB Plane") || n.starts_with("RTB Flight"))
         {
             let from = e.pos_xz().unwrap_or((0.0, 0.0));
             placement::move_anchor_to(e, from, xz);
@@ -289,7 +322,17 @@ fn require_rtb(root: &Il2Entity, n: usize) -> Result<&Il2Entity, String> {
         .ok_or_else(|| format!("template has no RTB - {n} waypoint"))
 }
 
-#[allow(dead_code)]
+/// Top-level `Group 1` plus `NodeGates`: a linked fighter pack, not a base map.
+pub fn is_linked_fighter_pack(root: &Il2Entity) -> bool {
+    root.children.iter().any(|c| c.name() == Some("Group 1"))
+        && root.children.iter().any(|c| c.name() == Some("NodeGates"))
+}
+
+/// How many `Group N` children a linked pack will place.
+pub fn linked_group_count(root: &Il2Entity) -> usize {
+    count_named_groups(root)
+}
+
 fn count_named_groups(root: &Il2Entity) -> usize {
     root.children
         .iter()
@@ -538,6 +581,14 @@ mod tests {
             }
         }
         assert_eq!(source, loaded, "loaded fighter pack must not change");
+    }
+
+    #[test]
+    fn group_1_attack_area_is_a_30km_orbit() {
+        let root = pack3();
+        let (dx, dz, r) = group_attack_orbit(&root, 1).expect("Group 1 AttackArea");
+        assert!((r - 30_000.0).abs() < 1.0, "radius {r}");
+        assert!(dx.abs() + dz.abs() > 1.0, "orbit is offset from Zone IN");
     }
 
     #[test]

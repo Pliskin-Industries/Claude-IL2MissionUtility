@@ -106,12 +106,8 @@ fn load_group_file(path: &Path, cat: &mut MapCatalog) -> Result<(), String> {
         if rest.is_empty() {
             break;
         }
-        let (next, entity) = parse_entity(rest).map_err(|err| {
-            format!(
-                "{}: parse error: {err}",
-                path.display()
-            )
-        })?;
+        let (next, entity) =
+            parse_entity(rest).map_err(|err| format!("{}: parse error: {err}", path.display()))?;
         let is_marks = entity.name() == Some("MARKS");
         let before = cat.points.len();
         collect_points(&entity, None, cat);

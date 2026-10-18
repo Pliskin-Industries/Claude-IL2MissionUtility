@@ -3,7 +3,11 @@
 //! Clones each loaded `.Group` as its own plan and wires a NodeGates mutex
 //! so one plan's trigger checkzones close the others; the chosen end timer
 //! (`END`, `MISSION END`, or a timer that pulses Delete/Deactivate on the
-//! template's units) reopens the remaining zones. Multiple `Zone IN` MCUs
+//! template's units) reopens the remaining zones. The same trigger starts a
+//! 3 hour `{n} WINDOW` in NodeGates. If the plan never finishes, that window
+//! pulses the end timer, which cleans the flight up and reopens the other
+//! plans. A normal finish deactivates the window so it cannot fire later.
+//! Multiple `Zone IN` MCUs
 //! in one template (B-29 corridor) count as a single plan. It does not
 //! author unit logic — templates come from Template Builder — and it does
 //! not configure aircraft (`flights` / Fighter Pack are a different mutex).
@@ -14,8 +18,9 @@
 //!   suggestions, cleanup/trigger warnings
 //! * `struct BomberInput` — one plan fed to the linker
 //! * `fn looks_like_exclusive_pack` / `fn extract_exclusive_plans`
-//! * `fn link_bomber_plans` / `fn link_bomber_plans_with` — `keep_positions`
-//!   skips the 10 km parking grid
+//! * `fn link_bomber_plans` / `fn link_bomber_plans_with` /
+//!   `fn link_bomber_plans_placing` — `keep_positions` skips the 10 km
+//!   parking grid; `place` runs after that park
 //! * `fn trigger_zone_warning` / `fn cleanup_coverage_warning`
 //!
 //! ## Used by
@@ -31,6 +36,8 @@ use crate::placement;
 /// Names the linker auto-selects. Use these in new templates to skip the picker.
 pub const SUGGESTED_TRIGGER_NAMES: &str = "Zone IN or MISSION START";
 pub const SUGGESTED_END_NAMES: &str = "END or MISSION END";
+/// An MP mission is built for a 3 hour window. The gate timer uses seconds.
+pub const MISSION_WINDOW_S: f64 = 3.0 * 60.0 * 60.0;
 
 #[derive(Debug, Clone)]
 pub struct McuChoice {
@@ -74,6 +81,10 @@ struct GateCell {
     fanout_disable: Il2Entity,
     open_zones: Il2Entity,
     close_zones: Il2Entity,
+    /// Starts when this plan triggers. Pulses the plan's end timer at 3 hours.
+    window: Il2Entity,
+    /// The end timer deactivates `window` so a finished plan cannot fire it later.
+    window_off: Il2Entity,
 }
 
 impl GateCell {
@@ -87,6 +98,8 @@ impl GateCell {
             self.fanout_disable,
             self.open_zones,
             self.close_zones,
+            self.window,
+            self.window_off,
         ]
     }
 }
@@ -244,19 +257,37 @@ pub fn link_bomber_plans_with(
     plans: &[BomberInput],
     keep_positions: bool,
 ) -> Result<Il2Entity, String> {
+    link_bomber_plans_placing(plans, keep_positions, &mut |_, _| {})
+}
+
+/// [`link_bomber_plans_with`], then `place` on each copy after the grid park.
+pub fn link_bomber_plans_placing(
+    plans: &[BomberInput],
+    keep_positions: bool,
+    place: &mut dyn FnMut(usize, &mut Il2Entity),
+) -> Result<Il2Entity, String> {
     if plans.is_empty() {
         return Err("add at least one template".into());
     }
     for (i, plan) in plans.iter().enumerate() {
         if plan.trigger_zone_ids.is_empty() {
-            return Err(format!("plan {} needs at least one trigger checkzone", i + 1));
+            return Err(format!(
+                "plan {} needs at least one trigger checkzone",
+                i + 1
+            ));
         }
         if find_index(&plan.root, plan.completion_timer_id).is_none() {
-            return Err(format!("plan {} end trigger timer was not found in the template", i + 1));
+            return Err(format!(
+                "plan {} end trigger timer was not found in the template",
+                i + 1
+            ));
         }
         for id in &plan.trigger_zone_ids {
             if find_index(&plan.root, *id).is_none() {
-                return Err(format!("plan {} checkzone {id} was not found in the template", i + 1));
+                return Err(format!(
+                    "plan {} checkzone {id} was not found in the template",
+                    i + 1
+                ));
             }
         }
     }
@@ -287,6 +318,7 @@ pub fn link_bomber_plans_with(
         if !keep_positions {
             placement::move_to_grid(&mut clone, i, plans.len());
         }
+        place(i, &mut clone);
         let base = plan.root.name().unwrap_or(plan.label.as_str());
         clone.set_name(&format!("{} [{}]", base, i + 1));
         let triggers: Vec<i32> = plan
@@ -331,17 +363,23 @@ pub fn link_bomber_plans_with(
         cells.push(cell);
     }
 
-    for (i, (plan, cell)) in copies.iter_mut().zip(cells.iter()).enumerate() {
+    for (i, (plan, cell)) in copies.iter_mut().zip(cells.iter_mut()).enumerate() {
         let out_disable = cell.out_disable.index.unwrap();
         let out_enable = cell.out_enable.index.unwrap();
+        let window = cell.window.index.unwrap();
+        let window_off = cell.window_off.index.unwrap();
         let triggers = &mapped_triggers[i];
         let completion = mapped_completion[i];
+        cell.window.set_targets(vec![completion]);
+        cell.window_off.set_targets(vec![window]);
         plan.for_each_mut(&mut |e| {
             if e.index.is_some_and(|id| triggers.contains(&id)) {
                 e.append_target(out_disable);
+                e.append_target(window);
             }
             if e.index == Some(completion) {
                 e.append_target(out_enable);
+                e.append_target(window_off);
             }
         });
     }
@@ -416,6 +454,20 @@ fn build_gate_cell(
     set_pos(&mut open_zones, x + dx, y, z + 40.0);
     set_pos(&mut close_zones, x + dx, y, z + 80.0);
 
+    let mut window = clone_named(proto_timer, next_id, &format!("{n} WINDOW"));
+    window.set_property("Time", format!("{:.0}", MISSION_WINDOW_S));
+    window.set_property("Random", "100");
+    window.set_targets(vec![]);
+    window.set_objects(vec![]);
+    set_pos(&mut window, x + dx, y, z + 120.0);
+    let mut window_off = match proto_deactivate {
+        Some(proto) => clone_named(proto, next_id, &format!("{n} WINDOW OFF")),
+        None => synthesize_mcu("MCU_Deactivate", next_id, &format!("{n} WINDOW OFF")),
+    };
+    window_off.set_targets(vec![]);
+    window_off.set_objects(vec![]);
+    set_pos(&mut window_off, x + dx, y, z + 160.0);
+
     Ok(GateCell {
         in_enable,
         in_disable,
@@ -425,6 +477,8 @@ fn build_gate_cell(
         fanout_disable,
         open_zones,
         close_zones,
+        window,
+        window_off,
     })
 }
 
@@ -506,10 +560,7 @@ fn is_start_zone_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("zone in") || name.eq_ignore_ascii_case("mission start")
 }
 
-fn trigger_warnings_for_zones(
-    root: &Il2Entity,
-    zones: &[McuChoice],
-) -> HashMap<i32, String> {
+fn trigger_warnings_for_zones(root: &Il2Entity, zones: &[McuChoice]) -> HashMap<i32, String> {
     let mut out = HashMap::new();
     for zone in zones {
         if let Some(msg) = trigger_zone_warning(root, zone.index) {
@@ -540,9 +591,7 @@ pub fn trigger_zone_warning(root: &Il2Entity, zone_id: i32) -> Option<String> {
     }
     let units = collect_world_units(root);
     if !units.is_empty() && !reaches_unit_activation(root, zone, &units) {
-        parts.push(
-            "does not reach an Activate or Spawner that lists units in this group.".into(),
-        );
+        parts.push("does not reach an Activate or Spawner that lists units in this group.".into());
     }
     if parts.is_empty() {
         None
@@ -618,10 +667,7 @@ fn starts_with_ignore_ascii(name: &str, prefix: &str) -> bool {
             .all(|(a, b)| a.eq_ignore_ascii_case(&b))
 }
 
-fn cleanup_warnings_for_timers(
-    root: &Il2Entity,
-    timers: &[McuChoice],
-) -> HashMap<i32, String> {
+fn cleanup_warnings_for_timers(root: &Il2Entity, timers: &[McuChoice]) -> HashMap<i32, String> {
     let mut out = HashMap::new();
     for timer in timers {
         if let Some(msg) = cleanup_coverage_warning(root, timer.index) {
@@ -745,7 +791,10 @@ struct WorldUnit {
 fn collect_world_units(root: &Il2Entity) -> Vec<WorldUnit> {
     let mut out = Vec::new();
     root.for_each(&mut |e| {
-        if !matches!(e.block_type.as_str(), "Vehicle" | "Ship" | "Plane" | "Train") {
+        if !matches!(
+            e.block_type.as_str(),
+            "Vehicle" | "Ship" | "Plane" | "Train"
+        ) {
             return;
         }
         let Some(index) = e.index else {
@@ -762,10 +811,7 @@ fn collect_world_units(root: &Il2Entity) -> Vec<WorldUnit> {
 }
 
 fn unit_is_covered(unit: &WorldUnit, objects: &HashSet<i32>) -> bool {
-    objects.contains(&unit.index)
-        || unit
-            .link_tr
-            .is_some_and(|id| objects.contains(&id))
+    objects.contains(&unit.index) || unit.link_tr.is_some_and(|id| objects.contains(&id))
 }
 
 fn cleanup_mcu_indexes(root: &Il2Entity) -> Vec<i32> {
@@ -777,9 +823,7 @@ fn cleanup_mcu_indexes(root: &Il2Entity) -> Vec<i32> {
     let mut ids = Vec::new();
     root.for_each(&mut |e| {
         let name = e.name().unwrap_or("");
-        let named = name == "Deactive ALL"
-            || name == "Deactivate ALL"
-            || name == "Trigger Delete";
+        let named = name == "Deactive ALL" || name == "Deactivate ALL" || name == "Trigger Delete";
         let points_at_units = e.objects.iter().any(|id| unit_ids.contains(id));
         let is_cleanup = e.block_type == "MCU_Delete"
             || (e.block_type == "MCU_Deactivate" && (named || points_at_units));
@@ -811,9 +855,7 @@ fn find_block<'a>(root: &'a Il2Entity, block_type: &str) -> Option<&'a Il2Entity
     if root.block_type == block_type {
         return Some(root);
     }
-    root.children
-        .iter()
-        .find_map(|c| find_block(c, block_type))
+    root.children.iter().find_map(|c| find_block(c, block_type))
 }
 
 fn find_block_any<'a>(plans: &'a [BomberInput], block_type: &str) -> Option<&'a Il2Entity> {
@@ -911,7 +953,10 @@ mod tests {
             .find(|z| z.name == "MISSION START")
             .unwrap();
         assert_eq!(info.suggested_triggers, vec![start.index]);
-        let end = info.timers.iter().find(|t| t.name.starts_with("MISSION CLEAN UP"));
+        let end = info
+            .timers
+            .iter()
+            .find(|t| t.name.starts_with("MISSION CLEAN UP"));
         assert_eq!(info.suggested_completion, end.map(|t| t.index));
         assert_eq!(info.plane_count, 8);
         assert!(
@@ -1148,7 +1193,10 @@ mod tests {
         let mut hit = 0;
         let mut missed = 0;
         for zone in all_named(&out, "Zone IN") {
-            if zone.targets.contains(&out.find_by_name("1OUT - DISABLE").unwrap().index.unwrap()) {
+            if zone
+                .targets
+                .contains(&out.find_by_name("1OUT - DISABLE").unwrap().index.unwrap())
+            {
                 hit += 1;
                 assert_eq!(zone.index, Some(gated));
             } else {
@@ -1193,8 +1241,36 @@ mod tests {
         });
         assert!(enable_fanout);
         assert!(disable_fanout);
-        assert!(out.find_by_name("DPRK Bombers - Small Formation [1]").is_some());
-        assert!(out.find_by_name("DPRK Bombers - Small Formation [2]").is_some());
+        assert!(
+            out.find_by_name("DPRK Bombers - Small Formation [1]")
+                .is_some()
+        );
+        assert!(
+            out.find_by_name("DPRK Bombers - Small Formation [2]")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn mission_window_is_three_hours_and_cancels_on_completion() {
+        let out = link_bomber_plans(&[input("dprk", dprk()), input("dprk", dprk())]).unwrap();
+        let gates = out.find_by_name("NodeGates").unwrap();
+        let window = gates.find_by_name("1 WINDOW").unwrap();
+        let off = gates.find_by_name("1 WINDOW OFF").unwrap();
+        assert_eq!(window.block_type, "MCU_Timer");
+        assert_eq!(window.property("Time"), Some("10800"));
+        assert_eq!(off.block_type, "MCU_Deactivate");
+        assert_eq!(off.targets, vec![window.index.unwrap()]);
+        let start = all_named(&out, "MISSION START")
+            .into_iter()
+            .find(|e| e.targets.contains(&window.index.unwrap()))
+            .expect("trigger starts the window");
+        let cleanup = all_named(&out, "MISSION CLEAN UP (2m)")
+            .into_iter()
+            .find(|e| e.targets.contains(&off.index.unwrap()))
+            .expect("completion cancels the window");
+        assert_eq!(window.targets, vec![cleanup.index.unwrap()]);
+        assert!(start.targets.contains(&window.index.unwrap()));
     }
 
     #[test]
@@ -1214,9 +1290,13 @@ mod tests {
         let end = out.find_by_name("END").unwrap();
         let out_en = gates.find_by_name("1OUT - ENABLE").unwrap().index.unwrap();
         assert!(end.targets.contains(&out_en));
-        assert!(out.find_by_name("END MISSION").unwrap().targets.iter().all(|t| {
-            *t != gates.find_by_name("2OUT - DISABLE").unwrap().index.unwrap()
-        }));
+        assert!(
+            out.find_by_name("END MISSION")
+                .unwrap()
+                .targets
+                .iter()
+                .all(|t| { *t != gates.find_by_name("2OUT - DISABLE").unwrap().index.unwrap() })
+        );
         let closer = gates.find_by_name("1 Close Zones").unwrap();
         assert_eq!(closer.targets.len(), 9);
         let opener = gates.find_by_name("2 Open Zones").unwrap();
@@ -1236,7 +1316,10 @@ mod tests {
         let set: HashSet<i32> = ids.iter().copied().collect();
         assert_eq!(ids.len(), set.len());
         assert!(out.find_by_name("B-29 XCountryFlight [1]").is_some());
-        assert!(out.find_by_name("DPRK Bombers - Small Formation [2]").is_some());
+        assert!(
+            out.find_by_name("DPRK Bombers - Small Formation [2]")
+                .is_some()
+        );
         assert!(out.find_by_name("B-29 XCountryFlight [3]").is_some());
         assert_eq!(all_named(&out, "Zone IN").len(), 18);
         let text = serialize_group(&out);
@@ -1291,11 +1374,7 @@ mod tests {
         b.translate_xz(55_000.0, 12_000.0);
         let (ax, az) = a.first_xz().unwrap();
         let (bx, bz) = b.first_xz().unwrap();
-        let out = link_bomber_plans_with(
-            &[input("a", a), input("b", b)],
-            true,
-        )
-        .unwrap();
+        let out = link_bomber_plans_with(&[input("a", a), input("b", b)], true).unwrap();
         let p1 = out
             .find_by_name("DPRK Bombers - Small Formation [1]")
             .unwrap()
@@ -1324,7 +1403,13 @@ mod tests {
             .map(|(i, root)| input(&format!("p{i}"), root))
             .collect();
         let out = link_bomber_plans_with(&inputs, true).unwrap();
-        assert_eq!(out.children.iter().filter(|c| c.block_type == "Group" && c.name() != Some("NodeGates")).count(), 2);
+        assert_eq!(
+            out.children
+                .iter()
+                .filter(|c| c.block_type == "Group" && c.name() != Some("NodeGates"))
+                .count(),
+            2
+        );
         assert!(out.find_by_name("2IN - ENABLE").is_some());
         assert!(out.find_by_name("B-29 XCountryFlight [2]").is_some());
     }

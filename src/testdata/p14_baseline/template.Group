@@ -672,7 +672,7 @@ Group
       XOri = 0;
       YOri = 0;
       ZOri = 0;
-      FormationType = 23;
+      FormationType = 8;
       FormationDensity = 1;
       FlightSize = 1;
       WaitForWingmen = 1;
