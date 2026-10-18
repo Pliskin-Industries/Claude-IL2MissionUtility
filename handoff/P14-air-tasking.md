@@ -931,6 +931,8 @@ Rules: presentation only. Build on `theme.rs` / `shell.rs`. Text at least 12 px,
 
 ### 6.1 Rail tab "Air Tasking" (7th, Ctrl 7)
 
+**Changed by decision 0024 (2026-10-18):** the tab adds entries itself (Add to pool, Auto-fill, plan logic in `airtask/pool.rs`), the pool table and slot timeline layout, an on/off column, Reset scope, the header label, a hard-stop helper, collapsible sections, and wiring to the real API before step 7. Mockup: `docs/ui-redesign/design/air-tasking-tab.html`. Decision 0025 adds upstream's air-group builders as a later step. Where this section and 0024 differ, 0024 wins.
+
 **Enum, arrays and exhaustive matches** (the compiler flags these; `ui.rs`, approximate lines at `bf1a356`):
 - `enum AppMode` (≈169) → add `AirTasking`.
 - `MODES: [(AppMode,&str); 6]` (≈184) → 7, add `(AppMode::AirTasking, "Air Tasking")`. Also update its doc comment.
@@ -1905,6 +1907,8 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 - `acceptance_mission_has_zone_entries_and_debug_subtitles`: the written mission has, per side, at least one `Zone` and one `Both` entry's `ZN*` cell, the clock and zone debug subtitles named in step 11, and `validate(acceptance_test_plan())` has exactly one D30 warning and no errors.
 
 ### Step 8. Air Tasking rail tab — M. Branch `claude/p14-ui-tab`
+
+**Built ahead of step 7 on `codex/p14-8` (decision 0024).** The tab lives in `src/ui/air.rs`; delegation prompt `handoff/P14-step-8-codex-prompt.md`. The 8b tests that need step 7 are ignored with `needs step 7`.
 
 **Files:** `src/ui.rs`, `src/shell.rs`, `src/help.rs`, `src/ui_tests.rs`, `USER_MANUAL.md` (stub section only).
 
