@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use super::threshold::{OBJECT_ENTERED, OBJECT_LEFT};
 use crate::ast::Il2Entity;
 use crate::template::{EntityEvent, read_event};
 
@@ -61,7 +62,18 @@ pub(crate) enum CheckZoneMode {
     Repeat,
 }
 
-/// These are hypotheses from the step 1b rule table, not game-engine claims.
+/// k1 of decision 0023 remains unflown pending probe 2J. ReportsInside evaluates
+/// at the next zone sample after activation. Silent seeds the inside set at
+/// activation, so only subsequent crossings report Entered. Mission load is an
+/// activation too, using the positions at tick zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum TriggerActivation {
+    #[default]
+    ReportsInside,
+    Silent,
+}
+
+/// Configurable hypotheses; use flown settings explicitly in builder tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct WalkerConfig {
     pub timer_retrigger: TimerRetrigger,                  // risk p
@@ -72,6 +84,7 @@ pub(crate) struct WalkerConfig {
     pub same_tick_delivery: SameTickDelivery,             // risk q
     pub reverse_targets: bool,                            // risk q
     pub check_zone: CheckZoneMode,                        // risks b, c, o
+    pub trigger_activation: TriggerActivation,            // k1, probe 2J
 }
 
 /// Names must be unique among indexed nodes. Use Index for repeated pack names.
@@ -95,10 +108,12 @@ impl From<i32> for WalkerNode {
 
 /// Samples are exactly one second apart. Before its first sample a track is
 /// absent; afterwards its last position is held, without interpolation or an
-/// implicit departure at the end of the script. Coalition IDs are the file IDs.
+/// implicit departure at the end of the script. All tracks are planes;
+/// coalition and country IDs are the file IDs.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ScriptedTrack {
     pub coalition: i32,
+    pub country: i32,
     pub samples: Vec<(Tick, f64, f64)>,
 }
 
@@ -147,6 +162,7 @@ struct NodeState {
     last_count: Option<Tick>,
     zone_armed: bool,
     last_zone_fire: Option<Tick>,
+    trigger_inside: BTreeSet<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -219,8 +235,10 @@ fn state_links(node: &Il2Entity) -> impl Iterator<Item = i32> + '_ {
 /// end of that tick's queue. DepthFirst descendants precede siblings; Batched
 /// descendants join the tail and Activate/Deactivate commit at tick end.
 /// Counts, resets and timer bookkeeping still accumulate in delivery order.
-/// Panics on invalid/ambiguous references, ComplexTrigger (step 12), or a
-/// million processed events (a bounded diagnostic for accidental cycles).
+/// Complex Triggers sample continuously without a pulse, and deliver Entered
+/// (58) and Left (60) through OnEvents once per crossing track, never Targets.
+/// Panics on invalid/ambiguous references or a million processed events
+/// (a bounded diagnostic for accidental cycles).
 pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) -> WalkerLog {
     assert_links_resolve(root);
     let nodes = indexed_nodes(root);
@@ -228,7 +246,6 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
         states: nodes
             .iter()
             .map(|(&id, node)| {
-                assert_ne!(node.block_type, "MCU_TR_ComplexTrigger", "step 12 only");
                 (
                     id,
                     NodeState {
@@ -305,6 +322,18 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
                 walker.positions[i] = Some(xz);
             }
         }
+        if t == 0 && config.trigger_activation == TriggerActivation::Silent {
+            let triggers: Vec<_> = walker
+                .nodes
+                .keys()
+                .copied()
+                .filter(|&id| walker.is_trigger(id) && walker.states[&id].active)
+                .collect();
+            for id in triggers {
+                let inside = walker.trigger_inside(id);
+                walker.states.get_mut(&id).expect("state link resolves").trigger_inside = inside;
+            }
+        }
         while let Some(event) = walker.pending.pop_front() {
             processed += 1;
             assert!(processed <= 1_000_000, "walker event limit at tick {t}");
@@ -332,6 +361,10 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
 }
 
 impl Walker<'_> {
+    fn is_trigger(&self, id: i32) -> bool {
+        self.nodes[&id].block_type == "MCU_TR_ComplexTrigger"
+    }
+
     fn resolve(&self, target: &WalkerNode) -> i32 {
         match target {
             WalkerNode::Index(id) => {
@@ -389,15 +422,25 @@ impl Walker<'_> {
     }
 
     fn switch(&mut self, id: i32, active: bool) {
+        let inside = (active
+            && !self.states[&id].active
+            && self.is_trigger(id)
+            && self.config.trigger_activation == TriggerActivation::Silent)
+            .then(|| self.trigger_inside(id));
         let state = self.states.get_mut(&id).expect("state link resolves");
         state.active = active;
+        if let Some(inside) = inside {
+            state.trigger_inside = inside;
+        }
         if !active {
             state.zone_armed = false;
+            state.trigger_inside.clear();
             if self.config.deactivate_running_timer == DeactivateRunningTimer::Cancels {
                 state.running.clear();
             }
         }
-        // Activation alone neither replays a dropped pulse nor pulses a zone.
+        // Activation neither replays a dropped pulse nor pulses a check zone.
+        // A Complex Trigger evaluates at its next sample, without a pulse.
     }
 
     fn roll(&mut self, percent: u32) -> bool {
@@ -434,12 +477,20 @@ impl Walker<'_> {
                 let checks = self
                     .nodes
                     .iter()
-                    .filter(|(_, n)| n.block_type == "MCU_CheckZone")
+                    .filter(|(id, node)| {
+                        node.block_type == "MCU_CheckZone" || self.is_trigger(**id)
+                    })
                     .map(|(&id, _)| WalkEvent::SampleZone(id))
                     .collect();
                 self.enqueue_now(checks);
             }
-            WalkEvent::SampleZone(id) => self.check_zone(id),
+            WalkEvent::SampleZone(id) => {
+                if self.is_trigger(id) {
+                    self.check_trigger(id);
+                } else {
+                    self.check_zone(id);
+                }
+            }
         }
     }
 
@@ -586,6 +637,81 @@ impl Walker<'_> {
             state.last_zone_fire = Some(self.now);
             self.fire(id);
         }
+    }
+
+    fn trigger_inside(&self, id: i32) -> BTreeSet<usize> {
+        let node = self.nodes[&id];
+        assert_eq!(
+            value(node, "Cylinder", 0),
+            1,
+            "Complex Trigger requires Cylinder = 1 because scripted tracks have no altitude"
+        );
+        if value(node, "CheckPlanes", 0) == 0 {
+            return BTreeSet::new();
+        }
+        let country: Option<i32> = node
+            .property("Country")
+            .map(|raw| raw.parse().expect("trigger Country must be an integer"));
+        let (x, z) = node.pos_xz().expect("trigger needs XPos/ZPos");
+        let radius: f64 = value(node, "Radius", 0.0);
+        assert!(
+            radius.is_finite() && radius >= 0.0,
+            "invalid trigger radius"
+        );
+        self.positions
+            .iter()
+            .zip(&self.input.tracks)
+            .enumerate()
+            .filter(|(_, (pos, track))| {
+                country.is_none_or(|country| track.country == country)
+                    && pos.is_some_and(|(px, pz)| {
+                        (px - x).powi(2) + (pz - z).powi(2) <= radius.powi(2)
+                    })
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    fn check_trigger(&mut self, id: i32) {
+        if !self.states[&id].active {
+            return;
+        }
+        let inside = self.trigger_inside(id);
+        let previous = std::mem::replace(
+            &mut self.states.get_mut(&id).expect("state link resolves").trigger_inside,
+            inside.clone(),
+        );
+        let changes = [
+            (OBJECT_ENTERED, inside.difference(&previous)),
+            (OBJECT_LEFT, previous.difference(&inside)),
+        ];
+        let node = self.nodes[&id];
+        let mut pulses = Vec::new();
+        for (event_type, tracks) in changes {
+            let mut targets: Vec<_> = node
+                .children
+                .iter()
+                .filter(|events| events.block_type == "OnEvents")
+                .flat_map(|events| &events.children)
+                .map(|event| read_event(event).expect("OnEvent needs Type and TarId"))
+                .filter(|&(kind, _)| kind == event_type)
+                .map(|(_, target)| {
+                    assert!(
+                        self.nodes.contains_key(&target),
+                        "trigger TarId {target} must resolve"
+                    );
+                    WalkEvent::Pulse(target)
+                })
+                .collect();
+            if self.config.reverse_targets {
+                targets.reverse();
+            }
+            for _ in tracks {
+                self.record(id);
+                pulses.extend(targets.iter().copied());
+            }
+        }
+        self.enqueue_now(pulses);
     }
 
     fn kill(&mut self, id: i32) {
@@ -769,6 +895,7 @@ mod walker_tests {
     fn track(coalition: i32, points: &[(f64, f64)]) -> ScriptedTrack {
         ScriptedTrack {
             coalition,
+            country: if coalition == 2 { 601 } else { 501 },
             samples: points
                 .iter()
                 .enumerate()
@@ -985,6 +1112,168 @@ mod walker_tests {
     fn zone(id: i32, name: &str, closer: bool) -> Il2Entity {
         let mut next = id;
         crate::template::checkzone(name, 100.0, closer, "[2]", &mut next, 0.0, 0.0)
+    }
+
+    fn trigger_tree(country: Option<i32>) -> Il2Entity {
+        let mut trigger = node("MCU_TR_ComplexTrigger", 1, "Trigger", &[4]);
+        trigger.set_property("Radius", "100");
+        trigger.set_property("Cylinder", "1");
+        trigger.set_property("CheckPlanes", "1");
+        if let Some(country) = country {
+            trigger.set_property("Country", country.to_string());
+        }
+        crate::template::attach_event(&mut trigger, OBJECT_ENTERED, 2);
+        crate::template::attach_event(&mut trigger, OBJECT_LEFT, 3);
+        tree(vec![
+            trigger,
+            timer(2, "Entered", "0", &[]),
+            timer(3, "Left", "0", &[]),
+            timer(4, "Targets must not fire", "0", &[]),
+            node("MCU_Deactivate", 5, "Off", &[1]),
+            node("MCU_Activate", 6, "On", &[1]),
+        ])
+    }
+
+    #[test]
+    fn walker_trigger_country_boundary_and_per_track_events() {
+        let root = trigger_tree(Some(601));
+        let outside = (101.0, 0.0);
+        let inside = (0.0, 0.0);
+        let points = [outside, (60.0, 80.0), inside, outside, inside];
+        let mut same_country_other_coalition = track(1, &points);
+        same_country_other_coalition.country = 601;
+        let mut ai = track(2, &[inside; 5]);
+        ai.country = 602;
+        let input = WalkerInput {
+            until: 4 * TICKS_PER_SECOND,
+            tracks: vec![
+                track(2, &points),
+                same_country_other_coalition,
+                ai,
+                track(1, &[inside; 5]),
+            ],
+            ..WalkerInput::default()
+        };
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            for reverse_targets in [false, true] {
+                let log = walk(
+                    &root,
+                    WalkerConfig {
+                        same_tick_delivery,
+                        reverse_targets,
+                        ..WalkerConfig::default()
+                    },
+                    &input,
+                );
+                assert_eq!(times(&log, 2), [20, 20, 80, 80]);
+                assert_eq!(times(&log, 3), [60, 60]);
+                assert_eq!(times(&log, 1), [20, 20, 60, 60, 80, 80]);
+                assert!(times(&log, 4).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn walker_trigger_unfiltered_and_planes_disabled() {
+        let mut root = trigger_tree(None);
+        let input = WalkerInput {
+            until: TICKS_PER_SECOND,
+            tracks: vec![track(1, &[(0.0, 0.0); 2]), track(2, &[(0.0, 0.0); 2])],
+            ..WalkerInput::default()
+        };
+        assert_eq!(
+            times(&walk(&root, WalkerConfig::default(), &input), 2),
+            [0, 0]
+        );
+        root.find_by_name_mut("Trigger")
+            .unwrap()
+            .set_property("CheckPlanes", "0");
+        assert!(
+            walk(&root, WalkerConfig::default(), &input)
+                .pulses
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn walker_trigger_activation_hypotheses_and_repeated_reactivation() {
+        let root = trigger_tree(Some(601));
+        let mut points = vec![(0.0, 0.0); 9];
+        points[7] = (101.0, 0.0);
+        let input = WalkerInput {
+            until: 8 * TICKS_PER_SECOND,
+            tracks: vec![track(2, &points)],
+            pulses: vec![
+                (10, 5.into()),
+                (30, 6.into()),
+                (50, 5.into()),
+                (70, 6.into()),
+            ],
+            ..WalkerInput::default()
+        };
+        for trigger_activation in [TriggerActivation::ReportsInside, TriggerActivation::Silent] {
+            for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+                let config = WalkerConfig {
+                    trigger_activation,
+                    same_tick_delivery,
+                    ..WalkerConfig::default()
+                };
+                let log = walk(&root, config, &input);
+                assert_eq!(
+                    times(&log, 2),
+                    if trigger_activation == TriggerActivation::ReportsInside {
+                        vec![0, 40, 80, 160]
+                    } else {
+                        vec![160]
+                    }
+                );
+                assert_eq!(times(&log, 3), [140]); // Turning off never reports Left.
+                assert!(times(&log, 4).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn walker_trigger_inactive_crossings_are_forgotten() {
+        let mut root = trigger_tree(Some(601));
+        root.find_by_name_mut("Trigger")
+            .unwrap()
+            .set_property("Enabled", "0");
+        let input = WalkerInput {
+            until: 5 * TICKS_PER_SECOND,
+            tracks: vec![track(
+                2,
+                &[
+                    (0.0, 0.0),
+                    (101.0, 0.0),
+                    (0.0, 0.0),
+                    (0.0, 0.0),
+                    (101.0, 0.0),
+                    (0.0, 0.0),
+                ],
+            )],
+            pulses: vec![(50, 6.into())],
+            ..WalkerInput::default()
+        };
+        for trigger_activation in [TriggerActivation::ReportsInside, TriggerActivation::Silent] {
+            for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+                let config = WalkerConfig {
+                    trigger_activation,
+                    same_tick_delivery,
+                    ..WalkerConfig::default()
+                };
+                let log = walk(&root, config, &input);
+                assert_eq!(
+                    times(&log, 2),
+                    if trigger_activation == TriggerActivation::ReportsInside {
+                        vec![60, 100]
+                    } else {
+                        vec![100]
+                    }
+                );
+                assert_eq!(times(&log, 3), [80]);
+            }
+        }
     }
 
     #[test]

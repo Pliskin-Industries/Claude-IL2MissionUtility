@@ -4899,6 +4899,7 @@ fn reflight_walk_input(root: &Il2Entity) -> super::testkit::WalkerInput {
             let target = world(cell.centre_km);
             input.tracks.push(ScriptedTrack {
                 coalition: TWO_B_TRACK_COALITION,
+                country: COUNTRY_DPRK,
                 // Deletion is modeled by moving the last sample outside the
                 // zone; the walker does not simulate aircraft existence.
                 samples: (enemy.activate_s as u32..=enemy.delete_s as u32).map(|second| {
@@ -6401,7 +6402,7 @@ fn flight2c_spawn_is_nato_and_cannot_trip_zones() {
         assert_eq!(zone.property("Closer"), Some("1"));
         assert_eq!(number(zone, "Zone"), 35_000.0);
         let (x, z) = zone.pos_xz().unwrap();
-        input.tracks.push(ScriptedTrack { coalition: 2, samples: vec![(ticks(0.0), x, z)] });
+        input.tracks.push(ScriptedTrack { coalition: 2, country: COUNTRY_USA, samples: vec![(ticks(0.0), x, z)] });
     }
     let log = walk(&root, WalkerConfig::default(), &input);
     for cell in ["C0a", "C0b", "C0c", "C1a", "C1b", "C1c", "C2a", "C2b", "C2c", "C3a", "C3b", "C3c"] {
