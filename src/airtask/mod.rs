@@ -254,13 +254,13 @@ impl Default for TotalsLimits {
 } // D36
 
 // Strategy enums (§8 step 0d table). The Default is the primary design.
-// ThresholdImpl::ComplexTrigger and CounterResetImpl are reserved for step 12 (§3.9); v1 builders accept only ZoneOnly.
+// ThresholdImpl::Counted and CounterResetImpl are reserved for step 12 (§3.9); v1 builders accept only OnePlayer.
 #[allow(dead_code)] // P14 step 12
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThresholdImpl {
     #[default]
-    ZoneOnly,
-    ComplexTrigger,
+    OnePlayer, // one Complex Trigger per area, N = 1 (decision 0023)
+    Counted, // N >= 2: trigger, counter and window (§3.9, step 12)
 }
 #[allow(dead_code)] // P14 step 12
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -303,9 +303,9 @@ pub enum CensusImpl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PresenceCheckImpl {
     #[default]
-    PulseInside,
-    Closer0Race,
-} // risk c
+    TriggerReactivate, // the area's Complex Trigger is switched on again (k1, probe 2J)
+    ZonePulse, // a pulsed coalition check zone at r_in (risk c, flight 1A)
+} // decision 0023
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Strategies {
