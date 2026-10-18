@@ -662,6 +662,8 @@ Run 2 lost nothing, but its Blue pair passed 8.5 m apart at 396.2 s, the wingman
 
 The game's log has no collision record: it shows only the losses and bail-outs. The evidence for contact is Tacview: attitude jumps of 80° to 90° within 0.4 s at the closest point, which no controlled aircraft can fly, followed by loss of control.
 
+**Server timing around the collisions (Tacview frame clock).** Tacview writes a frame every 0.2 s of game time; uneven steps (0.02 to 0.18 s) mark server hiccups, and at each one every aircraft's position jumps at once. Run 2 had 3 uneven steps (at the Yak deletion and the end). Runs 1 and 3 had 47 and 89, but **the first came at 417.8 s and 422.4 s, 20 to 25 s after the 396–397 s contacts**, and more followed the 637 s collision in run 3. Through every approach to a contact the frames are a steady 0.2 s, and no aircraft shows an abrupt step anywhere until the moment of contact. Reading: the hiccups follow the collisions (wrecks, bail-outs, deletions) and did not cause them; the in-flight overload message never showed. Not proven: a server under load could still degrade the AI's avoidance without showing either sign. Flight 2F's design should vary the aircraft count to settle this (script: `tools/p14/tacview_jumps.py <run dir>`).
+
 ### Spacing (Tacview)
 
 Distance from each aircraft to the nearest aircraft of its **own flight**, sampled once a second; phases are transit (before `WP 1`), descent (the next 180 s) and on station. "Under 20 m" counts aircraft-seconds. "Closest" is the once-a-second minimum, and for the Yaks the 0.2 s Tacview minimum. Script: `tools/p14/flight2e_spacing.py <run dir>` (the run's logs and its unzipped `.acmi`).
