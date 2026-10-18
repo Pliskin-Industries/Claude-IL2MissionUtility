@@ -193,7 +193,7 @@ fn generate_pack_ex(
 ) -> Result<Il2Entity, String> {
     let group_count = group_count.max(1);
     let mut group1 = require_group(root, 1)?.clone();
-    crate::template::set_safe_air_formations(&mut group1);
+    crate::template::set_air_formation_density(&mut group1);
     let waypoint1 = require_rtb(root, 1)?.clone();
     let node_gates = root
         .children

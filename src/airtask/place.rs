@@ -107,7 +107,7 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
     mapnet::park_path_waypoints(root, &vec![p.target; paths.len()]);
     // park_path_waypoints has a legacy RTB-name filter. The inspected ids also
     // handle renamed path/RTB nodes; existing RTBs are moved to p.rtb below.
-    template::set_safe_air_formations(root);
+    template::set_air_formation_density(root);
     root.for_each_mut(&mut |node| {
         if node
             .index

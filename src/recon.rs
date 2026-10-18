@@ -432,7 +432,7 @@ pub fn combine_placed_packs(
                 continue;
             }
             let (mut cloned, _) = duplicate_template(copy, &mut next_id);
-            crate::template::set_safe_air_formations(&mut cloned);
+            crate::template::set_air_formation_density(&mut cloned);
             copies.push(cloned);
         }
     }
@@ -599,7 +599,7 @@ pub fn generate_recon_ex(plans: &[ReconInput], build: ReconBuild) -> Result<Il2E
         let (ox, oz) = origins.next().unwrap_or((placement::MAP_MIN, placement::MAP_MIN));
         for local in 0..plan.copies {
             let (mut clone, id_map) = duplicate_template(&plan.root, &mut next_id);
-            crate::template::set_safe_air_formations(&mut clone);
+            crate::template::set_air_formation_density(&mut clone);
             let mut start = mission_begin_targets(&clone);
             if start.is_empty() {
                 if let Some(id) = clone.find_by_name("ENABLE / PULSE IN").and_then(|e| e.index) {

@@ -283,7 +283,7 @@ pub fn link_bomber_plans_with(
     let mut mapped_completion: Vec<i32> = Vec::with_capacity(plans.len());
     for (i, plan) in plans.iter().enumerate() {
         let (mut clone, id_map) = duplicate_template(&plan.root, &mut next_id);
-        crate::template::set_safe_air_formations(&mut clone);
+        crate::template::set_air_formation_density(&mut clone);
         if !keep_positions {
             placement::move_to_grid(&mut clone, i, plans.len());
         }

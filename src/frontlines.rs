@@ -2192,7 +2192,7 @@ fn place_ref_groups(
     let mut n = 0usize;
     for src in groups {
         let mut entity = src.entity.clone();
-        crate::template::set_safe_air_formations(&mut entity);
+        crate::template::set_air_formation_density(&mut entity);
         strip_catalog_waypoints(&mut entity);
         prune_to_aabb(&mut entity, place);
         if !spatially_relevant(&entity, place) {
@@ -2212,7 +2212,7 @@ where
     let mut out = Vec::new();
     for root in packs {
         let (mut clone, _) = duplicate_template(root, next_id);
-        crate::template::set_safe_air_formations(&mut clone);
+        crate::template::set_air_formation_density(&mut clone);
         out.push(clone);
     }
     out

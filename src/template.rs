@@ -695,7 +695,7 @@ pub fn formation_density(id: i32, kind: UnitKind) -> i32 {
 
 /// Apply decision 0019 to an output copy, identifying aircraft by entity links.
 /// Formation types alone do not identify the units commanded by a loaded group.
-pub fn set_safe_air_formations(root: &mut Il2Entity) {
+pub fn set_air_formation_density(root: &mut Il2Entity) {
     let mut plane_entities = HashSet::new();
     root.for_each(&mut |node| {
         if node.block_type != "Plane" {
@@ -6305,9 +6305,9 @@ mod tests {
             let mut expected = source.clone();
             expected.find_by_name_mut("Air formation").unwrap().set_property("FormationDensity", "1");
             let mut copy = source.clone();
-            set_safe_air_formations(&mut copy);
+            set_air_formation_density(&mut copy);
             assert_eq!(copy, expected, "source density {density}: only aircraft FormationDensity may change");
-            set_safe_air_formations(&mut copy);
+            set_air_formation_density(&mut copy);
             assert_eq!(copy, expected, "source density {density}: idempotent");
         }
     }

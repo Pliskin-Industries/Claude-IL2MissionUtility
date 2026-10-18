@@ -108,7 +108,7 @@ pub fn clean_airfield(
 ) -> Result<CleanReport, String> {
     let plan = plan_clean(root);
     let report = apply_plan(root, plan, plane_coalitions)?;
-    crate::template::set_safe_air_formations(root);
+    crate::template::set_air_formation_density(root);
     Ok(report)
 }
 
