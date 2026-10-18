@@ -162,6 +162,7 @@ fn library_item(root: &Il2Entity, source: SortieSource, id: String) -> Result<Ai
         wp_alt_m: shape.wp_alt_m,
         attack_time_s: shape.attack_time_s,
         valid,
+        category: String::new(), // decision 0029: filled by the category reader
         warnings,
     })
 }

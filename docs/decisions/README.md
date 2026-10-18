@@ -60,5 +60,6 @@ What this makes easier, harder or necessary.
 | [0022](0022-f51-armed-recon-at-loose.md) | Pairs at Loose does not hold for a covering pair: a flight flying a Cover order stays Safe | Accepted |
 | [0027](0027-air-tasking-rail-tab-design.md) | The Air Tasking rail tab (step 8): layout, adding entries, behaviour before step 7 | Accepted |
 | [0028](0028-upstream-air-groups-feed-the-pool.md) | Upstream's air-group builders feed the pool, as their own step after the upstream merge | Accepted |
+| [0029](0029-sortie-categories.md) | Sortie categories: a label in the template file, chosen by the user, and a pool filter | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

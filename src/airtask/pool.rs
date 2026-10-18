@@ -188,6 +188,7 @@ mod tests {
             wp_alt_m: 1500.0,
             attack_time_s: 600.0,
             valid: in_theatre::for_model("la11").unwrap().valid,
+            category: "Strike".into(),
             warnings: vec![],
         }
     }
