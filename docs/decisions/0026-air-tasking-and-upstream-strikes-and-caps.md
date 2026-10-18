@@ -1,4 +1,4 @@
-# 0024. Air Tasking schedules and budgets upstream's strikes and CAPs instead of placing its own
+# 0026. Air Tasking schedules and budgets upstream's strikes and CAPs instead of placing its own
 
 - **Status:** Proposed
 - **Date:** 2026-10-18
@@ -13,6 +13,8 @@ Upstream v0.7.0 (`eszyman/IL2MissionUtility`, commits `160619d` and `842d27c`) n
 - **Exclusive Activation:** a 3-hour `{n} WINDOW` per plan reopens the other plans if a plan never finishes.
 
 Air Tasking (P14, steps 1a to 3 merged) does the same job a different way: it copies one of the six built-in sorties (`TemplateExamples/Historical1950/`) onto a Map target, wraps it in its own shell (decisions 0017 and 0018: Zone IN as the "enemy seen" check, on-station time, `HOT` / `COLD` / `EXTEND`, its own Delete, losses on event 13) and limits how many sorties each side has alive (the budget, plan U20 and U22). The upstream issue text (`handoff/upstream-issue-draft.md`, last section) already offered the upstream author this direction.
+
+The user has since accepted the same direction in step 8's decision 'Upstream's air-group builders feed the Air Tasking pool' (codex/p14-8, to be numbered 0028); the user decides whether this record is superseded by it.
 
 So after the merge the app has two ways to put AI strikes and CAPs on Map targets, with different logic and no shared budget. STATE item 4 asks which one Air Tasking builds on.
 

@@ -92,7 +92,7 @@ Measured by recording every P14 baseline and running the flown-probe byte checks
 ## 7. Things to know before pushing
 
 - **Repository size:** upstream's history adds about 150 MB uncompressed: two old release executables (`IL2MissionUtility-v0.3-Alpha.exe`, `-v0.5-Alpha.exe`, about 51 MB each), the height grid (31 MB) and `References/_gen.Mission` (17 MB). A merge keeps them in our history even if they are deleted later. Every file is under GitHub's 100 MB limit.
-- **Decision number 0023 is taken** by the step 4 branch (`codex/p14-4`, `0023-step-4-threshold-one-complex-trigger-per-area.md`); the new Proposed record here is **0024**.
+- **Decision number 0023 is taken** by the step 4 branch (`codex/p14-4`, `0023-step-4-threshold-one-complex-trigger-per-area.md`); the new Proposed record here was first numbered 0024 and is **0026** (allocated by the coordinating session: `codex/p14-4` keeps 0023 to 0025, `codex/p14-8` takes 0027 and 0028). The merge commit `c3792eb` still says 0024 in its message.
 
 ## 7b. For the UI sessions (steps 8 and 9)
 
@@ -102,7 +102,7 @@ Measured by recording every P14 baseline and running the flown-probe byte checks
 
 ## 7c. Rules from the coordinating session (2026-10-18)
 
-- **Nothing goes to the upstream author** (no issues, comments, files, patches or PRs) until Air Tasking has a working concept and UI. Pulling and merging upstream's commits is fine. Decision 0024 stays in this repo; it is not an offer to upstream.
+- **Nothing goes to the upstream author** (no issues, comments, files, patches or PRs) until Air Tasking has a working concept and UI. Pulling and merging upstream's commits is fine. Decision 0026 stays in this repo; it is not an offer to upstream.
 - `STATE.md` is not changed on this branch; a refreshed version is on `claude/state-refresh-2026-10-18`.
 
 ## 8. Facts for STATE.md (for the coordinating session)
@@ -111,6 +111,6 @@ Measured by recording every P14 baseline and running the flown-probe byte checks
 - Decisions 0012, 0013, 0014 and 0016 are now also upstream's; ours kept, outputs identical. 0015 stays ours.
 - Template Builder writes Korea editor formation ids (upstream); 0019 to 0022 apply by formation type, with Column - Pairs (4) counted as Pairs. Unflown: ids 4, 5, 8.
 - Generate changes from the merge: `template.Group` one line, `exclusive.Group` the 3-hour window; nothing for Air Tasking or the flown probes.
-- New Proposed decision 0024 (Air Tasking and upstream's strikes and CAPs) replaces STATE "Waiting on the user" item 4.
+- New Proposed decision 0026 (Air Tasking and upstream's strikes and CAPs) replaces STATE "Waiting on the user" item 4.
 - Test line after the merge: 781 passed, 0 failed, 28 ignored; 82 build / 307 clippy warnings; 52 flown probe files byte-identical.
 - Game fact added to `docs/il2-loader-and-log-facts.md`: `FormationType` 19 and 20 fly as Pairs and Wedge on game 1.005 (flights 2D to 2I), although upstream lists 19 as "Reserved - 15" in the Korea editor's list.
