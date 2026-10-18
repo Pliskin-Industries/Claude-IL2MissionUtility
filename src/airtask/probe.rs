@@ -193,7 +193,7 @@ impl Flight {
 
     fn regenerates_flown_files(self) -> bool {
         match self {
-            Self::TwoJ | Self::Load => false,
+            Self::Load => false,
             _ => !self.is_frozen(),
         }
     }
@@ -6589,8 +6589,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     // excluded by 0018. The remaining flights use unchanged or frozen inputs.
     // 2F (flown 2026-10-17) and 2H (flown 2026-10-18) add four files each.
     // 0020/0022 remove 2E and 2G's eight files from the previous total of 56.
-    // 2I (flown 2026-10-18) adds four files.
-    assert_eq!(compared, 52);
+    // 2I (flown 2026-10-18) adds four files. 2J (flown 2026-10-18) adds four.
+    assert_eq!(compared, 56);
 }
 
 fn flown_formation_probe(flight: Flight) -> Il2Entity {
@@ -7576,7 +7576,7 @@ fn flight2j_cells_countries_radii_and_switches_match_table() {
     assert_eq!(Flight::TwoJ.stem(), "P14_Probe_2J");
     assert!(Flight::ALL.contains(&Flight::TwoJ));
     assert!(!Flight::TwoJ.is_frozen());
-    assert!(!Flight::TwoJ.regenerates_flown_files());
+    assert!(Flight::TwoJ.regenerates_flown_files()); // Flown 2026-10-18.
     assert!(Flight::TwoJ.writes_schedule());
     assert_eq!(RUN_SHEET_2J.len(), 6);
     assert_eq!(TWO_J_CELLS.len(), 6);
