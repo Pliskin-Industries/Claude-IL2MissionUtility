@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-18: the P14 flight and formation stack (step 3, flights 2C to 2I, decisions 0019 to 0022) is **merged into `claude/p14-air-tasking`** and pushed. `main` is unchanged.
+> Last updated: 2026-10-18: the P14 flight and formation stack (step 3, flights 2C to 2I, decisions 0019 to 0022) is merged into `claude/p14-air-tasking`, and **`claude/p14-air-tasking` is merged into `main`** (PR #31, `344d9d8`, on the user's instruction).
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/`.
 
 ## What this is
@@ -79,7 +79,7 @@ Plan: `handoff/P14-air-tasking.md` (long; read §8 for steps and §10 for the bu
 
 1. Watch the upstream issue for a reply; send the patches for 1 to 3 if the author wants them.
 2. Merge upstream (8 commits ahead, including the strike and CAP missions and a large `template.rs` rewrite). Carry the decision fixes onto it, or offer them upstream first.
-3. Merging `claude/p14-air-tasking` into `main` (the user's call, decision 0005); the formation workarounds (0019 to 0022) ship with it.
+3. Done 2026-10-18: `claude/p14-air-tasking` merged into `main` (PR #31, `344d9d8`). Later work continues on `claude/p14-air-tasking`; merging it to `main` again is the user's call (decision 0005).
 4. Scope step 4 (threshold) on a Complex Trigger filtered by country (decision 0008).
 5. Optional probes, if they matter later: the go-home timer without Force Complete when it fires more than once (1P's H3 did not test it), and what makes the game raise event 7 at activation.
 
