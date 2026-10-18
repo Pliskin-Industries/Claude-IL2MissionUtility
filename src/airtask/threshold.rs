@@ -1,9 +1,10 @@
-//! One player-country trigger per area, with periodic presence checks (0023).
+//! Country-filtered Complex Trigger entry and a pulsed coalition check zone at
+//! r_in for presence (decisions 0023 and 0024, flown in flight 2J).
 
 use std::collections::BTreeMap;
 
 use super::timing::derived_timing;
-use super::{AirSide, PresenceCheckImpl, SideLogic, Strategies, ThresholdImpl, ThresholdSpec};
+use super::{AirSide, SideLogic, Strategies, ThresholdImpl, ThresholdSpec};
 use crate::ast::Il2Entity;
 use crate::{parser, template};
 
@@ -19,6 +20,12 @@ pub(crate) const OBJECT_ENTERED: i32 = 58;
 /// Object Left, confirmed in flights 1N and 1D. See docs/il2-loader-and-log-facts.md.
 pub(crate) const OBJECT_LEFT: i32 = 60;
 
+/// Build the 19-MCU cell: country-filtered Complex Trigger entry, then a pulsed
+/// coalition check zone at r_in for presence (decisions 0023 and 0024, flight 2J).
+/// A plane already inside the area when the mission loads is not seen until it
+/// re-enters. Flight 2J showed a trigger does not report a plane already inside
+/// when switched on; the mission-load case itself is unflown.
+///
 /// Build after consumers and subscribers register, before emit_side_logic.
 /// The slice is enumerated from zero, but registry keys are the 1-based area
 /// numbers already passed by assemble_side to ShellIds::register.
@@ -85,7 +92,6 @@ pub(crate) fn build_side(
     trigger.set_property("Radius", format!("{:.0}", timing.inner_m));
     trigger.set_property("Cylinder", "1");
     trigger.set_property("CheckPlanes", "1");
-    let reactivate = strategies.presence == PresenceCheckImpl::TriggerReactivate;
     let mut result = Vec::new();
     for (index, &(x, z)) in areas.iter().enumerate() {
         let area = index + 1;
@@ -101,7 +107,6 @@ pub(crate) fn build_side(
             ("CLOSE", "MCU_Timer", 2.0),
             ("CLOSE OFF", "MCU_Deactivate", 0.0),
             ("CLOSE DELAY", "MCU_Timer", 0.05),
-            ("SEEN", "MCU_Timer", 0.0),
             ("INNER", "MCU_CheckZone", 0.0),
             ("INNER PULSE", "MCU_Timer", 0.1),
             ("PASS OFF", "MCU_Deactivate", 0.0),
@@ -114,11 +119,6 @@ pub(crate) fn build_side(
             ("HOT OFF", "MCU_Deactivate", 0.0),
             ("REARM ON", "MCU_Activate", 0.0),
         ] {
-            if (reactivate && matches!(role, "INNER" | "INNER PULSE"))
-                || (!reactivate && role == "SEEN")
-            {
-                continue;
-            }
             let name = format!("{prefix} {role}");
             let node = match kind {
                 "MCU_TR_ComplexTrigger" => {
@@ -148,21 +148,7 @@ pub(crate) fn build_side(
         let hot = consumers(&logic.hot_consumers);
         let cold = consumers(&logic.cold_consumers);
         let subscribers = consumers(&logic.pass_subscribers);
-        let mut check = vec![ids["CHECK ON"], ids["CLOSE"]];
-        let (check_on, close_off, pass_off) = if reactivate {
-            (
-                vec![ids["SEEN"], ids["CLOSE DELAY"], ids["TRIGGER"]],
-                vec![ids["TRIGGER"], ids["SEEN"]],
-                vec![ids["CLOSE DELAY"], ids["TRIGGER"], ids["SEEN"]],
-            )
-        } else {
-            check.push(ids["INNER PULSE"]);
-            (
-                vec![ids["CLOSE DELAY"], ids["INNER"]],
-                vec![ids["INNER"]],
-                vec![ids["CLOSE DELAY"], ids["INNER"]],
-            )
-        };
+        let check = vec![ids["CHECK ON"], ids["CLOSE"], ids["INNER PULSE"]];
         let mut pass = vec![
             ids["PASS OFF"],
             ids["HOT ON"],
@@ -175,11 +161,12 @@ pub(crate) fn build_side(
             ("ENTRY OFF", vec![ids["TRIGGER"], ids["ARM"]]),
             ("DWELL", check.clone()),
             ("HOLD", check),
-            ("CHECK ON", check_on),
+            ("CHECK ON", vec![ids["CLOSE DELAY"], ids["INNER"]]),
             ("CLOSE", vec![ids["CLOSE OFF"], ids["CLOSE DELAY"]]),
-            ("CLOSE OFF", close_off),
-            ("PASS OFF", pass_off),
-            (if reactivate { "SEEN" } else { "INNER" }, pass),
+            ("CLOSE OFF", vec![ids["INNER"]]),
+            ("PASS OFF", vec![ids["CLOSE DELAY"], ids["INNER"]]),
+            ("INNER", pass),
+            ("INNER PULSE", vec![ids["INNER"]]),
             ("HOT ON", hot.clone()),
             ("COLD OFF DELAY", vec![ids["COLD OFF"]]),
             ("COLD OFF", cold.clone()),
@@ -192,15 +179,9 @@ pub(crate) fn build_side(
             ("HOT OFF", hot.clone()),
             ("REARM ON", vec![ids["ARM"], ids["TRIGGER"]]),
         ]);
-        if !reactivate {
-            edges.insert("INNER PULSE", vec![ids["INNER"]]);
-        }
         for node in &mut cell {
             if node.index == Some(ids["TRIGGER"]) {
                 template::attach_event(node, OBJECT_ENTERED, ids["ARM"]);
-                if reactivate {
-                    template::attach_event(node, OBJECT_ENTERED, ids["SEEN"]);
-                }
             } else {
                 let role = node.name().unwrap().strip_prefix(&prefix).unwrap().trim();
                 node.set_targets(edges.remove(role).expect("every cell MCU has its edges"));
@@ -208,7 +189,7 @@ pub(crate) fn build_side(
         }
         // ShellIds::register already owns its HOT start state. Fill in missing
         // consumers (for example a clock pair), without registering any twice.
-        for id in hot.into_iter().chain(reactivate.then(|| ids["SEEN"])) {
+        for id in hot {
             if !logic.init_off.contains(&id) {
                 logic.init_off.push(id);
             }
@@ -233,15 +214,9 @@ mod tests {
         root: Il2Entity,
         logic: SideLogic,
         side: AirSide,
-        presence: PresenceCheckImpl,
     }
 
-    fn harness(
-        side: AirSide,
-        areas: &[(f64, f64)],
-        spec: ThresholdSpec,
-        presence: PresenceCheckImpl,
-    ) -> Harness {
+    fn harness(side: AirSide, areas: &[(f64, f64)], spec: ThresholdSpec) -> Harness {
         let mut next = 1;
         let mut root = Il2Entity::new("Group");
         let mut logic = SideLogic::default();
@@ -277,10 +252,7 @@ mod tests {
             side,
             areas,
             &spec,
-            &Strategies {
-                presence,
-                ..Strategies::default()
-            },
+            &Strategies::default(),
             &mut logic,
             &mut next,
         )
@@ -289,16 +261,11 @@ mod tests {
         let init =
             emit_side_logic(side, &logic, std::slice::from_mut(&mut root), &mut next).unwrap();
         root.children.extend(init);
-        Harness {
-            root,
-            logic,
-            side,
-            presence,
-        }
+        Harness { root, logic, side }
     }
 
-    fn default_harness(presence: PresenceCheckImpl) -> Harness {
-        harness(AirSide::Nato, &[CENTRE], ThresholdSpec::default(), presence)
+    fn default_harness() -> Harness {
+        harness(AirSide::Nato, &[CENTRE], ThresholdSpec::default())
     }
 
     fn cell<'a>(h: &'a Harness, area: usize, role: &str) -> &'a Il2Entity {
@@ -316,54 +283,26 @@ mod tests {
     }
 
     fn assert_structure(h: &Harness, area: usize, centre: (f64, f64)) {
-        let reactivate = h.presence == PresenceCheckImpl::TriggerReactivate;
         let node_id = |role: &str| cell(h, area, role).index.unwrap();
         let ids = |roles: &[&str]| roles.iter().map(|role| node_id(role)).collect::<Vec<_>>();
-        let mut check = ids(&["CHECK ON", "CLOSE"]);
-        if !reactivate {
-            check.push(node_id("INNER PULSE"));
-        }
+        let check = ids(&["CHECK ON", "CLOSE", "INNER PULSE"]);
         let mut pass = ids(&["PASS OFF", "HOT ON", "COLD OFF DELAY", "HOLD"]);
         pass.extend(sorted(&h.logic.pass_subscribers[&area]));
-        let mut expected = vec![
+        let expected = vec![
             ("TRIGGER", "MCU_TR_ComplexTrigger", vec![]),
             ("ARM", "MCU_Timer", ids(&["ENTRY OFF", "DWELL"])),
             ("ENTRY OFF", "MCU_Deactivate", ids(&["TRIGGER", "ARM"])),
             ("DWELL", "MCU_Timer", check.clone()),
             ("HOLD", "MCU_Timer", check),
-            (
-                "CHECK ON",
-                "MCU_Activate",
-                if reactivate {
-                    ids(&["SEEN", "CLOSE DELAY", "TRIGGER"])
-                } else {
-                    ids(&["CLOSE DELAY", "INNER"])
-                },
-            ),
+            ("CHECK ON", "MCU_Activate", ids(&["CLOSE DELAY", "INNER"])),
             ("CLOSE", "MCU_Timer", ids(&["CLOSE OFF", "CLOSE DELAY"])),
-            (
-                "CLOSE OFF",
-                "MCU_Deactivate",
-                if reactivate {
-                    ids(&["TRIGGER", "SEEN"])
-                } else {
-                    ids(&["INNER"])
-                },
-            ),
+            ("CLOSE OFF", "MCU_Deactivate", ids(&["INNER"])),
             (
                 "CLOSE DELAY",
                 "MCU_Timer",
                 ids(&["COLD ON", "HOT OFF DELAY", "REARM ON"]),
             ),
-            (
-                "PASS OFF",
-                "MCU_Deactivate",
-                if reactivate {
-                    ids(&["CLOSE DELAY", "TRIGGER", "SEEN"])
-                } else {
-                    ids(&["CLOSE DELAY", "INNER"])
-                },
-            ),
+            ("PASS OFF", "MCU_Deactivate", ids(&["CLOSE DELAY", "INNER"])),
             (
                 "HOT ON",
                 "MCU_Activate",
@@ -387,27 +326,21 @@ mod tests {
                 sorted(&h.logic.hot_consumers[&area]),
             ),
             ("REARM ON", "MCU_Activate", ids(&["ARM", "TRIGGER"])),
+            ("INNER", "MCU_CheckZone", pass),
+            ("INNER PULSE", "MCU_Timer", ids(&["INNER"])),
         ];
-        if reactivate {
-            expected.push(("SEEN", "MCU_Timer", pass));
-        } else {
-            expected.extend([
-                ("INNER", "MCU_CheckZone", pass),
-                ("INNER PULSE", "MCU_Timer", ids(&["INNER"])),
-            ]);
-            let inner = cell(h, area, "INNER");
-            assert_eq!(inner.property("Closer"), Some("1"));
-            assert_eq!(inner.property("Cylinder"), Some("1"));
-            assert_eq!(number(inner, "Zone"), Ok(6000.0));
-            assert_eq!(
-                inner.property("PlaneCoalitions"),
-                Some(if h.side == AirSide::Nato {
-                    "[1]"
-                } else {
-                    "[2]"
-                })
-            );
-        }
+        let inner = cell(h, area, "INNER");
+        assert_eq!(inner.property("Closer"), Some("1"));
+        assert_eq!(inner.property("Cylinder"), Some("1"));
+        assert_eq!(number(inner, "Zone"), Ok(6000.0));
+        assert_eq!(
+            inner.property("PlaneCoalitions"),
+            Some(if h.side == AirSide::Nato {
+                "[1]"
+            } else {
+                "[2]"
+            })
+        );
         for (role, kind, targets) in &expected {
             let node = cell(h, area, role);
             assert_eq!(&node.block_type, kind, "{role}");
@@ -437,13 +370,7 @@ mod tests {
             assert_eq!(number(node, "Time"), Ok(time), "{role}");
             assert_eq!(node.property("Random"), Some("100"), "{role}");
         }
-        assert_eq!(
-            number(
-                cell(h, area, if reactivate { "SEEN" } else { "INNER PULSE" }),
-                "Time"
-            ),
-            Ok(if reactivate { 0.0 } else { 0.1 })
-        );
+        assert_eq!(number(cell(h, area, "INNER PULSE"), "Time"), Ok(0.1));
         let trigger = cell(h, area, "TRIGGER");
         assert_eq!(number(trigger, "Radius"), Ok(6000.0));
         assert_eq!(trigger.property("Cylinder"), Some("1"));
@@ -502,11 +429,7 @@ mod tests {
             .iter()
             .map(|event| template::read_event(event).unwrap())
             .collect();
-        let mut expected_events = vec![(58, node_id("ARM"))];
-        if reactivate {
-            expected_events.push((58, node_id("SEEN")));
-        }
-        assert_eq!(events, expected_events);
+        assert_eq!(events, [(58, node_id("ARM"))]);
         for node in nodes(named(&h.root, "Cells")) {
             for key in ["Name", "Desc"] {
                 if let Some(text) = node.property(key) {
@@ -516,13 +439,7 @@ mod tests {
         }
         assert!(h.logic.mission_begin.is_empty());
         assert!(h.logic.links.is_empty());
-        let mut expected_off: BTreeSet<_> =
-            h.logic.hot_consumers.values().flatten().copied().collect();
-        if reactivate {
-            expected_off.extend(
-                (1..=h.logic.hot_consumers.len()).map(|a| cell(h, a, "SEEN").index.unwrap()),
-            );
-        }
+        let expected_off: BTreeSet<_> = h.logic.hot_consumers.values().flatten().copied().collect();
         assert_eq!(
             h.logic.init_off.len(),
             expected_off.len(),
@@ -536,80 +453,9 @@ mod tests {
 
     #[test]
     fn threshold_structure() {
-        assert_structure(
-            &default_harness(PresenceCheckImpl::TriggerReactivate),
-            1,
-            CENTRE,
-        );
-    }
-
-    #[test]
-    fn threshold_countries() {
-        for (side, country) in [(AirSide::Nato, "501"), (AirSide::Dprk, "601")] {
-            let h = harness(
-                side,
-                &[CENTRE],
-                ThresholdSpec::default(),
-                PresenceCheckImpl::TriggerReactivate,
-            );
-            assert_eq!(cell(&h, 1, "TRIGGER").property("Country"), Some(country));
-            assert_structure(&h, 1, CENTRE);
-        }
-        assert_eq!((NATO_AI_COUNTRY, DPRK_AI_COUNTRY), (602, 503));
-    }
-
-    #[test]
-    fn threshold_hold_does_not_switch_hot_off() {
-        for presence in [
-            PresenceCheckImpl::TriggerReactivate,
-            PresenceCheckImpl::ZonePulse,
-        ] {
-            let h = default_harness(presence);
-            assert_eq!(cell(&h, 1, "HOLD").targets, cell(&h, 1, "DWELL").targets);
-            for role in ["HOLD", "CHECK ON", "CLOSE", "CLOSE OFF"] {
-                assert!(!cell(&h, 1, role).targets.contains(&id(&h, "HOT OFF")));
-                assert!(!cell(&h, 1, role).targets.contains(&id(&h, "HOT OFF DELAY")));
-            }
-            assert_eq!(cell(&h, 1, "HOT OFF DELAY").targets, [id(&h, "HOT OFF")]);
-            assert_eq!(
-                nodes(named(&h.root, "Cells"))
-                    .into_iter()
-                    .filter(|n| n.targets.contains(&id(&h, "HOT OFF DELAY")))
-                    .map(|n| n.index.unwrap())
-                    .collect::<Vec<_>>(),
-                [id(&h, "CLOSE DELAY")]
-            );
-        }
-    }
-
-    #[test]
-    fn threshold_has_18_mcus_one_trigger_no_check_zone() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
-        let cells = named(&h.root, "Cells");
-        assert_eq!(mcus(cells), 18);
-        assert_eq!(cells.count_block_type("MCU_TR_ComplexTrigger"), 1);
-        assert_eq!(cells.count_block_type("MCU_CheckZone"), 0);
-    }
-
-    #[test]
-    fn threshold_zone_pulse_has_19_mcus_one_trigger_one_check_zone() {
-        let h = default_harness(PresenceCheckImpl::ZonePulse);
-        let cells = named(&h.root, "Cells");
-        assert_eq!(mcus(cells), 19);
-        assert_eq!(cells.count_block_type("MCU_TR_ComplexTrigger"), 1);
-        assert_eq!(cells.count_block_type("MCU_CheckZone"), 1);
-    }
-
-    #[test]
-    fn threshold_zone_pulse_structure() {
         for side in [AirSide::Nato, AirSide::Dprk] {
             assert_structure(
-                &harness(
-                    side,
-                    &[CENTRE],
-                    ThresholdSpec::default(),
-                    PresenceCheckImpl::ZonePulse,
-                ),
+                &harness(side, &[CENTRE], ThresholdSpec::default()),
                 1,
                 CENTRE,
             );
@@ -617,50 +463,80 @@ mod tests {
     }
 
     #[test]
+    fn threshold_countries() {
+        for (side, country) in [(AirSide::Nato, "501"), (AirSide::Dprk, "601")] {
+            let h = harness(side, &[CENTRE], ThresholdSpec::default());
+            assert_eq!(cell(&h, 1, "TRIGGER").property("Country"), Some(country));
+        }
+        assert_eq!((NATO_AI_COUNTRY, DPRK_AI_COUNTRY), (602, 503));
+    }
+
+    #[test]
+    fn threshold_hold_does_not_switch_hot_off() {
+        let h = default_harness();
+        assert_eq!(cell(&h, 1, "HOLD").targets, cell(&h, 1, "DWELL").targets);
+        for role in ["HOLD", "CHECK ON", "CLOSE", "CLOSE OFF"] {
+            assert!(!cell(&h, 1, role).targets.contains(&id(&h, "HOT OFF")));
+            assert!(!cell(&h, 1, role).targets.contains(&id(&h, "HOT OFF DELAY")));
+        }
+        assert_eq!(cell(&h, 1, "HOT OFF DELAY").targets, [id(&h, "HOT OFF")]);
+        assert_eq!(
+            nodes(named(&h.root, "Cells"))
+                .into_iter()
+                .filter(|n| n.targets.contains(&id(&h, "HOT OFF DELAY")))
+                .map(|n| n.index.unwrap())
+                .collect::<Vec<_>>(),
+            [id(&h, "CLOSE DELAY")]
+        );
+    }
+
+    #[test]
+    fn threshold_has_19_mcus_one_trigger_one_check_zone() {
+        let h = default_harness();
+        let cells = named(&h.root, "Cells");
+        assert_eq!(mcus(cells), 19);
+        assert_eq!(cells.count_block_type("MCU_TR_ComplexTrigger"), 1);
+        assert_eq!(cells.count_block_type("MCU_CheckZone"), 1);
+    }
+
+    #[test]
     fn threshold_timing_follows_radius() {
-        for presence in [
-            PresenceCheckImpl::TriggerReactivate,
-            PresenceCheckImpl::ZonePulse,
+        for (spec, radius, dwell, hold) in [
+            (
+                ThresholdSpec {
+                    radius_m: 16_000.0,
+                    ..ThresholdSpec::default()
+                },
+                8000.0,
+                80.0,
+                160.0,
+            ),
+            (
+                ThresholdSpec {
+                    window_s: Some(7.0),
+                    dwell_s: Some(35.0),
+                    ..ThresholdSpec::default()
+                },
+                6000.0,
+                35.0,
+                70.0,
+            ),
+            (
+                ThresholdSpec {
+                    dwell_s: Some(35.0),
+                    hold_s: Some(45.0),
+                    ..ThresholdSpec::default()
+                },
+                6000.0,
+                35.0,
+                45.0,
+            ),
         ] {
-            for (spec, radius, dwell, hold) in [
-                (
-                    ThresholdSpec {
-                        radius_m: 16_000.0,
-                        ..ThresholdSpec::default()
-                    },
-                    8000.0,
-                    80.0,
-                    160.0,
-                ),
-                (
-                    ThresholdSpec {
-                        window_s: Some(7.0),
-                        dwell_s: Some(35.0),
-                        ..ThresholdSpec::default()
-                    },
-                    6000.0,
-                    35.0,
-                    70.0,
-                ),
-                (
-                    ThresholdSpec {
-                        dwell_s: Some(35.0),
-                        hold_s: Some(45.0),
-                        ..ThresholdSpec::default()
-                    },
-                    6000.0,
-                    35.0,
-                    45.0,
-                ),
-            ] {
-                let h = harness(AirSide::Nato, &[CENTRE], spec, presence);
-                assert_eq!(number(cell(&h, 1, "TRIGGER"), "Radius"), Ok(radius));
-                assert_eq!(number(cell(&h, 1, "DWELL"), "Time"), Ok(dwell));
-                assert_eq!(number(cell(&h, 1, "HOLD"), "Time"), Ok(hold));
-                if presence == PresenceCheckImpl::ZonePulse {
-                    assert_eq!(number(cell(&h, 1, "INNER"), "Zone"), Ok(radius));
-                }
-            }
+            let h = harness(AirSide::Nato, &[CENTRE], spec);
+            assert_eq!(number(cell(&h, 1, "TRIGGER"), "Radius"), Ok(radius));
+            assert_eq!(number(cell(&h, 1, "DWELL"), "Time"), Ok(dwell));
+            assert_eq!(number(cell(&h, 1, "HOLD"), "Time"), Ok(hold));
+            assert_eq!(number(cell(&h, 1, "INNER"), "Zone"), Ok(radius));
         }
     }
 
@@ -783,33 +659,28 @@ mod tests {
 
     #[test]
     fn threshold_links_resolve_and_rearm_rule() {
-        for presence in [
-            PresenceCheckImpl::TriggerReactivate,
-            PresenceCheckImpl::ZonePulse,
-        ] {
-            let h = default_harness(presence);
-            assert_links_resolve(&h.root);
-            walker_every_deactivated_out_has_a_rearm_or_is_single_use(&h.root, &[]).unwrap();
-            for trigger in nodes(&h.root)
-                .into_iter()
-                .filter(|n| n.block_type == "MCU_TR_ComplexTrigger")
-            {
-                for event in &trigger.children[0].children {
-                    by_id(&h.root, template::read_event(event).unwrap().1);
-                }
+        let h = default_harness();
+        assert_links_resolve(&h.root);
+        walker_every_deactivated_out_has_a_rearm_or_is_single_use(&h.root, &[]).unwrap();
+        for trigger in nodes(&h.root)
+            .into_iter()
+            .filter(|n| n.block_type == "MCU_TR_ComplexTrigger")
+        {
+            for event in &trigger.children[0].children {
+                by_id(&h.root, template::read_event(event).unwrap().1);
             }
-            // This cell cancels timers directly, so also check beyond OUT relays.
-            let activated: BTreeSet<_> = nodes(named(&h.root, "Cells"))
-                .into_iter()
-                .filter(|n| n.block_type == "MCU_Activate")
-                .flat_map(|n| &n.targets)
-                .collect();
-            for off in nodes(named(&h.root, "Cells"))
-                .into_iter()
-                .filter(|n| n.block_type == "MCU_Deactivate")
-            {
-                assert!(off.targets.iter().all(|target| activated.contains(target)));
-            }
+        }
+        // This cell cancels timers directly, so also check beyond OUT relays.
+        let activated: BTreeSet<_> = nodes(named(&h.root, "Cells"))
+            .into_iter()
+            .filter(|n| n.block_type == "MCU_Activate")
+            .flat_map(|n| &n.targets)
+            .collect();
+        for off in nodes(named(&h.root, "Cells"))
+            .into_iter()
+            .filter(|n| n.block_type == "MCU_Deactivate")
+        {
+            assert!(off.targets.iter().all(|target| activated.contains(target)));
         }
     }
 
@@ -836,28 +707,11 @@ mod tests {
         );
         assert_eq!(logic, before);
         assert_eq!(next, 42);
-        for presence in [
-            PresenceCheckImpl::TriggerReactivate,
-            PresenceCheckImpl::ZonePulse,
-        ] {
-            let other = (CENTRE.0 + 50_000.0, CENTRE.1 - 50_000.0);
-            let h = harness(
-                AirSide::Nato,
-                &[CENTRE, other],
-                ThresholdSpec::default(),
-                presence,
-            );
-            assert_structure(&h, 1, CENTRE);
-            assert_structure(&h, 2, other);
-            assert_eq!(
-                mcus(named(&h.root, "Cells")),
-                if presence == PresenceCheckImpl::TriggerReactivate {
-                    36
-                } else {
-                    38
-                }
-            );
-        }
+        let other = (CENTRE.0 + 50_000.0, CENTRE.1 - 50_000.0);
+        let h = harness(AirSide::Nato, &[CENTRE, other], ThresholdSpec::default());
+        assert_structure(&h, 1, CENTRE);
+        assert_structure(&h, 2, other);
+        assert_eq!(mcus(named(&h.root, "Cells")), 38);
     }
 
     fn game_config() -> WalkerConfig {
@@ -922,16 +776,7 @@ mod tests {
 
     fn assert_passes(h: &Harness, log: &WalkerLog, expected: &[f64]) {
         let expected: Vec<_> = expected.iter().map(|&t| ticks(t)).collect();
-        for role in [
-            if h.presence == PresenceCheckImpl::TriggerReactivate {
-                "SEEN"
-            } else {
-                "INNER"
-            },
-            "PASS OFF",
-            "HOT ON",
-            "COLD OFF DELAY",
-        ] {
+        for role in ["INNER", "PASS OFF", "HOT ON", "COLD OFF DELAY"] {
             let expected = if role == "COLD OFF DELAY" {
                 expected.iter().map(|t| t + 1).collect()
             } else {
@@ -961,7 +806,7 @@ mod tests {
 
     #[test]
     fn threshold_one_zone_loiter_passes() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let h = default_harness();
         for config in game_configs() {
             for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
                 let config = WalkerConfig {
@@ -974,15 +819,16 @@ mod tests {
                     70.0,
                     vec![track(DPRK_PLAYER_COUNTRY, 1, 70, orbit)],
                 );
-                let passes = times(&log, id(&h, "SEEN"));
+                let passes = times(&log, id(&h, "INNER"));
                 assert_eq!(passes.len(), 1, "{config:?}");
                 assert!(
-                    (ticks(60.0)..=ticks(62.1)).contains(&(passes[0] - ticks(1.0))),
+                    (ticks(60.1)..=ticks(61.1)).contains(&(passes[0] - ticks(1.0))),
                     "{config:?}"
                 );
-                // Samples precede future timer expiries at the same tick, so
-                // the 61 s DWELL activation is first evaluated at 62 s.
-                assert_passes(&h, &log, &[62.0]);
+                // Presence is checked by the pulse 0.1 s after DWELL. The
+                // first inside sample is entry; crossing-to-PASS is 60.1 to
+                // 61.1 s with one-second samples (60.1 s from that sample).
+                assert_passes(&h, &log, &[61.1]);
                 assert!(times(&log, id(&h, "CLOSE DELAY")).is_empty());
                 assert_eq!(times(&log, id(&h, "ARM")), [ticks(1.0)]);
                 assert_eq!(times(&log, id(&h, "DWELL")), [ticks(61.0)]);
@@ -992,7 +838,7 @@ mod tests {
 
     #[test]
     fn threshold_one_zone_straight_pass_fails() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let h = default_harness();
         for config in game_configs() {
             let log = run(
                 &h,
@@ -1011,7 +857,7 @@ mod tests {
 
     #[test]
     fn threshold_one_zone_edge_orbit_fails() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let h = default_harness();
         let log = run(
             &h,
             game_config(),
@@ -1037,12 +883,7 @@ mod tests {
             (AirSide::Nato, DPRK_AI_COUNTRY),
             (AirSide::Dprk, NATO_AI_COUNTRY),
         ] {
-            let h = harness(
-                side,
-                &[CENTRE],
-                ThresholdSpec::default(),
-                PresenceCheckImpl::TriggerReactivate,
-            );
+            let h = harness(side, &[CENTRE], ThresholdSpec::default());
             let log = run(
                 &h,
                 game_config(),
@@ -1068,11 +909,11 @@ mod tests {
 
     #[test]
     fn threshold_hot_and_cold_are_never_both_off() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let h = default_harness();
         for config in game_configs() {
             let log = run(&h, config, 400.0, vec![leave_and_return()]);
-            assert_passes(&h, &log, &[62.0, 311.0]);
-            assert_eq!(times(&log, id(&h, "COLD ON")), [ticks(184.05)]);
+            assert_passes(&h, &log, &[61.1, 310.1]);
+            assert_eq!(times(&log, id(&h, "COLD ON")), [ticks(183.15)]);
             for (&hot, &cold) in h.logic.hot_consumers[&1]
                 .iter()
                 .zip(&h.logic.cold_consumers[&1])
@@ -1090,7 +931,7 @@ mod tests {
 
     #[test]
     fn threshold_pass_and_timeout_in_one_tick_is_a_pass() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let h = default_harness();
         for config in game_configs() {
             for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
                 let config = WalkerConfig {
@@ -1127,22 +968,33 @@ mod tests {
 
     #[test]
     fn threshold_timeout_then_pass_in_one_tick_is_one_outcome() {
-        let mut h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let mut h = default_harness();
         let mut next = nodes(&h.root)
             .into_iter()
             .filter_map(|node| node.index)
             .max()
             .unwrap()
             + 1;
+        // Keep the normal pulse after the race, so the 63 s sample cannot
+        // satisfy INNER before CLOSE. The late pulse arms the real check zone
+        // after CLOSE in that tick, with a player now inside.
+        h.root
+            .find_by_name_mut("THN01 INNER PULSE")
+            .unwrap()
+            .set_property("Time", "2.05");
         let mut late_pass = template::timer("Late pass", 1.95, &mut next, CENTRE.0, CENTRE.1);
-        late_pass.set_targets(vec![id(&h, "SEEN")]);
+        late_pass.set_targets(vec![id(&h, "INNER")]);
         let late_pass_id = late_pass.index.unwrap();
         h.root.children.push(late_pass);
         let input = WalkerInput {
             // Include HOLD's expiry after a pass, before that recheck closes.
             until: ticks(183.0),
             tracks: vec![track(DPRK_PLAYER_COUNTRY, 1, 183, |s| {
-                if s == 1 { orbit(s) } else { outside() }
+                if s == 1 || s >= 63 {
+                    orbit(s)
+                } else {
+                    outside()
+                }
             })],
             // DWELL schedules CLOSE at 61.0. Starting this timer afterwards
             // queues its 63.0 expiry behind CLOSE, in either delivery mode.
@@ -1177,7 +1029,7 @@ mod tests {
                 );
                 match same_tick_delivery {
                     SameTickDelivery::DepthFirst => {
-                        // CLOSE OFF has already closed SEEN when the late
+                        // CLOSE OFF has already closed INNER when the late
                         // pulse reaches it, so only the timeout can finish.
                         assert_passes(&h, &log, &[]);
                         for role in ["CLOSE DELAY", "COLD ON", "REARM ON"] {
@@ -1198,7 +1050,7 @@ mod tests {
                         assert_cold(&h, &log);
                     }
                     SameTickDelivery::Batched => {
-                        // SEEN still passes; PASS OFF cancels the running
+                        // INNER still passes; PASS OFF cancels the running
                         // CLOSE DELAY when deactivations commit at tick end.
                         assert_passes(&h, &log, &[63.0]);
                         assert_eq!(times(&log, id(&h, "HOLD")), [ticks(183.0)], "{config:?}");
@@ -1230,7 +1082,7 @@ mod tests {
 
     #[test]
     fn threshold_stays_hot_through_a_successful_recheck() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let h = default_harness();
         for config in game_configs() {
             let log = run(
                 &h,
@@ -1238,9 +1090,9 @@ mod tests {
                 600.0,
                 vec![track(DPRK_PLAYER_COUNTRY, 1, 600, orbit)],
             );
-            assert_passes(&h, &log, &[62.0, 183.0, 304.0, 425.0, 546.0]);
+            assert_passes(&h, &log, &[61.1, 181.2, 301.3, 421.4, 541.5]);
             assert!(times(&log, id(&h, "COLD ON")).is_empty());
-            for snapshot in log.snapshots.iter().filter(|s| s.t >= ticks(62.0)) {
+            for snapshot in log.snapshots.iter().filter(|s| s.t >= ticks(61.1)) {
                 assert!(
                     h.logic.hot_consumers[&1]
                         .iter()
@@ -1252,20 +1104,20 @@ mod tests {
 
     #[test]
     fn threshold_pass_leave_pass_again() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let h = default_harness();
         for config in game_configs() {
             let log = run(&h, config, 400.0, vec![leave_and_return()]);
-            assert_passes(&h, &log, &[62.0, 311.0]);
+            assert_passes(&h, &log, &[61.1, 310.1]);
             assert_eq!(times(&log, id(&h, "ARM")), [ticks(1.0), ticks(250.0)]);
-            assert_eq!(times(&log, id(&h, "CLOSE DELAY")), [ticks(184.05)]);
-            assert_eq!(times(&log, id(&h, "REARM ON")), [ticks(184.05)]);
-            assert!(h.logic.hot_consumers[&1].iter().all(|&hot| !active(&log, hot, ticks(200.0)) && active(&log, hot, ticks(311.0))));
+            assert_eq!(times(&log, id(&h, "CLOSE DELAY")), [ticks(183.15)]);
+            assert_eq!(times(&log, id(&h, "REARM ON")), [ticks(183.15)]);
+            assert!(h.logic.hot_consumers[&1].iter().all(|&hot| !active(&log, hot, ticks(200.0)) && active(&log, hot, ticks(310.1))));
         }
     }
 
     #[test]
     fn threshold_second_plane_after_close_does_not_pass() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let h = default_harness();
         for config in game_configs() {
             let log = run(
                 &h,
@@ -1280,13 +1132,13 @@ mod tests {
             );
             assert_eq!(times(&log, id(&h, "ARM")), [ticks(1.0), ticks(64.0)]);
             assert_eq!(times(&log, id(&h, "CLOSE DELAY")), [ticks(63.05)]);
-            assert_passes(&h, &log, &[125.0]); // A new, full dwell is mandatory.
+            assert_passes(&h, &log, &[124.1]); // A new, full dwell is mandatory.
         }
     }
 
     #[test]
     fn threshold_two_planes_pass_once_per_check() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
+        let h = default_harness();
         // Latches use DepthFirst, as the existing shell/budget game scenarios
         // do. Batched deliberately defers switches and does not latch two
         // same-tick inputs (walker_same_tick_latch_and_target_order).
@@ -1301,157 +1153,95 @@ mod tests {
                 ],
             );
             assert_eq!(times(&log, id(&h, "ARM")), [ticks(1.0)]);
-            assert_passes(&h, &log, &[62.0, 183.0, 304.0, 425.0, 546.0]);
+            assert_passes(&h, &log, &[61.1, 181.2, 301.3, 421.4, 541.5]);
             assert_eq!(
                 times(&log, id(&h, "HOLD")),
-                [182.0, 303.0, 424.0, 545.0].map(ticks)
+                [181.1, 301.2, 421.3, 541.4].map(ticks)
             );
             assert_eq!(
                 times(&log, id(&h, "CHECK ON")),
-                [61.0, 182.0, 303.0, 424.0, 545.0].map(ticks)
+                [61.0, 181.1, 301.2, 421.3, 541.4].map(ticks)
             );
         }
     }
 
     #[test]
-    fn threshold_batched_two_planes_exposes_latch_hypothesis() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
-        for reverse_targets in [false, true] {
-            let config = WalkerConfig {
-                same_tick_delivery: SameTickDelivery::Batched,
-                reverse_targets,
-                ..game_config()
-            };
-            let log = run(
-                &h,
-                config,
-                70.0,
-                vec![
-                    track(DPRK_PLAYER_COUNTRY, 1, 70, orbit),
-                    track(DPRK_PLAYER_COUNTRY, 1, 70, |s| orbit(s + 10)),
-                ],
-            );
-            // The binding 18-MCU graph has same-tick latches, not counters.
-            // Preserve the walker's Batched hypothesis rather than suppressing
-            // per-aircraft Entered events to make it look like a single pass.
-            assert_eq!(times(&log, id(&h, "ARM")), [ticks(1.0); 2]);
-            assert_eq!(times(&log, id(&h, "SEEN")), [ticks(62.0); 2]);
-            assert_eq!(times(&log, id(&h, "HOT ON")), [ticks(62.0); 2]);
-        }
-    }
-
-    #[test]
-    fn threshold_presence_before_init_off_exposes_startup_gap() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
-        let log = run(
-            &h,
-            game_config(),
-            70.0,
-            vec![track(DPRK_PLAYER_COUNTRY, 0, 70, orbit)],
-        );
-        // The required mission-load trigger is live before the shared 0.5 s
-        // INIT OFF. A plane already inside reaches SEEN before it is disabled,
-        // bypasses the dwell, then INIT OFF closes HOT after COLD was closed.
-        // Keep this scope limitation visible without changing the prescribed
-        // graph or relying on Enabled for a timer.
-        assert_eq!(times(&log, id(&h, "SEEN")), [ticks(0.0), ticks(61.0)]);
-        for (&hot, &cold) in h.logic.hot_consumers[&1]
-            .iter()
-            .zip(&h.logic.cold_consumers[&1])
-        {
-            assert!(!active(&log, hot, ticks(0.5)));
-            assert!(!active(&log, cold, ticks(0.5)));
-            assert!(active(&log, hot, ticks(61.0)));
-        }
-    }
-
-    #[test]
-    fn threshold_silent_trigger_never_passes() {
-        let h = default_harness(PresenceCheckImpl::TriggerReactivate);
-        for config in game_configs() {
-            let config = WalkerConfig {
-                trigger_activation: TriggerActivation::Silent,
-                ..config
-            };
-            let log = run(
-                &h,
-                config,
-                600.0,
-                vec![track(DPRK_PLAYER_COUNTRY, 1, 600, orbit)],
-            );
-            assert_eq!(times(&log, id(&h, "ARM")), [ticks(1.0)]);
-            assert_passes(&h, &log, &[]);
-            assert_eq!(times(&log, id(&h, "CLOSE DELAY")), [ticks(63.05)]);
-            assert_cold(&h, &log);
-        }
-    }
-
-    #[test]
-    fn threshold_zone_pulse_loiter_passes() {
-        let h = default_harness(PresenceCheckImpl::ZonePulse);
+    fn threshold_plane_inside_at_load_waits_for_reentry() {
+        let h = default_harness();
         for config in game_configs() {
             for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
                 let config = WalkerConfig {
                     same_tick_delivery,
-                    trigger_activation: TriggerActivation::Silent,
                     ..config
                 };
-                let log = run(
-                    &h,
-                    config,
-                    400.0,
-                    vec![track(DPRK_PLAYER_COUNTRY, 1, 400, orbit)],
-                );
-                assert_passes(&h, &log, &[61.1, 181.2, 301.3]);
-                assert!(times(&log, id(&h, "CLOSE DELAY")).is_empty());
-                assert_eq!(times(&log, id(&h, "TRIGGER")), [ticks(1.0)]);
+                let player = track(DPRK_PLAYER_COUNTRY, 0, 200, |s| {
+                    if (121..130).contains(&s) {
+                        outside()
+                    } else {
+                        orbit(s)
+                    }
+                });
+                let waiting = run(&h, config, 120.0, vec![player.clone()]);
+                assert!(times(&waiting, id(&h, "ARM")).is_empty());
+                assert!(times(&waiting, id(&h, "DWELL")).is_empty());
+                assert_passes(&h, &waiting, &[]);
+                assert_cold(&h, &waiting);
+
+                let log = run(&h, config, 200.0, vec![player]);
+                assert_eq!(times(&log, id(&h, "ARM")), [ticks(130.0)]);
+                assert_eq!(times(&log, id(&h, "DWELL")), [ticks(190.0)]);
+                assert_passes(&h, &log, &[190.1]); // Full dwell, then the 0.1 s pulse.
+                for (&hot, &cold) in h.logic.hot_consumers[&1]
+                    .iter()
+                    .zip(&h.logic.cold_consumers[&1])
+                {
+                    for tick in 0..=ticks(200.0) {
+                        assert!(
+                            active(&log, hot, tick) || active(&log, cold, tick),
+                            "both off at {tick}, {config:?}"
+                        );
+                        if tick < ticks(190.1) {
+                            assert!(active(&log, cold, tick), "COLD before first check");
+                            if tick >= ticks(0.5) {
+                                assert!(!active(&log, hot, tick), "HOT before first check");
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
     #[test]
-    fn threshold_zone_pulse_ai_passes_a_recheck() {
+    fn threshold_enemy_ai_passes_a_recheck() {
+        // Decision 0024 accepts this weakness: a player must start the dwell,
+        // but enemy-coalition AI can keep the area HOT at later presence checks.
         for (side, player, ai) in [
             (AirSide::Nato, DPRK_PLAYER_COUNTRY, DPRK_AI_COUNTRY),
             (AirSide::Dprk, NATO_PLAYER_COUNTRY, NATO_AI_COUNTRY),
         ] {
-            for presence in [
-                PresenceCheckImpl::TriggerReactivate,
-                PresenceCheckImpl::ZonePulse,
-            ] {
-                let h = harness(side, &[CENTRE], ThresholdSpec::default(), presence);
-                let log = run(
-                    &h,
-                    game_config(),
-                    400.0,
-                    vec![
-                        track(
-                            player,
-                            1,
-                            400,
-                            |s| if s < 100 { orbit(s) } else { outside() },
-                        ),
-                        track(ai, 1, 400, |s| orbit(s + 10)),
-                    ],
-                );
-                if presence == PresenceCheckImpl::ZonePulse {
-                    assert_passes(&h, &log, &[61.1, 181.2, 301.3]);
-                    assert!(times(&log, id(&h, "COLD ON")).is_empty());
-                    assert!(h.logic.hot_consumers[&1].iter().all(|&hot| active(
-                        &log,
-                        hot,
-                        ticks(400.0)
-                    )));
-                } else {
-                    assert_passes(&h, &log, &[62.0]);
-                    assert_eq!(times(&log, id(&h, "COLD ON")), [ticks(184.05)]);
-                    assert!(h.logic.hot_consumers[&1].iter().all(|&hot| !active(
-                        &log,
-                        hot,
-                        ticks(400.0)
-                    )));
-                }
-            }
+            let h = harness(side, &[CENTRE], ThresholdSpec::default());
+            let log = run(
+                &h,
+                game_config(),
+                400.0,
+                vec![
+                    track(
+                        player,
+                        1,
+                        400,
+                        |s| if s < 100 { orbit(s) } else { outside() },
+                    ),
+                    track(ai, 1, 400, |s| orbit(s + 10)),
+                ],
+            );
+            assert_passes(&h, &log, &[61.1, 181.2, 301.3]);
+            assert!(times(&log, id(&h, "COLD ON")).is_empty());
+            assert!(
+                h.logic.hot_consumers[&1]
+                    .iter()
+                    .all(|&hot| active(&log, hot, ticks(400.0)))
+            );
         }
     }
 }

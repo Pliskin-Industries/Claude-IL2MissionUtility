@@ -301,13 +301,6 @@ pub enum CensusImpl {
     SameTick,
 } // §3.3, probe E7
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PresenceCheckImpl {
-    TriggerReactivate, // the area's Complex Trigger switched on again; flight 2J: misses a plane already inside
-    #[default]
-    ZonePulse, // a pulsed coalition check zone at r_in (risk c, flight 1A; flown in 2J)
-} // decisions 0023, 0024
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Strategies {
     pub threshold: ThresholdImpl,
     pub zone_out: ZoneOutImpl,
@@ -316,7 +309,6 @@ pub struct Strategies {
     pub random: RandomImpl,
     pub budget: BudgetImpl,
     pub census: CensusImpl,
-    pub presence: PresenceCheckImpl,
     pub ai_counts: bool, // probe result a; true makes the D30 warning an error (§8 step 0d)
 }
 

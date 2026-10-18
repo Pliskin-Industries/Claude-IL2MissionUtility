@@ -62,17 +62,6 @@ pub(crate) enum CheckZoneMode {
     Repeat,
 }
 
-/// k1 of decision 0023 remains unflown pending probe 2J. ReportsInside evaluates
-/// at the next zone sample after activation. Silent seeds the inside set at
-/// activation, so only subsequent crossings report Entered. Mission load is an
-/// activation too, using the positions at tick zero.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum TriggerActivation {
-    #[default]
-    ReportsInside,
-    Silent,
-}
-
 /// Configurable hypotheses; use flown settings explicitly in builder tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct WalkerConfig {
@@ -84,7 +73,6 @@ pub(crate) struct WalkerConfig {
     pub same_tick_delivery: SameTickDelivery,             // risk q
     pub reverse_targets: bool,                            // risk q
     pub check_zone: CheckZoneMode,                        // risks b, c, o
-    pub trigger_activation: TriggerActivation,            // k1, probe 2J
 }
 
 /// Names must be unique among indexed nodes. Use Index for repeated pack names.
@@ -322,7 +310,7 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
                 walker.positions[i] = Some(xz);
             }
         }
-        if t == 0 && config.trigger_activation == TriggerActivation::Silent {
+        if t == 0 {
             let triggers: Vec<_> = walker
                 .nodes
                 .keys()
@@ -330,8 +318,7 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
                 .filter(|&id| walker.is_trigger(id) && walker.states[&id].active)
                 .collect();
             for id in triggers {
-                let inside = walker.trigger_inside(id);
-                walker.states.get_mut(&id).expect("state link resolves").trigger_inside = inside;
+                walker.snapshot_trigger_inside(id);
             }
         }
         while let Some(event) = walker.pending.pop_front() {
@@ -421,20 +408,24 @@ impl Walker<'_> {
         self.enqueue_now(targets);
     }
 
+    fn snapshot_trigger_inside(&mut self, id: i32) {
+        let inside = self.trigger_inside(id);
+        self.states
+            .get_mut(&id)
+            .expect("state link resolves")
+            .trigger_inside = inside;
+    }
+
     fn switch(&mut self, id: i32, active: bool) {
-        let inside = (active
-            && !self.states[&id].active
-            && self.is_trigger(id)
-            && self.config.trigger_activation == TriggerActivation::Silent)
-            .then(|| self.trigger_inside(id));
+        // Only a switch from off to on takes a snapshot; Activate on a trigger
+        // that is already on changes nothing (not flown, so assume no effect).
+        if active && !self.states[&id].active && self.is_trigger(id) {
+            self.snapshot_trigger_inside(id);
+        }
         let state = self.states.get_mut(&id).expect("state link resolves");
         state.active = active;
-        if let Some(inside) = inside {
-            state.trigger_inside = inside;
-        }
         if !active {
             state.zone_armed = false;
-            state.trigger_inside.clear();
             if self.config.deactivate_running_timer == DeactivateRunningTimer::Cancels {
                 state.running.clear();
             }
@@ -672,13 +663,24 @@ impl Walker<'_> {
             .collect()
     }
 
+    /// Flight 2J (KA, KB, KC): mission load and every switch-on take matching
+    /// tracks already inside as known, without reporting them. While on, each
+    /// later crossing reports Entered / Left once per track. While off, crossings
+    /// neither report nor queue; the next switch-on takes a fresh inside snapshot.
+    /// Mission-load seeding is the same model rule, but was not flown in 2J.
+    /// THD01 at 212.00 s reported a previously unreported entry just after one
+    /// switch-on in 2J; this sampled model does not reproduce that exception.
     fn check_trigger(&mut self, id: i32) {
         if !self.states[&id].active {
             return;
         }
         let inside = self.trigger_inside(id);
         let previous = std::mem::replace(
-            &mut self.states.get_mut(&id).expect("state link resolves").trigger_inside,
+            &mut self
+                .states
+                .get_mut(&id)
+                .expect("state link resolves")
+                .trigger_inside,
             inside.clone(),
         );
         let changes = [
@@ -1178,12 +1180,15 @@ mod walker_tests {
         let mut root = trigger_tree(None);
         let input = WalkerInput {
             until: TICKS_PER_SECOND,
-            tracks: vec![track(1, &[(0.0, 0.0); 2]), track(2, &[(0.0, 0.0); 2])],
+            tracks: vec![
+                track(1, &[(101.0, 0.0), (0.0, 0.0)]),
+                track(2, &[(101.0, 0.0), (0.0, 0.0)]),
+            ],
             ..WalkerInput::default()
         };
         assert_eq!(
             times(&walk(&root, WalkerConfig::default(), &input), 2),
-            [0, 0]
+            [20, 20]
         );
         root.find_by_name_mut("Trigger")
             .unwrap()
@@ -1196,7 +1201,7 @@ mod walker_tests {
     }
 
     #[test]
-    fn walker_trigger_activation_hypotheses_and_repeated_reactivation() {
+    fn walker_trigger_load_and_repeated_switch_on_are_silent() {
         let root = trigger_tree(Some(601));
         let mut points = vec![(0.0, 0.0); 9];
         points[7] = (101.0, 0.0);
@@ -1208,28 +1213,20 @@ mod walker_tests {
                 (30, 6.into()),
                 (50, 5.into()),
                 (70, 6.into()),
+                (90, 5.into()),
+                (110, 6.into()),
             ],
             ..WalkerInput::default()
         };
-        for trigger_activation in [TriggerActivation::ReportsInside, TriggerActivation::Silent] {
-            for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
-                let config = WalkerConfig {
-                    trigger_activation,
-                    same_tick_delivery,
-                    ..WalkerConfig::default()
-                };
-                let log = walk(&root, config, &input);
-                assert_eq!(
-                    times(&log, 2),
-                    if trigger_activation == TriggerActivation::ReportsInside {
-                        vec![0, 40, 80, 160]
-                    } else {
-                        vec![160]
-                    }
-                );
-                assert_eq!(times(&log, 3), [140]); // Turning off never reports Left.
-                assert!(times(&log, 4).is_empty());
-            }
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            let config = WalkerConfig {
+                same_tick_delivery,
+                ..WalkerConfig::default()
+            };
+            let log = walk(&root, config, &input);
+            assert_eq!(times(&log, 2), [160]);
+            assert_eq!(times(&log, 3), [140]); // Turning off never reports Left.
+            assert!(times(&log, 4).is_empty());
         }
     }
 
@@ -1239,41 +1236,45 @@ mod walker_tests {
         root.find_by_name_mut("Trigger")
             .unwrap()
             .set_property("Enabled", "0");
+        let inside = (0.0, 0.0);
+        let outside = (101.0, 0.0);
         let input = WalkerInput {
             until: 5 * TICKS_PER_SECOND,
-            tracks: vec![track(
-                2,
-                &[
-                    (0.0, 0.0),
-                    (101.0, 0.0),
-                    (0.0, 0.0),
-                    (0.0, 0.0),
-                    (101.0, 0.0),
-                    (0.0, 0.0),
-                ],
-            )],
+            tracks: vec![
+                track(2, &[inside, outside, inside, inside, outside, inside]),
+                // Like 2J KB, this track completes its crossing while off.
+                track(2, &[outside, inside, outside, outside, outside, outside]),
+            ],
             pulses: vec![(50, 6.into())],
             ..WalkerInput::default()
         };
-        for trigger_activation in [TriggerActivation::ReportsInside, TriggerActivation::Silent] {
-            for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
-                let config = WalkerConfig {
-                    trigger_activation,
-                    same_tick_delivery,
-                    ..WalkerConfig::default()
-                };
-                let log = walk(&root, config, &input);
-                assert_eq!(
-                    times(&log, 2),
-                    if trigger_activation == TriggerActivation::ReportsInside {
-                        vec![60, 100]
-                    } else {
-                        vec![100]
-                    }
-                );
-                assert_eq!(times(&log, 3), [80]);
-            }
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            let config = WalkerConfig {
+                same_tick_delivery,
+                ..WalkerConfig::default()
+            };
+            let log = walk(&root, config, &input);
+            assert_eq!(times(&log, 2), [100]);
+            assert_eq!(times(&log, 3), [80]);
         }
+    }
+
+    #[test]
+    fn walker_trigger_activate_while_on_changes_nothing() {
+        let root = trigger_tree(Some(601));
+        let input = WalkerInput {
+            until: 3 * TICKS_PER_SECOND,
+            tracks: vec![track(
+                2,
+                &[(101.0, 0.0), (0.0, 0.0), (101.0, 0.0), (0.0, 0.0)],
+            )],
+            // The Activate precedes this tick's sample; the trigger is already on.
+            pulses: vec![(20, 6.into())],
+            ..WalkerInput::default()
+        };
+        let log = walk(&root, WalkerConfig::default(), &input);
+        assert_eq!(times(&log, 2), [20, 60]);
+        assert_eq!(times(&log, 3), [40]);
     }
 
     #[test]
