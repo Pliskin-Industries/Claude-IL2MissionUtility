@@ -183,7 +183,7 @@ impl Flight {
 
     fn regenerates_flown_files(self) -> bool {
         match self {
-            Self::TwoG | Self::Load => false, // Not flown; no committed artifacts yet.
+            Self::Load => false,
             _ => !self.is_frozen(),
         }
     }
@@ -5795,8 +5795,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     }
     // 56 minus 1M, 2B, 2C and 2D (four files each); flight 2 was already
     // excluded by 0018. The remaining flights use unchanged or frozen inputs.
-    // Flight 2E (flown 2026-10-16) adds its four files, flight 2F (flown 2026-10-17) four more.
-    assert_eq!(compared, 48);
+    // Flight 2E (flown 2026-10-16) adds its four files, flights 2F and 2G (flown 2026-10-17) four more each.
+    assert_eq!(compared, 52);
 }
 
 #[test]
@@ -7127,7 +7127,7 @@ fn flight2g_cells_changes_and_land_paths_match_table() {
     assert_eq!(root.name(), Some("P14_Probe_2G"));
     assert!(Flight::ALL.contains(&Flight::TwoG));
     assert!(!Flight::TwoG.is_frozen());
-    assert!(!Flight::TwoG.regenerates_flown_files(), "2G has not flown");
+    assert!(Flight::TwoG.regenerates_flown_files(), "2G flew; its frozen files regenerate");
     assert!(Flight::TwoG.writes_schedule());
     assert_eq!(RUN_SHEET_2G.len(), 5);
     assert_eq!(TWO_G_SORTIES.len(), 5);
