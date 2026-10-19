@@ -283,12 +283,6 @@ pub enum CounterResetImpl {
     Ring,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RandomImpl {
-    #[default]
-    InMission,
-    Seeded,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BudgetImpl {
     #[default]
     HeadCount,
@@ -306,7 +300,6 @@ pub struct Strategies {
     pub zone_out: ZoneOutImpl,
     pub losses: LossesImpl,
     pub counter_reset: CounterResetImpl,
-    pub random: RandomImpl,
     pub budget: BudgetImpl,
     pub census: CensusImpl,
     pub ai_counts: bool, // probe result a; true makes the D30 warning an error (§8 step 0d)
