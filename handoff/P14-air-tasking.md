@@ -446,6 +446,20 @@ Differences: names carry the `CLK s` prefix, and exclusion acts on `ENii RANDOM`
 
 ### 3.7 Front end A: mission clock (per side)
 
+**As built (step 5, 2026-10-18; decision 0029, option B).** Same behaviour as the original design below, with a smaller inside, because flight 0 settled what the original hedged against (f: a timer's Random % is rolled per trigger; J1: deactivating a running timer cancels it; J3: an Activate and a pulse in one tick drop the pulse; J4: a relay latch drops a same-tick double). Code and tests: `src/airtask/clock.rs`; scope, diagram and test list: `handoff/sessions/2026-10-18-p14-step5.md`.
+
+- **Quiet roll and jitter are J random timers into a latch.** `TICK` → `SLOT ON` (re-arms the `SLOT OPEN` latch) and `JITTER k` (`Time` 0.1 + (k−1)·step, `Random` p_k = `weighted_random_pct([100−q; J] ++ [q·J])[k]`, 27 / 36 / 57 % at the defaults) → `SLOT OPEN`. The first that passes opens the slot; about q % of slots stay quiet. No `QUIET ROLL`, no jitter randomizer, no `JITTER k DELAY`.
+- **`ATTEMPT END` is cancelled directly** by `WIN` (no `ATTEMPT ARM`, no `ATTEMPT END OUT`); `REROLL ON` re-arms it at `SLOT OPEN`.
+- **The entry randomizer is `INPUT` → `ReOpen Outputs` and the `RANDOM` timers**; attempts never overlap, so there is no `CloseInput` or `Wait for Output`. A = L + 0.5 s and the slot window min(300, (a + 10)·A) are unchanged.
+- **`DRAW` is the 0.3 s timer** and pulses `LAST CLEAR`; the accepted exception below is 0.3 s, not 0.2 s.
+- **`ENii LAST SET` is one Activate.** The next slot excludes every entry started since the last slot opened, not only the most recent. Step 6 measures whether that matters on a busy area against the alternative (B′); the bar is half a launch per 3-hour mission (0029).
+- **`ENii GO` → `CLK s WIN`, then the `COPY r` pointers last run first**, so a pointer activated by the previous copy's `START` cannot take `GO`'s pulse in the same tick.
+- **No `Seeded` variant; `RandomImpl` is removed.**
+- **MCUs: 11 per clock entry (10 for the last in the waterfall), 17 + J + a per side** (20 + a at J = 3). The three-entry, three-area test plan has 55 (the original design: 76).
+- The entry order is shuffled per side from `AirPlan.seed` by `clock::waterfall_order` (SplitMix64); step 6 uses the same order for its stagger. `clock::validate_schedule(side, schedule, entries)` holds the schedule checks and the two §3.7 rules below.
+
+**Original design (2026-09-27),** kept for its reasoning; where it differs from the list above, the list above is what is built.
+
 ```
  Translator Mission Begin ─► CLK s FIRST (timer, first slot) ─► CLK s TICK (relay)
  CLK s TICK ─► CLK s PERIOD (timer, P) ─► CLK s TICK          (loop; jitter is downstream so it never accumulates)
@@ -491,7 +505,7 @@ Differences: names carry the `CLK s` prefix, and exclusion acts on `ENii RANDOM`
 - **A request needs no answer.** If the gate is shut, the pulse is dropped and the slot stays quiet (D17). There is no REQ, GRANTED or DENIED relay per copy.
 - **Starting states** (`SideLogic.init_off`): `ENii LAST`, `CLK s REROLL` (clock); `ENii COPY r` for r ≥ 2 (assemble).
 - **MCUs: 12 per clock entry** (11 for the last one in the waterfall, which has no closer): `AVAILABLE`, `RANDOM ON`, `LAST`, `EXCLUDE`, `RANDOM`, `OUT`, its closer, `HOT`, `COLD`, `GO` and the two `LAST SET` switches. `ENii EXHAUSTED` is one more MCU per entry, owned by `assemble_side` and shared by both front ends. One `CLK s WIN` Deactivate per side serves every `GO`. The per-side count is about 40 with three jitter steps, plus one `AREA aa OUT` per area; step 5 pins the exact number.
-- `QUIET ROLL`, `JITTER` and `RANDOM` rely on the Timer `Random` % being rolled each time the timer is triggered (risk f). The builder takes `RandomImpl::{InMission, Seeded}`:
+- `QUIET ROLL`, `JITTER` and `RANDOM` rely on the Timer `Random` % being rolled each time the timer is triggered (risk f, confirmed in flight 0; decision 0029 removed `RandomImpl` and the `Seeded` variant). The original builder took `RandomImpl::{InMission, Seeded}`:
   - `InMission` (primary) is the diagram above.
   - `Seeded` (fallback if f fails) makes every choice at Generate time from the plan seed (`AirPlan.seed`). The clock is unrolled into S = ceil(6 h / period) slots. Each slot gets a fixed jitter step, a fixed quiet flag, and an ordered entry list (a weighted sample without replacement over the clock-eligible entries). In the mission, a slot tries its list in order through the same `ENii HOT` / `ENii COLD` pairs: the first HOT, available, not-LAST entry wins, and "reroll" means the next entry in the list (U6). After slot S the clock stops. The zone chance becomes a fixed per-zone sequence of 8 fire/skip outcomes, stepped by a one-hot pointer at each arming and cycled.
 
@@ -748,7 +762,7 @@ impl Default for TotalsLimits { fn default() -> Self { Self { aircraft: 96, mcus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum ZoneOutImpl      { #[default] CheckZone, Watchdog }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum LossesImpl       { #[default] Type13 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum CounterResetImpl { #[default] SetVal, Ring }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum RandomImpl       { #[default] InMission, Seeded }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum RandomImpl       { #[default] InMission, Seeded }      // removed by decision 0029 (flight 0 confirmed f)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum BudgetImpl       { #[default] HeadCount, SingleSlot }      // §3.3
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum CensusImpl       { #[default] Spaced, SameTick }           // §3.3, probe E7
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum PresenceCheckImpl { #[default] PulseInside, Closer0Race }   // risk c; removed by decision 0025 (one presence check)
@@ -1774,7 +1788,7 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 
 **Files:** `src/airtask/clock.rs`.
 
-**Depends on:** steps 3 and 4. Built with `RandomImpl::{InMission, Seeded}`; the default comes from the flight 0 result f.
+**Depends on:** steps 3 and 4. Built with `RandomImpl::{InMission, Seeded}`; the default comes from the flight 0 result f. **As built (2026-10-18), decision 0029 B changed the inside of the clock and removed `Seeded`: the list below is the original draft; the built tests are in `src/airtask/clock.rs` and listed in `handoff/sessions/2026-10-18-p14-step5.md`.**
 
 **Walker test plan, pinned in code** (`clock_test_plan()`): the lifecycle scenarios below need more grants than the defaults allow, so they use `runs = 6` on every entry, budget 6, and a scripted `DONE HUB` for each copy 60 s after its `START`. Scenarios that state other values say so.
 
@@ -1831,6 +1845,7 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
   - `zone_no_request_after_runs_starts`.
   - `zone_fire_then_later_chance_miss_reaches_cooldown`: a FIRE, its `DONE HUB`, re-arm, then a failed chance roll: `COOLDOWN` starts and the zone re-arms.
   - `zone_clock_done_does_not_start_idle_zone_cooldown`.
+  - **Busy-area check of the clock's no-repeat rule (decision 0029, added 2026-10-18):** one area, a player loitering for 3 h, zone and clock both on it; 200 paired runs (same seed) of `LAST SET` as built (B) and as the two-switch rule (B′), for 2 and 4 entries on the area and budget 1 and 2. Report launches on the area, slots lost and B′'s repeats per 3-hour mission. If B and B′ differ by less than half a launch per mission in every case, B stays; otherwise the user chooses.
 
 ### Step 7. Export integration — S–M. Branch `claude/p14-export`
 
@@ -2129,3 +2144,4 @@ The repo does not prove any of these in game. The shipped files only show what t
   - **No further full review (U23).** These last changes are not reviewed by a second model. Fable re-reads each step's section when it scopes that step for Astra.
 - **Gate-switch view (2026-10-08, user).** §10 item 26 added: explore a cell library of the gate idioms (relay, latch, once-gate, threshold, reset, pair) shared by every builder, scoped after step 3. Not scheduled; no design, count or step changed.
 - **2026-10-18, step 4 built.** §3.5 rewritten as built: one country-filtered Complex Trigger per area for the entry and a pulsed check zone for the presence check, 19 MCUs (decisions 0023, 0024, 0025; flight 2J showed a switched-on Complex Trigger misses a plane already inside). U24 timing in `timing.rs`. `PresenceCheckImpl` removed.
+- **2026-10-18, step 5 built.** §3.7 opens with the clock as built (decision 0029 B): quiet roll and jitter as J random timers into a latch, `ATTEMPT END` cancelled directly, a 2-MCU entry randomizer, one-Activate `LAST SET`, `GO` lists copy pointers last run first; 11 MCUs per entry and 17 + J + a per side (55 on the three-entry test plan, from 76). `RandomImpl` and the `Seeded` variants removed (flight 0 confirmed f). Step 6 adds a busy-area check of the `LAST SET` rule (B against B′).
