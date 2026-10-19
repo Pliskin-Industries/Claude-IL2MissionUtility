@@ -71,6 +71,12 @@ impl AirSide {
             AirSide::Nato => 'N',
         }
     } // §3.0 names
+    pub fn label(self) -> &'static str {
+        match self {
+            AirSide::Dprk => "DPRK",
+            AirSide::Nato => "NATO",
+        }
+    } // user-facing text and group names
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
