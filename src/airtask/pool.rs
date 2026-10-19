@@ -1,7 +1,155 @@
 //! Target choices, resolution and pool edits shared by the rail tab and Map dock.
 
-use super::{AirContext, AirPlan, AirSide, PoolEntry, SortieSource, TargetRef};
+use super::{
+    AirContext, AirPlan, AirRole, AirSide, AirSortie, PoolEntry, SortieSource, TargetRef, Ymd,
+};
 use crate::mapclip::point_north_of_front;
+
+impl AirSide {
+    pub const ALL: [AirSide; 2] = [AirSide::Dprk, AirSide::Nato];
+}
+
+impl AirSortie {
+    pub fn valid_on(&self, date: Ymd) -> bool {
+        self.valid.from <= date && date <= self.valid.to
+    }
+
+    pub fn is_escorted(&self) -> bool {
+        self.lead_roles
+            .iter()
+            .flatten()
+            .any(|role| *role == AirRole::Escort)
+    }
+}
+
+impl AirPlan {
+    pub fn sortie(&self, id: &str) -> Option<&AirSortie> {
+        self.library.iter().find(|sortie| sortie.id == id)
+    }
+}
+
+/// Counts include switched-off entries; unresolved sortie ids have no side.
+pub fn pool_counts(plan: &AirPlan) -> [usize; 2] {
+    let mut counts = [0; 2];
+    for entry in &plan.pool {
+        if let Some(sortie) = plan.sortie(&entry.sortie_id) {
+            counts[sortie.side.idx()] += 1;
+        }
+    }
+    counts
+}
+
+pub fn default_categories() -> Vec<String> {
+    super::DEFAULT_CATEGORIES
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+fn same_category(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
+}
+
+/// Register a label without changing the spelling carried by a sortie.
+fn ensure_category(plan: &mut AirPlan, name: &str) -> String {
+    let name = name.trim();
+    if !plan.categories.iter().any(|c| same_category(c, name)) {
+        plan.categories.push(name.to_owned());
+    }
+    name.to_owned()
+}
+
+pub fn add_library_item(plan: &mut AirPlan, mut sortie: AirSortie) {
+    let name = if sortie.category.trim().is_empty() {
+        super::default_category(&sortie)
+    } else {
+        sortie.category.clone()
+    };
+    sortie.category = ensure_category(plan, &name);
+    plan.library.push(sortie);
+}
+
+/// Set a nonempty category, adding its label if a caller supplies a new one.
+pub fn set_category(plan: &mut AirPlan, sortie_index: usize, name: &str) {
+    if sortie_index < plan.library.len() && !name.trim().is_empty() {
+        plan.library[sortie_index].category = ensure_category(plan, name);
+    }
+}
+
+fn checked_category(plan: &AirPlan, name: &str, except: Option<usize>) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Enter a category name.".into());
+    }
+    if plan
+        .categories
+        .iter()
+        .enumerate()
+        .any(|(i, c)| Some(i) != except && same_category(c, name))
+    {
+        return Err(format!("A category named {name} already exists."));
+    }
+    Ok(name.to_owned())
+}
+
+pub fn add_category(plan: &mut AirPlan, name: &str) -> Result<(), String> {
+    let name = checked_category(plan, name, None)?;
+    plan.categories.push(name);
+    Ok(())
+}
+
+pub fn rename_category(plan: &mut AirPlan, old: &str, new: &str) -> Result<(), String> {
+    let index = plan
+        .categories
+        .iter()
+        .position(|c| same_category(c, old.trim()))
+        .ok_or("Select a category to rename.")?;
+    let name = checked_category(plan, new, Some(index))?;
+    let old = std::mem::replace(&mut plan.categories[index], name.clone());
+    for sortie in &mut plan.library {
+        if same_category(&sortie.category, &old) {
+            sortie.category = name.clone();
+        }
+    }
+    Ok(())
+}
+
+/// Removed labels fall back to file/order defaults, even if that restores a label.
+pub fn remove_category(plan: &mut AirPlan, name: &str) -> usize {
+    let Some(index) = plan
+        .categories
+        .iter()
+        .position(|c| same_category(c, name.trim()))
+    else {
+        return 0;
+    };
+    let old = plan.categories.remove(index);
+    let moved: Vec<_> = plan
+        .library
+        .iter()
+        .enumerate()
+        .filter(|(_, sortie)| same_category(&sortie.category, &old))
+        .map(|(i, sortie)| (i, super::default_category(sortie)))
+        .collect();
+    for (i, default) in &moved {
+        set_category(plan, *i, default);
+    }
+    moved.len()
+}
+
+pub fn category_counts(plan: &AirPlan) -> Vec<(String, usize)> {
+    plan.categories
+        .iter()
+        .map(|category| {
+            let count = plan
+                .library
+                .iter()
+                .filter(|s| same_category(&s.category, category))
+                .count();
+            (category.clone(), count)
+        })
+        .collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetKind {
@@ -62,7 +210,7 @@ pub fn resolve_target(target: &TargetRef, ctx: &AirContext) -> Option<TargetChoi
         TargetRef::Objective { side, xz } => (TargetKind::Objective, Some(side), xz),
         TargetRef::Arrow { tip, .. } => (TargetKind::Arrow, None, tip),
     };
-    [AirSide::Dprk, AirSide::Nato]
+    AirSide::ALL
         .into_iter()
         .filter(|s| side.is_none_or(|wanted| *s == wanted))
         .flat_map(|s| target_choices(ctx, s))
@@ -93,7 +241,7 @@ pub fn entry_status(plan: &AirPlan, index: usize, ctx: &AirContext) -> EntryStat
     let Some(entry) = plan.pool.get(index) else {
         return EntryStatus::MissingSortie;
     };
-    let Some(sortie) = plan.library.iter().find(|s| s.id == entry.sortie_id) else {
+    let Some(sortie) = plan.sortie(&entry.sortie_id) else {
         return EntryStatus::MissingSortie;
     };
     let Some(target) = resolve_target(&entry.target, ctx) else {
@@ -101,7 +249,7 @@ pub fn entry_status(plan: &AirPlan, index: usize, ctx: &AirContext) -> EntryStat
     };
     if target.side != sortie.side {
         EntryStatus::SideChanged
-    } else if ctx.date < sortie.valid.from || ctx.date > sortie.valid.to {
+    } else if !sortie.valid_on(ctx.date) {
         EntryStatus::OutOfDate
     } else {
         EntryStatus::Ok
@@ -117,11 +265,20 @@ pub fn add_entry(plan: &mut AirPlan, entry: PoolEntry) {
 }
 
 /// Add each date-valid sortie/target pair once, including existing disabled entries.
-pub fn auto_fill(plan: &mut AirPlan, ctx: &AirContext, side: AirSide) -> usize {
+pub fn auto_fill(
+    plan: &mut AirPlan,
+    ctx: &AirContext,
+    side: AirSide,
+    category: Option<&str>,
+) -> usize {
     let sorties: Vec<_> = plan
         .library
         .iter()
-        .filter(|s| s.side == side && s.valid.from <= ctx.date && ctx.date <= s.valid.to)
+        .filter(|s| {
+            s.side == side
+                && s.valid_on(ctx.date)
+                && category.is_none_or(|category| same_category(&s.category, category))
+        })
         .map(|s| s.id.clone())
         .collect();
     let choices = target_choices(ctx, side);
@@ -322,8 +479,8 @@ mod tests {
             ..AirPlan::default()
         };
         plan.library.push(la11()); // Invalid on 1 Jul 1950: must not add its three targets.
-        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Dprk), 2 * 3);
-        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Nato), 4 * 2);
+        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Dprk, None), 2 * 3);
+        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Nato, None), 4 * 2);
         assert!(plan.include_in_base_map);
         assert_eq!(plan.pool.len(), 14);
         assert!(
@@ -336,15 +493,15 @@ mod tests {
             panic!()
         };
         xz.0 += 25.0; // Still resolves to objective 1: do not add it again.
-        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Dprk), 0);
-        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Nato), 0);
+        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Dprk, None), 0);
+        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Nato, None), 0);
         let empty = AirContext {
             east_objectives: &[],
             nato_objectives: &[],
             arrows: &[],
             ..ctx
         };
-        assert_eq!(auto_fill(&mut plan, &empty, AirSide::Dprk), 0);
+        assert_eq!(auto_fill(&mut plan, &empty, AirSide::Dprk, None), 0);
     }
 
     #[test]
@@ -353,7 +510,7 @@ mod tests {
             library: super::super::builtin_library(),
             ..AirPlan::default()
         };
-        auto_fill(&mut plan, &context(), AirSide::Nato);
+        auto_fill(&mut plan, &context(), AirSide::Nato, None);
         let before = plan.clone();
         assert_eq!(
             remove_library_item(&mut plan, 0).unwrap_err(),
@@ -369,7 +526,7 @@ mod tests {
             library: super::super::builtin_library(),
             ..AirPlan::default()
         };
-        auto_fill(&mut plan, &context(), AirSide::Nato);
+        auto_fill(&mut plan, &context(), AirSide::Nato, None);
         let keep = plan.pool.clone();
         plan.library.push(la11());
         for choice in target_choices(&context(), AirSide::Dprk) {
@@ -379,5 +536,267 @@ mod tests {
         assert_eq!(remove_library_item(&mut plan, 6), Ok(3));
         assert_eq!(plan.pool, keep);
         assert_eq!(plan.library.len(), 6);
+    }
+
+    #[test]
+    fn sortie_dates_are_inclusive_and_escort_comes_from_any_lead() {
+        let mut sortie = la11();
+        assert!(!sortie.valid_on((1953, 4, 14)));
+        assert!(sortie.valid_on((1953, 4, 15)));
+        assert!(sortie.valid_on((1953, 7, 27)));
+        assert!(!sortie.valid_on((1953, 7, 28)));
+        assert!(!sortie.is_escorted());
+        sortie.lead_roles.push(vec![AirRole::Escort]);
+        assert!(sortie.is_escorted());
+        sortie.lead_roles = vec![vec![AirRole::AirPatrol, AirRole::GroundAttack]];
+        assert!(!sortie.is_escorted());
+    }
+
+    #[test]
+    fn sortie_lookup_and_pool_counts_include_disabled_but_not_missing() {
+        let ctx = context();
+        let mut plan = AirPlan {
+            library: super::super::builtin_library(),
+            ..AirPlan::default()
+        };
+        assert_eq!(AirSide::ALL.map(AirSide::idx), [0, 1]);
+        assert_eq!(plan.sortie(&plan.library[1].id), Some(&plan.library[1]));
+        assert!(plan.sortie("missing").is_none());
+        assert_eq!(pool_counts(&plan), [0, 0]);
+        auto_fill(&mut plan, &ctx, AirSide::Dprk, None);
+        auto_fill(&mut plan, &ctx, AirSide::Nato, None);
+        plan.pool[0].enabled = false;
+        plan.pool.push(PoolEntry::new(
+            "missing".into(),
+            target_choices(&ctx, AirSide::Dprk)[0].target,
+        ));
+        assert_eq!(pool_counts(&plan), [6, 8]);
+    }
+
+    #[test]
+    fn default_categories_have_the_five_labels_in_order() {
+        assert_eq!(
+            default_categories(),
+            [
+                "Air alert",
+                "Strike",
+                "Close support",
+                "Armed recon",
+                "Interdiction"
+            ]
+        );
+    }
+
+    #[test]
+    fn add_library_item_appends_and_registers_its_category_once() {
+        let mut plan = AirPlan {
+            categories: default_categories(),
+            ..AirPlan::default()
+        };
+        let mut sortie = la11();
+        sortie.category = "Night raids".into();
+        add_library_item(&mut plan, sortie.clone());
+        assert_eq!(plan.library, [sortie.clone()]);
+        assert_eq!(
+            plan.categories,
+            [
+                "Air alert",
+                "Strike",
+                "Close support",
+                "Armed recon",
+                "Interdiction",
+                "Night raids"
+            ]
+        );
+        sortie.category = " night RAIDS ".into();
+        add_library_item(&mut plan, sortie);
+        assert_eq!(plan.categories.len(), 6);
+        assert_eq!(plan.library[1].category, "night RAIDS");
+        let mut unlabeled = la11();
+        unlabeled.category.clear();
+        add_library_item(&mut plan, unlabeled);
+        assert_eq!(plan.library[2].category, "Strike");
+    }
+
+    #[test]
+    fn set_category_changes_only_the_selected_sortie_and_registers_new_labels() {
+        let mut plan = AirPlan {
+            library: super::super::builtin_library(),
+            categories: default_categories(),
+            ..AirPlan::default()
+        };
+        set_category(&mut plan, 1, " interdiction ");
+        assert_eq!(plan.library[1].category, "interdiction");
+        assert_eq!(plan.library[0].category, "Air alert");
+        set_category(&mut plan, 1, "Night raids");
+        assert_eq!(plan.categories.last().unwrap(), "Night raids");
+        let before = plan.clone();
+        set_category(&mut plan, 99, "Unused");
+        set_category(&mut plan, 1, "  ");
+        assert_eq!(plan, before);
+    }
+
+    #[test]
+    fn add_category_trims_and_rejects_empty_or_case_duplicate_names() {
+        let mut plan = AirPlan {
+            categories: default_categories(),
+            ..AirPlan::default()
+        };
+        assert_eq!(add_category(&mut plan, "  Night raids  "), Ok(()));
+        assert_eq!(plan.categories.last().unwrap(), "Night raids");
+        let before = plan.clone();
+        assert_eq!(
+            add_category(&mut plan, " \t ").unwrap_err(),
+            "Enter a category name."
+        );
+        assert_eq!(
+            add_category(&mut plan, " STRIKE ").unwrap_err(),
+            "A category named STRIKE already exists."
+        );
+        assert_eq!(plan, before);
+    }
+
+    #[test]
+    fn rename_category_keeps_list_order_and_moves_every_sortie() {
+        let mut plan = AirPlan {
+            library: super::super::builtin_library(),
+            categories: default_categories(),
+            ..AirPlan::default()
+        };
+        assert_eq!(rename_category(&mut plan, "Strike", "  Raids  "), Ok(()));
+        assert_eq!(
+            plan.categories,
+            [
+                "Air alert",
+                "Raids",
+                "Close support",
+                "Armed recon",
+                "Interdiction"
+            ]
+        );
+        assert_eq!(
+            plan.library
+                .iter()
+                .map(|s| s.category.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Air alert",
+                "Raids",
+                "Close support",
+                "Armed recon",
+                "Raids",
+                "Raids"
+            ]
+        );
+        assert_eq!(rename_category(&mut plan, "Raids", "RAIDS"), Ok(()));
+        assert_eq!(plan.library[5].category, "RAIDS");
+        let before = plan.clone();
+        assert_eq!(
+            rename_category(&mut plan, "RAIDS", " ").unwrap_err(),
+            "Enter a category name."
+        );
+        assert_eq!(
+            rename_category(&mut plan, "RAIDS", "air ALERT").unwrap_err(),
+            "A category named air ALERT already exists."
+        );
+        assert_eq!(
+            rename_category(&mut plan, "missing", "New").unwrap_err(),
+            "Select a category to rename."
+        );
+        assert_eq!(plan, before);
+    }
+
+    #[test]
+    fn remove_category_restores_builtin_and_file_defaults_and_missing_labels() {
+        let mut plan = AirPlan {
+            categories: vec!["Custom".into()],
+            ..AirPlan::default()
+        };
+        for mut sortie in super::super::builtin_library() {
+            sortie.category = "Custom".into();
+            add_library_item(&mut plan, sortie);
+        }
+        let mut file = la11();
+        file.category = "Custom".into();
+        add_library_item(&mut plan, file);
+        assert_eq!(remove_category(&mut plan, "Custom"), 7);
+        assert_eq!(
+            plan.categories,
+            ["Air alert", "Strike", "Close support", "Armed recon"]
+        );
+        assert_eq!(
+            plan.library
+                .iter()
+                .map(|s| s.category.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Air alert",
+                "Strike",
+                "Close support",
+                "Armed recon",
+                "Strike",
+                "Strike",
+                "Strike"
+            ]
+        );
+        assert_eq!(remove_category(&mut plan, "Strike"), 4);
+        assert_eq!(
+            plan.categories,
+            ["Air alert", "Close support", "Armed recon", "Strike"]
+        );
+        assert_eq!(remove_category(&mut plan, "missing"), 0);
+        add_category(&mut plan, "Unused").unwrap();
+        assert_eq!(remove_category(&mut plan, "Unused"), 0);
+        assert!(!plan.categories.iter().any(|c| c == "Unused"));
+    }
+
+    #[test]
+    fn category_counts_follow_list_order_and_include_unused_categories() {
+        let plan = AirPlan {
+            library: super::super::builtin_library(),
+            categories: default_categories(),
+            ..AirPlan::default()
+        };
+        assert_eq!(
+            category_counts(&plan),
+            vec![
+                ("Air alert".into(), 1),
+                ("Strike".into(), 3),
+                ("Close support".into(), 1),
+                ("Armed recon".into(), 1),
+                ("Interdiction".into(), 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn auto_fill_filters_category_without_changing_existing_entries() {
+        let ctx = context();
+        let mut plan = AirPlan {
+            library: super::super::builtin_library(),
+            ..AirPlan::default()
+        };
+        assert_eq!(
+            auto_fill(&mut plan, &ctx, AirSide::Dprk, Some("Air alert")),
+            0
+        );
+        assert_eq!(
+            auto_fill(&mut plan, &ctx, AirSide::Nato, Some("Air alert")),
+            2
+        );
+        let alert = plan.pool.clone();
+        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Dprk, Some("Strike")), 6);
+        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Nato, Some("Strike")), 2);
+        assert_eq!(&plan.pool[..2], &alert);
+        assert!(
+            plan.pool[2..]
+                .iter()
+                .all(|e| plan.sortie(&e.sortie_id).unwrap().category == "Strike")
+        );
+        assert_eq!(auto_fill(&mut plan, &ctx, AirSide::Nato, Some("Strike")), 0);
+        assert_eq!(
+            auto_fill(&mut plan, &ctx, AirSide::Nato, Some("Interdiction")),
+            0
+        );
     }
 }

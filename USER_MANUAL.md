@@ -514,6 +514,12 @@ After import, generate again with a different box if you need a tighter AO.
 
 Open **Air Tasking** with **Ctrl 7**. Pick a library sortie, choose one of its side's Map objectives or arrows, and click **Add to pool**. **Auto-fill from objectives** adds the available sorties for both sides without repeating existing pairs. The Map date decides which sorties are valid.
 
+Library cards show their category: **Air alert**, **Strike**, **Close support**, **Armed recon** or **Interdiction**. Interdiction can describe attacks on naval vessels too. Select a card and use its **Category** combo to change it. **Escorted** appears automatically when a lead has a Cover order.
+
+The centre has **Pool** and **Categories** tabs. The Pool filter shows **All categories** or only the selected category; with a filter, **Auto-fill from objectives** adds only that category. The Categories tab lists how many library sorties use each category and lets you add, rename or remove names. Renaming updates its sorties. Removing a category returns its sorties to their defaults, restoring any default category they need. **Ctrl Z** undoes each change.
+
+Category edits last for this run. To keep a template's category between runs, put a line `Category: <name>` in the top-level group's description (**Desc**) in the mission editor, for example `Category: Interdiction`. The first such line supplies the category when the file loads, and a new name joins the list. Without a label, user templates with an air patrol order start as Air alert; other user templates start as Strike. The six built-ins use their curated categories. Reset restores the default category list and keeps the library's labels. Generate does not write category edits back to templates.
+
 Each pool row has an on/off switch, weight, trigger mode and maximum runs. Select a row to set its heading and see its hard stop. The right panel holds the budget, player threshold, schedules, zone triggers and output totals. The threshold is fixed at one player. **Add template…** (**Ctrl O**) adds a supported file to the library. Removing a user template removes its entries too. **Reset** clears the pool and restores the settings while keeping the library; **Ctrl Z** undoes an edit, removal or reset. **Generate File** writes the air sorties as one group.
 
 ## Language files

@@ -69,15 +69,23 @@ settings sections, confirmation dialog, `Undo<T>`, side markers, and
 Presentation only. **All modes.**
 
 ### `ui/air.rs` — Air Tasking rail tab
-The library, target picker, editable pool, slot strip, plan checks and settings.
+The library, category editor and pool filter, target picker, editable pool,
+slot strip, plan checks and settings.
 Builds the Map context and calls the public `airtask` API; owns presentation,
 undo snapshots and the standalone file dialog. `draw_slot_strip` also serves
 the future Map Air dock. **Air Tasking.**
 
 ### `airtask/pool.rs` — targets and pool edits
 `target_choices`, `resolve_target` (50 m tolerance), `entry_status`, `add_entry`,
-`auto_fill` and `remove_library_item`. Keeps target numbering, side/date checks
-and duplicate prevention shared between the rail tab and future Map dock.
+`auto_fill` and `remove_library_item`, plus category edits and counts. Keeps
+target numbering, side/date checks and duplicate prevention shared between
+the rail tab and future Map dock.
+**Air Tasking.**
+
+### `airtask/standalone.rs` — standalone air group and sidecar sources
+`build_air_group` wraps `build_air_packs` in one Air Tasking group and assigns
+indexes from 1. `sidecar_paths` returns only user files used by enabled pool
+entries. Keeps AST assembly out of the UI; the UI serializes and saves it.
 **Air Tasking.**
 
 ### `ast.rs` — `Il2Entity`: the .Group AST

@@ -2,23 +2,36 @@
 
 use super::*;
 use crate::airtask::{
-    self, AirContext, AirPlan, AirRole, AirSide, AirSortie, BudgetImpl, EntryStatus, IssueSeverity,
+    self, AirContext, AirPlan, AirSide, AirSortie, BudgetImpl, EntryStatus, IssueSeverity,
     PoolEntry, SlotMark, SortieSource, TargetChoice, TargetKind, TriggerMode, Ymd,
 };
 
 type Edit = Option<(egui::Id, String)>;
 
+#[derive(Default)]
+pub(super) struct CategoryUi {
+    show_categories: bool,
+    filter: Option<String>,
+    new_name: String,
+    renaming: Option<(String, String)>,
+    error: Option<String>,
+}
+
 impl GroupGeneratorApp {
     pub(super) fn new_air_plan() -> AirPlan {
-        AirPlan {
-            library: airtask::builtin_library(),
+        let mut plan = AirPlan {
+            categories: airtask::default_categories(),
             seed: Self::placement_seed(),
             ..AirPlan::default()
+        };
+        for sortie in airtask::builtin_library() {
+            airtask::add_library_item(&mut plan, sortie);
         }
+        plan
     }
 
     /// Use exactly the full/composite front used to colour Map's arrows, without AO clipping.
-    pub(super) fn with_air_context<R>(&self, read: impl FnOnce(&AirContext<'_>) -> R) -> R {
+    fn air_front(&self) -> Vec<(f64, f64)> {
         let raw = if self.custom_front_xz.is_empty() {
             preview_front_xz(self.front_t)
         } else {
@@ -26,23 +39,29 @@ impl GroupGeneratorApp {
         };
         let full = crate::frontlines::densify(&raw, 4000.0);
         let (composite, _) = apply_salients(full.clone(), &self.salients);
+        if composite.len() >= 2 {
+            composite
+        } else {
+            full
+        }
+    }
+
+    pub(super) fn with_air_context<R>(&self, read: impl FnOnce(&AirContext<'_>) -> R) -> R {
+        let front = self.air_front();
         let mark = self.current_mark();
         read(&AirContext {
             east_objectives: &self.east_objectives,
             nato_objectives: &self.nato_objectives,
             arrows: &self.attack_arrows,
-            front: if composite.len() >= 2 {
-                &composite
-            } else {
-                &full
-            },
+            front: &front,
             aabb: self.front_aabb,
             date: (mark.year, mark.month, mark.day),
         })
     }
 
     pub(super) fn air_header_label(&self) -> String {
-        let date = self.with_air_context(|ctx| date_text(ctx.date));
+        let mark = self.current_mark();
+        let date = date_text((mark.year, mark.month, mark.day));
         format!(
             "Map date {date} · {} {}",
             self.air_plan.pool.len(),
@@ -89,6 +108,8 @@ impl GroupGeneratorApp {
         if let Some(plan) = self.air_undo.take() {
             self.air_plan = plan;
             self.air_editing = None;
+            self.air_categories.renaming = None;
+            self.air_categories.error = None;
             self.air_selection_bounds();
         }
     }
@@ -98,6 +119,14 @@ impl GroupGeneratorApp {
         self.air_library_selected = self
             .air_library_selected
             .filter(|&i| i < self.air_plan.library.len());
+        if self
+            .air_categories
+            .filter
+            .as_ref()
+            .is_some_and(|name| !self.air_plan.categories.contains(name))
+        {
+            self.air_categories.filter = None;
+        }
     }
 
     pub(super) fn air_reset_prompt(&self) -> (&'static str, String, &'static str) {
@@ -117,10 +146,14 @@ impl GroupGeneratorApp {
             .record("Reset Air Tasking", self.air_plan.clone());
         let library = self.air_plan.library.clone();
         self.air_plan = AirPlan {
-            library,
+            categories: airtask::default_categories(),
             seed: Self::placement_seed(),
             ..AirPlan::default()
         };
+        for sortie in library {
+            airtask::add_library_item(&mut self.air_plan, sortie);
+        }
+        self.air_categories = CategoryUi::default();
         self.air_selected = None;
         self.air_editing = None;
         self.status = Status::Info("Reset Air Tasking. Library kept.".into());
@@ -156,21 +189,21 @@ impl GroupGeneratorApp {
                 self.status = Status::Info(format!("Added {} to the library.", sortie.name));
                 self.air_library_selected = Some(self.air_plan.library.len());
                 self.air_picked_target = None;
-                self.air_plan.library.push(sortie);
+                airtask::add_library_item(&mut self.air_plan, sortie);
                 self.air_editing = None;
             }
             Err(error) => self.status = Status::Error(error),
         }
     }
 
-    fn add_air_entry(&mut self) {
+    fn add_air_entry(&mut self, ctx: &AirContext) {
         let Some(sortie) = self
             .air_library_selected
             .and_then(|i| self.air_plan.library.get(i))
         else {
             return;
         };
-        let choices = self.with_air_context(|ctx| airtask::target_choices(ctx, sortie.side));
+        let choices = airtask::target_choices(ctx, sortie.side);
         let Some(target) = self.air_picked_target.filter(|t| choices.contains(t)) else {
             return;
         };
@@ -184,21 +217,24 @@ impl GroupGeneratorApp {
         self.air_editing = None;
     }
 
-    fn auto_fill_air_pool(&mut self) {
+    fn auto_fill_air_pool(&mut self, ctx: &AirContext) {
         let mut plan = self.air_plan.clone();
-        let count = self.with_air_context(|ctx| {
-            airtask::auto_fill(&mut plan, ctx, AirSide::Dprk)
-                + airtask::auto_fill(&mut plan, ctx, AirSide::Nato)
-        });
+        let count: usize = AirSide::ALL
+            .into_iter()
+            .map(|side| {
+                airtask::auto_fill(&mut plan, ctx, side, self.air_categories.filter.as_deref())
+            })
+            .sum();
+        let mut label = format!("Added {count} {}", entry_word(count));
+        if let Some(category) = &self.air_categories.filter {
+            label.push_str(&format!(" · {category}"));
+        }
         if count > 0 {
-            self.air_undo.record(
-                format!("Added {count} {}", entry_word(count)),
-                self.air_plan.clone(),
-            );
+            self.air_undo.record(&label, self.air_plan.clone());
             self.air_plan = plan;
             self.air_editing = None;
         }
-        self.status = Status::Info(format!("Added {count} entries"));
+        self.status = Status::Info(label);
     }
 
     fn remove_air_library_item(&mut self, index: usize) {
@@ -234,13 +270,17 @@ impl GroupGeneratorApp {
 
     /// Widgets edit a draft; record the live plan before committing it. A drag or
     /// text edit keeps its first snapshot across frames, then settles on release.
-    fn apply_air_edit(&mut self, plan: AirPlan, edit: Edit) {
+    pub(super) fn apply_air_edit(&mut self, plan: AirPlan, edit: Edit) {
         if plan == self.air_plan {
             return;
         }
-        let Some((id, label)) = edit else {
-            return;
-        };
+        let (id, label) = edit.unwrap_or_else(|| {
+            (
+                self.air_editing
+                    .unwrap_or_else(|| egui::Id::new("air_draft_edit")),
+                "Changed Air Tasking".into(),
+            )
+        });
         if self.air_editing == Some(id) {
             self.air_undo.rebase();
         } else {
@@ -251,39 +291,64 @@ impl GroupGeneratorApp {
     }
 
     pub(super) fn air_page(&mut self, ctx: &egui::Context) {
+        // Own the Map inputs for this frame so every panel can edit the plan
+        // while sharing one context and one densified/composite front.
+        let front = self.air_front();
+        let east_objectives = self.east_objectives.clone();
+        let nato_objectives = self.nato_objectives.clone();
+        let arrows = self.attack_arrows.clone();
+        let mark = self.current_mark();
+        let air_ctx = AirContext {
+            east_objectives: &east_objectives,
+            nato_objectives: &nato_objectives,
+            arrows: &arrows,
+            front: &front,
+            aabb: self.front_aabb,
+            date: (mark.year, mark.month, mark.day),
+        };
         if !ctx.input(|i| i.pointer.any_down()) && !ctx.wants_keyboard_input() {
             self.air_editing = None;
         }
         self.air_selection_bounds();
-        side_panel(ctx, "air_left", true, 270.0, |ui| self.air_library(ui));
-        side_panel(ctx, "air_right", false, 304.0, |ui| self.air_settings(ui));
+        side_panel(ctx, "air_left", true, 270.0, |ui| {
+            self.air_library(ui, &air_ctx)
+        });
+        side_panel(ctx, "air_right", false, 304.0, |ui| {
+            self.air_settings(ui, &air_ctx)
+        });
         egui::CentralPanel::default().show(ctx, |ui| {
             paint_blueprint_grid(ui.painter(), ui.max_rect());
-            egui::ScrollArea::vertical().id_salt("air_center").auto_shrink([false, false]).show(ui, |ui| {
-                air_sheet(ui, |ui| self.air_pool(ui));
+            air_tabs(ui, &mut self.air_categories.show_categories);
+            egui::ScrollArea::vertical().id_salt(("air_center", self.air_categories.show_categories)).auto_shrink([false, false]).show(ui, |ui| {
+                if self.air_categories.show_categories {
+                    air_sheet(ui, |ui| self.air_category_list(ui));
+                    return;
+                }
+                air_sheet(ui, |ui| self.air_pool(ui, &air_ctx));
                 ui.add_space(10.0);
                 air_sheet(ui, |ui| {
                     shell::section_title(ui, "Slot timeline", Some("0–3 h · one row per side"));
-                    let marks = self.with_air_context(|ctx| airtask::preview(&self.air_plan, ctx).slot_times);
+                    let marks = airtask::preview(&self.air_plan, &air_ctx).slot_times;
                     draw_slot_strip(ui, &marks);
                     shell::hint(ui, "Ticks: slot times · shading: jitter span · fainter tick: higher quiet chance.", false);
                 });
                 ui.add_space(10.0);
                 air_sheet(ui, |ui| {
                     shell::section_title(ui, "Plan check", Some("errors block Generate · warnings do not"));
-                    let issues = self.with_air_context(|ctx| airtask::validate(&self.air_plan, ctx));
+                    let issues = airtask::validate(&self.air_plan, &air_ctx);
                     if issues.is_empty() { shell::hint(ui, "No issues reported.", false); }
                     for issue in issues {
                         let glyph = if issue.severity == IssueSeverity::Error { "✖" } else { "⚠" };
-                        ui.colored_label(c::WARN_TEXT, format!("{glyph} {}", issue.text));
+                        let text = RichText::new(format!("{glyph} {}", issue.text)).color(c::WARN_TEXT);
+                        ui.label(if issue.severity == IssueSeverity::Error { text.strong() } else { text });
                     }
                 });
             });
         });
     }
 
-    fn air_library(&mut self, ui: &mut egui::Ui) {
-        let date = self.with_air_context(|ctx| ctx.date);
+    fn air_library(&mut self, ui: &mut egui::Ui, ctx: &AirContext) {
+        let date = ctx.date;
         shell::section_title(
             ui,
             &format!("Library · {}", self.air_plan.library.len()),
@@ -292,12 +357,19 @@ impl GroupGeneratorApp {
         for (index, sortie) in self.air_plan.library.iter().enumerate() {
             let card = shell::card(ui, self.air_library_selected == Some(index), |ui| {
                 ui.horizontal(|ui| {
-                    shell::side_marker(ui, marker_side(sortie.side), 12.0);
+                    shell::side_marker(ui, side_style(sortie.side).marker, 12.0);
                     ui.add(egui::Label::new(RichText::new(&sortie.name).strong()).wrap());
                 });
                 ui.horizontal_wrapped(|ui| {
-                    shell::tag(ui, role_text(sortie), true);
-                    if escorted(sortie) {
+                    let tag = shell::tag(ui, &sortie.category, true);
+                    tag.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Label,
+                            true,
+                            format!("Sortie {} category: {}", index + 1, sortie.category),
+                        )
+                    });
+                    if sortie.is_escorted() {
                         shell::tag(ui, "Escorted", false);
                     }
                     if matches!(sortie.source, SortieSource::File(_)) {
@@ -313,7 +385,9 @@ impl GroupGeneratorApp {
                     })
                     .collect::<Vec<_>>()
                     .join(" / ");
-                ui.label(RichText::new(format!("{} × {models}", sortie.planes)).small());
+                ui.horizontal_wrapped(|ui| {
+                    shell::tag(ui, &format!("{} × {models}", sortie.planes), false);
+                });
                 let (valid, badge) = date_badge(sortie, date);
                 ui.label(RichText::new(badge).small().color(if valid {
                     c::ACCENT_700
@@ -344,7 +418,39 @@ impl GroupGeneratorApp {
         if let Some(index) = self.air_library_selected {
             let sortie = &self.air_plan.library[index];
             ui.label(format!("Selected: {}", sortie.name));
-            let choices = self.with_air_context(|ctx| airtask::target_choices(ctx, sortie.side));
+            let choices = airtask::target_choices(ctx, sortie.side);
+            let removable = matches!(sortie.source, SortieSource::File(_));
+            let mut category = sortie.category.clone();
+            ui.horizontal(|ui| {
+                ui.label("Category");
+                let response = egui::ComboBox::from_id_salt("air_sortie_category")
+                    .width(ui.available_width())
+                    .selected_text(&category)
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        for name in &self.air_plan.categories {
+                            if ui
+                                .selectable_label(
+                                    category.to_lowercase() == name.to_lowercase(),
+                                    name,
+                                )
+                                .clicked()
+                            {
+                                category = name.clone();
+                            }
+                        }
+                    })
+                    .response;
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Sortie category")
+                });
+            });
+            if category != self.air_plan.library[index].category {
+                self.air_undo
+                    .record("Changed sortie category", self.air_plan.clone());
+                airtask::set_category(&mut self.air_plan, index, &category);
+                self.air_editing = None;
+            }
             if !self
                 .air_picked_target
                 .is_some_and(|picked| choices.contains(&picked))
@@ -382,7 +488,6 @@ impl GroupGeneratorApp {
             if choices.is_empty() {
                 shell::hint(ui, "Place objectives or arrows on the Map first.", false);
             }
-            let removable = matches!(sortie.source, SortieSource::File(_));
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(
@@ -391,7 +496,7 @@ impl GroupGeneratorApp {
                     )
                     .clicked()
                 {
-                    self.add_air_entry();
+                    self.add_air_entry(ctx);
                 }
                 if ui
                     .add_enabled(removable, egui::Button::new("Remove"))
@@ -406,29 +511,167 @@ impl GroupGeneratorApp {
         shell::hint(ui, "Built-in sorties stay in the library.", false);
     }
 
-    fn air_pool(&mut self, ui: &mut egui::Ui) {
-        let counts = [AirSide::Dprk, AirSide::Nato].map(|side| {
-            self.air_plan
-                .pool
-                .iter()
-                .filter(|entry| {
-                    self.air_plan
-                        .library
-                        .iter()
-                        .any(|s| s.id == entry.sortie_id && s.side == side)
-                })
-                .count()
-        });
-        ui.horizontal(|ui| {
-            air_cell(ui, 80.0, |ui| {
-                shell::section_title(ui, &format!("Pool · {}", self.air_plan.pool.len()), None)
+    fn air_category_list(&mut self, ui: &mut egui::Ui) {
+        shell::section_title(ui, "Categories", Some("library sorties"));
+        for (name, count) in airtask::category_counts(&self.air_plan) {
+            ui.push_id(&name, |ui| {
+                ui.horizontal(|ui| {
+                    let editing = self
+                        .air_categories
+                        .renaming
+                        .as_ref()
+                        .is_some_and(|(old, _)| *old == name);
+                    let name_width = (ui.available_width() - 212.0).max(60.0);
+                    if editing {
+                        let (_, draft) = self.air_categories.renaming.as_mut().unwrap();
+                        category_input(ui, draft, name_width, "Rename category");
+                    } else {
+                        ui.add_sized([name_width, 28.0], egui::Label::new(&name).truncate())
+                            .on_hover_text(&name);
+                    }
+                    ui.label(format!("{count} sorties"));
+                    if editing {
+                        if ui.button("Save").clicked() {
+                            let new = self.air_categories.renaming.as_ref().unwrap().1.clone();
+                            let mut plan = self.air_plan.clone();
+                            match airtask::rename_category(&mut plan, &name, &new) {
+                                Ok(()) => {
+                                    if self.air_categories.filter.as_ref() == Some(&name) {
+                                        self.air_categories.filter = Some(new.trim().to_owned());
+                                    }
+                                    self.commit_air_category(plan, "Renamed category");
+                                    self.air_categories.renaming = None;
+                                }
+                                Err(error) => self.air_categories.error = Some(error),
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.air_categories.renaming = None;
+                            self.air_categories.error = None;
+                        }
+                    } else {
+                        let rename = ui.button("Rename");
+                        rename.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                format!("Rename {name}"),
+                            )
+                        });
+                        if rename.clicked() {
+                            self.air_categories.renaming = Some((name.clone(), name.clone()));
+                            self.air_categories.error = None;
+                        }
+                        let remove = ui.button("Remove");
+                        remove.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                format!("Remove category {name}"),
+                            )
+                        });
+                        if remove.clicked() {
+                            let mut plan = self.air_plan.clone();
+                            let moved = airtask::remove_category(&mut plan, &name);
+                            self.commit_air_category(plan, &format!("Removed category {name}"));
+                            self.status = Status::Info(format!(
+                                "Removed {name} · {moved} sorties moved to defaults"
+                            ));
+                        }
+                    }
+                });
             });
-            ui.label(RichText::new(format!("DPRK {} · NATO {}", counts[0], counts[1])).small());
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            let width = (ui.available_width() - 116.0).max(60.0);
+            category_input(ui, &mut self.air_categories.new_name, width, "New category");
+            if ui.button("Add category").clicked() {
+                let mut plan = self.air_plan.clone();
+                match airtask::add_category(&mut plan, &self.air_categories.new_name) {
+                    Ok(()) => {
+                        self.commit_air_category(plan, "Added category");
+                        self.air_categories.new_name.clear();
+                    }
+                    Err(error) => self.air_categories.error = Some(error),
+                }
+            }
+        });
+        if let Some(error) = &self.air_categories.error {
+            shell::warning(ui, error);
+        }
+        if shell::hint(
+            ui,
+            "Categories last for this run. A template keeps its category with a line Category: <name> in its group description.",
+            true,
+        ) {
+            self.open_help(HelpTopic::AirTasking);
+        }
+    }
+
+    fn commit_air_category(&mut self, plan: AirPlan, label: &str) {
+        self.air_undo.record(label, self.air_plan.clone());
+        self.air_plan = plan;
+        self.air_editing = None;
+        self.air_categories.error = None;
+    }
+
+    fn air_pool(&mut self, ui: &mut egui::Ui, ctx: &AirContext) {
+        ui.horizontal(|ui| {
+            let label = self
+                .air_categories
+                .filter
+                .as_deref()
+                .unwrap_or("All categories");
+            let response = egui::ComboBox::from_id_salt("air_pool_filter")
+                .width(175.0)
+                .selected_text(label)
+                .truncate()
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.air_categories.filter, None, "All categories");
+                    for name in &self.air_plan.categories {
+                        ui.selectable_value(
+                            &mut self.air_categories.filter,
+                            Some(name.clone()),
+                            name,
+                        );
+                    }
+                })
+                .response;
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Pool category filter")
+            });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button("Auto-fill from objectives").clicked() {
-                    self.auto_fill_air_pool();
+                    self.auto_fill_air_pool(ctx);
                 }
             });
+        });
+        let visible: Vec<_> = self
+            .air_plan
+            .pool
+            .iter()
+            .enumerate()
+            .filter_map(|(i, entry)| {
+                self.air_categories
+                    .filter
+                    .as_ref()
+                    .is_none_or(|category| {
+                        self.air_plan
+                            .sortie(&entry.sortie_id)
+                            .is_some_and(|s| s.category.to_lowercase() == category.to_lowercase())
+                    })
+                    .then_some(i)
+            })
+            .collect();
+        let counts = airtask::pool_counts(&self.air_plan);
+        let count = if self.air_categories.filter.is_some() {
+            format!("{} of {}", visible.len(), self.air_plan.pool.len())
+        } else {
+            self.air_plan.pool.len().to_string()
+        };
+        ui.horizontal(|ui| {
+            shell::section_title(ui, &format!("Pool · {count}"), Some(&side_counts(counts)));
         });
         if self.air_plan.pool.is_empty() {
             shell::hint(
@@ -443,23 +686,14 @@ impl GroupGeneratorApp {
                 )
                 .clicked()
             {
-                self.add_air_entry();
+                self.add_air_entry(ctx);
             }
             return;
         }
-        let states = self.with_air_context(|ctx| {
-            self.air_plan
-                .pool
-                .iter()
-                .enumerate()
-                .map(|(i, entry)| {
-                    (
-                        airtask::entry_status(&self.air_plan, i, ctx),
-                        airtask::resolve_target(&entry.target, ctx),
-                    )
-                })
-                .collect::<Vec<_>>()
-        });
+        if visible.is_empty() {
+            shell::hint(ui, "No pool entries in this category.", false);
+            return;
+        }
         let mut plan = self.air_plan.clone();
         let mut edit = None;
         let mut remove = None;
@@ -486,10 +720,13 @@ impl GroupGeneratorApp {
             }
         });
         ui.separator();
-        for (index, entry) in plan.pool.iter_mut().enumerate() {
-            let sortie = plan.library.iter().find(|s| s.id == entry.sortie_id);
+        let popup_open = egui::Popup::is_any_open(ui.ctx());
+        for index in visible {
+            let entry = &mut plan.pool[index];
+            let sortie = self.air_plan.sortie(&entry.sortie_id);
             let name = sortie.map_or("Missing sortie", |s| s.name.as_str());
-            let (status, target) = states[index];
+            let status = airtask::entry_status(&self.air_plan, index, ctx);
+            let target = airtask::resolve_target(&entry.target, ctx);
             let (rect, row) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::click());
             row.widget_info(|| {
                 egui::WidgetInfo::selected(
@@ -505,6 +742,8 @@ impl GroupGeneratorApp {
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)), |ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 ui.spacing_mut().button_padding.x = 4.0;
+                // Let the row receive clicks on its text; controls keep their own responses.
+                ui.style_mut().interaction.selectable_labels = false;
                 if !entry.enabled { ui.visuals_mut().override_text_color = Some(c::NEUTRAL_600); ui.set_opacity(0.55); }
                 air_cell(ui, widths[0], |ui| {
                     let r = ui.add_sized([28.0, 28.0], egui::Checkbox::without_text(&mut entry.enabled));
@@ -512,7 +751,7 @@ impl GroupGeneratorApp {
                     note_edit(&mut edit, &r, "Changed entry on/off");
                 });
                 air_cell(ui, widths[1], |ui| {
-                    if let Some(s) = sortie { shell::side_marker(ui, marker_side(s.side), 12.0); }
+                    if let Some(s) = sortie { shell::side_marker(ui, side_style(s.side).marker, 12.0); }
                     ui.add(egui::Label::new(name).truncate()).on_hover_text(name);
                 });
                 air_cell(ui, widths[2], |ui| {
@@ -551,12 +790,7 @@ impl GroupGeneratorApp {
                     if ui.add_sized([28.0, 28.0], egui::Button::new("✖")).on_hover_text("Remove entry").clicked() { remove = Some(index); }
                 });
             });
-            if row.clicked()
-                || ui.input(|i| {
-                    i.pointer.any_click()
-                        && i.pointer.interact_pos().is_some_and(|p| rect.contains(p))
-                })
-            {
+            if row.clicked() && !popup_open && !egui::Popup::is_any_open(ui.ctx()) {
                 self.air_selected = Some(index);
             }
             ui.painter().hline(
@@ -571,44 +805,38 @@ impl GroupGeneratorApp {
         }
     }
 
-    fn air_settings(&mut self, ui: &mut egui::Ui) {
+    fn air_settings(&mut self, ui: &mut egui::Ui, ctx: &AirContext) {
         ui.spacing_mut().slider_width = 88.0;
         let mut plan = self.air_plan.clone();
         let mut edit = None;
         let mut remove = None;
         if let Some(index) = self.air_selected {
-            let state = self.with_air_context(|ctx| {
-                (
-                    airtask::entry_status(&plan, index, ctx),
-                    airtask::resolve_target(&plan.pool[index].target, ctx),
-                )
-            });
+            let state = (
+                airtask::entry_status(&plan, index, ctx),
+                airtask::resolve_target(&plan.pool[index].target, ctx),
+            );
             ui.label(
                 RichText::new(format!("Selected · pool entry {}", index + 1))
                     .small()
                     .color(c::ACCENT_700),
             );
-            if let Some(sortie) = plan
-                .library
-                .iter()
-                .find(|s| s.id == plan.pool[index].sortie_id)
-            {
+            if let Some(sortie) = plan.sortie(&plan.pool[index].sortie_id) {
                 ui.label(
                     RichText::new(&sortie.name).font(FontId::new(22.0, theme::heading_family())),
                 );
                 ui.horizontal_wrapped(|ui| {
-                    shell::side_marker(ui, marker_side(sortie.side), 12.0);
+                    shell::side_marker(ui, side_style(sortie.side).marker, 12.0);
                     ui.label(
                         RichText::new(format!(
                             "{} · {} · {}",
-                            side_text(sortie.side),
+                            side_style(sortie.side).label,
                             entry_target_text(state.0, state.1),
-                            role_text(sortie)
+                            sortie.category
                         ))
                         .small(),
                     );
                 });
-                let stop = airtask::hard_stop(sortie, &plan);
+                let stop = airtask::hard_stop(sortie, &plan, plan.pool[index].mode);
                 let entry = &mut plan.pool[index];
                 ui.horizontal(|ui| {
                     ui.label("Heading");
@@ -633,15 +861,8 @@ impl GroupGeneratorApp {
                 });
                 ui.horizontal(|ui| {
                     ui.label("Hard stop");
-                    let text = match entry.mode {
-                        TriggerMode::Clock => format!("{} min", minutes(stop.clock_s)),
-                        TriggerMode::Zone => format!("Zone {} min", minutes(stop.zone_s)),
-                        TriggerMode::Both => format!(
-                            "{} min · Zone {} min",
-                            minutes(stop.clock_s),
-                            minutes(stop.zone_s)
-                        ),
-                    };
+                    let text = stop
+                        .map_or_else(|| "—".into(), |seconds| format!("{} min", minutes(seconds)));
                     ui.monospace(text);
                 });
             } else {
@@ -661,12 +882,12 @@ impl GroupGeneratorApp {
             ui,
             "air_budget",
             "Budget",
-            &format!("DPRK {} · NATO {}", shown[0], shown[1]),
+            &side_counts(shown.map(usize::from)),
             true,
             |ui| {
-                for side in [AirSide::Dprk, AirSide::Nato] {
+                for side in AirSide::ALL {
                     ui.horizontal(|ui| {
-                        ui.label(format!("{} max active", side_text(side)));
+                        ui.label(format!("{} max active", side_style(side).label));
                         let mut value = shown[side.idx()];
                         let r =
                             ui.add_enabled(!single, egui::Slider::new(&mut value, 1..=6).integer());
@@ -718,12 +939,13 @@ impl GroupGeneratorApp {
                     timing.dwell_s, timing.hold_s
                 ));
                 ui.label(format!("Inner r_in {} km", timing.inner_m / 1000.0));
-                let (cruise, measured) = airtask::f80_cruise_kmh();
+                let cruise = airtask::f80_cruise_kmh();
                 shell::hint(
                     ui,
                     &format!(
-                        "From F-80C cruise {cruise} km/h{}",
-                        if measured { ", measured" } else { "" }
+                        "From F-80C cruise {} km/h{}",
+                        cruise.kmh,
+                        if cruise.measured { ", measured" } else { "" }
                     ),
                     false,
                 );
@@ -737,17 +959,37 @@ impl GroupGeneratorApp {
                 note_edit(&mut edit, &r, "Changed manual timing");
                 if manual {
                     if let Some(dwell) = &mut plan.threshold.dwell_s {
-                        number_row(ui, "Dwell D", dwell, 10.0..=1800.0, 10.0, " s", &mut edit);
+                        number_row(
+                            ui,
+                            "Dwell D",
+                            dwell,
+                            NumberSpec {
+                                range: 10.0..=1800.0,
+                                step: 10.0,
+                                suffix: " s",
+                            },
+                            &mut edit,
+                        );
                     }
                     if let Some(hold) = &mut plan.threshold.hold_s {
-                        number_row(ui, "Hold H", hold, 10.0..=3600.0, 10.0, " s", &mut edit);
+                        number_row(
+                            ui,
+                            "Hold H",
+                            hold,
+                            NumberSpec {
+                                range: 10.0..=3600.0,
+                                step: 10.0,
+                                suffix: " s",
+                            },
+                            &mut edit,
+                        );
                     }
                 }
             },
         );
-        for side in [AirSide::Dprk, AirSide::Nato] {
+        for side in AirSide::ALL {
             let schedule = &mut plan.schedule[side.idx()];
-            let title = format!("Schedule · {}", side_text(side));
+            let title = format!("Schedule · {}", side_style(side).label);
             let summary = format!(
                 "{} min, every {} · +{}",
                 schedule.first_slot_min,
@@ -767,18 +1009,22 @@ impl GroupGeneratorApp {
                         ui,
                         "First slot",
                         &mut schedule.first_slot_min,
-                        0.0..=180.0,
-                        1.0,
-                        " min",
+                        NumberSpec {
+                            range: 0.0..=180.0,
+                            step: 1.0,
+                            suffix: " min",
+                        },
                         &mut edit,
                     );
                     number_row(
                         ui,
                         "Period",
                         &mut schedule.period_min,
-                        1.0..=180.0,
-                        1.0,
-                        " min",
+                        NumberSpec {
+                            range: 1.0..=180.0,
+                            step: 1.0,
+                            suffix: " min",
+                        },
                         &mut edit,
                     );
                     ui.horizontal(|ui| {
@@ -795,9 +1041,11 @@ impl GroupGeneratorApp {
                         ui,
                         "× step",
                         &mut schedule.jitter_step_min,
-                        0.0..=30.0,
-                        0.5,
-                        " min",
+                        NumberSpec {
+                            range: 0.0..=30.0,
+                            step: 0.5,
+                            suffix: " min",
+                        },
                         &mut edit,
                     );
                     percent_row(ui, "Quiet", &mut schedule.quiet_pct, &mut edit);
@@ -805,9 +1053,11 @@ impl GroupGeneratorApp {
                         ui,
                         "Arrive in M",
                         &mut schedule.arrive_min,
-                        0.5..=30.0,
-                        0.5,
-                        " min",
+                        NumberSpec {
+                            range: 0.5..=30.0,
+                            step: 0.5,
+                            suffix: " min",
+                        },
                         &mut edit,
                     );
                 },
@@ -828,18 +1078,22 @@ impl GroupGeneratorApp {
                     ui,
                     "Cooldown",
                     &mut plan.zone.cooldown_min,
-                    1.0..=180.0,
-                    1.0,
-                    " min",
+                    NumberSpec {
+                        range: 1.0..=180.0,
+                        step: 1.0,
+                        suffix: " min",
+                    },
                     &mut edit,
                 );
                 number_row(
                     ui,
                     "Spawn distance",
                     &mut plan.zone.spawn_dist_km,
-                    1.0..=100.0,
-                    1.0,
-                    " km",
+                    NumberSpec {
+                        range: 1.0..=100.0,
+                        step: 1.0,
+                        suffix: " km",
+                    },
                     &mut edit,
                 );
             },
@@ -858,18 +1112,22 @@ impl GroupGeneratorApp {
                     ui,
                     "Margin",
                     &mut plan.stop.margin_min,
-                    0.0..=60.0,
-                    1.0,
-                    " min",
+                    NumberSpec {
+                        range: 0.0..=60.0,
+                        step: 1.0,
+                        suffix: " min",
+                    },
                     &mut edit,
                 );
                 number_row(
                     ui,
                     "Extension",
                     &mut plan.stop.extension_min,
-                    0.0..=60.0,
-                    1.0,
-                    " min",
+                    NumberSpec {
+                        range: 0.0..=60.0,
+                        step: 1.0,
+                        suffix: " min",
+                    },
                     &mut edit,
                 );
                 shell::hint(
@@ -892,11 +1150,12 @@ impl GroupGeneratorApp {
             |ui| {
                 let r = ui.checkbox(&mut plan.include_in_base_map, "Include in base map");
                 note_edit(&mut edit, &r, "Changed base map inclusion");
-                let totals = self.with_air_context(|ctx| airtask::totals(&plan, ctx));
+                let totals = airtask::totals(&plan, ctx);
                 egui::Grid::new("air_totals")
                     .min_col_width(34.0)
                     .show(ui, |ui| {
-                        for heading in ["", "DPRK", "NATO", "All"] {
+                        let sides = AirSide::ALL.map(|side| side_style(side).label);
+                        for heading in ["", sides[0], sides[1], "All"] {
                             ui.label(RichText::new(heading).small());
                         }
                         ui.end_row();
@@ -931,7 +1190,7 @@ impl GroupGeneratorApp {
                                         true,
                                         format!(
                                             "{label} {}: {value}",
-                                            ["DPRK", "NATO", "All"][column]
+                                            [sides[0], sides[1], "All"][column]
                                         ),
                                     )
                                 });
@@ -948,20 +1207,14 @@ impl GroupGeneratorApp {
     }
 
     pub(super) fn generate_air_file(&mut self) {
-        let packs = match self.with_air_context(|ctx| airtask::build_air_packs(&self.air_plan, ctx))
+        let root = match self.with_air_context(|ctx| airtask::build_air_group(&self.air_plan, ctx))
         {
-            Ok(packs) => packs,
+            Ok(root) => root,
             Err(error) => {
                 self.status = Status::Error(error);
                 return;
             }
         };
-        let mut root = crate::ast::Il2Entity::new("Group");
-        root.set_name("Air Tasking");
-        root.children = packs.into_iter().map(|pack| pack.root).collect();
-        root.index = Some(root.max_index() + 1);
-        root.set_property("Index", root.index.unwrap().to_string());
-        let (root, _) = crate::duplicate::duplicate_template(&root, &mut 1);
         let text = serialize_group(&root);
         let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
@@ -970,17 +1223,71 @@ impl GroupGeneratorApp {
         else {
             return;
         };
-        let paths = self
-            .air_plan
-            .library
-            .iter()
-            .filter_map(|sortie| match &sortie.source {
-                SortieSource::File(path) => Some(path.clone()),
-                SortieSource::BuiltIn(_) => None,
-            })
-            .collect::<Vec<_>>();
+        let paths = airtask::sidecar_paths(&self.air_plan);
         self.status = save_with_sidecars(&path, &text, &paths, "Wrote Air Tasking");
     }
+}
+
+/// The dock-tab look at the Air Tasking tab's 28 px control height.
+fn air_tabs(ui: &mut egui::Ui, categories: &mut bool) {
+    let (strip, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
+    for (i, label) in ["Pool", "Categories"].into_iter().enumerate() {
+        let rect = Rect::from_min_size(
+            strip.min + Vec2::new(i as f32 * strip.width() / 2.0, 0.0),
+            Vec2::new(strip.width() / 2.0, 28.0),
+        );
+        let selected = *categories == (i == 1);
+        let response = ui.interact(rect, ui.id().with(("air_tab", i)), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label)
+        });
+        if response.clicked() {
+            *categories = i == 1;
+        }
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 0.0, c::ACCENT_100);
+        }
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            label,
+            FontId::new(
+                13.0,
+                if selected {
+                    theme::bold_family()
+                } else {
+                    egui::FontFamily::Proportional
+                },
+            ),
+            if selected { c::ACCENT_700 } else { c::TEXT },
+        );
+        if selected {
+            ui.painter().hline(
+                rect.x_range(),
+                rect.bottom() - 1.0,
+                Stroke::new(2.0_f32, c::ACCENT),
+            );
+        }
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                0.0,
+                Stroke::new(2.0_f32, c::ACCENT),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    ui.add_space(6.0);
+}
+
+fn category_input(ui: &mut egui::Ui, value: &mut String, width: f32, label: &str) {
+    let r = ui.add_sized(
+        [width, 28.0],
+        egui::TextEdit::singleline(value)
+            .desired_width(width)
+            .hint_text(label),
+    );
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, label));
 }
 
 fn air_sheet(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
@@ -1020,23 +1327,21 @@ fn name_number(response: &egui::Response, label: &str, value: f64) {
     });
 }
 
-fn number_row(
-    ui: &mut egui::Ui,
-    label: &str,
-    value: &mut f64,
+struct NumberSpec {
     range: std::ops::RangeInclusive<f64>,
-    speed: f64,
-    suffix: &str,
-    edit: &mut Edit,
-) {
+    step: f64,
+    suffix: &'static str,
+}
+
+fn number_row(ui: &mut egui::Ui, label: &str, value: &mut f64, spec: NumberSpec, edit: &mut Edit) {
     ui.horizontal(|ui| {
         ui.label(label);
         let r = ui.add(
             egui::DragValue::new(value)
-                .range(range)
-                .speed(speed)
+                .range(spec.range)
+                .speed(spec.step)
                 .max_decimals(1)
-                .suffix(suffix),
+                .suffix(spec.suffix),
         );
         name_number(&r, label, *value);
         note_edit(edit, &r, &format!("Changed {label}"));
@@ -1060,17 +1365,31 @@ fn percent_row(ui: &mut egui::Ui, label: &str, value: &mut u8, edit: &mut Edit) 
 fn entry_word(n: usize) -> &'static str {
     if n == 1 { "entry" } else { "entries" }
 }
-fn side_text(side: AirSide) -> &'static str {
+struct SideStyle {
+    label: &'static str,
+    marker: shell::Side,
+    color: Color32,
+}
+
+fn side_style(side: AirSide) -> SideStyle {
     match side {
-        AirSide::Dprk => "DPRK",
-        AirSide::Nato => "NATO",
+        AirSide::Dprk => SideStyle {
+            label: "DPRK",
+            marker: shell::Side::Dprk,
+            color: c::DPRK,
+        },
+        AirSide::Nato => SideStyle {
+            label: "NATO",
+            marker: shell::Side::Nato,
+            color: c::NATO,
+        },
     }
 }
-fn marker_side(side: AirSide) -> shell::Side {
-    match side {
-        AirSide::Dprk => shell::Side::Dprk,
-        AirSide::Nato => shell::Side::Nato,
-    }
+
+fn side_counts(counts: [usize; 2]) -> String {
+    AirSide::ALL
+        .map(|side| format!("{} {}", side_style(side).label, counts[side.idx()]))
+        .join(" · ")
 }
 fn mode_text(mode: TriggerMode) -> &'static str {
     match mode {
@@ -1079,32 +1398,6 @@ fn mode_text(mode: TriggerMode) -> &'static str {
         TriggerMode::Both => "Both",
     }
 }
-fn escorted(sortie: &AirSortie) -> bool {
-    sortie
-        .lead_roles
-        .iter()
-        .flatten()
-        .any(|role| *role == AirRole::Escort)
-}
-
-fn role_text(sortie: &AirSortie) -> &'static str {
-    let has = |role| sortie.lead_roles.iter().flatten().any(|r| *r == role);
-    if has(AirRole::AirPatrol) {
-        "Air alert"
-    } else if has(AirRole::GroundAttack) && escorted(sortie) {
-        "Armed recon"
-    }
-    // GroundAttack is shared by strike and CAS; the model distinguishes the
-    // Mustang close-support label in the role table, never the template name.
-    else if has(AirRole::GroundAttack) && sortie.models.iter().any(|m| m == "f51d") {
-        "Close support"
-    } else if has(AirRole::GroundAttack) {
-        "Strike"
-    } else {
-        "Escort"
-    }
-}
-
 fn date_text((year, month, day): Ymd) -> String {
     let month = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -1116,17 +1409,13 @@ fn date_text((year, month, day): Ymd) -> String {
 }
 
 fn date_badge(sortie: &AirSortie, date: Ymd) -> (bool, String) {
-    if date < sortie.valid.from {
-        return (
-            false,
-            format!("✖ Valid from {}", date_text(sortie.valid.from)),
-        );
-    }
-    if date > sortie.valid.to {
-        return (
-            false,
-            format!("✖ Valid until {}", date_text(sortie.valid.to)),
-        );
+    if !sortie.valid_on(date) {
+        let (word, boundary) = if date < sortie.valid.from {
+            ("from", sortie.valid.from)
+        } else {
+            ("until", sortie.valid.to)
+        };
+        return (false, format!("✖ Valid {word} {}", date_text(boundary)));
     }
     let unsourced = sortie
         .models
@@ -1148,7 +1437,11 @@ fn date_badge(sortie: &AirSortie, date: Ymd) -> (bool, String) {
 
 fn target_label(choice: TargetChoice) -> String {
     match choice.kind {
-        TargetKind::Objective => format!("{} objective {}", side_text(choice.side), choice.number),
+        TargetKind::Objective => format!(
+            "{} objective {}",
+            side_style(choice.side).label,
+            choice.number
+        ),
         TargetKind::Arrow => format!("Arrow {}", choice.number),
     }
 }
@@ -1200,18 +1493,18 @@ pub(super) fn draw_slot_strip(ui: &mut egui::Ui, marks: &[Vec<SlotMark>; 2]) {
     let end = rect.right() - 14.0;
     let x = |seconds: f64| start + (seconds / 10800.0).clamp(0.0, 1.0) as f32 * (end - start);
     let p = ui.painter();
-    for (lane, side) in [AirSide::Dprk, AirSide::Nato].into_iter().enumerate() {
+    for (lane, side) in AirSide::ALL.into_iter().enumerate() {
         let y = rect.top() + 8.0 + lane as f32 * 30.0;
         shell::paint_side_marker(
             p,
             Pos2::new(rect.left() + 6.0, y + 10.0),
             12.0,
-            marker_side(side),
+            side_style(side).marker,
         );
         p.text(
             Pos2::new(rect.left() + 17.0, y + 10.0),
             Align2::LEFT_CENTER,
-            side_text(side),
+            side_style(side).label,
             FontId::proportional(12.0),
             c::TEXT,
         );
@@ -1229,11 +1522,7 @@ pub(super) fn draw_slot_strip(ui: &mut egui::Ui, marks: &[Vec<SlotMark>; 2]) {
                 Stroke::new(1.0_f32, c::NEUTRAL_200),
             );
         }
-        let color = if side == AirSide::Dprk {
-            c::DPRK
-        } else {
-            c::NATO
-        };
+        let color = side_style(side).color;
         for mark in &marks[lane] {
             let span = Rect::from_min_max(
                 Pos2::new(x(mark.t_s), y),

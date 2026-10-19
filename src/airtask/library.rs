@@ -7,6 +7,38 @@ use super::{AirRole, AirSide, AirSortie, SortieSource};
 use crate::ast::Il2Entity;
 use crate::{in_theatre, model_spec, parser, weapon_range};
 
+pub const DEFAULT_CATEGORIES: [&str; 5] = ["Air alert", "Strike", "Close support", "Armed recon", "Interdiction"];
+
+/// Built-ins keep their curated roles; user files fall back to their orders.
+pub fn default_category(sortie: &AirSortie) -> String {
+    if let SortieSource::BuiltIn(file) = sortie.source {
+        let category = match file {
+            "1950_US_F80_AirAlert_4ship.Group" => Some("Air alert"),
+            "1950_US_F80_HVAR_Strike_4ship.Group" => Some("Strike"),
+            "1950_US_F51_CloseSupport_4ship.Group" => Some("Close support"),
+            "1950_US_F51_ArmedRecon_2plus2.Group" => Some("Armed recon"),
+            "1950_DPRK_Yak_AirfieldRaid_2plus2.Group" => Some("Strike"),
+            "1950_DPRK_Il10_KimpoAttack_2x4.Group" => Some("Strike"),
+            _ => None,
+        };
+        if let Some(category) = category {
+            return category.into();
+        }
+    }
+    if sortie.lead_roles.iter().flatten().any(|role| *role == AirRole::AirPatrol) {
+        "Air alert".into()
+    } else {
+        "Strike".into()
+    }
+}
+
+fn category_label(root: &Il2Entity) -> Option<&str> {
+    root.property("Desc")?.trim_matches('"').lines().find_map(|line| {
+        let (key, name) = line.split_once(':')?;
+        key.trim().eq_ignore_ascii_case("Category").then_some(name.trim())
+    }).filter(|name| !name.is_empty())
+}
+
 pub(crate) const BUILTINS: [(&str, &str); 6] = [
     (
         "1950_US_F80_AirAlert_4ship.Group",
@@ -150,7 +182,7 @@ fn library_item(root: &Il2Entity, source: SortieSource, id: String) -> Result<Ai
             ));
         }
     }
-    Ok(AirSortie {
+    let mut sortie = AirSortie {
         id,
         name: root.name().unwrap_or("Air sortie").to_owned(),
         source,
@@ -162,9 +194,12 @@ fn library_item(root: &Il2Entity, source: SortieSource, id: String) -> Result<Ai
         wp_alt_m: shape.wp_alt_m,
         attack_time_s: shape.attack_time_s,
         valid,
-        category: String::new(), // decision 0029: filled by the category reader
+        category: String::new(),
         warnings,
-    })
+    };
+    sortie.category = category_label(root).map(str::to_owned)
+        .unwrap_or_else(|| default_category(&sortie));
+    Ok(sortie)
 }
 
 pub(crate) fn nodes(root: &Il2Entity) -> Vec<&Il2Entity> {
@@ -931,6 +966,45 @@ pub(crate) mod tests {
         TemplateSeat, UnitKind, ZoneCoalition,
         LOOSE_AIR_FORMATION_DENSITY, PAIRS_AIR_FORMATION_TYPE, SAFE_AIR_FORMATION_DENSITY,
     };
+
+    #[test]
+    fn category_defaults_match_all_six_builtin_files_and_user_orders() {
+        let library = builtin_library();
+        assert_eq!(library.iter().map(|s| s.category.as_str()).collect::<Vec<_>>(),
+            ["Air alert", "Strike", "Close support", "Armed recon", "Strike", "Strike"]);
+        for (i, original) in library.into_iter().enumerate() {
+            let mut sortie = original;
+            sortie.name = "Renamed".into();
+            sortie.category = "Custom".into();
+            assert_eq!(default_category(&sortie), ["Air alert", "Strike", "Close support", "Armed recon", "Strike", "Strike"][i]);
+            sortie.source = SortieSource::File("custom.Group".into());
+            assert_eq!(default_category(&sortie), if i == 0 { "Air alert" } else { "Strike" });
+        }
+    }
+
+    #[test]
+    fn category_reader_uses_first_top_level_label_with_trimmed_preserved_name() {
+        for source in [SortieSource::BuiltIn(BUILTINS[1].0), SortieSource::File("custom.Group".into())] {
+            let mut root = builtin(1);
+            root.set_property("Desc", "\"Notes\r\n  cAtEgOrY:  Naval interdiction  \r\nCategory: Strike\"".to_string());
+            root.children[0].set_property("Desc", "\"Category: Ignored child\"".to_string());
+            let before = root.clone();
+            let sortie = library_item(&root, source, "custom".into()).unwrap();
+            assert_eq!(sortie.category, "Naval interdiction");
+            assert_eq!(root, before, "reading never writes the template");
+        }
+    }
+
+    #[test]
+    fn category_reader_empty_or_absent_label_uses_default_and_ignores_children() {
+        for desc in ["\"Category:   \nCategory: Interdiction\"", "\"No label\"", "\"OtherCategory: Interdiction\""] {
+            let mut root = builtin(2);
+            root.set_property("Desc", desc.to_string());
+            root.children[0].set_property("Desc", "\"Category: Interdiction\"".to_string());
+            assert_eq!(library_item(&root, SortieSource::BuiltIn(BUILTINS[2].0), "built-in".into()).unwrap().category, "Close support");
+            assert_eq!(library_item(&root, SortieSource::File("custom.Group".into()), "file".into()).unwrap().category, "Strike");
+        }
+    }
 
     /// Formation index, lead entity, type and density, in BUILTINS order.
     pub(crate) const BUILTIN_FORMATIONS: [&[(i32, i32, i32, i32)]; BUILTINS.len()] = [

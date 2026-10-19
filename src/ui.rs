@@ -604,6 +604,7 @@ struct GroupGeneratorApp {
     air_library_selected: Option<usize>,
     air_picked_target: Option<crate::airtask::TargetChoice>,
     air_editing: Option<egui::Id>,
+    air_categories: air::CategoryUi,
     /// Status text last seen, and the tab's edit fingerprint when it appeared (`age_status`).
     status_seen: String,
     status_fp: u64,
@@ -1845,6 +1846,7 @@ impl Default for GroupGeneratorApp {
             air_library_selected: Some(0),
             air_picked_target: None,
             air_editing: None,
+            air_categories: air::CategoryUi::default(),
             status_seen: String::new(),
             status_fp: 0,
             tpl_path: None,

@@ -14,6 +14,7 @@ mod pool;
 #[cfg(test)]
 mod probe;
 mod shell;
+mod standalone;
 #[cfg(test)]
 mod testkit;
 mod threshold;
@@ -23,10 +24,11 @@ mod zone;
 // What `ui.rs` may call besides the functions at the bottom. The submodules stay private.
 // library.rs / timing.rs get these signatures with stub bodies in the 1a skeleton (§5 table).
 #[allow(unused_imports)] // P14: removed in step 9
-pub use library::{builtin_library, load_user_sortie}; // fn builtin_library() -> Vec<AirSortie>; fn load_user_sortie(path: &std::path::Path) -> Result<AirSortie, String>
+pub use library::{builtin_library, default_category, load_user_sortie, DEFAULT_CATEGORIES}; // fn builtin_library() -> Vec<AirSortie>; fn default_category(sortie: &AirSortie) -> String; fn load_user_sortie(path: &std::path::Path) -> Result<AirSortie, String>; const DEFAULT_CATEGORIES: [&str; 5]
 #[allow(unused_imports)] // P14: removed in step 9
-pub use timing::{derived_timing, f80_cruise_kmh, f80_transit_s, hard_stop, HardStop}; // fn derived_timing(t: &ThresholdSpec) -> DerivedTiming; fn f80_transit_s(radius_m: f64) -> f64
-pub use pool::{add_entry, auto_fill, entry_status, remove_library_item, resolve_target, target_choices, EntryStatus, TargetChoice, TargetKind};
+pub use timing::{derived_timing, f80_cruise_kmh, f80_transit_s, hard_stop, F80Cruise}; // fn derived_timing(t: &ThresholdSpec) -> DerivedTiming; fn f80_cruise_kmh() -> F80Cruise; fn f80_transit_s(radius_m: f64) -> f64; fn hard_stop(sortie: &AirSortie, plan: &AirPlan, mode: TriggerMode) -> Option<f64>; struct F80Cruise { kmh: f64, measured: bool }
+pub use pool::{add_category, add_entry, add_library_item, auto_fill, category_counts, default_categories, entry_status, pool_counts, remove_category, remove_library_item, rename_category, resolve_target, set_category, target_choices, EntryStatus, TargetChoice, TargetKind}; // fn add_category(plan: &mut AirPlan, name: &str) -> Result<(), String>; fn add_entry(plan: &mut AirPlan, entry: PoolEntry); fn add_library_item(plan: &mut AirPlan, sortie: AirSortie); fn auto_fill(plan: &mut AirPlan, ctx: &AirContext, side: AirSide, category: Option<&str>) -> usize; fn category_counts(plan: &AirPlan) -> Vec<(String, usize)>; fn default_categories() -> Vec<String>; fn entry_status(plan: &AirPlan, index: usize, ctx: &AirContext) -> EntryStatus; fn pool_counts(plan: &AirPlan) -> [usize; 2]; fn remove_category(plan: &mut AirPlan, name: &str) -> usize; fn remove_library_item(plan: &mut AirPlan, index: usize) -> Result<usize, String>; fn rename_category(plan: &mut AirPlan, old: &str, new: &str) -> Result<(), String>; fn resolve_target(target: &TargetRef, ctx: &AirContext) -> Option<TargetChoice>; fn set_category(plan: &mut AirPlan, sortie_index: usize, name: &str); fn target_choices(ctx: &AirContext, side: AirSide) -> Vec<TargetChoice>; enum EntryStatus { Ok, Orphaned, SideChanged, OutOfDate, MissingSortie }; struct TargetChoice { kind: TargetKind, number: usize, side: AirSide, target: TargetRef }; enum TargetKind { Objective, Arrow }
+pub use standalone::{build_air_group, sidecar_paths}; // fn build_air_group(plan: &AirPlan, ctx: &AirContext) -> Result<crate::ast::Il2Entity, String>; fn sidecar_paths(plan: &AirPlan) -> Vec<std::path::PathBuf>
 
 /// Index convention for every per-side array (`schedule`, `AirBudget::per_side`, preview slot rows).
 pub const DPRK: usize = 0;
