@@ -310,9 +310,10 @@ impl GroupGeneratorApp {
             self.air_editing = None;
         }
         self.air_selection_bounds();
-        side_panel(ctx, "air_left", true, 270.0, |ui| {
-            self.air_library(ui, &air_ctx)
-        });
+        egui::SidePanel::left("air_left")
+            .exact_width(270.0)
+            .resizable(false)
+            .show(ctx, |ui| self.air_library(ui, &air_ctx));
         side_panel(ctx, "air_right", false, 304.0, |ui| {
             self.air_settings(ui, &air_ctx)
         });
@@ -348,12 +349,24 @@ impl GroupGeneratorApp {
     }
 
     fn air_library(&mut self, ui: &mut egui::Ui, ctx: &AirContext) {
-        let date = ctx.date;
+        ui.add_space(6.0);
         shell::section_title(
             ui,
             &format!("Library · {}", self.air_plan.library.len()),
-            Some(&format!("valid for {}", date_text(date))),
+            Some(&format!("valid for {}", date_text(ctx.date))),
         );
+        // Reserve the footer's own height before giving the cards the remaining space.
+        egui::TopBottomPanel::bottom("air_library_footer")
+            .frame(egui::Frame::NONE)
+            .show_separator_line(false)
+            .show_inside(ui, |ui| self.air_library_footer(ui, ctx));
+        egui::ScrollArea::vertical()
+            .id_salt("air_library_cards")
+            .auto_shrink([false, false])
+            .show(ui, |ui| self.air_library_cards(ui, ctx.date));
+    }
+
+    fn air_library_cards(&mut self, ui: &mut egui::Ui, date: Ymd) {
         for (index, sortie) in self.air_plan.library.iter().enumerate() {
             let card = shell::card(ui, self.air_library_selected == Some(index), |ui| {
                 ui.horizontal(|ui| {
@@ -414,6 +427,9 @@ impl GroupGeneratorApp {
             }
             ui.add_space(4.0);
         }
+    }
+
+    fn air_library_footer(&mut self, ui: &mut egui::Ui, ctx: &AirContext) {
         ui.separator();
         if let Some(index) = self.air_library_selected {
             let sortie = &self.air_plan.library[index];
@@ -464,8 +480,9 @@ impl GroupGeneratorApp {
                         .air_picked_target
                         .map_or_else(|| "No targets".into(), target_label);
                     let response = egui::ComboBox::from_id_salt("air_target")
-                        .width(175.0)
+                        .width(ui.available_width())
                         .selected_text(&label)
+                        .truncate()
                         .show_ui(ui, |ui| {
                             for choice in choices.iter().copied() {
                                 ui.selectable_value(
@@ -513,6 +530,13 @@ impl GroupGeneratorApp {
 
     fn air_category_list(&mut self, ui: &mut egui::Ui) {
         shell::section_title(ui, "Categories", Some("library sorties"));
+        let count_width = 80.0;
+        let button_width = 72.0;
+        let name_width = (ui.available_width()
+            - count_width
+            - 2.0 * button_width
+            - 3.0 * ui.spacing().item_spacing.x)
+            .max(0.0);
         for (name, count) in airtask::category_counts(&self.air_plan) {
             ui.push_id(&name, |ui| {
                 ui.horizontal(|ui| {
@@ -521,17 +545,26 @@ impl GroupGeneratorApp {
                         .renaming
                         .as_ref()
                         .is_some_and(|(old, _)| *old == name);
-                    let name_width = (ui.available_width() - 212.0).max(60.0);
+                    air_cell(ui, name_width, |ui| {
+                        if editing {
+                            let (_, draft) = self.air_categories.renaming.as_mut().unwrap();
+                            category_input(ui, draft, name_width, "Rename category");
+                        } else {
+                            ui.add(egui::Label::new(&name).truncate())
+                                .on_hover_text(&name);
+                        }
+                    });
+                    air_cell(ui, count_width, |ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let word = if count == 1 { "sortie" } else { "sorties" };
+                            ui.add(egui::Label::new(format!("{count} {word}")).truncate());
+                        });
+                    });
                     if editing {
-                        let (_, draft) = self.air_categories.renaming.as_mut().unwrap();
-                        category_input(ui, draft, name_width, "Rename category");
-                    } else {
-                        ui.add_sized([name_width, 28.0], egui::Label::new(&name).truncate())
-                            .on_hover_text(&name);
-                    }
-                    ui.label(format!("{count} sorties"));
-                    if editing {
-                        if ui.button("Save").clicked() {
+                        if ui
+                            .add_sized([button_width, 28.0], egui::Button::new("Save"))
+                            .clicked()
+                        {
                             let new = self.air_categories.renaming.as_ref().unwrap().1.clone();
                             let mut plan = self.air_plan.clone();
                             match airtask::rename_category(&mut plan, &name, &new) {
@@ -545,12 +578,16 @@ impl GroupGeneratorApp {
                                 Err(error) => self.air_categories.error = Some(error),
                             }
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui
+                            .add_sized([button_width, 28.0], egui::Button::new("Cancel"))
+                            .clicked()
+                        {
                             self.air_categories.renaming = None;
                             self.air_categories.error = None;
                         }
                     } else {
-                        let rename = ui.button("Rename");
+                        let rename =
+                            ui.add_sized([button_width, 28.0], egui::Button::new("Rename"));
                         rename.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
@@ -562,7 +599,8 @@ impl GroupGeneratorApp {
                             self.air_categories.renaming = Some((name.clone(), name.clone()));
                             self.air_categories.error = None;
                         }
-                        let remove = ui.button("Remove");
+                        let remove =
+                            ui.add_sized([button_width, 28.0], egui::Button::new("Remove"));
                         remove.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,

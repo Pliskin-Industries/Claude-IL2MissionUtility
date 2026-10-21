@@ -1936,6 +1936,95 @@ fn air_tasking_category_combo_is_undoable() {
 }
 
 #[test]
+fn air_tasking_category_counts_use_singular_and_plural() {
+    let mut h = Harness::new("air_category_counts");
+    h.tab("Air Tasking");
+    h.click("Categories");
+    for (name, label) in [("Air alert", "1 sortie"), ("Interdiction", "0 sorties"), ("Strike", "3 sorties")] {
+        let row = h.find(&format!("Rename {name}")).rect;
+        assert!(h.all(label).iter().any(|n| (n.rect.center().y - row.center().y).abs() < 0.5), "{name}: missing {label}");
+    }
+    assert!(!h.has("1 sorties"));
+}
+
+#[test]
+fn air_tasking_category_rows_keep_fixed_columns_while_renaming() {
+    let mut h = Harness::new("air_category_columns");
+    let long_name = "Night interdiction and maritime patrol along the entire northern coastline";
+    crate::airtask::add_category(&mut h.app.air_plan, long_name).unwrap();
+    h.tab("Air Tasking");
+    h.click("Categories");
+    let names = h.app.air_plan.categories.clone();
+    for screen in [Vec2::new(1280.0, 800.0), SCREEN] {
+        h.screen = screen;
+        h.settle();
+        let rename = h.find("Rename Air alert").rect;
+        let remove = h.find("Remove category Air alert").rect;
+        let name_left = h.find("Air alert").rect.left();
+        let count_right = h.find("0 sorties").rect.right();
+        for name in &names {
+            let rename_row = h.find(&format!("Rename {name}")).rect;
+            let remove_row = h.find(&format!("Remove category {name}")).rect;
+            assert!((rename_row.left() - rename.left()).abs() < 0.5, "Rename {name}: {rename_row:?}");
+            assert!((remove_row.left() - remove.left()).abs() < 0.5, "Remove {name}: {remove_row:?}");
+            assert!((h.find(name).rect.left() - name_left).abs() < 0.5, "name must start at the left column edge: {name}");
+            let count = h.nodes.iter().find(|n| n.role == Role::Label && (n.label.ends_with(" sortie") || n.label.ends_with(" sorties"))
+                && (n.rect.center().y - rename_row.center().y).abs() < 0.5).unwrap();
+            assert!((count.rect.right() - count_right).abs() < 0.5, "count must be right aligned: {count:?}");
+        }
+        let name_column = h.find(long_name).rect;
+        let mut input_edges: Option<(f32, f32)> = None;
+        for name in &names {
+            h.click(&format!("Rename {name}"));
+            let input = h.find("Rename category").rect;
+            assert!((input.left() - name_column.left()).abs() < 0.5 && input.right() >= name_column.right(), "rename input must fill the name column: {input:?} vs {name_column:?}");
+            if let Some((left, right)) = input_edges {
+                assert!((input.left() - left).abs() < 0.5 && (input.right() - right).abs() < 0.5, "rename input changed column edges: {input:?}");
+            }
+            input_edges = Some((input.left(), input.right()));
+            assert!((h.find("0 sorties").rect.right() - count_right).abs() < 0.5);
+            assert!((h.find("Save").rect.left() - rename.left()).abs() < 0.5);
+            assert!((h.find("Cancel").rect.left() - remove.left()).abs() < 0.5);
+            h.click("Cancel");
+        }
+    }
+}
+
+#[test]
+fn air_tasking_category_names_are_left_aligned_and_truncated_with_hover_text() {
+    fn text_shape<'a>(shape: &'a egui::Shape, name: &str, bounds: Rect) -> Option<&'a egui::epaint::TextShape> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == name && bounds.contains(text.pos) => Some(text),
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| text_shape(shape, name, bounds)),
+            _ => None,
+        }
+    }
+    let mut h = Harness::new("air_category_name_layout");
+    h.screen = Vec2::new(1280.0, 800.0);
+    let long_name = "Night interdiction and maritime patrol along the entire northern coastline";
+    crate::airtask::add_category(&mut h.app.air_plan, long_name).unwrap();
+    h.tab("Air Tasking");
+    h.click("Categories");
+    let out = h.ctx.run(RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, h.screen)),
+        time: Some(h.time),
+        ..Default::default()
+    }, |ctx| h.app.ui(ctx));
+    h.time += 1.0 / 60.0;
+    for name in ["Air alert", long_name] {
+        let text = out.shapes.iter().find_map(|s| text_shape(&s.shape, name, h.find(name).rect)).unwrap();
+        assert_eq!(text.galley.job.halign, egui::Align::LEFT);
+        assert!((text.pos.x - h.find(name).rect.left()).abs() < 0.5);
+        assert_eq!(text.galley.elided, name == long_name);
+        assert_eq!(text.galley.rows.len(), 1);
+    }
+    assert_eq!(h.all(long_name).len(), 1);
+    h.move_to(h.find(long_name).rect.center());
+    for _ in 0..60 { h.step(Vec::new()); }
+    assert!(h.all(long_name).len() >= 2, "hover must show the full category name");
+}
+
+#[test]
 fn air_tasking_categories_add_rename_remove_and_undo() {
     let mut h = Harness::new("air_categories_edit");
     h.tab("Air Tasking");
@@ -2276,6 +2365,46 @@ fn air_tasking_controls_fit_the_minimum_window() {
         let size = h.ctx.fonts(|f| f.layout_no_wrap(label.into(), egui::FontId::new(13.0, theme::bold_family()), c::TEXT).size());
         assert!(size.x <= n.rect.width() && size.y <= 28.0, "{label} does not fit on one line");
     }
+}
+
+#[test]
+fn air_tasking_library_footer_is_pinned_inside_the_minimum_panel() {
+    let mut h = Harness::new("air_pinned_library_footer");
+    h.screen = Vec2::new(1280.0, 800.0);
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    assert_eq!(h.app.air_plan.library.len(), 6);
+    assert!(!h.app.air_plan.pool.is_empty());
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("air_left")).unwrap().rect;
+    assert!((panel.width() - 270.0).abs() < 0.5, "{panel:?}");
+    let category = h.find("Sortie category").rect;
+    let target = h.all("NATO objective 1").into_iter().find(|n| n.role == Role::ComboBox).unwrap().rect;
+    let add = h.find("Add to pool");
+    let selected = h.find_prefix("Selected: ").rect;
+    let hint = h.find("Built-in sorties stay in the library.").rect;
+    for rect in [selected, category, target, add.rect, h.find("Remove").rect, hint] {
+        assert!(panel.contains_rect(rect), "footer must be fully visible before scrolling: {rect:?} outside {panel:?}");
+    }
+    assert!(!add.disabled);
+    assert!((category.right() - target.right()).abs() < 0.5, "combos must fill the same footer width");
+    assert!(panel.right() - category.right() < 10.0, "combo must reach the footer's right edge");
+    assert!(panel.bottom() - hint.bottom() < 10.0, "footer must sit at the bottom of the panel");
+    let first_card = h.find("Library sortie 1").rect;
+    h.move_to(first_card.center());
+    h.step(vec![Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: Vec2::new(0.0, -10000.0),
+        modifiers: Modifiers::NONE,
+    }]);
+    for _ in 0..20 { h.step(Vec::new()); }
+    let last_card = h.find("Library sortie 6").rect;
+    assert!(panel.contains_rect(last_card) && last_card.bottom() < selected.top(), "cards must scroll above the footer: {last_card:?}");
+    assert_eq!(h.find("Add to pool").rect, add.rect, "scrolling cards must not move the footer");
+    assert_eq!(h.find("Sortie category").rect, category);
+    assert_eq!(h.find("Built-in sorties stay in the library.").rect, hint);
+    let before = h.app.air_plan.pool.len();
+    h.click("Add to pool");
+    assert_eq!(h.app.air_plan.pool.len(), before + 1);
 }
 
 #[test]
