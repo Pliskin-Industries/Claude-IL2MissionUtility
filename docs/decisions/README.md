@@ -62,5 +62,6 @@ What this makes easier, harder or necessary.
 | [0024](0024-threshold-presence-check-is-a-pulsed-check-zone.md) | The threshold's presence check is a pulsed check zone (ZonePulse), after flight 2J | Accepted |
 | [0025](0025-remove-trigger-reactivate.md) | Remove the TriggerReactivate presence check from the code | Accepted |
 | [0029](0029-step-5-clock-lean-design.md) | Step 5 clock: a leaner build of plan §3.7 on flown facts | Accepted |
+| [0030](0030-step-6-zone-lean-design.md) | Step 6 zone front end: a leaner build of plan §3.8 on flown facts | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
