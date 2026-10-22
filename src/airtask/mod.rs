@@ -322,7 +322,7 @@ pub(crate) struct SideLogic {
     pub(crate) flags: Vec<i32>, // SNjj FLYING timers, in census order (BUD s CENSUS)
     pub(crate) budget_events: Vec<i32>, // SNjj START relays and the copies' delete timers; each gets BUD s MARK and BUD s CHECK
     pub(crate) links: Vec<(i32, i32)>, // (from, to): emit_side_logic adds `to` to the Targets of `from` (§3.0)
-    pub(crate) pass_subscribers: BTreeMap<usize, Vec<i32>>, // area index → ZNii ARMED relays (targets of THsaa INNER, the PASS event)
+    pub(crate) pass_subscribers: BTreeMap<usize, Vec<i32>>, // area index → ZNii CHANCE and ZNii MISS WAIT timers (targets of THsaa INNER, the PASS event; 0030)
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
