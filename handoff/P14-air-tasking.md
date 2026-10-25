@@ -511,6 +511,19 @@ Differences: names carry the `CLK s` prefix, and exclusion acts on `ENii RANDOM`
 
 ### 3.8 Front end B: check zone (per entry tagged Zone or Both)
 
+**As built (step 6, 2026-10-22; decision 0030, option C).** Same behaviour as the original design below, with a smaller inside, because flight 0 settled what it hedged against (J1: deactivating a running timer cancels it; J3: an Activate and a pulse in one tick drop the pulse; a pulse into an inactive timer is dropped). Code and tests: `src/airtask/zone.rs`; scope, diagram and test list: `handoff/sessions/2026-10-22-p14-step6.md`.
+
+- **No `ARMED` relay.** `THsaa INNER` pulses `ZNii CHANCE` and `ZNii MISS WAIT` directly (both are the area's `pass_subscribers`); the zone is armed while both are on. `ZNii DISARM` (Deactivate: both) is pulsed by the outcome: by `CHANCE` on a success (which also cancels the running `MISS WAIT`) and by `MISS WAIT` on a miss.
+- **Direct cancels (J1).** `GRANTED` deactivates `DENY WAIT` itself; no `MISS WAIT OUT` or `DENY WAIT OUT`. `FIRE ARM` re-activates `WAITING` and `DENY WAIT` at the roll, 0.05 s before `FIRE` (R4-2 holds). `ARM` (end of the cooldown) re-activates `CHANCE` and `MISS WAIT`.
+- **No `REARM` relay.** `ENii EXHAUSTED` deactivates `CHANCE`, `MISS WAIT` and `COOLDOWN`; a running cooldown is cancelled and a later pulse into it is dropped.
+- `FIRE` → `DENY WAIT`, then the `COPY r` pointers last run first (as `ENii GO`). Stagger p·(T_count + 0.2) s, p from `clock::waterfall_order` over the side's zone entries, per area.
+- **Input check:** `zone::validate_zone` (an Error) when the threshold hold H is not longer than the longest `MISS WAIT` plus 1 s (PASS events are at least H apart), and for a chance outside 1..=100 % or a bad cooldown; `build_side` refuses on the same text. Step 7's `validate` calls it per side.
+- **No debug subtitles** in the zone (0030); step 7 decides them for both front ends.
+- **MCUs: 11 per zone entry, none per side** (the original: 17), plus the shared `ENii EXHAUSTED`.
+- **The clock's no-repeat rule (0029 B) stays:** the busy-area check found B and B′ within half a launch per 3-hour mission in all four scenarios (session note, "Busy-area check").
+
+**Original design (2026-09-27),** kept for its reasoning; where it differs from the list above, the list above is what is built.
+
 ```
  THsaa INNER (the PASS event, §3.5) ─► ZNii ARMED (relay; ON = armed)
  ZNii ARMED ─► ZNii ARMED ARM (MCU_Activate: ZNii MISS WAIT OUT)                              ⟲ re-arm, first
@@ -1824,7 +1837,7 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 
 **Files:** `src/airtask/zone.rs`.
 
-**Depends on:** steps 3 and 4.
+**Depends on:** steps 3 and 4. **As built (2026-10-22), decision 0030 C changed the inside of the zone cell: the list below is the original draft; the built tests are in `src/airtask/zone.rs` and listed in `handoff/sessions/2026-10-22-p14-step6.md`.** `zone_seeded_chance_sequence_structure` and `zone_debug_subtitles_only_when_enabled` were dropped (0029, 0030).
 
 **Acceptance (tests):**
 - `zone_structure`: an entry with mode Zone: `ZNii CHANCE Random = 50`, `ZNii COOLDOWN.Time = 900`. `ZNii ARMED` is a target of the area's `THsaa INNER` and targets `ARMED ARM`, which activates `MISS WAIT OUT` only. `ZNii CHANCE` targets `FIRE ARM` (which activates `WAITING` and `DENY WAIT OUT`), `FIRE OFF` and `FIRE`; `FIRE.Time = 0.05`. `FIRE` targets every `ENii COPY r` and `DENY WAIT` (`Time = 1`). Every copy's `START` targets `ZNii GRANTED`, which deactivates `DENY WAIT OUT`. `DENY WAIT OUT` and every copy's `DONE HUB` target `ZNii WAITING`, which targets `ZNii COOLDOWN` and its own Deactivate. `ZNii WAITING` starts OFF.
@@ -2145,3 +2158,4 @@ The repo does not prove any of these in game. The shipped files only show what t
 - **Gate-switch view (2026-10-08, user).** §10 item 26 added: explore a cell library of the gate idioms (relay, latch, once-gate, threshold, reset, pair) shared by every builder, scoped after step 3. Not scheduled; no design, count or step changed.
 - **2026-10-18, step 4 built.** §3.5 rewritten as built: one country-filtered Complex Trigger per area for the entry and a pulsed check zone for the presence check, 19 MCUs (decisions 0023, 0024, 0025; flight 2J showed a switched-on Complex Trigger misses a plane already inside). U24 timing in `timing.rs`. `PresenceCheckImpl` removed.
 - **2026-10-18, step 5 built.** §3.7 opens with the clock as built (decision 0029 B): quiet roll and jitter as J random timers into a latch, `ATTEMPT END` cancelled directly, a 2-MCU entry randomizer, one-Activate `LAST SET`, `GO` lists copy pointers last run first; 11 MCUs per entry and 17 + J + a per side (55 on the three-entry test plan, from 76). `RandomImpl` and the `Seeded` variants removed (flight 0 confirmed f). Step 6 adds a busy-area check of the `LAST SET` rule (B against B′).
+- **2026-10-22, step 6 built.** §3.8 opens with the zone as built (decision 0030 C): `INNER` pulses `CHANCE` and `MISS WAIT` directly, one `DISARM` at the outcome, direct cancels of `MISS WAIT`, `DENY WAIT` and `COOLDOWN`; 11 MCUs per zone entry (from 17); a hold check in `zone::validate_zone`; no debug subtitles. The busy-area check keeps the clock's `LAST SET` rule B.
