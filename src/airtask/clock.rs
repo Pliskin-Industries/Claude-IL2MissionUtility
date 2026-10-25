@@ -371,7 +371,7 @@ pub(crate) fn build_side(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::airtask::assemble::{
         assemble_side,
@@ -381,7 +381,7 @@ mod tests {
     use crate::airtask::shell::test_support::{active, mcus, named, ticks, times};
     use crate::airtask::testkit::*;
     use crate::airtask::{
-        AirBudget, NATO, PoolEntry, TargetRef, budget, builtin_library, threshold,
+        AirBudget, NATO, PoolEntry, TargetRef, budget, builtin_library, threshold, zone,
     };
 
     fn clock_test_plan() -> AirPlan {
@@ -409,13 +409,14 @@ mod tests {
         plan
     }
 
-    struct Harness {
-        root: Il2Entity,
-        copies: SideCopies,
-        logic: SideLogic,
+    pub(crate) struct Harness {
+        pub(crate) root: Il2Entity,
+        pub(crate) copies: SideCopies,
+        pub(crate) logic: SideLogic,
+        pub(crate) next: i32,
     }
 
-    fn assembled(plan: &AirPlan) -> (SideCopies, SideLogic, i32) {
+    pub(crate) fn assembled(plan: &AirPlan) -> (SideCopies, SideLogic, i32) {
         let targets: Vec<_> = plan
             .pool
             .iter()
@@ -435,10 +436,12 @@ mod tests {
         (copies, logic, next)
     }
 
-    fn harness(plan: &AirPlan) -> Harness {
+    pub(crate) fn harness(plan: &AirPlan, done_delay_s: f64) -> Harness {
         let (mut copies, mut logic, mut next) = assembled(plan);
         let clock = build_side(AirSide::Nato, plan, &copies, &mut logic, &mut next).unwrap();
         copies.trees[0].children.extend(clock);
+        let zone = zone::build_side(AirSide::Nato, plan, &copies, &mut logic, &mut next).unwrap();
+        copies.trees[0].children.extend(zone);
         copies.trees[0].children.extend(
             threshold::build_side(
                 AirSide::Nato,
@@ -457,12 +460,12 @@ mod tests {
             &plan.strategies,
             &mut next,
         ));
-        // The walker does not fly AI. End every launched copy after 60 s,
+        // The walker does not fly AI. End every launched copy after the delay,
         // through the real DONE HUB and its real RTB/deletion/budget chain.
         for copy in copies.entries.iter().flat_map(|entry| &entry.copies) {
             let mut done = template::timer(
                 &format!("Test SN{:02} DONE", copy.number),
-                60.0,
+                done_delay_s,
                 &mut next,
                 0.0,
                 0.0,
@@ -476,6 +479,7 @@ mod tests {
             root,
             copies,
             logic,
+            next,
         }
     }
 
@@ -483,7 +487,7 @@ mod tests {
         named(&h.root, &format!("CLK N {role}")).index.unwrap()
     }
 
-    fn entry_id(h: &Harness, entry: usize, role: &str) -> i32 {
+    pub(crate) fn entry_id(h: &Harness, entry: usize, role: &str) -> i32 {
         named(&h.root, &format!("EN{entry:02} {role}"))
             .index
             .unwrap()
@@ -504,7 +508,7 @@ mod tests {
 
     // Last-first pointers are safe with depth-first forward delivery. Batched
     // delivery models J3 in either target order (0029's required GO check).
-    fn configs() -> [WalkerConfig; 3] {
+    pub(crate) fn configs() -> [WalkerConfig; 3] {
         [
             (SameTickDelivery::DepthFirst, false),
             (SameTickDelivery::Batched, false),
@@ -518,7 +522,7 @@ mod tests {
         })
     }
 
-    fn loiter(h: &Harness, areas: &[usize]) -> Vec<ScriptedTrack> {
+    pub(crate) fn loiter(h: &Harness, areas: &[usize]) -> Vec<ScriptedTrack> {
         areas
             .iter()
             .map(|&area| {
@@ -584,7 +588,7 @@ mod tests {
         plan
     }
 
-    fn starts<'a>(log: &'a WalkerLog, h: &Harness) -> Vec<&'a WalkerPulse> {
+    pub(crate) fn starts<'a>(log: &'a WalkerLog, h: &Harness) -> Vec<&'a WalkerPulse> {
         log.pulses
             .iter()
             .filter(|pulse| h.logic.gates.contains(&pulse.index))
@@ -759,7 +763,7 @@ mod tests {
 
     #[test]
     fn clock_entry_relays() {
-        let h = harness(&clock_test_plan());
+        let h = harness(&clock_test_plan(), 60.0);
         for entry in &h.copies.entries {
             let id = |role| entry_id(&h, entry.number, role);
             for role in ["AVAILABLE", "LAST", "OUT", "HOT", "COLD", "GO"] {
@@ -847,7 +851,7 @@ mod tests {
 
     #[test]
     fn clock_rearm_edges() {
-        let h = harness(&clock_test_plan());
+        let h = harness(&clock_test_plan(), 60.0);
         let order = waterfall_order(7, AirSide::Nato, 3);
         let all = |role: &str| {
             order
@@ -933,7 +937,7 @@ mod tests {
 
     #[test]
     fn clock_last_copy_disables_available_random_and_go() {
-        let h = harness(&clock_test_plan());
+        let h = harness(&clock_test_plan(), 60.0);
         for entry in &h.copies.entries {
             let targets =
                 ["AVAILABLE", "RANDOM", "GO"].map(|role| entry_id(&h, entry.number, role));
@@ -1304,7 +1308,7 @@ mod tests {
                 [id(&format!("CLK {} FIRST", side.letter()))]
             );
         }
-        let h = harness(&clock_test_plan());
+        let h = harness(&clock_test_plan(), 60.0);
         // Seed 0 is immaterial before FIRST fires; this walk only checks startup state.
         let log = run(&h, configs()[0], 0, 1.0, &[], &[]);
         for entry in &h.copies.entries {
@@ -1368,7 +1372,7 @@ mod tests {
     #[test]
     fn clock_all_hot_one_start_per_slot_no_back_to_back() {
         let plan = plan_with_entries(4, 4);
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         for config in configs() {
             // Seed 2 exercises quiet periods and launches across the default jitter steps.
             let log = run(&h, config, 2, 14400.0, &[1, 2, 3, 4], &[]);
@@ -1413,7 +1417,7 @@ mod tests {
 
     #[test]
     fn clock_only_one_area_hot_alternates_with_quiet() {
-        let h = harness(&clock_test_plan());
+        let h = harness(&clock_test_plan(), 60.0);
         let outputs: Vec<_> = h
             .copies
             .entries
@@ -1484,7 +1488,7 @@ mod tests {
 
     #[test]
     fn clock_no_area_hot_sends_no_request() {
-        let h = harness(&clock_test_plan());
+        let h = harness(&clock_test_plan(), 60.0);
         for config in configs() {
             // Seed 2 opens the first period so every cold area is actually tried.
             let log = run(&h, config, 2, 1100.0, &[], &[]);
@@ -1514,7 +1518,7 @@ mod tests {
         let order = waterfall_order(plan.seed, AirSide::Nato, 3);
         let winner = order[0] + 1;
         let blocker = order[2];
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         for config in configs() {
             let log = run(
                 &h,
@@ -1558,7 +1562,7 @@ mod tests {
     fn clock_entry_never_wins_after_runs_starts() {
         let mut plan = plan_with_entries(1, 1);
         plan.pool[0].runs = 3;
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         for config in configs() {
             // Seed 2 opens enough default slots to exhaust three copies and try again afterwards.
             let log = run(&h, config, 2, 12000.0, &[1], &[]);
@@ -1596,7 +1600,7 @@ mod tests {
         // One short slot isolates the engineered cold first draw and its later hot reroll.
         let plan = fast_plan(3, 3);
         let order = waterfall_order(plan.seed, AirSide::Nato, 3);
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         let cold = order[0] + 1;
         let hot: Vec<_> = order[1..]
             .iter()
@@ -1640,7 +1644,7 @@ mod tests {
             entry.weight = 1;
         }
         plan.pool[order[0]].weight = 9;
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         let first = order[0] + 1;
         let first_area = h.copies.entries[first - 1].area;
         let mut tracks = loiter(&h, &[1, 2, 3]);
@@ -1687,7 +1691,7 @@ mod tests {
     fn clock_sixteen_entries_one_passing_area_found() {
         let plan = plan_with_entries(16, 8);
         let order = waterfall_order(plan.seed, AirSide::Nato, 16);
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         let hot = h.copies.entries[order[15]].area;
         for config in configs() {
             // Seed 2 opens the first period and reaches the hot area after cold-area misses.
@@ -1715,7 +1719,7 @@ mod tests {
 
     #[test]
     fn clock_quiet_rate_and_jitter_spread() {
-        let h = harness(&statistical_plan());
+        let h = harness(&statistical_plan(), 60.0);
         let mut quiet = 0;
         let mut jitter = [0; 3];
         // Exactly 200 independent missions, with distinct RNG seeds. Cycle
@@ -1756,7 +1760,7 @@ mod tests {
         let first = waterfall_order(plan.seed, AirSide::Nato, 3)[0];
         plan.pool[first].mode = TriggerMode::Both;
         plan.pool[first].runs = 3;
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         let used = &h.copies.entries[first];
         let pulses: Vec<_> = used
             .copies
@@ -1787,7 +1791,7 @@ mod tests {
     fn clock_nobody_won_quiet_rate_is_small() {
         let plan = statistical_plan();
         let order = waterfall_order(plan.seed, AirSide::Nato, 3);
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         let first = order[0] + 1;
         let last = order[2] + 1;
         let mut opened = 0;
@@ -1840,7 +1844,7 @@ mod tests {
                 xz: (150_000.0, 150_000.0 + area as f64 * 15_000.0),
             };
         }
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         let hot = order[22] + 1;
         let last = order[23] + 1;
         assert_eq!(h.copies.areas.len(), 14);
@@ -1886,8 +1890,13 @@ mod tests {
         let first = waterfall_order(plan.seed, AirSide::Nato, 3)[0];
         plan.pool[first].mode = TriggerMode::Both;
         plan.pool[first].runs = 1;
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
         let used = &h.copies.entries[first];
+        // This scenario scripts the zone start. Disarm its PASS timers before
+        // they can launch early or consume the clock's seeded random sequence.
+        let zone_disarm = named(&h.root, &format!("ZN{:02} DISARM", used.number))
+            .index
+            .unwrap();
         for config in configs() {
             for cancellation in [
                 DeactivateRunningTimer::RunsOn,
@@ -1903,7 +1912,7 @@ mod tests {
                     548, // Passes all jitter rolls and position 1, leaving its timer pending at the zone start.
                     1100.0,
                     &[1, 2, 3],
-                    &[(600.5, used.copies[0].pointer)],
+                    &[(2.0, zone_disarm), (600.5, used.copies[0].pointer)],
                 );
                 assert_eq!(default_slots(&h, &log, 1), [Some(ticks(600.1))]);
                 assert_wins_match_requests(&h, &log);
@@ -1937,7 +1946,11 @@ mod tests {
         let zone = order[1] + 1;
         let first = order[0] + 1;
         plan.pool[zone - 1].mode = TriggerMode::Both;
-        let h = harness(&plan);
+        let h = harness(&plan, 60.0);
+        // The scripted start below owns the zone timing in this clock check.
+        let zone_disarm = named(&h.root, &format!("ZN{zone:02} DISARM"))
+            .index
+            .unwrap();
         for config in configs() {
             let log = run(
                 &h,
@@ -1945,7 +1958,10 @@ mod tests {
                 14, // First position wins slot 1; it misses in slot 2, exposing the zone entry.
                 300.0,
                 &[1, 2],
-                &[(80.25, h.copies.entries[zone - 1].copies[0].pointer)],
+                &[
+                    (2.0, zone_disarm),
+                    (80.25, h.copies.entries[zone - 1].copies[0].pointer),
+                ],
             );
             assert_slots(&h, &log, &[80.1, 260.1]);
             assert_wins_match_requests(&h, &log);
@@ -1991,7 +2007,7 @@ mod tests {
 
     #[test]
     fn clock_go_starts_one_copy_per_win() {
-        let h = harness(&plan_with_entries(1, 1));
+        let h = harness(&plan_with_entries(1, 1), 60.0);
         for config in configs() {
             // Seed 2 supplies several non-quiet slots to exercise advancing copy pointers.
             let log = run(&h, config, 2, 6000.0, &[1], &[]);
@@ -2021,7 +2037,7 @@ mod tests {
 
     #[test]
     fn clock_one_slot_per_period_when_two_jitter_timers_pass() {
-        let h = harness(&plan_with_entries(1, 1));
+        let h = harness(&plan_with_entries(1, 1), 60.0);
         for config in configs() {
             // Seed 106 passes all three jitter timers in period 1, stays quiet in period 3, then reopens.
             let log = run(&h, config, 106, 4800.0, &[1], &[]);
@@ -2056,7 +2072,7 @@ mod tests {
     #[test]
     fn clock_late_attempt_end_after_win_does_not_reroll() {
         // One short slot isolates a late RunsOn expiry after its winner has shut REROLL.
-        let h = harness(&fast_plan(1, 1));
+        let h = harness(&fast_plan(1, 1), 60.0);
         for config in configs() {
             let config = WalkerConfig {
                 deactivate_running_timer: DeactivateRunningTimer::RunsOn,
