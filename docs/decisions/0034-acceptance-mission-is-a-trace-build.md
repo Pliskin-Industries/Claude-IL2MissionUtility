@@ -1,8 +1,8 @@
 # 0034. The step 11 acceptance mission is observed by a trace build, not debug subtitles
 
-- **Status:** Proposed
+- **Status:** Accepted (option B)
 - **Date:** 2026-10-26
-- **Decided by:** not yet (the user). Options and recommendation by Claude, from the step 7 scope (`handoff/sessions/2026-10-26-p14-step7.md`). Decision 0030 left this to step 7.
+- **Decided by:** the user, 2026-10-26 ("Accept 0032 B, 0033 B, 0034 B and 0035 A. Build step 7 as scoped."), on options and a recommendation by Claude, from the step 7 scope (`handoff/sessions/2026-10-26-p14-step7.md`). Decision 0030 left this to step 7.
 
 ## Context
 

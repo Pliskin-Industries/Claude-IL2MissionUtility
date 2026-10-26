@@ -1,8 +1,8 @@
 # 0032. Air Tasking totals limits (D36) after the upstream author's load test
 
-- **Status:** Proposed
+- **Status:** Accepted (option B)
 - **Date:** 2026-10-26
-- **Decided by:** not yet (the user). Options and recommendation by Claude, from the step 7 scope (`handoff/sessions/2026-10-26-p14-step7.md`).
+- **Decided by:** the user, 2026-10-26 ("Accept 0032 B, 0033 B, 0034 B and 0035 A. Build step 7 as scoped."), on options and a recommendation by Claude, from the step 7 scope (`handoff/sessions/2026-10-26-p14-step7.md`).
 
 ## Context
 
@@ -25,6 +25,8 @@ The step 7 acceptance plan (all six built-ins, 3 runs each) adds about 84 aircra
 **B.** It uses the only measurement there is and stays a warning. Step 11 notes load time and tick delay next to the totals the plan reports; the limits can move again from that.
 
 ## Consequences
+
+- **Values set (2026-10-26):** 240 aircraft, 2,300 MCUs, 48 check zones. The current load probe (`build(Flight::Load)`, 24 copies per side with today's shell) counts 2,349 MCUs, 96 check zones and 240 aircraft; the tested `P14_Load_2` had one check zone per copy and a few MCUs fewer per copy, so 2,349 is rounded down.
 
 - `TotalsLimits::default()` changes (a type default in `mod.rs`: its own small commit by Claude before the step 7 build); no output changes.
 - Step 8's totals display reads the limits from the plan; nothing there changes.

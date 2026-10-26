@@ -1,8 +1,8 @@
 # 0035. `build_air_packs` returns one pack rooted at the `Air Tasking` group
 
-- **Status:** Proposed
+- **Status:** Accepted (option A)
 - **Date:** 2026-10-26
-- **Decided by:** not yet (the user). Options and recommendation by Claude, from the step 7 scope (`handoff/sessions/2026-10-26-p14-step7.md`).
+- **Decided by:** the user, 2026-10-26 ("Accept 0032 B, 0033 B, 0034 B and 0035 A. Build step 7 as scoped."), on options and a recommendation by Claude, from the step 7 scope (`handoff/sessions/2026-10-26-p14-step7.md`).
 
 ## Context
 

@@ -1,8 +1,8 @@
 # 0033. The D30 check after the country-filtered threshold: warn within r_in
 
-- **Status:** Proposed
+- **Status:** Accepted (option B)
 - **Date:** 2026-10-26
-- **Decided by:** not yet (the user). Options and recommendation by Claude, from the step 7 scope (`handoff/sessions/2026-10-26-p14-step7.md`).
+- **Decided by:** the user, 2026-10-26 ("Accept 0032 B, 0033 B, 0034 B and 0035 A. Build step 7 as scoped."), on options and a recommendation by Claude, from the step 7 scope (`handoff/sessions/2026-10-26-p14-step7.md`).
 
 ## Context
 
