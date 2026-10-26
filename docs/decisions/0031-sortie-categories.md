@@ -1,6 +1,7 @@
-# 0029. Air Tasking sortie categories: a label in the template file, chosen by the user, and a pool filter
+# 0031. Air Tasking sortie categories: a label in the template file, chosen by the user, and a pool filter
 
 - **Status:** Accepted
+- **Renumbered:** written as 0029; renumbered 0031 on 2026-10-26 by the user's ruling, because the step 5 clock record on `codex/p14-5` took 0029 the same day. Commit messages before the renumbering say 0029. Nothing else in this record changed.
 - **Date:** 2026-10-18
 - **Decided by:** the user ("Let's create categories and have the user select them"; "4 plus interdiction which can also target naval vessels. allow another tab that can add or customize these"; "Also filter the pool"; "Tab inside Air Tasking"; "Can we add a label into missions instead?" → "In the template file"). Two details by Claude, marked below.
 

@@ -1,11 +1,13 @@
-# Delegation prompt: P14 step 8, review fixes and sortie categories (decision 0029)
+# Delegation prompt: P14 step 8, review fixes and sortie categories (decision 0031)
 
-Second job on `codex/p14-8` in the worktree `eloquent-lumiere-a004d5`, after the build (`162556e`) and the type change for decision 0029 (`6ebead8`). Sent with `codex_start`, model `gpt-6-astra`, `reasoning_effort` = `max`, `sandbox` = `workspace-write`, `max_idle_seconds` = 1500.
+> Sent with this decision numbered 0029; it was renumbered 0031 on 2026-10-26 (see the record). The references below use the new number.
+
+Second job on `codex/p14-8` in the worktree `eloquent-lumiere-a004d5`, after the build (`162556e`) and the type change for decision 0031 (`6ebead8`). Sent with `codex_start`, model `gpt-6-astra`, `reasoning_effort` = `max`, `sandbox` = `workspace-write`, `max_idle_seconds` = 1500.
 
 ---
 
 <task>
-Two things on the Air Tasking tab you built (`src/ui/air.rs`, `src/airtask/pool.rs`): **(1) fix the review findings below**, and **(2) build sortie categories as decision 0029 says**. Read first: `docs/decisions/0029-sortie-categories.md`, `docs/decisions/0027-air-tasking-rail-tab-design.md`, `handoff/P14-step-8-codex-prompt.md` (your first brief; its rules still hold), `git show 6ebead8` (the two new fields), then the code.
+Two things on the Air Tasking tab you built (`src/ui/air.rs`, `src/airtask/pool.rs`): **(1) fix the review findings below**, and **(2) build sortie categories as decision 0031 says**. Read first: `docs/decisions/0031-sortie-categories.md`, `docs/decisions/0027-air-tasking-rail-tab-design.md`, `handoff/P14-step-8-codex-prompt.md` (your first brief; its rules still hold), `git show 6ebead8` (the two new fields), then the code.
 
 ### 1. Review fixes
 
@@ -23,7 +25,7 @@ Two things on the Air Tasking tab you built (`src/ui/air.rs`, `src/airtask/pool.
 12. **Build the `AirContext` once per frame** at the top of the tab's page function and pass it down (today `with_air_context` clones and densifies the front ~8 times a frame). Generate and the readiness arm may build their own.
 13. **Format the new files only:** run `rustfmt` on `src/ui/air.rs`, `src/airtask/pool.rs` and `src/airtask/standalone.rs` (and nothing else); do not reformat existing files.
 
-### 2. Sortie categories (decision 0029)
+### 2. Sortie categories (decision 0031)
 
 - **Reader, in `src/airtask/library.rs`** (now in scope for this only): `pub const DEFAULT_CATEGORIES: [&str; 5] = ["Air alert", "Strike", "Close support", "Armed recon", "Interdiction"]`. When a sortie is loaded (built-in or file), `category` = the first `Category: <name>` line in the top-level group's `Desc` (key case-insensitive, name trimmed, kept as written; an empty name counts as no label); else `default_category(&sortie)`. `pub fn default_category(sortie: &AirSortie) -> String`: a built-in by its file (AirAlert → "Air alert", HVAR → "Strike", CloseSupport → "Close support", ArmedRecon → "Armed recon", Yak raid → "Strike", Il-10 → "Strike"); a file template from its orders (any lead with `AirRole::AirPatrol` → "Air alert", else "Strike"). Re-export both through `mod.rs`. **Do not edit the six built-in files** (flown probes place them as shipped and must regenerate byte for byte).
 - **Plan functions, in `pool.rs`:** `pub fn default_categories() -> Vec<String>`; `add_library_item(plan, sortie)` (appends; adds its category to `plan.categories` when missing; the UI's Add template… uses it); `set_category(plan, sortie_index, name)`; `add_category(plan, name) -> Result<(), String>` (trimmed, not empty, unique ignoring case; user-facing message on error); `rename_category(plan, old, new) -> Result<(), String>` (same rules; every sortie with `old` follows); `remove_category(plan, name) -> usize` (removes it; each sortie that had it goes back to `default_category`, and that category is added back to the list if it was missing; returns how many sorties moved); `category_counts(plan) -> Vec<(String, usize)>` in list order; `auto_fill` gains `category: Option<&str>` and fills only sorties of that category when `Some`. Unit tests for each, with literals.
@@ -31,7 +33,7 @@ Two things on the Air Tasking tab you built (`src/ui/air.rs`, `src/airtask/pool.
   - **Pool:** the pool header gets a filter combo "All categories" / each category; the table shows only entries whose sortie has the filtered category (the header count says "{shown} of {n}" when filtered); Auto-fill fills only the filtered category (status "Added n entries · {category}"). The slot timeline and plan check stay under the pool as now.
   - **Categories:** one row per category: name, "{n} sorties", Rename (an inline text field with Save / Cancel) and Remove; under the list a text field and "Add category"; an error from `add_category` / `rename_category` shows inline with `shell::warning`. Hint: "Categories last for this run. A template keeps its category with a line Category: <name> in its group description. Help ›". Undo records before every add, rename, remove and category change.
   The selected-entry block shows the sortie's category.
-- **Tests in `src/ui_tests.rs`:** the category combo changes a sortie's category and Ctrl Z restores it; the Categories tab adds, renames (sorties follow) and removes (sorties fall back) a category, each undoable; the pool filter hides other categories' rows and Auto-fill with a filter adds only that category; a user template whose Desc says `Category: Interdiction` shows Interdiction (write a temp copy of a built-in with that Desc and load it through `dialog::answer`); the six built-ins show their 0029 defaults. Extend the guards so the Categories tab and the filter are covered: 28 px (with every control, disabled ones too), panel fit, labels on one line, glyphs.
+- **Tests in `src/ui_tests.rs`:** the category combo changes a sortie's category and Ctrl Z restores it; the Categories tab adds, renames (sorties follow) and removes (sorties fall back) a category, each undoable; the pool filter hides other categories' rows and Auto-fill with a filter adds only that category; a user template whose Desc says `Category: Interdiction` shows Interdiction (write a temp copy of a built-in with that Desc and load it through `dialog::answer`); the six built-ins show their 0031 defaults. Extend the guards so the Categories tab and the filter are covered: 28 px (with every control, disabled ones too), panel fit, labels on one line, glyphs.
 - **Docs:** `USER_MANUAL.md` "Air Tasking": categories, the filter, and the `Category: <name>` line; `docs/src-guide.md`: `airtask/standalone.rs`.
 
 ### Acceptance
@@ -53,7 +55,7 @@ Resolve the task fully. Every acceptance line must hold before you report. If so
 </completeness_contract>
 
 <verification_loop>
-Run `cargo build --offline`, `cargo clippy --offline` and `cargo test --offline` after the change and again after any fix. Before reporting, re-read decision 0029 and the 13 fixes and check each against the code.
+Run `cargo build --offline`, `cargo clippy --offline` and `cargo test --offline` after the change and again after any fix. Before reporting, re-read decision 0031 and the 13 fixes and check each against the code.
 </verification_loop>
 
 <missing_context_gating>

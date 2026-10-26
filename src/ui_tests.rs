@@ -2147,7 +2147,7 @@ fn air_tasking_loads_category_label_from_user_template() {
 }
 
 #[test]
-fn air_tasking_six_builtins_show_decision_0029_categories() {
+fn air_tasking_six_builtins_show_decision_0031_categories() {
     let mut h = Harness::new("air_builtin_categories");
     h.tab("Air Tasking");
     assert_eq!(h.app.air_plan.categories, ["Air alert", "Strike", "Close support", "Armed recon", "Interdiction"]);

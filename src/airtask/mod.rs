@@ -104,7 +104,7 @@ pub struct AirSortie {
     pub wp_alt_m: f64,
     pub attack_time_s: f64,
     pub valid: DateRange,
-    pub category: String, // decision 0029: the file's `Category:` label, else a default; the user can change it
+    pub category: String, // decision 0031: the file's `Category:` label, else a default; the user can change it
     pub warnings: Vec<String>,
 }
 
@@ -342,7 +342,7 @@ pub(crate) struct SideLogic {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AirPlan {
     pub library: Vec<AirSortie>, // Default is empty; the UI fills it with the built-ins (step 2)
-    pub categories: Vec<String>, // decision 0029: the category list; Default is empty, the UI fills it
+    pub categories: Vec<String>, // decision 0031: the category list; Default is empty, the UI fills it
     pub pool: Vec<PoolEntry>,
     pub budget: AirBudget,
     pub threshold: ThresholdSpec,
