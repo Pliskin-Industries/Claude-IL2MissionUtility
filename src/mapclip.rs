@@ -26,7 +26,7 @@
 use geo::{BooleanOps, Coord, LineString, Polygon, Rect};
 use geo_types::MultiPolygon;
 
-use crate::geo::{yalu_x_at_z, MAP_MAX, MAP_MIN};
+use crate::geo::{MAP_MAX, MAP_MIN, yalu_x_at_z};
 
 /// Keep the front this far south of the Yalu (Korean bank only).
 const YALU_STANDOFF: f64 = 8_000.0;
@@ -175,7 +175,11 @@ fn outcode(p: Coord<f64>, rect: &Rect<f64>) -> u8 {
     code
 }
 
-fn clip_segment(mut a: Coord<f64>, mut b: Coord<f64>, rect: &Rect<f64>) -> Option<(Coord<f64>, Coord<f64>)> {
+fn clip_segment(
+    mut a: Coord<f64>,
+    mut b: Coord<f64>,
+    rect: &Rect<f64>,
+) -> Option<(Coord<f64>, Coord<f64>)> {
     let min = rect.min();
     let max = rect.max();
     let mut code_a = outcode(a, rect);
@@ -253,7 +257,11 @@ pub fn offset_polyline(pts: &[(f64, f64)], dist: f64) -> Vec<(f64, f64)> {
     for i in 0..pts.len() {
         let (x, z) = pts[i];
         let (x0, z0) = if i == 0 { pts[0] } else { pts[i - 1] };
-        let (x1, z1) = if i + 1 == pts.len() { pts[i] } else { pts[i + 1] };
+        let (x1, z1) = if i + 1 == pts.len() {
+            pts[i]
+        } else {
+            pts[i + 1]
+        };
         let dx = x1 - x0;
         let dz = z1 - z0;
         let len = (dx * dx + dz * dz).sqrt().max(1e-6);
@@ -347,10 +355,7 @@ pub fn apply_salients(
 }
 
 /// Closed ring that does not share a span with the front (Hungnam-style pocket).
-pub fn detached_salient_patch(
-    front: &[(f64, f64)],
-    path: &[(f64, f64)],
-) -> Option<SalientPatch> {
+pub fn detached_salient_patch(front: &[(f64, f64)], path: &[(f64, f64)]) -> Option<SalientPatch> {
     if path.len() < 3 {
         return None;
     }
@@ -364,12 +369,12 @@ pub fn detached_salient_patch(
     let west_i = open
         .iter()
         .enumerate()
-        .min_by(|a, b| a.1 .1.partial_cmp(&b.1 .1).unwrap())
+        .min_by(|a, b| a.1.1.partial_cmp(&b.1.1).unwrap())
         .map(|(i, _)| i)?;
     let east_i = open
         .iter()
         .enumerate()
-        .max_by(|a, b| a.1 .1.partial_cmp(&b.1 .1).unwrap())
+        .max_by(|a, b| a.1.1.partial_cmp(&b.1.1).unwrap())
         .map(|(i, _)| i)?;
     if west_i == east_i {
         return None;
@@ -404,14 +409,13 @@ fn splice_one_salient(
     let (i0, t0, p0, _) = project_on_polyline(front, start)?;
     let (i1, t1, p1, _) = project_on_polyline(front, end)?;
 
-    let (i_lo, t_lo, p_lo, i_hi, t_hi, p_hi, mut path) =
-        if (i0, t0) <= (i1, t1) {
-            (i0, t0, p0, i1, t1, p1, salient.to_vec())
-        } else {
-            let mut rev = salient.to_vec();
-            rev.reverse();
-            (i1, t1, p1, i0, t0, p0, rev)
-        };
+    let (i_lo, t_lo, p_lo, i_hi, t_hi, p_hi, mut path) = if (i0, t0) <= (i1, t1) {
+        (i0, t0, p0, i1, t1, p1, salient.to_vec())
+    } else {
+        let mut rev = salient.to_vec();
+        rev.reverse();
+        (i1, t1, p1, i0, t0, p0, rev)
+    };
 
     if i_lo == i_hi && (t_hi - t_lo).abs() < 1e-4 {
         return None;
@@ -548,20 +552,12 @@ pub fn filter_front_band(
         .copied()
         .filter(|p| within_front_band(front, *p, band))
         .collect();
-    if kept.is_empty() {
-        pts
-    } else {
-        kept
-    }
+    if kept.is_empty() { pts } else { kept }
 }
 
 /// Base front strokes must run west→east (increasing Z) so the line cannot
 /// fold over itself. `min_step` is metres between vertices.
-pub fn can_extend_west_east(
-    line: &[(f64, f64)],
-    p: (f64, f64),
-    min_step: f64,
-) -> bool {
+pub fn can_extend_west_east(line: &[(f64, f64)], p: (f64, f64), min_step: f64) -> bool {
     let Some(&(x0, z0)) = line.last() else {
         return true;
     };
@@ -690,12 +686,12 @@ pub fn pocket_ring_to_salient(
     let west_i = open
         .iter()
         .enumerate()
-        .min_by(|a, b| a.1 .1.partial_cmp(&b.1 .1).unwrap())
+        .min_by(|a, b| a.1.1.partial_cmp(&b.1.1).unwrap())
         .map(|(i, _)| i)?;
     let east_i = open
         .iter()
         .enumerate()
-        .max_by(|a, b| a.1 .1.partial_cmp(&b.1 .1).unwrap())
+        .max_by(|a, b| a.1.1.partial_cmp(&b.1.1).unwrap())
         .map(|(i, _)| i)?;
     if west_i == east_i {
         return None;
@@ -889,7 +885,10 @@ pub fn quads_minus_salients(
     out
 }
 
-fn safe_difference(base: &MultiPolygon<f64>, hole: &MultiPolygon<f64>) -> Option<MultiPolygon<f64>> {
+fn safe_difference(
+    base: &MultiPolygon<f64>,
+    hole: &MultiPolygon<f64>,
+) -> Option<MultiPolygon<f64>> {
     if hole.0.is_empty() {
         return Some(base.clone());
     }
@@ -1158,7 +1157,11 @@ mod tests {
 
     #[test]
     fn influence_intersection_is_nonempty_on_the_mlr() {
-        let front = vec![(150_000.0, 80_000.0), (160_000.0, 200_000.0), (155_000.0, 350_000.0)];
+        let front = vec![
+            (150_000.0, 80_000.0),
+            (160_000.0, 200_000.0),
+            (155_000.0, 350_000.0),
+        ];
         let (north, south) = influence_polygons(&front).unwrap();
         let ao = WorldAabb::from_corners(140_000.0, 150_000.0, 180_000.0, 250_000.0);
         let n = intersect_polygon_with_aabb(&north, ao);
@@ -1180,7 +1183,11 @@ mod tests {
         ];
         let aabb = WorldAabb::from_corners(40_000.0, 40_000.0, 470_000.0, 470_000.0);
         let (north, south) = influence_polygons_in(&front, aabb, 5_000.0).unwrap();
-        let overlap: f64 = north.intersection(&south).iter().map(|p| p.unsigned_area()).sum();
+        let overlap: f64 = north
+            .intersection(&south)
+            .iter()
+            .map(|p| p.unsigned_area())
+            .sum();
         assert!(overlap < 50_000.0, "overlap area {overlap}");
         let (nq, sq) = influence_fill_quads(&front, aabb, 5_000.0);
         assert!(!nq.is_empty() && !sq.is_empty());
@@ -1207,8 +1214,7 @@ mod tests {
         assert!(
             north_pts
                 .iter()
-                .any(|&(x, z)| crate::geo::yalu_x_at_z(z)
-                    .is_some_and(|yx| x > yx + 1_000.0)),
+                .any(|&(x, z)| crate::geo::yalu_x_at_z(z).is_some_and(|yx| x > yx + 1_000.0)),
             "DPRK fill must continue north of the Yalu"
         );
         assert!(north_pts.iter().any(|&(x, _)| (x - aabb.x_max).abs() < 1.0));
@@ -1221,9 +1227,10 @@ mod tests {
             }
         }
         let (nq, _) = influence_fill_quads(&front, aabb, 5_000.0);
-        assert!(nq.iter().any(|q| q.iter().any(|&(x, z)| {
-            crate::geo::yalu_x_at_z(z).is_some_and(|yx| x > yx + 1_000.0)
-        })));
+        assert!(nq.iter().any(|q| {
+            q.iter()
+                .any(|&(x, z)| crate::geo::yalu_x_at_z(z).is_some_and(|yx| x > yx + 1_000.0))
+        }));
     }
 
     #[test]
@@ -1255,7 +1262,11 @@ mod tests {
     #[test]
     fn west_east_draw_rejects_westbound_and_self_cross() {
         let line = vec![(100_000.0, 100_000.0), (100_000.0, 120_000.0)];
-        assert!(!can_extend_west_east(&line, (100_000.0, 110_000.0), 2_500.0));
+        assert!(!can_extend_west_east(
+            &line,
+            (100_000.0, 110_000.0),
+            2_500.0
+        ));
         assert!(!can_extend_west_east(&line, (110_000.0, 90_000.0), 2_500.0));
         assert!(can_extend_west_east(&line, (110_000.0, 140_000.0), 2_500.0));
     }
@@ -1337,10 +1348,7 @@ mod tests {
 
     #[test]
     fn detached_pocket_keeps_base_front_and_fills_ring() {
-        let front = vec![
-            (100_000.0, 80_000.0),
-            (100_000.0, 200_000.0),
-        ];
+        let front = vec![(100_000.0, 80_000.0), (100_000.0, 200_000.0)];
         let pocket = vec![
             (160_000.0, 240_000.0),
             (180_000.0, 250_000.0),

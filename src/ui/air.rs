@@ -1,6 +1,8 @@
 //! Air Tasking rail tab. Plan decisions belong to the public `airtask` API.
 
 use super::*;
+use crate::frontlines::preview_front_xz;
+use crate::mapclip::apply_salients;
 use crate::airtask::{
     self, AirContext, AirPlan, AirSide, AirSortie, BudgetImpl, EntryStatus, IssueSeverity,
     PoolEntry, SlotMark, SortieSource, TargetChoice, TargetKind, TriggerMode, Ymd,
@@ -1412,12 +1414,12 @@ struct SideStyle {
 fn side_style(side: AirSide) -> SideStyle {
     match side {
         AirSide::Dprk => SideStyle {
-            label: "DPRK",
+            label: AirSide::Dprk.label(),
             marker: shell::Side::Dprk,
             color: c::DPRK,
         },
         AirSide::Nato => SideStyle {
-            label: "NATO",
+            label: AirSide::Nato.label(),
             marker: shell::Side::Nato,
             color: c::NATO,
         },

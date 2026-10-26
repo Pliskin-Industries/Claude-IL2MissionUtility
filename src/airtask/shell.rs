@@ -580,6 +580,7 @@ mod tests {
                 .collect(),
             tracks: vec![ScriptedTrack {
                 coalition: if f.shape.side == AirSide::Nato { 1 } else { 2 },
+                country: if f.shape.side == AirSide::Nato { 501 } else { 601 },
                 samples: vec![(0, TARGET.0, TARGET.1)],
             }],
             ..WalkerInput::default()

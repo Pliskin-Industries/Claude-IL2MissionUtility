@@ -11,7 +11,10 @@
 //! * Properties: `Key = Value;` where Key is an identifier **or an integer**
 //!   (e.g. `Damaged` table rows like `-1 = 1;`) and Value is a quoted string,
 //!   an integer array `[1, 2]`, or bare text up to `;` (clock times
-//!   `13:0:0`, dotted dates `1.6.1951`, plain numbers).
+//!   `13:0:0`, dotted dates `1.6.1951`, plain numbers). A doubled quote
+//!   inside a string (`""`) is a literal `"`, the way the game writes a
+//!   tail code such as `TCode = "   ""&";`. The raw text is kept, escapes
+//!   included, so a later serialize writes the same bytes.
 //! * List items: a quoted string terminated by `;` (e.g. `Trailers`) or an
 //!   unquoted `x, y;` coordinate pair (`MCU_TR_InfluenceArea.Boundary`).
 //!   Stored as properties with an empty key.
@@ -43,16 +46,15 @@
 //!
 //! Unit-tested with synthetic blocks and real `TemplateExamples/` fixtures.
 
-
 use nom::branch::alt;
-use nom::bytes::complete::take_till;
+use nom::bytes::complete::{tag, take_while1};
 use nom::character::complete::{char, digit1, multispace0, satisfy};
 use nom::combinator::{map, opt, recognize};
 use nom::error::{Error, ErrorKind};
 use nom::multi::{many0, separated_list0};
 use nom::sequence::{delimited, preceded, terminated};
-use nom::{bytes::complete::take_while, combinator::map_res};
 use nom::{Err, IResult, Parser};
+use nom::{bytes::complete::take_while, combinator::map_res};
 
 use crate::ast::Il2Entity;
 
@@ -73,10 +75,9 @@ pub fn parse_identifier(input: &str) -> IResult<&str, &str> {
 
 /// Signed integer used by Index and MCU link arrays.
 pub fn parse_integer(input: &str) -> IResult<&str, i32> {
-    map_res(
-        recognize((opt(char('-')), digit1)),
-        |s: &str| s.parse::<i32>(),
-    )
+    map_res(recognize((opt(char('-')), digit1)), |s: &str| {
+        s.parse::<i32>()
+    })
     .parse(input)
 }
 
@@ -96,8 +97,15 @@ pub fn parse_integer_array(input: &str) -> IResult<&str, Vec<i32>> {
     .parse(input)
 }
 
+/// Interior of a `"..."` value. `""` is one literal quote, not the closer.
+/// The slice is the raw interior, so `""` stays doubled for a lossless write.
 fn quoted_string_inner(input: &str) -> IResult<&str, &str> {
-    delimited(char('"'), take_till(|c| c == '"'), char('"')).parse(input)
+    delimited(
+        char('"'),
+        recognize(many0(alt((tag("\"\""), take_while1(|c: char| c != '"'))))),
+        char('"'),
+    )
+    .parse(input)
 }
 
 fn quoted_list_item(input: &str) -> IResult<&str, String> {
@@ -124,7 +132,9 @@ fn property_value(input: &str) -> IResult<&str, String> {
     alt((
         map(quoted_string_inner, |s: &str| format!("\"{s}\"")),
         map(recognize(parse_integer_array), |s: &str| s.to_string()),
-        map(take_while(|c: char| c != ';'), |s: &str| s.trim().to_string()),
+        map(take_while(|c: char| c != ';'), |s: &str| {
+            s.trim().to_string()
+        }),
     ))
     .parse(input)
 }
@@ -157,10 +167,7 @@ fn parse_nested_block(input: &str) -> IResult<&str, BodyItem> {
         preceded(multispace0, char('}')),
     )
     .parse(input)?;
-    Ok((
-        input,
-        BodyItem::Child(assemble(ident.to_string(), items)),
-    ))
+    Ok((input, BodyItem::Child(assemble(ident.to_string(), items))))
 }
 
 /// A property, nested block, or quoted list item. Fails without consuming
@@ -354,6 +361,15 @@ mod tests {
         assert_eq!(entity.property("Name"), Some("\"Truck Run\""));
         assert_eq!(entity.property("Desc"), Some("\"\""));
         assert!(entity.children.is_empty());
+    }
+
+    #[test]
+    fn quoted_value_keeps_doubled_quote() {
+        let src =
+            "Plane\r\n{\r\n  Name = \"\";\r\n  Index = 1;\r\n  TCode = \"   \"\"&\";\r\n}\r\n";
+        let entity = parse_group_file(src).expect("parse");
+        assert_eq!(entity.property("TCode"), Some("\"   \"\"&\""));
+        assert_eq!(crate::serialize::serialize_group(&entity), src);
     }
 
     #[test]
@@ -571,7 +587,8 @@ mod tests {
 
     #[test]
     fn parse_real_artillery_template() {
-        let src = include_str!("../TemplateExamples/GroundUnits/DropIns/DPRK MM13 Rocket Arty.Group");
+        let src =
+            include_str!("../TemplateExamples/GroundUnits/DropIns/DPRK MM13 Rocket Arty.Group");
         let entity = parse_group_file(src).expect("parse artillery template");
         assert_eq!(entity.block_type, "Group");
         assert!(entity.index.is_some());

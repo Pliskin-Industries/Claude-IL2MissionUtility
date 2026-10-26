@@ -1,7 +1,9 @@
 //! mapfighters.rs — park fighter packs in one coalition's influence area
 //!
-//! Checkerboard placement of NodeGates packs inside the eastern or western
-//! AO (optionally filling the box). Caps at `MAX_PACKS` (8). Picks RTB
+//! Places NodeGates packs inside the eastern or western AO. Spots stay at
+//! least a Zone In radius apart, cover the whole influence polygon
+//! (including narrow parts), and split evenly across waves. Fill keeps
+//! that tight spacing and adds packs up to `MAX_PACKS` (8). Picks RTB
 //! corners on the friendly-rear edge of the AABB and maps a GUI country
 //! setpoint onto 500-series (east) or 601 (NATO). It does not clone
 //! groups or rebuild NodeGates — `pack::generate_pack_at` consumes the
@@ -11,16 +13,19 @@
 //! * `MAX_PACKS` — 8
 //! * `struct FighterSpot` / `struct MapFighterLayout`
 //! * `fn place_in_coalition` — waves × groups, spacing, optional AO fill
+//! * `fn full_pack_spots` — keep only complete N-group copies, split evenly
 //! * `fn rtb_ao_point` — rear-corner RTB (east parks north, NATO south)
 //! * `fn country_for_coalition` — 500-series or 501 east; 601 west
 //!
 //! ## Used by
 //! * ui.rs (Map) — fighter-pack preview pins and generate_pack_at positions
 
-use geo::{BoundingRect, Contains, Coord, LineString, MultiPolygon, Point, Polygon};
+use std::collections::HashMap;
 
-use crate::frontlines::{densify, AOI_GAP};
-use crate::mapclip::{apply_salients, influence_minus_salients, WorldAabb};
+use geo::{BoundingRect, Contains, MultiPolygon, Point};
+
+use crate::frontlines::{AOI_GAP, densify};
+use crate::mapclip::{WorldAabb, apply_salients, influence_minus_salients};
 
 /// Hard cap on NodeGates packs written into one base map.
 pub const MAX_PACKS: usize = 8;
@@ -35,6 +40,11 @@ pub struct FighterSpot {
     pub pack: u32,
     /// 1-based `Group N` index inside that pack.
     pub slot: u32,
+    /// AttackArea center relative to this spot (the group's Zone IN).
+    pub area_dx: f64,
+    pub area_dz: f64,
+    /// AttackArea radius in metres. Zero draws no circle.
+    pub area_r: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -43,23 +53,11 @@ pub struct MapFighterLayout {
     pub spots: Vec<FighterSpot>,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct GridPt {
-    x: f64,
-    z: f64,
-    row: i32,
-    col: i32,
-}
-
 /// Country used when placing that coalition. Eastern keeps a 500-series setpoint
 /// (or 501 if the Fighter Pack page is on USA). NATO is always 601.
 pub fn country_for_coalition(eastern: bool, selected: i32) -> i32 {
     if eastern {
-        if selected / 100 == 5 {
-            selected
-        } else {
-            501
-        }
+        if selected / 100 == 5 { selected } else { 501 }
     } else {
         601
     }
@@ -76,11 +74,7 @@ pub fn rtb_ao_point(eastern: bool, group_x: f64, group_z: f64, aabb: WorldAabb) 
     let east = (rear_x, aabb.z_max);
     let d_west = dist2(group_x, group_z, west.0, west.1);
     let d_east = dist2(group_x, group_z, east.0, east.1);
-    if d_east < d_west {
-        east
-    } else {
-        west
-    }
+    if d_east < d_west { east } else { west }
 }
 
 fn dist2(x0: f64, z0: f64, x1: f64, z1: f64) -> f64 {
@@ -102,7 +96,7 @@ pub fn place_in_coalition(
     fill: bool,
 ) -> Result<MapFighterLayout, String> {
     let waves = waves.clamp(1, MAX_PACKS);
-    let groups_per_wave = groups_per_wave.clamp(1, 10);
+    let groups_per_wave = groups_per_wave.max(1);
     let min_spacing = min_spacing.max(1_000.0);
     let dense = densify(front_xz, 4_000.0);
     if dense.len() < 2 {
@@ -125,6 +119,44 @@ pub fn place_in_coalition(
     Ok(MapFighterLayout { eastern, spots })
 }
 
+/// Keep only complete packs of `group_count` spots, split evenly across waves.
+///
+/// A loaded fighter pack is already wired for a fixed number of groups, so a
+/// short pack cannot be stamped onto it. Leftover spots that do not fill a
+/// copy are dropped. When at least `waves` copies fit, each wave gets the
+/// same number of copies.
+pub fn full_pack_spots(
+    spots: &[FighterSpot],
+    eastern: bool,
+    waves: usize,
+    group_count: usize,
+) -> MapFighterLayout {
+    let waves = waves.clamp(1, MAX_PACKS);
+    let group_count = group_count.max(1);
+    let pts: Vec<(f64, f64)> = spots.iter().map(|s| (s.x, s.z)).collect();
+    let mut copies = (pts.len() / group_count).min(MAX_PACKS);
+    if copies >= waves {
+        copies = (copies / waves) * waves;
+    }
+    if copies == 0 {
+        return MapFighterLayout {
+            eastern,
+            spots: Vec::new(),
+        };
+    }
+    let use_n = copies * group_count;
+    let pts = if pts.len() > use_n {
+        farthest(&pts, use_n, 0.0)
+    } else {
+        pts
+    };
+    let wave_n = if copies >= waves { waves } else { copies };
+    MapFighterLayout {
+        eastern,
+        spots: deal_spots(pts, wave_n, group_count),
+    }
+}
+
 fn checkerboard_spots(
     mp: &MultiPolygon<f64>,
     min_step: f64,
@@ -132,100 +164,58 @@ fn checkerboard_spots(
     groups_per_wave: usize,
     fill: bool,
 ) -> Vec<FighterSpot> {
-    let want = waves.saturating_mul(groups_per_wave).max(1);
-    let step = if fill {
-        min_step
+    let waves = waves.max(1);
+    let groups_per_wave = groups_per_wave.max(1);
+    let want = if fill {
+        max_even_spots(waves, groups_per_wave)
     } else {
-        spread_step(mp, min_step, want)
+        waves.saturating_mul(groups_per_wave).max(1)
     };
-    let mut cells = grid_candidates(mp, step);
-    if cells.is_empty() {
-        return Vec::new();
-    }
-    let cap = if fill {
-        (MAX_PACKS * groups_per_wave).min(cells.len())
+    let mut pts = if fill {
+        fill_points(mp, min_step, want)
     } else {
-        want.min(cells.len())
+        spread_points(mp, min_step, want)
     };
-    if cells.len() > cap {
-        cells = subsample(cells, cap);
+    if pts.len() > want {
+        pts = farthest(&pts, want, 0.0);
     }
-
-    let mut buckets: Vec<Vec<GridPt>> = vec![Vec::new(); waves];
-    for p in cells {
-        let w = (p.row + p.col).rem_euclid(waves as i32) as usize;
-        buckets[w].push(p);
-    }
-
-    let mut spots = Vec::new();
-    let mut pack = 0u32;
-    for (wi, bucket) in buckets.iter().enumerate() {
-        let wave = (wi + 1) as u32;
-        if fill {
-            for chunk in bucket.chunks(groups_per_wave) {
-                if pack as usize >= MAX_PACKS {
-                    break;
-                }
-                push_pack(&mut spots, chunk, wave, pack);
-                pack += 1;
-            }
-        } else {
-            let take: Vec<GridPt> = bucket.iter().copied().take(groups_per_wave).collect();
-            if take.is_empty() {
-                continue;
-            }
-            push_pack(&mut spots, &take, wave, pack);
-            pack += 1;
+    if waves > 1 && pts.len() >= waves {
+        let n = (pts.len() / waves) * waves;
+        if pts.len() > n {
+            pts = farthest(&pts, n, 0.0);
         }
     }
-    spots
+    deal_spots(pts, waves, groups_per_wave)
 }
 
-fn push_pack(spots: &mut Vec<FighterSpot>, chunk: &[GridPt], wave: u32, pack: u32) {
-    for (i, p) in chunk.iter().enumerate() {
-        spots.push(FighterSpot {
-            x: p.x,
-            z: p.z,
-            wave,
-            pack,
-            slot: (i + 1) as u32,
-        });
+/// Most spots that still split evenly and stay within `MAX_PACKS`.
+fn max_even_spots(waves: usize, groups_per_wave: usize) -> usize {
+    let waves = waves.max(1);
+    let packs_per_wave = (MAX_PACKS / waves).max(1);
+    packs_per_wave * waves * groups_per_wave
+}
+
+fn spread_points(mp: &MultiPolygon<f64>, min_step: f64, want: usize) -> Vec<(f64, f64)> {
+    farthest(&interior_candidates(mp, min_step), want, min_step)
+}
+
+fn fill_points(mp: &MultiPolygon<f64>, min_step: f64, cap: usize) -> Vec<(f64, f64)> {
+    let packed = pack_dense(mp, min_step);
+    if packed.len() <= cap {
+        packed
+    } else {
+        farthest(&packed, cap, 0.0)
     }
 }
 
-fn spread_step(mp: &MultiPolygon<f64>, min_step: f64, want: usize) -> f64 {
-    let Some(rect) = mp.bounding_rect() else {
-        return min_step;
-    };
-    let area = rect.width() * rect.height();
-    if area <= 0.0 || want == 0 {
-        return min_step;
-    }
-    let mut step = (area / want as f64).sqrt().max(min_step);
-    for _ in 0..14 {
-        let n = grid_candidates(mp, step).len();
-        if n >= want && n <= want.saturating_mul(4) {
-            break;
-        }
-        if n < want {
-            let next = (step * 0.82).max(min_step);
-            if (next - min_step).abs() < 1.0 {
-                step = min_step;
-                break;
-            }
-            step = next;
-        } else {
-            step *= 1.15;
-        }
-    }
-    step.max(min_step)
-}
-
-fn grid_candidates(mp: &MultiPolygon<f64>, step: f64) -> Vec<GridPt> {
+/// Fine lattice inside the polygon so a strip that falls between a coarse
+/// Zone In grid still gets a candidate.
+fn interior_candidates(mp: &MultiPolygon<f64>, min_step: f64) -> Vec<(f64, f64)> {
     let Some(rect) = mp.bounding_rect() else {
         return Vec::new();
     };
-    if step < 100.0 {
+    let step = (min_step / 8.0).clamp(1_000.0, 4_000.0);
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return Vec::new();
     }
     let x0 = rect.min().x;
@@ -233,31 +223,176 @@ fn grid_candidates(mp: &MultiPolygon<f64>, step: f64) -> Vec<GridPt> {
     let x1 = rect.max().x;
     let z1 = rect.max().y;
     let mut out = Vec::new();
-    let mut row = 0i32;
     let mut x = x0 + step * 0.5;
-    while x <= x1 - step * 0.2 {
-        let mut col = 0i32;
+    while x < x1 {
         let mut z = z0 + step * 0.5;
-        while z <= z1 - step * 0.2 {
+        while z < z1 {
             if mp_contains(mp, x, z) {
-                out.push(GridPt { x, z, row, col });
+                out.push((x, z));
             }
             z += step;
-            col += 1;
         }
         x += step;
-        row += 1;
     }
     out
 }
 
-fn subsample(pts: Vec<GridPt>, n: usize) -> Vec<GridPt> {
-    if pts.len() <= n {
-        return pts;
+fn pack_dense(mp: &MultiPolygon<f64>, min_step: f64) -> Vec<(f64, f64)> {
+    let mut grid = SpacingGrid::new(min_step);
+    let mut out = Vec::new();
+    for (x, z) in interior_candidates(mp, min_step) {
+        if grid.fits(x, z, min_step) {
+            grid.insert(x, z);
+            out.push((x, z));
+        }
     }
-    (0..n)
-        .map(|i| pts[i * pts.len() / n])
-        .collect()
+    out
+}
+
+/// Pick up to `k` points. `min_sep` is the closest two selected points may be
+/// (0 keeps a subset of an already spaced set). The first point is near the
+/// centroid; each later point is the one farthest from those already chosen,
+/// so the set covers the polygon instead of stacking on one edge.
+fn farthest(cands: &[(f64, f64)], k: usize, min_sep: f64) -> Vec<(f64, f64)> {
+    if cands.is_empty() || k == 0 {
+        return Vec::new();
+    }
+    let (cx, cz) = centroid(cands);
+    let mut seed = 0usize;
+    let mut seed_d = f64::MAX;
+    for (i, p) in cands.iter().enumerate() {
+        let d = dist2(p.0, p.1, cx, cz);
+        if d < seed_d {
+            seed_d = d;
+            seed = i;
+        }
+    }
+    let mut selected = vec![cands[seed]];
+    let mut used = vec![false; cands.len()];
+    used[seed] = true;
+    while selected.len() < k {
+        let mut best_i = None;
+        let mut best_d = -1.0;
+        for (i, p) in cands.iter().enumerate() {
+            if used[i] {
+                continue;
+            }
+            let d = selected
+                .iter()
+                .map(|s| (p.0 - s.0).hypot(p.1 - s.1))
+                .fold(f64::MAX, f64::min);
+            if d + 1.0 >= min_sep && d > best_d {
+                best_d = d;
+                best_i = Some(i);
+            }
+        }
+        match best_i {
+            Some(i) => {
+                used[i] = true;
+                selected.push(cands[i]);
+            }
+            None => break,
+        }
+    }
+    selected
+}
+
+fn centroid(pts: &[(f64, f64)]) -> (f64, f64) {
+    let n = pts.len() as f64;
+    let (sx, sz) = pts
+        .iter()
+        .fold((0.0, 0.0), |(sx, sz), p| (sx + p.0, sz + p.1));
+    (sx / n, sz / n)
+}
+
+struct SpacingGrid {
+    cell: f64,
+    bins: HashMap<(i32, i32), Vec<(f64, f64)>>,
+}
+
+impl SpacingGrid {
+    fn new(min_step: f64) -> Self {
+        Self {
+            cell: min_step.max(1.0),
+            bins: HashMap::new(),
+        }
+    }
+
+    fn fits(&self, x: f64, z: f64, min_step: f64) -> bool {
+        let (cx, cz) = self.key(x, z);
+        for ix in (cx - 1)..=(cx + 1) {
+            for iz in (cz - 1)..=(cz + 1) {
+                if let Some(pts) = self.bins.get(&(ix, iz)) {
+                    for p in pts {
+                        if (x - p.0).hypot(z - p.1) + 1.0 < min_step {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    fn insert(&mut self, x: f64, z: f64) {
+        let key = self.key(x, z);
+        self.bins.entry(key).or_default().push((x, z));
+    }
+
+    fn key(&self, x: f64, z: f64) -> (i32, i32) {
+        (
+            (x / self.cell).floor() as i32,
+            (z / self.cell).floor() as i32,
+        )
+    }
+}
+
+/// Round-robin in spatial order so each wave gets the same count, then cut
+/// each wave into packs of `groups_per_wave` (the last pack in a wave may be
+/// short when the zone cannot hold a full set).
+fn deal_spots(mut pts: Vec<(f64, f64)>, waves: usize, groups_per_wave: usize) -> Vec<FighterSpot> {
+    if pts.is_empty() || waves == 0 || groups_per_wave == 0 {
+        return Vec::new();
+    }
+    pts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    let mut buckets: Vec<Vec<(f64, f64)>> = vec![Vec::new(); waves];
+    for (i, p) in pts.into_iter().enumerate() {
+        buckets[i % waves].push(p);
+    }
+    let mut spots = Vec::new();
+    let mut pack = 0u32;
+    let chunks = buckets
+        .iter()
+        .map(|b| b.len().div_ceil(groups_per_wave))
+        .max()
+        .unwrap_or(0);
+    for ci in 0..chunks {
+        for (wi, bucket) in buckets.iter().enumerate() {
+            if pack as usize >= MAX_PACKS {
+                return spots;
+            }
+            let start = ci * groups_per_wave;
+            if start >= bucket.len() {
+                continue;
+            }
+            let end = (start + groups_per_wave).min(bucket.len());
+            let wave = (wi + 1) as u32;
+            for (slot, p) in bucket[start..end].iter().enumerate() {
+                spots.push(FighterSpot {
+                    x: p.0,
+                    z: p.1,
+                    wave,
+                    pack,
+                    slot: (slot + 1) as u32,
+                    area_dx: 0.0,
+                    area_dz: 0.0,
+                    area_r: 0.0,
+                });
+            }
+            pack += 1;
+        }
+    }
+    spots
 }
 
 fn mp_contains(mp: &MultiPolygon<f64>, x: f64, z: f64) -> bool {
@@ -266,6 +401,8 @@ fn mp_contains(mp: &MultiPolygon<f64>, x: f64, z: f64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use geo::{Coord, LineString, Polygon};
+
     use super::*;
 
     fn rect_mp(x0: f64, z0: f64, x1: f64, z1: f64) -> MultiPolygon<f64> {
@@ -327,8 +464,18 @@ mod tests {
         let w1 = spots.iter().filter(|s| s.wave == 1).count();
         let w2 = spots.iter().filter(|s| s.wave == 2).count();
         assert!(w1 >= 1 && w2 >= 1, "waves should mix, got {w1} and {w2}");
-        let z1: f64 = spots.iter().filter(|s| s.wave == 1).map(|s| s.z).sum::<f64>() / w1 as f64;
-        let z2: f64 = spots.iter().filter(|s| s.wave == 2).map(|s| s.z).sum::<f64>() / w2 as f64;
+        let z1: f64 = spots
+            .iter()
+            .filter(|s| s.wave == 1)
+            .map(|s| s.z)
+            .sum::<f64>()
+            / w1 as f64;
+        let z2: f64 = spots
+            .iter()
+            .filter(|s| s.wave == 2)
+            .map(|s| s.z)
+            .sum::<f64>()
+            / w2 as f64;
         assert!(
             (z1 - z2).abs() < 24_000.0,
             "waves should interleave, not sit in opposite corners ({z1} vs {z2})"
@@ -381,6 +528,106 @@ mod tests {
     fn tiny_zone_returns_what_fits() {
         let mp = rect_mp(100_000.0, 100_000.0, 118_000.0, 118_000.0);
         let spots = checkerboard_spots(&mp, 16_000.0, 2, 5, false);
-        assert!(spots.len() <= 2);
+        assert!(!spots.is_empty() && spots.len() <= 4, "got {}", spots.len());
+        if spots.len() >= 2 {
+            assert!(min_pair_dist(&spots) + 1.0 >= 16_000.0);
+            let (w1, w2) = wave_counts(&spots);
+            assert_eq!(w1, w2, "tiny zone split {w1} and {w2}");
+        }
+    }
+
+    fn wave_counts(spots: &[FighterSpot]) -> (usize, usize) {
+        (
+            spots.iter().filter(|s| s.wave == 1).count(),
+            spots.iter().filter(|s| s.wave == 2).count(),
+        )
+    }
+
+    #[test]
+    fn two_waves_of_a_five_pack_place_ten() {
+        let mp = rect_mp(0.0, 0.0, 200_000.0, 200_000.0);
+        let spots = checkerboard_spots(&mp, 16_000.0, 2, 5, false);
+        assert_eq!(wave_counts(&spots), (5, 5));
+        assert_eq!(spots.len(), 10);
+        let (min_x, max_x, min_z, max_z) = extent(&spots);
+        assert!(
+            max_x - min_x > 100_000.0,
+            "spots stay in one band of x ({min_x}..{max_x})"
+        );
+        assert!(
+            max_z - min_z > 100_000.0,
+            "spots stay in one band of z ({min_z}..{max_z})"
+        );
+    }
+
+    #[test]
+    fn fill_splits_two_waves_evenly() {
+        let mp = rect_mp(0.0, 0.0, 120_000.0, 120_000.0);
+        let spots = checkerboard_spots(&mp, 16_000.0, 2, 5, true);
+        let (w1, w2) = wave_counts(&spots);
+        assert_eq!(w1, w2, "fill handed the waves {w1} and {w2}");
+        assert!(w1 >= 4, "fill left only {w1} in a 120 km box");
+        let packs: std::collections::BTreeSet<u32> = spots.iter().map(|s| s.pack).collect();
+        assert!(packs.len() <= MAX_PACKS);
+    }
+
+    #[test]
+    fn fill_covers_a_strip_a_coarse_grid_misses() {
+        // 200 km by 10 km. A 16 km grid inset from the box never lands inside.
+        let mp = rect_mp(0.0, 10_000.0, 200_000.0, 20_000.0);
+        let spots = checkerboard_spots(&mp, 16_000.0, 2, 1, true);
+        assert!(spots.len() >= 8, "thin strip got {} spots", spots.len());
+        let (w1, w2) = wave_counts(&spots);
+        assert_eq!(w1, w2, "thin strip split {w1} and {w2}");
+        let (min_x, max_x, _, _) = extent(&spots);
+        assert!(
+            max_x - min_x > 100_000.0,
+            "strip was filled from one end ({min_x}..{max_x})"
+        );
+        for s in &spots {
+            assert!(mp_contains(&mp, s.x, s.z));
+        }
+    }
+
+    #[test]
+    fn spread_reaches_the_narrow_end_of_a_wedge() {
+        // Wide along the north edge (high X), a point at the south.
+        let ring = LineString::from(vec![
+            Coord {
+                x: 30_000.0,
+                y: 100_000.0,
+            },
+            Coord {
+                x: 170_000.0,
+                y: 20_000.0,
+            },
+            Coord {
+                x: 170_000.0,
+                y: 180_000.0,
+            },
+            Coord {
+                x: 30_000.0,
+                y: 100_000.0,
+            },
+        ]);
+        let mp = MultiPolygon(vec![Polygon::new(ring, vec![])]);
+        assert!(mp_contains(&mp, 120_000.0, 100_000.0));
+        let spots = checkerboard_spots(&mp, 16_000.0, 2, 4, false);
+        let (w1, w2) = wave_counts(&spots);
+        assert_eq!(w1, w2);
+        assert_eq!(spots.len(), 8);
+        let min_x = spots.iter().map(|s| s.x).fold(f64::MAX, f64::min);
+        assert!(
+            min_x < 100_000.0,
+            "every spot sat in the wide end (min x {min_x})"
+        );
+    }
+
+    fn extent(spots: &[FighterSpot]) -> (f64, f64, f64, f64) {
+        let min_x = spots.iter().map(|s| s.x).fold(f64::MAX, f64::min);
+        let max_x = spots.iter().map(|s| s.x).fold(f64::MIN, f64::max);
+        let min_z = spots.iter().map(|s| s.z).fold(f64::MAX, f64::min);
+        let max_z = spots.iter().map(|s| s.z).fold(f64::MIN, f64::max);
+        (min_x, max_x, min_z, max_z)
     }
 }

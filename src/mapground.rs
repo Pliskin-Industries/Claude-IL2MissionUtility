@@ -26,19 +26,19 @@
 
 use geo::{Contains, Point};
 
-use crate::frontlines::{densify, AOI_GAP};
+use crate::frontlines::{AOI_GAP, densify};
 use crate::geo::{MAP_MAX, MAP_MIN};
 use crate::mapclip::{
-    apply_salients, filter_front_band, influence_minus_salients, point_north_of_front, snap_to_front,
-    WorldAabb,
-};
-use crate::placement::{
-    hashed_pick, heading_toward, heading_toward_nearest, subsample_spaced, PlaceOpts,
-    UNIT_PLACE_SPACING,
+    WorldAabb, apply_salients, filter_front_band, influence_minus_salients, point_north_of_front,
+    snap_to_front,
 };
 use crate::mapnet::{self, NetworkSpot, RouteLayout};
-use crate::weapon_range::UNKNOWN_ARTILLERY_M;
+use crate::placement::{
+    PlaceOpts, UNIT_PLACE_SPACING, hashed_pick, heading_toward, heading_toward_nearest,
+    subsample_spaced,
+};
 use crate::watermap::TerrainMap;
+use crate::weapon_range::UNKNOWN_ARTILLERY_M;
 
 pub const MAX_GROUND: usize = 64;
 pub const GROUND_SPACING: f64 = UNIT_PLACE_SPACING;
@@ -46,6 +46,10 @@ pub const START_DELAY_S: f64 = 5.0;
 pub const GROUP_DELAY_S: f64 = 0.5;
 /// Fallback when a template has no known gun script.
 pub const ARTY_OBJECTIVE_RADIUS: f64 = UNKNOWN_ARTILLERY_M;
+
+/// Road columns prefer to park this far inside the AO, including their vehicles
+/// and waypoints. No road in that inset falls back to the full box.
+const ROAD_AO_MARGIN_M: f64 = 10_000.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GroundKind {
@@ -257,11 +261,7 @@ impl MapGroundLayout {
     }
 
     /// Face objectives when any are marked; otherwise face the front.
-    pub fn aim_at_objectives_or_front(
-        &mut self,
-        objectives: &[(f64, f64)],
-        front: &[(f64, f64)],
-    ) {
+    pub fn aim_at_objectives_or_front(&mut self, objectives: &[(f64, f64)], front: &[(f64, f64)]) {
         if objectives.is_empty() {
             self.aim_at_front(front);
         } else {
@@ -453,8 +453,7 @@ fn place_path_hop(
     dist: f64,
 ) -> ((f64, f64), bool) {
     let straight = hop_along(from, heading_deg, dist);
-    if terrain.is_land_xz(straight.0, straight.1)
-        && !segment_crosses_water(terrain, prev, straight)
+    if terrain.is_land_xz(straight.0, straight.1) && !segment_crosses_water(terrain, prev, straight)
     {
         return (straight, false);
     }
@@ -532,31 +531,29 @@ pub fn place_ground(
     let constrain_arty = kind_counts[2] > 0 && !opts.favor.is_empty();
     let mut jobs = Vec::new();
     if constrain_arty {
-        jobs.extend(std::iter::repeat(GroundJob::new(
-            GroundKind::Artillery,
-            Some(ARTY_OBJECTIVE_RADIUS),
-        )).take(kind_counts[2]));
-        jobs.extend(std::iter::repeat(GroundJob::new(
-            GroundKind::Armor,
-            None,
-        )).take(kind_counts[0]));
-        jobs.extend(std::iter::repeat(GroundJob::new(
-            GroundKind::Supply,
-            None,
-        )).take(kind_counts[1]));
+        jobs.extend(
+            std::iter::repeat(GroundJob::new(
+                GroundKind::Artillery,
+                Some(ARTY_OBJECTIVE_RADIUS),
+            ))
+            .take(kind_counts[2]),
+        );
+        jobs.extend(
+            std::iter::repeat(GroundJob::new(GroundKind::Armor, None)).take(kind_counts[0]),
+        );
+        jobs.extend(
+            std::iter::repeat(GroundJob::new(GroundKind::Supply, None)).take(kind_counts[1]),
+        );
     } else {
-        jobs.extend(std::iter::repeat(GroundJob::new(
-            GroundKind::Armor,
-            None,
-        )).take(kind_counts[0]));
-        jobs.extend(std::iter::repeat(GroundJob::new(
-            GroundKind::Supply,
-            None,
-        )).take(kind_counts[1]));
-        jobs.extend(std::iter::repeat(GroundJob::new(
-            GroundKind::Artillery,
-            None,
-        )).take(kind_counts[2]));
+        jobs.extend(
+            std::iter::repeat(GroundJob::new(GroundKind::Armor, None)).take(kind_counts[0]),
+        );
+        jobs.extend(
+            std::iter::repeat(GroundJob::new(GroundKind::Supply, None)).take(kind_counts[1]),
+        );
+        jobs.extend(
+            std::iter::repeat(GroundJob::new(GroundKind::Artillery, None)).take(kind_counts[2]),
+        );
     }
     place_ground_jobs(
         eastern,
@@ -597,7 +594,16 @@ pub fn place_ground_jobs(
         let mut pending_issue: Option<String> = None;
         if let Some(route) = &job.route {
             let prefer_side = |x: f64, z: f64| aabb.contains(x, z) && allowed(&side, x, z);
-            let placed = mapnet::place_route(route, aabb, opts.seed, i, &used, prefer_side);
+            let placed = if route.rail {
+                None
+            } else {
+                place_road_inside(route, aabb, &side, opts.seed, i, &used)
+            };
+            let placed = if placed.is_some() {
+                placed
+            } else {
+                mapnet::place_route(route, aabb, opts.seed, i, &used, prefer_side)
+            };
             let (placed, issue) = match placed {
                 Some(p) => (Some(p), None),
                 None => {
@@ -624,15 +630,12 @@ pub fn place_ground_jobs(
                             ));
                             (None, None)
                         }
-                        None => {
-                            (
-                                None,
-                                Some(
-                                    "no road long enough inside the AO — parked on open ground."
-                                        .into(),
-                                ),
-                            )
-                        }
+                        None => (
+                            None,
+                            Some(
+                                "no road long enough inside the AO — parked on open ground.".into(),
+                            ),
+                        ),
                     }
                 }
             };
@@ -697,7 +700,8 @@ pub fn place_ground_jobs(
             .into_iter()
             .next()
             {
-                pending_issue = Some("no open ground near an objective — parked along the front.".into());
+                pending_issue =
+                    Some("no open ground near an objective — parked along the front.".into());
                 Some(p)
             } else {
                 None
@@ -752,14 +756,7 @@ pub fn place_ground_jobs(
         } else {
             assigned
         };
-        let mut spot = GroundSpot::at(
-            x,
-            z,
-            in_ao,
-            heading_deg,
-            job.kind,
-            objective,
-        );
+        let mut spot = GroundSpot::at(x, z, in_ao, heading_deg, job.kind, objective);
         spot.issue = pending_issue;
         spot.wp_ahead = job.wp_ahead.clone();
         spot.layout_offroad_waypoints(terrain);
@@ -767,7 +764,10 @@ pub fn place_ground_jobs(
     }
 
     if spots.is_empty() {
-        if jobs.iter().any(|j| j.route.as_ref().is_some_and(|r| r.rail)) {
+        if jobs
+            .iter()
+            .any(|j| j.route.as_ref().is_some_and(|r| r.rail))
+        {
             return Err(
                 "no railroad in the AO for those train groups. Enlarge the box or pick another area."
                     .into(),
@@ -824,17 +824,11 @@ fn pick_front_open(
     }
     inside = apply_cover_preference(terrain, inside, prefer_cover, total);
     let take = total.min(inside.len());
-    let mut points: Vec<(f64, f64, bool)> = subsample_spaced(
-        inside,
-        take,
-        opts.favor,
-        opts.seed,
-        spacing,
-        used,
-    )
-        .into_iter()
-        .map(|(x, z)| (x, z, true))
-        .collect();
+    let mut points: Vec<(f64, f64, bool)> =
+        subsample_spaced(inside, take, opts.favor, opts.seed, spacing, used)
+            .into_iter()
+            .map(|(x, z)| (x, z, true))
+            .collect();
 
     if points.len() < total {
         let outside_box = WorldAabb::full_map();
@@ -903,17 +897,11 @@ fn pick_near_objectives(
             outside.push(p);
         }
     }
-    let mut points: Vec<(f64, f64, bool)> = subsample_spaced(
-        inside,
-        n,
-        objectives,
-        seed,
-        spacing,
-        occupied,
-    )
-        .into_iter()
-        .map(|(x, z)| (x, z, true))
-        .collect();
+    let mut points: Vec<(f64, f64, bool)> =
+        subsample_spaced(inside, n, objectives, seed, spacing, occupied)
+            .into_iter()
+            .map(|(x, z)| (x, z, true))
+            .collect();
     if points.len() < n {
         let mut blocked = occupied.to_vec();
         blocked.extend(points.iter().map(|(x, z, _)| (*x, *z)));
@@ -979,11 +967,7 @@ fn sample_open_near(
         out.extend(sample_open(terrain, around, step, side));
     }
     let r2 = radius * radius;
-    out.retain(|&(x, z)| {
-        objectives
-            .iter()
-            .any(|&(ox, oz)| dist2(x, z, ox, oz) <= r2)
-    });
+    out.retain(|&(x, z)| objectives.iter().any(|&(ox, oz)| dist2(x, z, ox, oz) <= r2));
     out.sort_by(|a, b| {
         a.0.partial_cmp(&b.0)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -1003,10 +987,56 @@ fn drop_near(pts: Vec<(f64, f64)>, used: &[(f64, f64)], min_d: f64) -> Vec<(f64,
         .collect()
 }
 
+fn ao_inset(aabb: WorldAabb, margin: f64) -> Option<WorldAabb> {
+    let shrunk = aabb.expanded(-margin);
+    (shrunk.x_min < shrunk.x_max && shrunk.z_min < shrunk.z_max).then_some(shrunk)
+}
+
+/// Lead, vehicles, and waypoints all inside `aabb`.
+fn column_inside(x: f64, z: f64, net: &NetworkSpot, aabb: WorldAabb) -> bool {
+    aabb.contains(x, z)
+        && net.unit_xz.iter().all(|&(px, pz)| aabb.contains(px, pz))
+        && net.waypoints.iter().all(|&(px, pz)| aabb.contains(px, pz))
+}
+
+/// A road column at least [`ROAD_AO_MARGIN_M`] inside the AO, on this side.
+/// Several seeds are tried so a long column can find a stretch that fits.
+fn place_road_inside(
+    route: &RouteLayout,
+    aabb: WorldAabb,
+    side: &LandSide,
+    seed: u64,
+    index: usize,
+    used: &[(f64, f64)],
+) -> Option<((f64, f64, f64, bool), NetworkSpot)> {
+    let inset = ao_inset(aabb, ROAD_AO_MARGIN_M)?;
+    let prefer = |x: f64, z: f64| inset.contains(x, z) && allowed(side, x, z);
+    for k in 0..8u64 {
+        let Some(placed) = mapnet::place_route(
+            route,
+            aabb,
+            seed.wrapping_add(k.wrapping_mul(97)),
+            index,
+            used,
+            &prefer,
+        ) else {
+            continue;
+        };
+        let ((x, z, _, _), net) = &placed;
+        if column_inside(*x, *z, net, inset) {
+            return Some(placed);
+        }
+    }
+    None
+}
+
 enum LandSide {
     Any,
     Polygon(geo::MultiPolygon<f64>),
-    Front { eastern: bool, front: Vec<(f64, f64)> },
+    Front {
+        eastern: bool,
+        front: Vec<(f64, f64)>,
+    },
 }
 
 fn coalition_land(
@@ -1096,11 +1126,7 @@ fn apply_cover_preference(
         .copied()
         .filter(|&(x, z)| !terrain.is_open_xz(x, z))
         .collect();
-    if cover.len() >= need {
-        cover
-    } else {
-        pts
-    }
+    if cover.len() >= need { cover } else { pts }
 }
 
 fn dist2(x0: f64, z0: f64, x1: f64, z1: f64) -> f64 {
@@ -1780,19 +1806,20 @@ mod tests {
             s.x,
             s.issue
         );
+        let inset = aabb.expanded(-ROAD_AO_MARGIN_M);
+        assert!(
+            column_inside(s.x, s.z, net, inset),
+            "truck route should keep a 10 km margin, lead=({}, {})",
+            s.x,
+            s.z
+        );
     }
 
     #[test]
     fn path_waypoints_follow_heading_on_open_ground() {
         let terrain = all_open();
         let from = (150_000.0, 150_000.0);
-        let (wps, wet) = layout_path_waypoints(
-            from,
-            180.0,
-            &[4_000.0, 8_000.0],
-            None,
-            &terrain,
-        );
+        let (wps, wet) = layout_path_waypoints(from, 180.0, &[4_000.0, 8_000.0], None, &terrain);
         assert!(!wet);
         assert_eq!(wps.len(), 2);
         assert!((wps[0].0 - 146_000.0).abs() < 1.0);
@@ -1806,13 +1833,8 @@ mod tests {
         let terrain = all_open();
         let from = (150_000.0, 150_000.0);
         let obj = (147_000.0, 150_000.0);
-        let (wps, wet) = layout_path_waypoints(
-            from,
-            180.0,
-            &[4_000.0, 8_000.0],
-            Some(obj),
-            &terrain,
-        );
+        let (wps, wet) =
+            layout_path_waypoints(from, 180.0, &[4_000.0, 8_000.0], Some(obj), &terrain);
         assert!(!wet);
         assert_eq!(wps.len(), 2);
         assert!((wps[0].0 - 148_500.0).abs() < 1.0);
@@ -1830,10 +1852,7 @@ mod tests {
         let mut spot = GroundSpot::at(from.0, from.1, true, 0.0, GroundKind::Armor, None);
         spot.wp_ahead = vec![4_000.0];
         spot.layout_offroad_waypoints(&terrain);
-        assert_eq!(
-            spot.issue.as_deref(),
-            Some("path waypoint crosses water.")
-        );
+        assert_eq!(spot.issue.as_deref(), Some("path waypoint crosses water."));
     }
 
     #[test]

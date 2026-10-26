@@ -1,6 +1,6 @@
 Group
 {
-  Index = 21890;
+  Index = 21902;
   Name = "Exclusive Activation";
   Desc = "";
   Group
@@ -1026,7 +1026,7 @@ Group
       Index = 21351;
       Name = "END";
       Desc = "";
-      Targets = [21330,21422,21445,21446,21844];
+      Targets = [21330,21422,21445,21446,21844,21851];
       Objects = [];
       XPos = 36562.700;
       YPos = 448.566;
@@ -1093,7 +1093,7 @@ Group
       Index = 21354;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21363,21364,21845];
+      Targets = [21363,21364,21845,21850];
       Objects = [];
       XPos = 33474.996;
       YPos = 3501.000;
@@ -1113,7 +1113,7 @@ Group
       Index = 21355;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21363,21364,21845];
+      Targets = [21363,21364,21845,21850];
       Objects = [];
       XPos = 32727.946;
       YPos = 3501.000;
@@ -1133,7 +1133,7 @@ Group
       Index = 21356;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21363,21364,21845];
+      Targets = [21363,21364,21845,21850];
       Objects = [];
       XPos = 31943.543;
       YPos = 3501.000;
@@ -1153,7 +1153,7 @@ Group
       Index = 21357;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21363,21364,21845];
+      Targets = [21363,21364,21845,21850];
       Objects = [];
       XPos = 31271.199;
       YPos = 3501.000;
@@ -1173,7 +1173,7 @@ Group
       Index = 21358;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21363,21364,21845];
+      Targets = [21363,21364,21845,21850];
       Objects = [];
       XPos = 30598.854;
       YPos = 3501.000;
@@ -1193,7 +1193,7 @@ Group
       Index = 21359;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21363,21364,21845];
+      Targets = [21363,21364,21845,21850];
       Objects = [];
       XPos = 30038.566;
       YPos = 3501.000;
@@ -1213,7 +1213,7 @@ Group
       Index = 21360;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21363,21364,21845];
+      Targets = [21363,21364,21845,21850];
       Objects = [];
       XPos = 29328.869;
       YPos = 3501.000;
@@ -1233,7 +1233,7 @@ Group
       Index = 21361;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21363,21364,21845];
+      Targets = [21363,21364,21845,21850];
       Objects = [];
       XPos = 28702.782;
       YPos = 3501.000;
@@ -1253,7 +1253,7 @@ Group
       Index = 21362;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21363,21364,21845];
+      Targets = [21363,21364,21845,21850];
       Objects = [];
       XPos = 28128.580;
       YPos = 3501.000;
@@ -3814,7 +3814,7 @@ Group
       Index = 21449;
       Name = "MISSION START";
       Desc = "";
-      Targets = [21454,21456,21459,21460,21462,21468,21472,21853];
+      Targets = [21454,21456,21459,21460,21462,21468,21472,21855,21860];
       Objects = [];
       XPos = 50000.000;
       YPos = 1501.000;
@@ -4146,7 +4146,7 @@ Group
         Index = 21467;
         Name = "MISSION CLEAN UP (2m)";
         Desc = "";
-        Targets = [21466,21470,21852];
+        Targets = [21466,21470,21854,21861];
         Objects = [];
         XPos = 84469.105;
         YPos = 1.000;
@@ -5206,7 +5206,7 @@ Group
       Index = 21505;
       Name = "MISSION START";
       Desc = "";
-      Targets = [21510,21512,21515,21516,21518,21524,21528,21861];
+      Targets = [21510,21512,21515,21516,21518,21524,21528,21865,21870];
       Objects = [];
       XPos = 60000.000;
       YPos = 1501.000;
@@ -5538,7 +5538,7 @@ Group
         Index = 21523;
         Name = "MISSION CLEAN UP (2m)";
         Desc = "";
-        Targets = [21522,21526,21860];
+        Targets = [21522,21526,21864,21871];
         Objects = [];
         XPos = 120863.496;
         YPos = 1.000;
@@ -6598,7 +6598,7 @@ Group
       Index = 21561;
       Name = "MISSION START";
       Desc = "";
-      Targets = [21566,21568,21571,21572,21574,21580,21584,21869];
+      Targets = [21566,21568,21571,21572,21574,21580,21584,21875,21880];
       Objects = [];
       XPos = 40000.000;
       YPos = 1501.000;
@@ -6930,7 +6930,7 @@ Group
         Index = 21579;
         Name = "MISSION CLEAN UP (2m)";
         Desc = "";
-        Targets = [21578,21582,21868];
+        Targets = [21578,21582,21874,21881];
         Objects = [];
         XPos = 143578.082;
         YPos = 1.000;
@@ -7990,7 +7990,7 @@ Group
       Index = 21617;
       Name = "MISSION START";
       Desc = "";
-      Targets = [21622,21624,21627,21628,21630,21636,21640,21877];
+      Targets = [21622,21624,21627,21628,21630,21636,21640,21885,21890];
       Objects = [];
       XPos = 50000.000;
       YPos = 1501.000;
@@ -8322,7 +8322,7 @@ Group
         Index = 21635;
         Name = "MISSION CLEAN UP (2m)";
         Desc = "";
-        Targets = [21634,21638,21876];
+        Targets = [21634,21638,21884,21891];
         Objects = [];
         XPos = 75670.975;
         YPos = 1.000;
@@ -10557,7 +10557,7 @@ Group
       Index = 21694;
       Name = "Zone IN";
       Desc = "";
-      Targets = [21702,21707,21700,21712,21736,21885];
+      Targets = [21702,21707,21700,21712,21736,21895,21900];
       Objects = [];
       XPos = 77012.508;
       YPos = 276.047;
@@ -10597,7 +10597,7 @@ Group
       Index = 21696;
       Name = "END MISSION";
       Desc = "";
-      Targets = [21701,21722,21884];
+      Targets = [21701,21722,21894,21901];
       Objects = [];
       XPos = 77220.562;
       YPos = 448.566;
@@ -13395,7 +13395,7 @@ Group
   
   Group
   {
-    Index = 21891;
+    Index = 21903;
     Name = "NodeGates";
     Desc = "";
     MCU_Timer
@@ -13475,7 +13475,7 @@ Group
       Index = 21846;
       Name = "1";
       Desc = "";
-      Targets = [21850,21858,21866,21874,21882];
+      Targets = [21852,21862,21872,21882,21892];
       Objects = [];
       XPos = 33474.996;
       YPos = 3501.000;
@@ -13493,7 +13493,7 @@ Group
       Index = 21847;
       Name = "1";
       Desc = "";
-      Targets = [21851,21859,21867,21875,21883];
+      Targets = [21853,21863,21873,21883,21893];
       Objects = [];
       XPos = 33474.996;
       YPos = 3501.000;
@@ -13540,8 +13540,60 @@ Group
     
     MCU_Timer
     {
+      Index = 21850;
+      Name = "1 WINDOW";
+      Desc = "";
+      Targets = [21351];
+      Objects = [];
+      XPos = 33474.996;
+      YPos = 3501.000;
+      ZPos = 109411.503;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 10800;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
       Index = 21851;
+      Name = "1 WINDOW OFF";
+      Desc = "";
+      Targets = [21850];
+      Objects = [];
+      XPos = 33474.996;
+      YPos = 3501.000;
+      ZPos = 109451.503;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21853;
       Name = "2IN - DISABLE";
+      Desc = "";
+      Targets = [21859];
+      Objects = [];
+      XPos = 50080.000;
+      YPos = 1501.000;
+      ZPos = 40000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21855;
+      Name = "2OUT - DISABLE";
       Desc = "";
       Targets = [21857];
       Objects = [];
@@ -13558,10 +13610,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21853;
-      Name = "2OUT - DISABLE";
+      Index = 21852;
+      Name = "2IN - ENABLE";
       Desc = "";
-      Targets = [21855];
+      Targets = [21858];
       Objects = [];
       XPos = 50080.000;
       YPos = 1501.000;
@@ -13576,8 +13628,8 @@ Group
     
     MCU_Timer
     {
-      Index = 21850;
-      Name = "2IN - ENABLE";
+      Index = 21854;
+      Name = "2OUT - ENABLE";
       Desc = "";
       Targets = [21856];
       Objects = [];
@@ -13594,10 +13646,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21852;
-      Name = "2OUT - ENABLE";
+      Index = 21856;
+      Name = "2";
       Desc = "";
-      Targets = [21854];
+      Targets = [21842,21862,21872,21882,21892];
       Objects = [];
       XPos = 50080.000;
       YPos = 1501.000;
@@ -13612,28 +13664,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21854;
+      Index = 21857;
       Name = "2";
       Desc = "";
-      Targets = [21842,21858,21866,21874,21882];
-      Objects = [];
-      XPos = 50080.000;
-      YPos = 1501.000;
-      ZPos = 40000.000;
-      XOri = 0;
-      YOri = 0.610122;
-      ZOri = 0;
-      Time = 0;
-      Random = 100;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 21855;
-      Name = "2";
-      Desc = "";
-      Targets = [21843,21859,21867,21875,21883];
+      Targets = [21843,21863,21873,21883,21893];
       Objects = [];
       XPos = 50080.000;
       YPos = 1501.000;
@@ -13648,7 +13682,7 @@ Group
     
     MCU_Activate
     {
-      Index = 21856;
+      Index = 21858;
       Name = "2 Open Zones";
       Desc = "";
       Targets = [21449];
@@ -13664,7 +13698,7 @@ Group
     
     MCU_Deactivate
     {
-      Index = 21857;
+      Index = 21859;
       Name = "2 Close Zones";
       Desc = "";
       Targets = [21449];
@@ -13680,64 +13714,62 @@ Group
     
     MCU_Timer
     {
-      Index = 21859;
-      Name = "3IN - DISABLE";
+      Index = 21860;
+      Name = "2 WINDOW";
       Desc = "";
-      Targets = [21865];
+      Targets = [21467];
       Objects = [];
-      XPos = 60160.000;
+      XPos = 50080.000;
       YPos = 1501.000;
-      ZPos = 40000.000;
+      ZPos = 40120.000;
       XOri = 0;
       YOri = 0.610122;
       ZOri = 0;
-      Time = 0;
+      Time = 10800;
       Random = 100;
     }
 
     
-    MCU_Timer
+    MCU_Deactivate
     {
       Index = 21861;
+      Name = "2 WINDOW OFF";
+      Desc = "";
+      Targets = [21860];
+      Objects = [];
+      XPos = 50080.000;
+      YPos = 1501.000;
+      ZPos = 40160.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21863;
+      Name = "3IN - DISABLE";
+      Desc = "";
+      Targets = [21869];
+      Objects = [];
+      XPos = 60160.000;
+      YPos = 1501.000;
+      ZPos = 40000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21865;
       Name = "3OUT - DISABLE";
       Desc = "";
-      Targets = [21863];
-      Objects = [];
-      XPos = 60160.000;
-      YPos = 1501.000;
-      ZPos = 40000.000;
-      XOri = 0;
-      YOri = 0.610122;
-      ZOri = 0;
-      Time = 0;
-      Random = 100;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 21858;
-      Name = "3IN - ENABLE";
-      Desc = "";
-      Targets = [21864];
-      Objects = [];
-      XPos = 60160.000;
-      YPos = 1501.000;
-      ZPos = 40000.000;
-      XOri = 0;
-      YOri = 0.610122;
-      ZOri = 0;
-      Time = 0;
-      Random = 100;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 21860;
-      Name = "3OUT - ENABLE";
-      Desc = "";
-      Targets = [21862];
+      Targets = [21867];
       Objects = [];
       XPos = 60160.000;
       YPos = 1501.000;
@@ -13753,9 +13785,9 @@ Group
     MCU_Timer
     {
       Index = 21862;
-      Name = "3";
+      Name = "3IN - ENABLE";
       Desc = "";
-      Targets = [21842,21850,21866,21874,21882];
+      Targets = [21868];
       Objects = [];
       XPos = 60160.000;
       YPos = 1501.000;
@@ -13770,10 +13802,46 @@ Group
     
     MCU_Timer
     {
-      Index = 21863;
+      Index = 21864;
+      Name = "3OUT - ENABLE";
+      Desc = "";
+      Targets = [21866];
+      Objects = [];
+      XPos = 60160.000;
+      YPos = 1501.000;
+      ZPos = 40000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21866;
       Name = "3";
       Desc = "";
-      Targets = [21843,21851,21867,21875,21883];
+      Targets = [21842,21852,21872,21882,21892];
+      Objects = [];
+      XPos = 60160.000;
+      YPos = 1501.000;
+      ZPos = 40000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21867;
+      Name = "3";
+      Desc = "";
+      Targets = [21843,21853,21873,21883,21893];
       Objects = [];
       XPos = 60160.000;
       YPos = 1501.000;
@@ -13788,7 +13856,7 @@ Group
     
     MCU_Activate
     {
-      Index = 21864;
+      Index = 21868;
       Name = "3 Open Zones";
       Desc = "";
       Targets = [21505];
@@ -13804,7 +13872,7 @@ Group
     
     MCU_Deactivate
     {
-      Index = 21865;
+      Index = 21869;
       Name = "3 Close Zones";
       Desc = "";
       Targets = [21505];
@@ -13820,82 +13888,44 @@ Group
     
     MCU_Timer
     {
-      Index = 21867;
-      Name = "4IN - DISABLE";
+      Index = 21870;
+      Name = "3 WINDOW";
       Desc = "";
-      Targets = [21873];
+      Targets = [21523];
       Objects = [];
-      XPos = 40240.000;
+      XPos = 60160.000;
       YPos = 1501.000;
-      ZPos = 50000.000;
+      ZPos = 40120.000;
       XOri = 0;
       YOri = 0.610122;
       ZOri = 0;
-      Time = 0;
+      Time = 10800;
       Random = 100;
     }
 
     
-    MCU_Timer
+    MCU_Deactivate
     {
-      Index = 21869;
-      Name = "4OUT - DISABLE";
-      Desc = "";
-      Targets = [21871];
-      Objects = [];
-      XPos = 40240.000;
-      YPos = 1501.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0.610122;
-      ZOri = 0;
-      Time = 0;
-      Random = 100;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 21866;
-      Name = "4IN - ENABLE";
-      Desc = "";
-      Targets = [21872];
-      Objects = [];
-      XPos = 40240.000;
-      YPos = 1501.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0.610122;
-      ZOri = 0;
-      Time = 0;
-      Random = 100;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 21868;
-      Name = "4OUT - ENABLE";
+      Index = 21871;
+      Name = "3 WINDOW OFF";
       Desc = "";
       Targets = [21870];
       Objects = [];
-      XPos = 40240.000;
+      XPos = 60160.000;
       YPos = 1501.000;
-      ZPos = 50000.000;
+      ZPos = 40160.000;
       XOri = 0;
       YOri = 0.610122;
       ZOri = 0;
-      Time = 0;
-      Random = 100;
     }
 
     
     MCU_Timer
     {
-      Index = 21870;
-      Name = "4";
+      Index = 21873;
+      Name = "4IN - DISABLE";
       Desc = "";
-      Targets = [21842,21850,21858,21874,21882];
+      Targets = [21879];
       Objects = [];
       XPos = 40240.000;
       YPos = 1501.000;
@@ -13910,10 +13940,82 @@ Group
     
     MCU_Timer
     {
-      Index = 21871;
+      Index = 21875;
+      Name = "4OUT - DISABLE";
+      Desc = "";
+      Targets = [21877];
+      Objects = [];
+      XPos = 40240.000;
+      YPos = 1501.000;
+      ZPos = 50000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21872;
+      Name = "4IN - ENABLE";
+      Desc = "";
+      Targets = [21878];
+      Objects = [];
+      XPos = 40240.000;
+      YPos = 1501.000;
+      ZPos = 50000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21874;
+      Name = "4OUT - ENABLE";
+      Desc = "";
+      Targets = [21876];
+      Objects = [];
+      XPos = 40240.000;
+      YPos = 1501.000;
+      ZPos = 50000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21876;
       Name = "4";
       Desc = "";
-      Targets = [21843,21851,21859,21875,21883];
+      Targets = [21842,21852,21862,21882,21892];
+      Objects = [];
+      XPos = 40240.000;
+      YPos = 1501.000;
+      ZPos = 50000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21877;
+      Name = "4";
+      Desc = "";
+      Targets = [21843,21853,21863,21883,21893];
       Objects = [];
       XPos = 40240.000;
       YPos = 1501.000;
@@ -13928,7 +14030,7 @@ Group
     
     MCU_Activate
     {
-      Index = 21872;
+      Index = 21878;
       Name = "4 Open Zones";
       Desc = "";
       Targets = [21561];
@@ -13944,7 +14046,7 @@ Group
     
     MCU_Deactivate
     {
-      Index = 21873;
+      Index = 21879;
       Name = "4 Close Zones";
       Desc = "";
       Targets = [21561];
@@ -13960,47 +14062,45 @@ Group
     
     MCU_Timer
     {
-      Index = 21875;
-      Name = "5IN - DISABLE";
+      Index = 21880;
+      Name = "4 WINDOW";
       Desc = "";
-      Targets = [21881];
+      Targets = [21579];
       Objects = [];
-      XPos = 50320.000;
+      XPos = 40240.000;
       YPos = 1501.000;
-      ZPos = 50000.000;
+      ZPos = 50120.000;
       XOri = 0;
       YOri = 0.610122;
       ZOri = 0;
-      Time = 0;
+      Time = 10800;
       Random = 100;
     }
 
     
-    MCU_Timer
+    MCU_Deactivate
     {
-      Index = 21877;
-      Name = "5OUT - DISABLE";
-      Desc = "";
-      Targets = [21879];
-      Objects = [];
-      XPos = 50320.000;
-      YPos = 1501.000;
-      ZPos = 50000.000;
-      XOri = 0;
-      YOri = 0.610122;
-      ZOri = 0;
-      Time = 0;
-      Random = 100;
-    }
-
-    
-    MCU_Timer
-    {
-      Index = 21874;
-      Name = "5IN - ENABLE";
+      Index = 21881;
+      Name = "4 WINDOW OFF";
       Desc = "";
       Targets = [21880];
       Objects = [];
+      XPos = 40240.000;
+      YPos = 1501.000;
+      ZPos = 50160.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21883;
+      Name = "5IN - DISABLE";
+      Desc = "";
+      Targets = [21889];
+      Objects = [];
       XPos = 50320.000;
       YPos = 1501.000;
       ZPos = 50000.000;
@@ -14014,10 +14114,46 @@ Group
     
     MCU_Timer
     {
-      Index = 21876;
+      Index = 21885;
+      Name = "5OUT - DISABLE";
+      Desc = "";
+      Targets = [21887];
+      Objects = [];
+      XPos = 50320.000;
+      YPos = 1501.000;
+      ZPos = 50000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21882;
+      Name = "5IN - ENABLE";
+      Desc = "";
+      Targets = [21888];
+      Objects = [];
+      XPos = 50320.000;
+      YPos = 1501.000;
+      ZPos = 50000.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 0;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21884;
       Name = "5OUT - ENABLE";
       Desc = "";
-      Targets = [21878];
+      Targets = [21886];
       Objects = [];
       XPos = 50320.000;
       YPos = 1501.000;
@@ -14032,10 +14168,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21878;
+      Index = 21886;
       Name = "5";
       Desc = "";
-      Targets = [21842,21850,21858,21866,21882];
+      Targets = [21842,21852,21862,21872,21892];
       Objects = [];
       XPos = 50320.000;
       YPos = 1501.000;
@@ -14050,10 +14186,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21879;
+      Index = 21887;
       Name = "5";
       Desc = "";
-      Targets = [21843,21851,21859,21867,21883];
+      Targets = [21843,21853,21863,21873,21893];
       Objects = [];
       XPos = 50320.000;
       YPos = 1501.000;
@@ -14068,7 +14204,7 @@ Group
     
     MCU_Activate
     {
-      Index = 21880;
+      Index = 21888;
       Name = "5 Open Zones";
       Desc = "";
       Targets = [21617];
@@ -14084,7 +14220,7 @@ Group
     
     MCU_Deactivate
     {
-      Index = 21881;
+      Index = 21889;
       Name = "5 Close Zones";
       Desc = "";
       Targets = [21617];
@@ -14100,10 +14236,44 @@ Group
     
     MCU_Timer
     {
-      Index = 21883;
+      Index = 21890;
+      Name = "5 WINDOW";
+      Desc = "";
+      Targets = [21635];
+      Objects = [];
+      XPos = 50320.000;
+      YPos = 1501.000;
+      ZPos = 50120.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 10800;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 21891;
+      Name = "5 WINDOW OFF";
+      Desc = "";
+      Targets = [21890];
+      Objects = [];
+      XPos = 50320.000;
+      YPos = 1501.000;
+      ZPos = 50160.000;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21893;
       Name = "6IN - DISABLE";
       Desc = "";
-      Targets = [21889];
+      Targets = [21899];
       Objects = [];
       XPos = 77412.508;
       YPos = 276.047;
@@ -14118,10 +14288,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21885;
+      Index = 21895;
       Name = "6OUT - DISABLE";
       Desc = "";
-      Targets = [21887];
+      Targets = [21897];
       Objects = [];
       XPos = 77412.508;
       YPos = 276.047;
@@ -14136,10 +14306,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21882;
+      Index = 21892;
       Name = "6IN - ENABLE";
       Desc = "";
-      Targets = [21888];
+      Targets = [21898];
       Objects = [];
       XPos = 77412.508;
       YPos = 276.047;
@@ -14154,10 +14324,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21884;
+      Index = 21894;
       Name = "6OUT - ENABLE";
       Desc = "";
-      Targets = [21886];
+      Targets = [21896];
       Objects = [];
       XPos = 77412.508;
       YPos = 276.047;
@@ -14172,10 +14342,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21886;
+      Index = 21896;
       Name = "6";
       Desc = "";
-      Targets = [21842,21850,21858,21866,21874];
+      Targets = [21842,21852,21862,21872,21882];
       Objects = [];
       XPos = 77412.508;
       YPos = 276.047;
@@ -14190,10 +14360,10 @@ Group
     
     MCU_Timer
     {
-      Index = 21887;
+      Index = 21897;
       Name = "6";
       Desc = "";
-      Targets = [21843,21851,21859,21867,21875];
+      Targets = [21843,21853,21863,21873,21883];
       Objects = [];
       XPos = 77412.508;
       YPos = 276.047;
@@ -14208,7 +14378,7 @@ Group
     
     MCU_Activate
     {
-      Index = 21888;
+      Index = 21898;
       Name = "6 Open Zones";
       Desc = "";
       Targets = [21694];
@@ -14224,7 +14394,7 @@ Group
     
     MCU_Deactivate
     {
-      Index = 21889;
+      Index = 21899;
       Name = "6 Close Zones";
       Desc = "";
       Targets = [21694];
@@ -14232,6 +14402,40 @@ Group
       XPos = 77412.508;
       YPos = 276.047;
       ZPos = 61442.410;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 21900;
+      Name = "6 WINDOW";
+      Desc = "";
+      Targets = [21696];
+      Objects = [];
+      XPos = 77412.508;
+      YPos = 276.047;
+      ZPos = 61482.410;
+      XOri = 0;
+      YOri = 0.610122;
+      ZOri = 0;
+      Time = 10800;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 21901;
+      Name = "6 WINDOW OFF";
+      Desc = "";
+      Targets = [21900];
+      Objects = [];
+      XPos = 77412.508;
+      YPos = 276.047;
+      ZPos = 61522.410;
       XOri = 0;
       YOri = 0.610122;
       ZOri = 0;

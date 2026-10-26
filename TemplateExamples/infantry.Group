@@ -1,574 +1,549 @@
-Group
+Vehicle
 {
-  Name = "Infantry";
-  Index = 4076;
+  Name = "Vehicle";
+  Index = 62;
+  LinkTrId = 65;
+  XPos = 50955.822;
+  YPos = 0.000;
+  ZPos = 82749.762;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Script = "LuaScripts\WorldObjects\vehicles\squad-mg-1950-usa.txt";
+  Model = "graphics\vehicles\infantry\squad-mg-1950-usa.mgm";
   Desc = "";
-  Vehicle
-  {
-    Name = "Vehicle";
-    Index = 4058;
-    LinkTrId = 4067;
-    XPos = 39659.865;
-    YPos = 0.000;
-    ZPos = 39979.671;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\vehicles\squad-mg-1950-dprk.txt";
-    Model = "graphics\vehicles\infantry\squad-mg-1950-dprk.mgm";
-    Desc = "";
-    Country = 503;
-    NumberInFormation = 0;
-    Vulnerable = 1;
-    Engageable = 1;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 1;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "";
-    TCodeColor = "";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-  
+  Country = 601;
+  NumberInFormation = 0;
+  Vulnerable = 1;
+  Engageable = 1;
+  LimitAmmo = 1;
+  AILevel = 2;
+  DamageReport = 50;
+  DamageThreshold = 1;
+  DeleteAfterDeath = 1;
+  CoopStart = 0;
+  Spotter = -1;
+  BeaconChannel = 0;
+  Callsign = 0;
+  PayloadId = 0;
+  ModMask = 1;
+  Fuel = 1;
+  Callnum = 0;
+  Skin = "";
+  BotSkin = "";
+  RepairTimeMultiplier = 0;
+  RehealTimeMultiplier = 0;
+  RearmTimeMultiplier = 0;
+  RefuelTimeMultiplier = 0;
+  MaintenanceRadius = 10;
+  TCode = "";
+  TCodeColor = "";
+  TrailerAtStart = 1;
+  PinToTerrain = 1;
+}
 
-  MCU_TR_Entity
-  {
-    Index = 4067;
-    Name = "Vehicle entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 39659.865;
-    YPos = 0.200;
-    ZPos = 39979.671;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    MisObjID = 4058;
-  }
-  
+MCU_TR_Entity
+{
+  Index = 65;
+  Name = "Vehicle entity";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 50955.822;
+  YPos = 0.200;
+  ZPos = 82749.762;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  MisObjID = 62;
+}
 
-  Vehicle
-  {
-    Name = "Vehicle";
-    Index = 4059;
-    LinkTrId = 4068;
-    XPos = 44656.845;
-    YPos = 0.000;
-    ZPos = 39788.353;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\vehicles\squad-mg-1950-prc.txt";
-    Model = "graphics\vehicles\infantry\squad-mg-1950-prc.mgm";
-    Desc = "";
-    Country = 502;
-    NumberInFormation = 0;
-    Vulnerable = 1;
-    Engageable = 1;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 1;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "";
-    TCodeColor = "";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-  
+Vehicle
+{
+  Name = "Vehicle";
+  Index = 63;
+  LinkTrId = 66;
+  XPos = 50955.822;
+  YPos = 0.000;
+  ZPos = 90003.183;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Script = "LuaScripts\WorldObjects\vehicles\squad-rifle-1950-usa.txt";
+  Model = "graphics\vehicles\infantry\squad-rifle-1950-usa.mgm";
+  Desc = "";
+  Country = 601;
+  NumberInFormation = 0;
+  Vulnerable = 1;
+  Engageable = 1;
+  LimitAmmo = 1;
+  AILevel = 2;
+  DamageReport = 50;
+  DamageThreshold = 1;
+  DeleteAfterDeath = 1;
+  CoopStart = 0;
+  Spotter = -1;
+  BeaconChannel = 0;
+  Callsign = 0;
+  PayloadId = 0;
+  ModMask = 1;
+  Fuel = 1;
+  Callnum = 0;
+  Skin = "";
+  BotSkin = "";
+  RepairTimeMultiplier = 0;
+  RehealTimeMultiplier = 0;
+  RearmTimeMultiplier = 0;
+  RefuelTimeMultiplier = 0;
+  MaintenanceRadius = 10;
+  TCode = "";
+  TCodeColor = "";
+  TrailerAtStart = 1;
+  PinToTerrain = 1;
+}
 
-  MCU_TR_Entity
-  {
-    Index = 4068;
-    Name = "Vehicle entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 44656.845;
-    YPos = 0.200;
-    ZPos = 39788.353;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    MisObjID = 4059;
-  }
-  
+MCU_TR_Entity
+{
+  Index = 66;
+  Name = "Vehicle entity";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 50955.822;
+  YPos = 0.200;
+  ZPos = 90003.183;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  MisObjID = 63;
+}
 
-  Vehicle
-  {
-    Name = "Vehicle";
-    Index = 4060;
-    LinkTrId = 4069;
-    XPos = 49688.788;
-    YPos = 0.000;
-    ZPos = 39869.632;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\vehicles\squad-mg-1950-usa.txt";
-    Model = "graphics\vehicles\infantry\squad-mg-1950-usa.mgm";
-    Desc = "";
-    Country = 601;
-    NumberInFormation = 0;
-    Vulnerable = 1;
-    Engageable = 1;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 1;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "";
-    TCodeColor = "";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-  
+Vehicle
+{
+  Name = "Vehicle";
+  Index = 64;
+  LinkTrId = 67;
+  XPos = 51090.144;
+  YPos = 0.000;
+  ZPos = 96853.635;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Script = "LuaScripts\WorldObjects\vehicles\squad-smg-1950-usa.txt";
+  Model = "graphics\vehicles\infantry\squad-smg-1950-usa.mgm";
+  Desc = "";
+  Country = 601;
+  NumberInFormation = 0;
+  Vulnerable = 1;
+  Engageable = 1;
+  LimitAmmo = 1;
+  AILevel = 2;
+  DamageReport = 50;
+  DamageThreshold = 1;
+  DeleteAfterDeath = 1;
+  CoopStart = 0;
+  Spotter = -1;
+  BeaconChannel = 0;
+  Callsign = 0;
+  PayloadId = 0;
+  ModMask = 1;
+  Fuel = 1;
+  Callnum = 0;
+  Skin = "";
+  BotSkin = "";
+  RepairTimeMultiplier = 0;
+  RehealTimeMultiplier = 0;
+  RearmTimeMultiplier = 0;
+  RefuelTimeMultiplier = 0;
+  MaintenanceRadius = 10;
+  TCode = "";
+  TCodeColor = "";
+  TrailerAtStart = 1;
+  PinToTerrain = 1;
+}
 
-  MCU_TR_Entity
-  {
-    Index = 4069;
-    Name = "Vehicle entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 49688.788;
-    YPos = 0.200;
-    ZPos = 39869.632;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    MisObjID = 4060;
-  }
-  
+MCU_TR_Entity
+{
+  Index = 67;
+  Name = "Vehicle entity";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 51090.144;
+  YPos = 0.200;
+  ZPos = 96853.635;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  MisObjID = 64;
+}
 
-  Vehicle
-  {
-    Name = "Vehicle";
-    Index = 4061;
-    LinkTrId = 4070;
-    XPos = 39634.693;
-    YPos = 0.000;
-    ZPos = 44926.308;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\vehicles\squad-rifle-1950-dprk.txt";
-    Model = "graphics\vehicles\infantry\squad-rifle-1950-dprk.mgm";
-    Desc = "";
-    Country = 503;
-    NumberInFormation = 0;
-    Vulnerable = 1;
-    Engageable = 1;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 1;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "";
-    TCodeColor = "";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-  
+Vehicle
+{
+  Name = "Vehicle";
+  Index = 68;
+  LinkTrId = 77;
+  XPos = 47127.628;
+  YPos = 0.000;
+  ZPos = 82884.085;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Script = "LuaScripts\WorldObjects\vehicles\squad-mg-1950-prc.txt";
+  Model = "graphics\vehicles\infantry\squad-mg-1950-prc.mgm";
+  Desc = "";
+  Country = 502;
+  NumberInFormation = 0;
+  Vulnerable = 1;
+  Engageable = 1;
+  LimitAmmo = 1;
+  AILevel = 2;
+  DamageReport = 50;
+  DamageThreshold = 1;
+  DeleteAfterDeath = 1;
+  CoopStart = 0;
+  Spotter = -1;
+  BeaconChannel = 0;
+  Callsign = 0;
+  PayloadId = 0;
+  ModMask = 1;
+  Fuel = 1;
+  Callnum = 0;
+  Skin = "";
+  BotSkin = "";
+  RepairTimeMultiplier = 0;
+  RehealTimeMultiplier = 0;
+  RearmTimeMultiplier = 0;
+  RefuelTimeMultiplier = 0;
+  MaintenanceRadius = 10;
+  TCode = "";
+  TCodeColor = "";
+  TrailerAtStart = 1;
+  PinToTerrain = 1;
+}
 
-  MCU_TR_Entity
-  {
-    Index = 4070;
-    Name = "Vehicle entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 39634.693;
-    YPos = 0.200;
-    ZPos = 44926.308;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    MisObjID = 4061;
-  }
-  
+MCU_TR_Entity
+{
+  Index = 77;
+  Name = "Vehicle entity";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 47127.628;
+  YPos = 0.200;
+  ZPos = 82884.085;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  MisObjID = 68;
+}
 
-  Vehicle
-  {
-    Name = "Vehicle";
-    Index = 4062;
-    LinkTrId = 4071;
-    XPos = 44612.359;
-    YPos = 0.000;
-    ZPos = 44827.545;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\vehicles\squad-rifle-1950-prc.txt";
-    Model = "graphics\vehicles\infantry\squad-rifle-1950-prc.mgm";
-    Desc = "";
-    Country = 502;
-    NumberInFormation = 0;
-    Vulnerable = 1;
-    Engageable = 1;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 1;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "";
-    TCodeColor = "";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-  
+Vehicle
+{
+  Name = "Vehicle";
+  Index = 69;
+  LinkTrId = 78;
+  XPos = 47329.112;
+  YPos = 0.000;
+  ZPos = 90003.183;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Script = "LuaScripts\WorldObjects\vehicles\squad-rifle-1950-prc.txt";
+  Model = "graphics\vehicles\infantry\squad-rifle-1950-prc.mgm";
+  Desc = "";
+  Country = 502;
+  NumberInFormation = 0;
+  Vulnerable = 1;
+  Engageable = 1;
+  LimitAmmo = 1;
+  AILevel = 2;
+  DamageReport = 50;
+  DamageThreshold = 1;
+  DeleteAfterDeath = 1;
+  CoopStart = 0;
+  Spotter = -1;
+  BeaconChannel = 0;
+  Callsign = 0;
+  PayloadId = 0;
+  ModMask = 1;
+  Fuel = 1;
+  Callnum = 0;
+  Skin = "";
+  BotSkin = "";
+  RepairTimeMultiplier = 0;
+  RehealTimeMultiplier = 0;
+  RearmTimeMultiplier = 0;
+  RefuelTimeMultiplier = 0;
+  MaintenanceRadius = 10;
+  TCode = "";
+  TCodeColor = "";
+  TrailerAtStart = 1;
+  PinToTerrain = 1;
+}
 
-  MCU_TR_Entity
-  {
-    Index = 4071;
-    Name = "Vehicle entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 44612.359;
-    YPos = 0.200;
-    ZPos = 44827.545;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    MisObjID = 4062;
-  }
-  
+MCU_TR_Entity
+{
+  Index = 78;
+  Name = "Vehicle entity";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 47329.112;
+  YPos = 0.200;
+  ZPos = 90003.183;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  MisObjID = 69;
+}
 
-  Vehicle
-  {
-    Name = "Vehicle";
-    Index = 4063;
-    LinkTrId = 4072;
-    XPos = 49708.540;
-    YPos = 0.000;
-    ZPos = 44867.051;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\vehicles\squad-rifle-1950-usa.txt";
-    Model = "graphics\vehicles\infantry\squad-rifle-1950-usa.mgm";
-    Desc = "";
-    Country = 601;
-    NumberInFormation = 0;
-    Vulnerable = 1;
-    Engageable = 1;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 1;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "";
-    TCodeColor = "";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-  
+Vehicle
+{
+  Name = "Vehicle";
+  Index = 70;
+  LinkTrId = 79;
+  XPos = 47329.112;
+  YPos = 0.000;
+  ZPos = 96987.958;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Script = "LuaScripts\WorldObjects\vehicles\squad-smg-1950-prc.txt";
+  Model = "graphics\vehicles\infantry\squad-smg-1950-prc.mgm";
+  Desc = "";
+  Country = 502;
+  NumberInFormation = 0;
+  Vulnerable = 1;
+  Engageable = 1;
+  LimitAmmo = 1;
+  AILevel = 2;
+  DamageReport = 50;
+  DamageThreshold = 1;
+  DeleteAfterDeath = 1;
+  CoopStart = 0;
+  Spotter = -1;
+  BeaconChannel = 0;
+  Callsign = 0;
+  PayloadId = 0;
+  ModMask = 1;
+  Fuel = 1;
+  Callnum = 0;
+  Skin = "";
+  BotSkin = "";
+  RepairTimeMultiplier = 0;
+  RehealTimeMultiplier = 0;
+  RearmTimeMultiplier = 0;
+  RefuelTimeMultiplier = 0;
+  MaintenanceRadius = 10;
+  TCode = "";
+  TCodeColor = "";
+  TrailerAtStart = 1;
+  PinToTerrain = 1;
+}
 
-  MCU_TR_Entity
-  {
-    Index = 4072;
-    Name = "Vehicle entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 49708.540;
-    YPos = 0.200;
-    ZPos = 44867.051;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    MisObjID = 4063;
-  }
-  
+MCU_TR_Entity
+{
+  Index = 79;
+  Name = "Vehicle entity";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 47329.112;
+  YPos = 0.200;
+  ZPos = 96987.958;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  MisObjID = 70;
+}
 
-  Vehicle
-  {
-    Name = "Vehicle";
-    Index = 4064;
-    LinkTrId = 4073;
-    XPos = 39624.817;
-    YPos = 0.000;
-    ZPos = 49923.727;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\vehicles\squad-smg-1950-dprk.txt";
-    Model = "graphics\vehicles\infantry\squad-smg-1950-dprk.mgm";
-    Desc = "";
-    Country = 503;
-    NumberInFormation = 0;
-    Vulnerable = 1;
-    Engageable = 1;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 1;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "";
-    TCodeColor = "";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-  
+Vehicle
+{
+  Name = "Vehicle";
+  Index = 71;
+  LinkTrId = 74;
+  XPos = 43030.789;
+  YPos = 0.000;
+  ZPos = 82816.924;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Script = "LuaScripts\WorldObjects\vehicles\squad-mg-1950-dprk.txt";
+  Model = "graphics\vehicles\infantry\squad-mg-1950-dprk.mgm";
+  Desc = "";
+  Country = 503;
+  NumberInFormation = 0;
+  Vulnerable = 1;
+  Engageable = 1;
+  LimitAmmo = 1;
+  AILevel = 2;
+  DamageReport = 50;
+  DamageThreshold = 1;
+  DeleteAfterDeath = 1;
+  CoopStart = 0;
+  Spotter = -1;
+  BeaconChannel = 0;
+  Callsign = 0;
+  PayloadId = 0;
+  ModMask = 1;
+  Fuel = 1;
+  Callnum = 0;
+  Skin = "";
+  BotSkin = "";
+  RepairTimeMultiplier = 0;
+  RehealTimeMultiplier = 0;
+  RearmTimeMultiplier = 0;
+  RefuelTimeMultiplier = 0;
+  MaintenanceRadius = 10;
+  TCode = "";
+  TCodeColor = "";
+  TrailerAtStart = 1;
+  PinToTerrain = 1;
+}
 
-  MCU_TR_Entity
-  {
-    Index = 4073;
-    Name = "Vehicle entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 39624.817;
-    YPos = 0.200;
-    ZPos = 49923.727;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    MisObjID = 4064;
-  }
-  
+MCU_TR_Entity
+{
+  Index = 74;
+  Name = "Vehicle entity";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 43030.789;
+  YPos = 0.200;
+  ZPos = 82816.924;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  MisObjID = 71;
+}
 
-  Vehicle
-  {
-    Name = "Vehicle";
-    Index = 4065;
-    LinkTrId = 4074;
-    XPos = 44760.504;
-    YPos = 0.000;
-    ZPos = 49864.469;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\vehicles\squad-smg-1950-prc.txt";
-    Model = "graphics\vehicles\infantry\squad-smg-1950-prc.mgm";
-    Desc = "";
-    Country = 502;
-    NumberInFormation = 0;
-    Vulnerable = 1;
-    Engageable = 1;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 1;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "";
-    TCodeColor = "";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-  
+Vehicle
+{
+  Name = "Vehicle";
+  Index = 72;
+  LinkTrId = 75;
+  XPos = 42963.627;
+  YPos = 0.000;
+  ZPos = 90070.344;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Script = "LuaScripts\WorldObjects\vehicles\squad-rifle-1950-dprk.txt";
+  Model = "graphics\vehicles\infantry\squad-rifle-1950-dprk.mgm";
+  Desc = "";
+  Country = 503;
+  NumberInFormation = 0;
+  Vulnerable = 1;
+  Engageable = 1;
+  LimitAmmo = 1;
+  AILevel = 2;
+  DamageReport = 50;
+  DamageThreshold = 1;
+  DeleteAfterDeath = 1;
+  CoopStart = 0;
+  Spotter = -1;
+  BeaconChannel = 0;
+  Callsign = 0;
+  PayloadId = 0;
+  ModMask = 1;
+  Fuel = 1;
+  Callnum = 0;
+  Skin = "";
+  BotSkin = "";
+  RepairTimeMultiplier = 0;
+  RehealTimeMultiplier = 0;
+  RearmTimeMultiplier = 0;
+  RefuelTimeMultiplier = 0;
+  MaintenanceRadius = 10;
+  TCode = "";
+  TCodeColor = "";
+  TrailerAtStart = 1;
+  PinToTerrain = 1;
+}
 
-  MCU_TR_Entity
-  {
-    Index = 4074;
-    Name = "Vehicle entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 44760.504;
-    YPos = 0.200;
-    ZPos = 49864.469;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    MisObjID = 4065;
-  }
-  
+MCU_TR_Entity
+{
+  Index = 75;
+  Name = "Vehicle entity";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 42963.627;
+  YPos = 0.200;
+  ZPos = 90070.344;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  MisObjID = 72;
+}
 
-  Vehicle
-  {
-    Name = "Vehicle";
-    Index = 4066;
-    LinkTrId = 4075;
-    XPos = 49619.653;
-    YPos = 0.000;
-    ZPos = 49903.974;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Script = "LuaScripts\WorldObjects\vehicles\squad-smg-1950-usa.txt";
-    Model = "graphics\vehicles\infantry\squad-smg-1950-usa.mgm";
-    Desc = "";
-    Country = 601;
-    NumberInFormation = 0;
-    Vulnerable = 1;
-    Engageable = 1;
-    LimitAmmo = 1;
-    AILevel = 2;
-    DamageReport = 50;
-    DamageThreshold = 1;
-    DeleteAfterDeath = 1;
-    CoopStart = 0;
-    Spotter = -1;
-    BeaconChannel = 0;
-    Callsign = 0;
-    PayloadId = 0;
-    ModMask = 1;
-    Fuel = 1;
-    Callnum = 0;
-    Skin = "";
-    BotSkin = "";
-    RepairTimeMultiplier = 0;
-    RehealTimeMultiplier = 0;
-    RearmTimeMultiplier = 0;
-    RefuelTimeMultiplier = 0;
-    MaintenanceRadius = 10;
-    TCode = "";
-    TCodeColor = "";
-    TrailerAtStart = 1;
-    PinToTerrain = 1;
-  }
-  
+Vehicle
+{
+  Name = "Vehicle";
+  Index = 73;
+  LinkTrId = 76;
+  XPos = 43030.789;
+  YPos = 0.000;
+  ZPos = 96853.635;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Script = "LuaScripts\WorldObjects\vehicles\squad-smg-1950-dprk.txt";
+  Model = "graphics\vehicles\infantry\squad-smg-1950-dprk.mgm";
+  Desc = "";
+  Country = 503;
+  NumberInFormation = 0;
+  Vulnerable = 1;
+  Engageable = 1;
+  LimitAmmo = 1;
+  AILevel = 2;
+  DamageReport = 50;
+  DamageThreshold = 1;
+  DeleteAfterDeath = 1;
+  CoopStart = 0;
+  Spotter = -1;
+  BeaconChannel = 0;
+  Callsign = 0;
+  PayloadId = 0;
+  ModMask = 1;
+  Fuel = 1;
+  Callnum = 0;
+  Skin = "";
+  BotSkin = "";
+  RepairTimeMultiplier = 0;
+  RehealTimeMultiplier = 0;
+  RearmTimeMultiplier = 0;
+  RefuelTimeMultiplier = 0;
+  MaintenanceRadius = 10;
+  TCode = "";
+  TCodeColor = "";
+  TrailerAtStart = 1;
+  PinToTerrain = 1;
+}
 
-  MCU_TR_Entity
-  {
-    Index = 4075;
-    Name = "Vehicle entity";
-    Desc = "";
-    Targets = [];
-    Objects = [];
-    XPos = 49619.653;
-    YPos = 0.200;
-    ZPos = 49903.974;
-    XOri = 0;
-    YOri = 0;
-    ZOri = 0;
-    Enabled = 1;
-    MisObjID = 4066;
-  }
-  
-
+MCU_TR_Entity
+{
+  Index = 76;
+  Name = "Vehicle entity";
+  Desc = "";
+  Targets = [];
+  Objects = [];
+  XPos = 43030.789;
+  YPos = 0.200;
+  ZPos = 96853.635;
+  XOri = 0;
+  YOri = 0;
+  ZOri = 0;
+  Enabled = 1;
+  MisObjID = 73;
 }
 

@@ -10,8 +10,8 @@
 use std::f32::consts::PI;
 
 use eframe::egui::{
-    self, Align, Align2, Color32, ColorImage, FontId, Layout, Pos2, Rect, Response, RichText, Sense,
-    Stroke, StrokeKind, TextStyle, TextureHandle, Ui, Vec2,
+    self, Align, Align2, Color32, ColorImage, FontId, Layout, Pos2, Rect, Response, RichText,
+    Sense, Stroke, StrokeKind, TextStyle, TextureHandle, Ui, Vec2,
 };
 
 use crate::theme::{bold_family, c, heading_family};
@@ -116,7 +116,11 @@ pub fn paint_rotated_texture(
         (Vec2::new(hx, hy), Pos2::new(1.0, 1.0)),
         (Vec2::new(-hx, hy), Pos2::new(0.0, 1.0)),
     ] {
-        mesh.vertices.push(egui::epaint::Vertex { pos: center + rot * off, uv, color: tint });
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: center + rot * off,
+            uv,
+            color: tint,
+        });
     }
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
@@ -133,7 +137,14 @@ pub fn paint_side_marker(painter: &egui::Painter, center: Pos2, size: f32, side:
             Side::Dprk => &tex[0],
             Side::Nato => &tex[1],
         };
-        paint_rotated_texture(painter, tex.id(), center, Vec2::splat(size), side.facing_rad(), side.color());
+        paint_rotated_texture(
+            painter,
+            tex.id(),
+            center,
+            Vec2::splat(size),
+            side.facing_rad(),
+            side.color(),
+        );
     } else {
         paint_side_pentagon(painter, center, size, side);
     }
@@ -169,7 +180,12 @@ pub fn side_marker(ui: &mut Ui, side: Side, size: f32) {
 pub fn corner_marks(painter: &egui::Painter, rect: Rect, color: Color32) {
     let s = Stroke::new(1.0_f32, color);
     let arm = 5.5;
-    for p in [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom()] {
+    for p in [
+        rect.left_top(),
+        rect.right_top(),
+        rect.left_bottom(),
+        rect.right_bottom(),
+    ] {
         painter.line_segment([p - Vec2::X * arm, p + Vec2::X * arm], s);
         painter.line_segment([p - Vec2::Y * arm, p + Vec2::Y * arm], s);
     }
@@ -177,7 +193,11 @@ pub fn corner_marks(painter: &egui::Painter, rect: Rect, color: Color32) {
 
 /// List card. Selected: accent border, ACCENT_100 fill, corner marks.
 /// Unselected: hairline border, no fill, no marks.
-pub fn card<R>(ui: &mut Ui, selected: bool, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+pub fn card<R>(
+    ui: &mut Ui,
+    selected: bool,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
     let (stroke, fill) = if selected {
         (Stroke::new(1.0_f32, c::ACCENT), c::ACCENT_100)
     } else {
@@ -198,7 +218,11 @@ pub fn card<R>(ui: &mut Ui, selected: bool, add: impl FnOnce(&mut Ui) -> R) -> e
 }
 
 /// Outlined panel with marks (e.g. "Start checkzones", "Removed").
-pub fn blueprint<R>(ui: &mut Ui, border: Color32, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+pub fn blueprint<R>(
+    ui: &mut Ui,
+    border: Color32,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
     let inner = egui::Frame::new()
         .stroke(Stroke::new(1.0_f32, border))
         .inner_margin(egui::Margin::same(14))
@@ -238,7 +262,11 @@ pub fn settings_section(
     body: impl FnOnce(&mut Ui),
 ) {
     let id = ui.make_persistent_id(id);
-    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, default_open);
+    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(),
+        id,
+        default_open,
+    );
     // The whole 28 px header row toggles (§6.6), not only the small arrow.
     let row = ui.allocate_ui_with_layout(
         Vec2::new(ui.available_width(), 28.0),
@@ -249,7 +277,10 @@ pub fn settings_section(
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.label(RichText::new(title).font(FontId::new(13.0, bold_family())));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add(egui::Label::new(RichText::new(summary).small().color(c::NEUTRAL_700)).truncate());
+                ui.add(
+                    egui::Label::new(RichText::new(summary).small().color(c::NEUTRAL_700))
+                        .truncate(),
+                );
             });
         },
     );
@@ -324,7 +355,11 @@ pub fn link(ui: &mut Ui, text: &str) -> Response {
             .selectable(false),
     );
     let pad = ((28.0 - resp.rect.height()) / 2.0).max(0.0);
-    let hit = ui.interact(resp.rect.expand2(Vec2::new(2.0, pad)), resp.id.with("hit"), Sense::click());
+    let hit = ui.interact(
+        resp.rect.expand2(Vec2::new(2.0, pad)),
+        resp.id.with("hit"),
+        Sense::click(),
+    );
     let resp = resp.union(hit);
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -341,7 +376,9 @@ pub fn kbd(ui: &mut Ui, keys: &str) {
     egui::Frame::new()
         .stroke(Stroke::new(1.0_f32, c::DIVIDER))
         .inner_margin(egui::Margin::symmetric(5, 1))
-        .show(ui, |ui| ui.label(RichText::new(keys).monospace().color(c::NEUTRAL_700)));
+        .show(ui, |ui| {
+            ui.label(RichText::new(keys).monospace().color(c::NEUTRAL_700))
+        });
 }
 
 pub fn warning(ui: &mut Ui, text: &str) {
@@ -360,16 +397,20 @@ pub fn primary_button(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool) -
     } else {
         (c::ACCENT_800, c::ACCENT_700)
     };
-    let label_g = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), FontId::new(13.0, bold_family()), label_c);
+    let label_g =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), FontId::new(13.0, bold_family()), label_c);
     let key_g = ui
         .painter()
         .layout_no_wrap(shortcut.to_owned(), FontId::monospace(12.0), key_c);
     let pad = 16.0;
     let gap = 10.0;
     let size = Vec2::new(pad * 2.0 + label_g.size().x + gap + key_g.size().x, 32.0);
-    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
     let (rect, resp) = ui.allocate_exact_size(size, sense);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     if ui.is_rect_visible(rect) {
@@ -387,11 +428,24 @@ pub fn primary_button(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool) -
         let y = rect.center().y;
         let key_w = key_g.size().x;
         let key_h = key_g.size().y;
-        p.galley(Pos2::new(rect.left() + pad, y - label_g.size().y / 2.0), label_g, label_c);
-        p.galley(Pos2::new(rect.right() - pad - key_w, y - key_h / 2.0), key_g, key_c);
+        p.galley(
+            Pos2::new(rect.left() + pad, y - label_g.size().y / 2.0),
+            label_g,
+            label_c,
+        );
+        p.galley(
+            Pos2::new(rect.right() - pad - key_w, y - key_h / 2.0),
+            key_g,
+            key_c,
+        );
         corner_marks(p, rect, c::MARK);
         if resp.has_focus() {
-            p.rect_stroke(rect.expand(2.0), 2.0, Stroke::new(2.0_f32, c::ACCENT), StrokeKind::Outside);
+            p.rect_stroke(
+                rect.expand(2.0),
+                2.0,
+                Stroke::new(2.0_f32, c::ACCENT),
+                StrokeKind::Outside,
+            );
         }
     }
     resp.on_hover_text(format!("{label}  ({shortcut})"))
@@ -425,7 +479,9 @@ pub fn tool_button(
     active: bool,
 ) -> Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(TOOL_SIZE), Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, tooltip));
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, tooltip)
+    });
     let (bg, fg) = if active {
         (c::ACCENT, c::BG)
     } else if resp.hovered() {
@@ -441,7 +497,13 @@ pub fn tool_button(
             p.image(tex.id(), rect.shrink(9.0), uv, fg);
         }
         None => {
-            p.text(rect.center(), Align2::CENTER_CENTER, fallback_glyph, FontId::proportional(18.0), fg);
+            p.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                fallback_glyph,
+                FontId::proportional(18.0),
+                fg,
+            );
         }
     }
     resp.on_hover_text(format!("{tooltip}  ({key})"))
@@ -488,19 +550,46 @@ pub(crate) fn tool_icon_paths(icon: ToolIcon) -> Vec<(Vec<Pos2>, bool)> {
     let p = Pos2::new;
     match icon {
         // M3 3l7 17 2.5-7.5L20 10z
-        ToolIcon::Select => vec![(vec![p(3.0, 3.0), p(10.0, 20.0), p(12.5, 12.5), p(20.0, 10.0)], true)],
+        ToolIcon::Select => vec![(
+            vec![p(3.0, 3.0), p(10.0, 20.0), p(12.5, 12.5), p(20.0, 10.0)],
+            true,
+        )],
         // M2 16c3-6 6 2 10-4s7-3 10-6
         ToolIcon::Front => {
             let mut pts = vec![p(2.0, 16.0)];
-            cubic(&mut pts, p(2.0, 16.0), p(5.0, 10.0), p(8.0, 18.0), p(12.0, 12.0));
-            cubic(&mut pts, p(12.0, 12.0), p(16.0, 6.0), p(19.0, 9.0), p(22.0, 6.0));
+            cubic(
+                &mut pts,
+                p(2.0, 16.0),
+                p(5.0, 10.0),
+                p(8.0, 18.0),
+                p(12.0, 12.0),
+            );
+            cubic(
+                &mut pts,
+                p(12.0, 12.0),
+                p(16.0, 6.0),
+                p(19.0, 9.0),
+                p(22.0, 6.0),
+            );
             vec![(pts, false)]
         }
         // M2 17h5c2 0 2-9 5-9s3 9 5 9h5
         ToolIcon::Salient => {
             let mut pts = vec![p(2.0, 17.0), p(7.0, 17.0)];
-            cubic(&mut pts, p(7.0, 17.0), p(9.0, 17.0), p(9.0, 8.0), p(12.0, 8.0));
-            cubic(&mut pts, p(12.0, 8.0), p(15.0, 8.0), p(15.0, 17.0), p(17.0, 17.0));
+            cubic(
+                &mut pts,
+                p(7.0, 17.0),
+                p(9.0, 17.0),
+                p(9.0, 8.0),
+                p(12.0, 8.0),
+            );
+            cubic(
+                &mut pts,
+                p(12.0, 8.0),
+                p(15.0, 8.0),
+                p(15.0, 17.0),
+                p(17.0, 17.0),
+            );
             pts.push(p(22.0, 17.0));
             vec![(pts, false)]
         }
@@ -512,21 +601,36 @@ pub(crate) fn tool_icon_paths(icon: ToolIcon) -> Vec<(Vec<Pos2>, bool)> {
         // M5 22V3M5 4h12l-2.5 4L17 12H5
         ToolIcon::Objective => vec![
             (vec![p(5.0, 22.0), p(5.0, 3.0)], false),
-            (vec![p(5.0, 4.0), p(17.0, 4.0), p(14.5, 8.0), p(17.0, 12.0), p(5.0, 12.0)], false),
+            (
+                vec![
+                    p(5.0, 4.0),
+                    p(17.0, 4.0),
+                    p(14.5, 8.0),
+                    p(17.0, 12.0),
+                    p(5.0, 12.0),
+                ],
+                false,
+            ),
         ],
         // M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-4
         ToolIcon::Undo => {
             let mut tail = vec![p(4.0, 9.0)];
             half_circle(&mut tail, p(15.0, 14.0), true);
             tail.push(p(11.0, 19.0));
-            vec![(vec![p(9.0, 14.0), p(4.0, 9.0), p(9.0, 4.0)], false), (tail, false)]
+            vec![
+                (vec![p(9.0, 14.0), p(4.0, 9.0), p(9.0, 4.0)], false),
+                (tail, false),
+            ]
         }
         // M15 14l5-5-5-5M20 9H9a5 5 0 000 10h4
         ToolIcon::Redo => {
             let mut tail = vec![p(20.0, 9.0)];
             half_circle(&mut tail, p(9.0, 14.0), false);
             tail.push(p(13.0, 19.0));
-            vec![(vec![p(15.0, 14.0), p(20.0, 9.0), p(15.0, 4.0)], false), (tail, false)]
+            vec![
+                (vec![p(15.0, 14.0), p(20.0, 9.0), p(15.0, 4.0)], false),
+                (tail, false),
+            ]
         }
     }
 }
@@ -537,7 +641,10 @@ pub fn paint_tool_icon(painter: &egui::Painter, rect: Rect, icon: ToolIcon, colo
     let origin = rect.center() - Vec2::splat(12.0 * scale);
     let stroke = Stroke::new(1.5_f32, color);
     for (pts, closed) in tool_icon_paths(icon) {
-        let pts: Vec<Pos2> = pts.into_iter().map(|q| origin + q.to_vec2() * scale).collect();
+        let pts: Vec<Pos2> = pts
+            .into_iter()
+            .map(|q| origin + q.to_vec2() * scale)
+            .collect();
         if closed {
             painter.add(egui::Shape::closed_line(pts, stroke));
         } else {
@@ -559,7 +666,9 @@ pub fn tool_icon_button(
     active: bool,
 ) -> Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(TOOL_SIZE), Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, tooltip));
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, tooltip)
+    });
     if ui.is_rect_visible(rect) {
         let (bg, fg) = if active {
             (c::ACCENT, c::BG)
@@ -570,13 +679,33 @@ pub fn tool_icon_button(
         };
         let p = ui.painter();
         p.rect_filled(rect, 0.0, bg);
-        paint_tool_icon(p, Rect::from_center_size(rect.center(), Vec2::splat(18.0)), icon, fg);
+        paint_tool_icon(
+            p,
+            Rect::from_center_size(rect.center(), Vec2::splat(18.0)),
+            icon,
+            fg,
+        );
         if corner_key {
-            let key_c = if active { c::ACCENT_100 } else { c::NEUTRAL_700 };
-            p.text(rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, key, FontId::monospace(12.0), key_c);
+            let key_c = if active {
+                c::ACCENT_100
+            } else {
+                c::NEUTRAL_700
+            };
+            p.text(
+                rect.right_bottom() + Vec2::new(-2.0, 1.0),
+                Align2::RIGHT_BOTTOM,
+                key,
+                FontId::monospace(12.0),
+                key_c,
+            );
         }
         if resp.has_focus() {
-            p.rect_stroke(rect, 0.0, Stroke::new(2.0_f32, c::ACCENT), StrokeKind::Inside);
+            p.rect_stroke(
+                rect,
+                0.0,
+                Stroke::new(2.0_f32, c::ACCENT),
+                StrokeKind::Inside,
+            );
         }
     }
     resp.on_hover_text(format!("{tooltip}  ({key})"))
@@ -589,7 +718,11 @@ pub fn tool_icon_button(
 /// accent underline; a tab's count follows its label as a separate 12 px
 /// NEUTRAL_700 number. Widths are measured bold, so selecting a tab never
 /// moves the others. Returns true when the selection changed.
-pub fn dock_tabs<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, tabs: &[(T, &str, Option<usize>)]) -> bool {
+pub fn dock_tabs<T: PartialEq + Copy>(
+    ui: &mut Ui,
+    value: &mut T,
+    tabs: &[(T, &str, Option<usize>)],
+) -> bool {
     let mut changed = false;
     let width = ui.available_width();
     let cells = dock_tab_widths(ui.ctx(), width, tabs);
@@ -604,7 +737,9 @@ pub fn dock_tabs<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, tabs: &[(T, &s
             None => (*label).to_owned(),
         };
         let resp = ui.interact(rect, ui.id().with(("dock_tab", i)), Sense::click());
-        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &name));
+        resp.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, &name)
+        });
         if resp.clicked() && !selected {
             *value = *v;
             changed = true;
@@ -624,17 +759,29 @@ pub fn dock_tabs<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, tabs: &[(T, &s
         if let Some(g) = count_g {
             // Baselines line up closely enough: both galleys are centred on the row.
             let h = g.size().y;
-            p.galley(Pos2::new(x0 + label_w + gap, y - h / 2.0 + 1.0), g, c::NEUTRAL_700);
+            p.galley(
+                Pos2::new(x0 + label_w + gap, y - h / 2.0 + 1.0),
+                g,
+                c::NEUTRAL_700,
+            );
         }
         if selected {
             p.rect_filled(
-                Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 2.0), rect.right_bottom()),
+                Rect::from_min_max(
+                    Pos2::new(rect.left(), rect.bottom() - 2.0),
+                    rect.right_bottom(),
+                ),
                 0.0,
                 c::ACCENT,
             );
         }
         if resp.has_focus() {
-            p.rect_stroke(rect.shrink(1.0), 0.0, Stroke::new(2.0_f32, c::ACCENT), StrokeKind::Inside);
+            p.rect_stroke(
+                rect.shrink(1.0),
+                0.0,
+                Stroke::new(2.0_f32, c::ACCENT),
+                StrokeKind::Inside,
+            );
         }
     }
     ui.painter().line_segment(
@@ -652,7 +799,10 @@ fn dock_tab_galleys(
     label: &str,
     count: Option<usize>,
     selected: bool,
-) -> (std::sync::Arc<egui::Galley>, Option<std::sync::Arc<egui::Galley>>) {
+) -> (
+    std::sync::Arc<egui::Galley>,
+    Option<std::sync::Arc<egui::Galley>>,
+) {
     let (family, fg) = if selected {
         (bold_family(), c::ACCENT_800)
     } else {
@@ -660,7 +810,8 @@ fn dock_tab_galleys(
     };
     ctx.fonts(|f| {
         let label_g = f.layout_no_wrap(label.to_owned(), FontId::new(13.0, family), fg);
-        let count_g = count.map(|n| f.layout_no_wrap(n.to_string(), FontId::proportional(12.0), c::NEUTRAL_700));
+        let count_g = count
+            .map(|n| f.layout_no_wrap(n.to_string(), FontId::proportional(12.0), c::NEUTRAL_700));
         (label_g, count_g)
     })
 }
@@ -678,7 +829,11 @@ const DOCK_TAB_GAP: f32 = 4.0;
 pub const DOCK_TAB_PAD: f32 = 6.0;
 
 /// Cell widths for `dock_tabs` across `width` (see there).
-pub fn dock_tab_widths<T>(ctx: &egui::Context, width: f32, tabs: &[(T, &str, Option<usize>)]) -> Vec<f32> {
+pub fn dock_tab_widths<T>(
+    ctx: &egui::Context,
+    width: f32,
+    tabs: &[(T, &str, Option<usize>)],
+) -> Vec<f32> {
     let n = tabs.len().max(1) as f32;
     let need: Vec<f32> = tabs
         .iter()
@@ -700,9 +855,12 @@ pub fn mode_rail(ui: &mut Ui, labels: &[&str], selected: &mut usize) -> bool {
     ui.label(RichText::new("IL-2 GROUP\nGENERATOR").font(FontId::new(17.0, heading_family())));
     ui.add_space(12.0);
     for (i, label) in labels.iter().enumerate() {
-        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
+        let (rect, resp) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
         let sel = *selected == i;
-        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, *label));
+        resp.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, true, sel, *label)
+        });
         let p = ui.painter();
         if sel {
             p.rect_filled(rect, 0.0, c::ACCENT_200);
@@ -711,9 +869,25 @@ pub fn mode_rail(ui: &mut Ui, labels: &[&str], selected: &mut usize) -> bool {
         }
         let idx_color = if sel { c::ACCENT_800 } else { c::NEUTRAL_600 };
         let fg = if sel { c::ACCENT_900 } else { c::TEXT };
-        let family = if sel { bold_family() } else { egui::FontFamily::Proportional };
-        p.text(rect.left_center() + Vec2::new(8.0, 0.0), Align2::LEFT_CENTER, format!("{:02}", i + 1), FontId::monospace(12.0), idx_color);
-        p.text(rect.left_center() + Vec2::new(34.0, 0.0), Align2::LEFT_CENTER, *label, FontId::new(13.0, family), fg);
+        let family = if sel {
+            bold_family()
+        } else {
+            egui::FontFamily::Proportional
+        };
+        p.text(
+            rect.left_center() + Vec2::new(8.0, 0.0),
+            Align2::LEFT_CENTER,
+            format!("{:02}", i + 1),
+            FontId::monospace(12.0),
+            idx_color,
+        );
+        p.text(
+            rect.left_center() + Vec2::new(34.0, 0.0),
+            Align2::LEFT_CENTER,
+            *label,
+            FontId::new(13.0, family),
+            fg,
+        );
         if resp.clicked() {
             *selected = i;
         }
@@ -724,7 +898,10 @@ pub fn mode_rail(ui: &mut Ui, labels: &[&str], selected: &mut usize) -> bool {
     ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if link(ui, "Help").on_hover_text("Help for this tab  (F1)").clicked() {
+            if link(ui, "Help")
+                .on_hover_text("Help for this tab  (F1)")
+                .clicked()
+            {
                 help = true;
             }
             kbd(ui, "F1");
@@ -742,7 +919,10 @@ pub struct Check {
 
 impl Check {
     pub fn new(ok: bool, text: impl Into<String>) -> Self {
-        Check { ok, text: text.into() }
+        Check {
+            ok,
+            text: text.into(),
+        }
     }
 }
 
@@ -764,7 +944,11 @@ pub fn readiness(ui: &mut Ui, checks: &[Check]) {
     };
     ui.menu_button(label, |ui| {
         ui.set_min_width(260.0);
-        ui.label(RichText::new("BEFORE YOU GENERATE").small().color(c::NEUTRAL_700));
+        ui.label(
+            RichText::new("BEFORE YOU GENERATE")
+                .small()
+                .color(c::NEUTRAL_700),
+        );
         for check in checks {
             ui.horizontal(|ui| {
                 if check.ok {
@@ -822,7 +1006,12 @@ pub enum Severity {
 }
 
 /// Bottom line. Returns true when Undo is clicked.
-pub fn status_bar(ui: &mut Ui, severity: Severity, message: &str, undo_label: Option<&str>) -> bool {
+pub fn status_bar(
+    ui: &mut Ui,
+    severity: Severity,
+    message: &str,
+    undo_label: Option<&str>,
+) -> bool {
     let mut undo = false;
     ui.horizontal_centered(|ui| {
         let dot = match severity {
@@ -838,7 +1027,10 @@ pub fn status_bar(ui: &mut Ui, severity: Severity, message: &str, undo_label: Op
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if let Some(label) = undo_label {
                 kbd(ui, "Ctrl Z");
-                if link(ui, "Undo").on_hover_text(format!("Undo: {label}  (Ctrl Z)")).clicked() {
+                if link(ui, "Undo")
+                    .on_hover_text(format!("Undo: {label}  (Ctrl Z)"))
+                    .clicked()
+                {
                     undo = true;
                 }
                 ui.label(label);
@@ -867,7 +1059,13 @@ pub fn map_tool_banner(painter: &egui::Painter, map_rect: Rect, name: &str, hint
 
 /// Confirmation before a destructive action. Returns true on confirm.
 /// Caller closes it on Esc by setting `*open = false`.
-pub fn confirm_dialog(ctx: &egui::Context, open: &mut bool, title: &str, body: &str, confirm: &str) -> bool {
+pub fn confirm_dialog(
+    ctx: &egui::Context,
+    open: &mut bool,
+    title: &str,
+    body: &str,
+    confirm: &str,
+) -> bool {
     if !*open {
         return false;
     }
@@ -907,7 +1105,10 @@ pub struct Undo<T> {
 
 impl<T> Default for Undo<T> {
     fn default() -> Self {
-        Self { slot: None, after: None }
+        Self {
+            slot: None,
+            after: None,
+        }
     }
 }
 
@@ -985,7 +1186,14 @@ pub fn read_shortcuts(ctx: &egui::Context, map_active: bool) -> Shortcuts {
         if i.consume_key(Modifiers::COMMAND, Key::Num7) {
             s.tab = Some(6);
         }
-        let nums = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6];
+        let nums = [
+            Key::Num1,
+            Key::Num2,
+            Key::Num3,
+            Key::Num4,
+            Key::Num5,
+            Key::Num6,
+        ];
         for (n, k) in nums.iter().enumerate() {
             if i.consume_key(Modifiers::COMMAND, *k) {
                 s.tab = Some(n);

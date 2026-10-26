@@ -75,6 +75,12 @@ impl AirSide {
             AirSide::Nato => 'N',
         }
     } // §3.0 names
+    pub fn label(self) -> &'static str {
+        match self {
+            AirSide::Dprk => "DPRK",
+            AirSide::Nato => "NATO",
+        }
+    } // user-facing text and group names
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,13 +265,13 @@ impl Default for TotalsLimits {
 } // D36
 
 // Strategy enums (§8 step 0d table). The Default is the primary design.
-// ThresholdImpl::ComplexTrigger and CounterResetImpl are reserved for step 12 (§3.9); v1 builders accept only ZoneOnly.
+// ThresholdImpl::Counted and CounterResetImpl are reserved for step 12 (§3.9); v1 builders accept only OnePlayer.
 #[allow(dead_code)] // P14 step 12
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThresholdImpl {
     #[default]
-    ZoneOnly,
-    ComplexTrigger,
+    OnePlayer, // one Complex Trigger per area, N = 1 (decision 0023)
+    Counted, // N >= 2: trigger, counter and window (§3.9, step 12)
 }
 #[allow(dead_code)] // P14 step 12
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -288,12 +294,6 @@ pub enum CounterResetImpl {
     Ring,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RandomImpl {
-    #[default]
-    InMission,
-    Seeded,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BudgetImpl {
     #[default]
     HeadCount,
@@ -306,22 +306,13 @@ pub enum CensusImpl {
     SameTick,
 } // §3.3, probe E7
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PresenceCheckImpl {
-    #[default]
-    PulseInside,
-    Closer0Race,
-} // risk c
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Strategies {
     pub threshold: ThresholdImpl,
     pub zone_out: ZoneOutImpl,
     pub losses: LossesImpl,
     pub counter_reset: CounterResetImpl,
-    pub random: RandomImpl,
     pub budget: BudgetImpl,
     pub census: CensusImpl,
-    pub presence: PresenceCheckImpl,
     pub ai_counts: bool, // probe result a; true makes the D30 warning an error (§8 step 0d)
 }
 
@@ -336,7 +327,7 @@ pub(crate) struct SideLogic {
     pub(crate) flags: Vec<i32>, // SNjj FLYING timers, in census order (BUD s CENSUS)
     pub(crate) budget_events: Vec<i32>, // SNjj START relays and the copies' delete timers; each gets BUD s MARK and BUD s CHECK
     pub(crate) links: Vec<(i32, i32)>, // (from, to): emit_side_logic adds `to` to the Targets of `from` (§3.0)
-    pub(crate) pass_subscribers: BTreeMap<usize, Vec<i32>>, // area index → ZNii ARMED relays (targets of THsaa INNER, the PASS event)
+    pub(crate) pass_subscribers: BTreeMap<usize, Vec<i32>>, // area index → ZNii CHANCE and ZNii MISS WAIT timers (targets of THsaa INNER, the PASS event; 0030)
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

@@ -9,7 +9,9 @@
 - Binary crate (`src/main.rs` only — there is no `lib.rs`). It generates
   IL-2 Sturmovik: Great Battles `.Group` / `.Mission` text files for the
   Korea map.
-- `ui.rs` is the GUI entry point. Its Air Tasking page is `ui/air.rs`. The other egui files are `shell.rs`
+- `ui.rs` is the GUI anchor. Mode panels move into `src/ui/<mode>.rs`
+  (Template is `ui/builder.rs`, Map is `ui/map.rs`, Airfield is
+  `ui/airfield.rs`, Air Tasking is `ui/air.rs`). The other egui files are `shell.rs`
   (shared page chrome and widgets), `theme.rs` (design tokens, fonts,
   visuals) and `help.rs` (detached Help window). Every other file is
   logic/data with no egui imports.
@@ -23,22 +25,54 @@
 - Coordinates: world = game meters, **X north** (up on the Korea map),
   **Z east**. Full map square is `geo::MAP_MIN`/`MAP_MAX` = 0…499_200.
   Parking grid is `placement::MAP_MIN`/`MAP_MAX` = 40_000…470_000 with a
-  10 km step. Map image UV/`Pos2` conversions live in `ui.rs`.
+  10 km step. Map image UV/`Pos2` conversions live in `ui/map.rs`.
 - `build.rs` embeds `assets/models/*.png` into `model_spec` (deduped
   identical bytes). Do not parse model images at runtime.
 - Assets in `assets/`: unit SVG icons, Korea map JPEGs, `Models.Group`
-  (+ language sidecars), `Payloads.txt`, `roads.svg` / `railroads.svg`,
+  (+ language sidecars), `Payloads.txt`, `gamedata/highways.ini` /
+  `gamedata/railroads.ini` (road and rail centerlines), `roads.svg` /
+  `railroads.svg` (on disk, not the placement network),
   `combined_terrain.bin`, and per-model PNGs under `assets/models/`.
 
 ## Files
 
 ### `ui.rs` — egui front-end
-The single GUI entry point. Owns `GroupGeneratorApp` (all state), the
-seven mode tabs, every panel, drag/drop map editing, order-tree widgets,
-map UV/world/`Pos2` conversions, SVG/JPEG loading, and
-`save_with_sidecars`. Calls into logic modules only through their public
-APIs; contains no AST work and no generation logic. Help content is
-rendered by `help.rs`. **All modes.**
+The GUI anchor. Owns `GroupGeneratorApp` (all state), the mode rail, and
+every mode that has not moved out yet. `save_with_sidecars` stays here.
+Calls into logic modules only through their public APIs; contains no AST
+work and no generation logic. Help content is rendered by `help.rs`.
+**All modes.**
+
+Mode panels live in `src/ui/<mode>.rs`, declared from `ui.rs`
+(`mod builder`, `mod map`, `mod airfield`, `mod air`). There is no `src/ui/mod.rs`: `ui.rs` is the
+module, and the folder holds its children. Each child is an
+`impl GroupGeneratorApp` plus that mode's widgets. State fields stay on
+the app in `ui.rs`.
+
+### `ui/builder.rs` — Template Builder tab
+The Template page: unit list, order tree, formation view, and Load /
+Generate / Reset. `ui.rs` calls `template_page`, `generate_unit_template`,
+`load_template_now`, `reset_template_confirmed`, `tpl_fingerprint`,
+`tpl_restore`, and `sync_template_waypoint_speed`. Group text is still
+built by `template.rs`. **Template.**
+
+### `ui/map.rs` — Map tab
+The Map page: Korea map drawing, the Period / Forces / References /
+Terrain dock, AO lock, fighter textures, and the height-store controls.
+`ui.rs` calls `map_page`, `generate_front_file`, `load_base_map`,
+`apply_terrain`, `add_terrain_note`, and the undo / tool hooks. Heights
+load through `terrain::open_store` (baked `assets/korea_100m.hgt`, with
+a newer AppData file merged on top). Placed fighters use
+`EasternFighter.svg` and `NatoFighter.svg` as authored (paint angle 0).
+Group text is still built by `frontlines.rs` and the other map modules.
+**Map.**
+
+### `ui/airfield.rs` — Airfield tab
+The Airfield page: load and export panels, the harvest section, field
+spawn, and the air-start bank. `ui.rs` calls `airfield_page`,
+`export_airfield`, `load_airfield`, and `poll_harvest`. State stays on
+the app. Group text is still built by `crate::airfield`, `harvest.rs`, and
+`airstart.rs`. **Airfield.**
 
 Since the 2026 redesign (`docs/ui-redesign/README.md`) every tab is a
 `*_page(ctx)` that adds fixed side panels and a center, each scrolling
@@ -162,10 +196,30 @@ the `Airfield` block, nearest-field split, link closure for logic up to
 20 km out), cleans it with `airfield.rs`, and files it into a database
 folder: `raw/` archive, `<name>_<country>.Group` + sidecars, `catalog.Group`
 (`AirfieldRecord` rows, upserted), `models.tsv`. `harvest_root` is pure;
-`harvest_file` does the I/O. `GenWatcher` polls the Missions folder and
-reports a rewrite once it has been stable for 1.5 s. Drops `#` comments and
-the `Options` header before parsing (`WindLayers` rows are not `.Group`
-syntax). **Airfield mode.**
+`harvest_file` does the I/O. `place_field_spawn` is a field spawn: it moves
+that field's fakefield to the hold-short, nose toward the runway, and writes
+its own aircraft list (not the air-start bank). Engine running uses
+`graphics\airfields\fakefield_rnwspawn.mgm` and
+`LuaScripts\WorldObjects\Airfields\fakefield_rnwspawn.txt`, `StartType` 1,
+`SnapTo` 0, altitude 0. Engine off, parking keeps that same hold-short and
+writes `StartType` 2 and `SnapTo` 2. It does not move the field onto a Type 3
+pad. `None` for the takeoff heading uses the base end; a heading picks the
+into-wind threshold. Defaults are the Korea Missions folder and
+`Template\MP Airfields`. `GenWatcher` polls the Missions folder and reports a
+rewrite once it has been stable for 1.5 s. Drops `#` comments and the
+`Options` header before parsing (`WindLayers` rows are not `.Group` syntax).
+**Airfield mode.**
+
+### `airstart.rs` — fake-field air starts
+A bank of `fakefield` airfields with a `Planes` list, shaped like
+`TemplateExamples/Airstart.Group`. Each entry has a coalition (NATO 601 /
+DPRK 502) and aircraft options (how many, skill, altitude, fuel, payload, mods, renew).
+`Number` `-1` is unlimited, matching the template.
+Facing is set on the map: the field icon stays upright and `direction.svg`
+points along `YOri` (0 = north). `field_group` writes one field;
+`combined_group` writes several. `plane_entry` writes one aircraft at a
+chosen `StartType` and `SnapTo`. An air start always passes `StartType` 0,
+`SnapTo` 0, and `fakefield.mgm`. **Airfield mode, Map mode, harvest.rs.**
 
 ### `bombers.rs` — Exclusive Activation
 Detects plans in template groups (`inspect_plan`, `BomberPlanInfo`:
@@ -174,9 +228,13 @@ warnings), detects already-generated packs (`looks_like_exclusive_pack`,
 `extract_exclusive_plans` — strips NodeGates links and `[n]`/`*n*`
 suffixes), and `link_bomber_plans` / `link_bomber_plans_with` write a
 file where only one plan activates at a time (NodeGates mutex; optional
-in-place keep-positions). Multiple `Zone IN` MCUs in one template count
-as a single plan. `SUGGESTED_TRIGGER_NAMES` / `SUGGESTED_END_NAMES`.
-**Exclusive mode.**
+in-place keep-positions). Triggering a plan also starts `{n} WINDOW`
+(`MISSION_WINDOW_S`, 3 hours) in NodeGates. The window pulses that plan's
+end timer; the end timer deactivates `{n} WINDOW OFF` so a finished plan
+cannot fire the window later. Multiple `Zone IN` MCUs in one template count
+as a single plan. Map export calls the same linker, positions kept, when more
+than one strike is placed. `SUGGESTED_TRIGGER_NAMES` / `SUGGESTED_END_NAMES`.
+**Exclusive mode, Map.**
 
 ### `duplicate.rs` — duplication engine & country overrides
 Index reallocation and MCU pointer reconnection used by every cloner.
@@ -194,7 +252,8 @@ Rebuilds **Group 1** from Template Builder pair logic (Independent
 seats, OnSpawned → AttackArea lead / Cover wing, leftover and extra
 pair leads each get their own AttackArea, events → that plane’s
 Mission Complete → Force Complete / RTB / deactivate for that bird
-only, AI RTB off, Spawn + repeat) then injects the pack randomizer
+only, OnKilled → that plane’s Delay Delete → the flight DeathCount,
+AI RTB off, Spawn + repeat) then injects the pack randomizer
 (`Random i:pct%` → `Out i` → `Spawn i`, 500 ms equal-odds waterfall),
 per-flight DeathCount, pack hooks (`Enable Spawner` / `Disable Spawner`
 / `Delete Orders`; the reinforcement timer is omitted), finger-four placement,
@@ -272,15 +331,17 @@ rules (`can_extend_salient`, `can_extend_west_east`).
 
 ### `mapfighters.rs` — fighter placement on the map
 `place_in_coalition` parks fighter groups in the side's influence
-polygon (checkerboard, waves × groups, optional AO fill, 8-pack cap).
-`MapFighterLayout` / `FighterSpot` (wave/pack/slot), `rtb_ao_point`
+polygon (spread across the whole zone, including narrow parts; waves
+split the spots evenly; optional AO fill at Zone In spacing; 8-pack cap).
+`full_pack_spots` keeps complete copies of a loaded N-group pack.
+`MapFighterLayout` / `FighterSpot` (wave/pack/slot, AttackArea offset and radius), `rtb_ao_point`
 (friendly-rear AO corner closer to the group), `country_for_coalition`
 (eastern keeps a 500-series setpoint or 501; NATO is always 601),
 `MAX_PACKS` = 8. **Map mode.**
 
 ### `mapground.rs` — ground unit placement
 `place_ground` / `place_ground_jobs` park armor/supply/artillery on
-dry open terrain, infantry on any dry land (not water), and trains/columns on roads or rails (`mapnet`).
+dry open terrain, infantry on any dry land (not water), and trains/columns on roads or rails (`mapnet`). Truck columns prefer a stretch at least 10 km inside the AO when one fits.
 `GroundKind`, `GroundJob` (optional `RouteLayout` + weapon range),
 `GroundSpot` (pos, heading, network pose, hashed objective, in-AO,
 soft `issue`), `MapGroundLayout`, `START_DELAY_S` / `GROUP_DELAY_S`,
@@ -303,9 +364,11 @@ use `geo::cities_on_map`, and user reference groups go through
 `frontlines::MapRefGroup`. **Map (future / tests).**
 
 ### `mapnet.rs` — road & railroad network
-Korea road/rail polylines parsed from mission-editor SVGs
-(`assets/roads.svg`, `assets/railroads.svg`) into world X/Z (50 m per
-SVG unit, `svg_to_world`). Owns the whole network-placement pipeline:
+Korea road/rail polylines parsed from the editor road INIs
+(`assets/gamedata/highways.ini`, `assets/gamedata/railroads.ini`; nom,
+in `mapnet/ini.rs`) into world X/Z (50 m per image unit, `svg_to_world`).
+Bridge tags stay on the centerline. `roads.svg` / `railroads.svg` are
+not loaded. Owns the whole network-placement pipeline:
 `Network`/`PolyLine` (arc-length indexed lines, `nearest` point
 snapping), `RouteLayout` (extracted from authored groups by
 `inspect_route` — trains → rail; roads require a detected perfect
@@ -378,7 +441,7 @@ cell by one shared delta. `generate_pack` (grid; root name
 `{nation} Fighters Npack - Linked` from the planes' country),
 `generate_pack_at`
 (explicit positions), `builtin_template` (bundled 3pack V6),
-`park_rtbs`, `zone_in_radius` (used by Map UI). `inspect_pack` /
+`park_rtbs`, `zone_in_radius` (used by Map UI), `group_attack_orbit` (AttackArea offset from Zone IN plus radius). `inspect_pack` /
 `PackInfo` and `group_anchor_xz` are for tests / internal parking
 (`inspect_pack` is `#[allow(dead_code)]` from ui.rs's point of view).
 **Fighter Pack, Map.**
@@ -466,18 +529,22 @@ plus `PULSE OUT`, Activate or Spawn bring-up: `Trigger Spawner` +
 `Modifier Set Value` + `Reset Counter`), and the `MISSION END` →
 `MISSION END ORDERS` (→ `Force Complete - High`, optional `RTB DELAY` →
 `RTB East/West n` per coalition/group) + `DELAYED END ORDERS` (60 s
-with RTB, 2 s without) → `Deactivate Units` → `DELETE DELAY` →
-`Trigger Delete` cleanup hub. `Units` = cloned object + `MCU_TR_Entity`
+with RTB, 2 s without) → `Deactivate Units`. Spawn mode then runs
+`DELETE DELAY` → `Trigger Delete`, object-linked to each unit's
+`MCU_TR_Entity` (the unit block index is ignored). Activate mode does
+not write those two MCUs. `DeathCount` listens for `OnKilled` (13) on
+every unit; Korea does not raise `OnPlaneDestroyed` (4). `Units` = cloned object + `MCU_TR_Entity`
 pairs (wingmen target-linked to their lead; `AiRTBDecision` /
 `StartType` written only when the prototype has the key — writing them
 on a Vehicle breaks mission-editor parsing); `Orders` = command MCUs
 (one MCU shared across `shared_with` seats; ground AttackArea sits at
 the group origin); `Waypoints` = `WP n` hops along +X at 4 km (300 m
 area for planes, 100 m ground, unclamped speed, 0 m altitude for
-ground, per-hop altitude/priority override). Goto WP
+ground, per-hop altitude/priority override, optional north/east offset and a `loop_to` back to an earlier WP). `apply_mission_package` fills a CAP diamond or a strike (formation by aircraft role, 8 km IP, 3 km AttackArea for 2 min, Time on Target in parallel for the same 2 min, home waypoint, Mission Complete). A new aircraft with no prototype height starts at 1500 m airstart; strike forces that height. `zone_out_enabled` false keeps Zone Out from running MISSION END. An `All destroyed` event ticks one `ALL DESTROYED` counter (Dropcount 0) that pulses MISSION END once every such attacker is gone. CAP and Strike add `OnKilled` → All destroyed on each aircraft, and they do not abort on bingo fuel. Abort events that Then a Goto pulse `Go Home Once` (Counter 1, Dropcount 0), which pulses that Goto timer once per flight. An event-owned Goto also pulses Force Complete, unless arrival at that waypoint starts Mission Complete — then the Goto timer pulses only the waypoint, and Force Complete runs from MISSION END after the flight is home. A report or Time on Target may still chain into that same Goto. Goto WP
 delays pulse only the WP MCU; on arrival the WP pulses Attack /
-AttackArea and Time on Target in parallel (list order doesn't matter),
-and TOT expiry continues the chain. Seat model + bookkeeping:
+AttackArea and Time on Target in parallel (list order doesn't matter,
+including a report stacked between them), and TOT expiry continues the
+chain even when abort events also Then that next order. Seat model + bookkeeping:
 `TemplateSeat` / `CatalogUnit` / `FlightRole` / `PlaneStart`,
 `append_seat` / `replace_seat_unit` / `copy_seat_attributes` /
 `move_seat`, `apply_plane_start` / `AIR_START_ALTITUDE_M` (airstart
@@ -525,10 +592,12 @@ Fallbacks: `UNKNOWN_ARTILLERY_M` = 15 km, `UNKNOWN_ARMOR_M` = 2 km,
 
 ### `terrain.rs` — measured ground heights
 Sparse store of ground heights on a 100 m lattice (224 × 224-node tiles,
-HGT1 file under `%APPDATA%\IL2MissionUtility\terrain`). `lookup` falls back
-from 100 m to 200 / 400 / 800 m cells and reports the spacing that
-answered; `ground_margin_m` / `parked_plane_margin_m` give the lift for
-that spacing. Stores and answers only: no parsing, no placement.
+HGT1). The harvested Korea store is compiled in from `assets/korea_100m.hgt`
+(`builtin` / `open_store`) so heights load with no AppData file. A newer
+file at `%APPDATA%\IL2MissionUtility\terrain\korea_100m.hgt` is merged on
+top. `lookup` falls back from 100 m to 200 / 400 / 800 m cells and reports
+the spacing that answered; `ground_margin_m` / `parked_plane_margin_m` give
+the lift for that spacing. Stores and answers only: no parsing, no placement.
 **Map mode (Terrain tab), terrain_apply.rs.**
 
 ### `terrain_apply.rs` — units onto the measured ground at export
@@ -540,15 +609,30 @@ unmeasured spots (or survey-only 800 m data) keep the old Y and are listed
 in `ApplyReport`. Airborne planes, MCUs and static objects are never
 touched; X/Z never change; applying twice is a no-op. ui.rs calls it for
 Template, Exclusive, Army (generate + rework), Map and Fighter Pack exports
-when *Apply terrain heights on export* is on (off by default) — not for Airfield.
+when *Apply terrain heights on export* is on (on by default; a session can turn it off) — not for Airfield.
 **All generate paths except Airfield.**
 
 ### `heightprobe.rs` — terrain probe files
-Builds T-34 probe groups (one per 100 m land node, one file per tile; the
-800 m survey pass over the whole map) and ingests files the user snapped
-with the editor's *set to ground*, refusing ones that look unsnapped.
-`run_cli` serves `--probe-survey`, `--probe-ingest`, `--probe-status`.
+Builds Helper Input probe groups (`MCU_H_Input`, one per 100 m land node).
+Each file holds at most 256 probes, because set-to-ground on a full
+224 × 224 tile takes minutes. The 800 m survey pass is split the same way.
+Ingest reads files the user snapped with the editor's *set to ground*, and
+refuses ones that look unsnapped. `run_cli` serves `--probe-survey`,
+`--probe-ingest`, `--probe-status`.
 **Map mode (Terrain tab) and the command line.**
+
+### `heighthelper.rs` — HeightHelper
+Drives the Mission Editor key sequence (import, set to ground, save) over
+those probe batches. Default is a 5-minute dry run with a timestamped log
+and no keystrokes. `--shard K/N` splits the batches across machines;
+`--live` writes `korea_mK.hgt`; `--height-merge` joins those into one
+`HeightStore`. A failed batch stops the run so the next keystrokes are not
+sent into a dialog. The utility and HeightHelper both cut probe lists into
+files of 256. A survey file is one east-west line (one X, 204 km of Z, 800 m
+apart). A land-tile file is 100 m spacing inside one 224-node tile (about
+22.3 km west-east and 100 m north-south). `--chunk 61000` is about 14.5 MB,
+roughly 78 km by 499 km, and is not either of those files.
+**Command line (`--height-run`, `--height-merge`).**
 
 ### `watermap.rs` — water/terrain queries
 Packed Korea terrain mask from `assets/combined_terrain.bin`
@@ -561,7 +645,8 @@ open `& 4`. `TerrainMap` (`WaterMap` is a historical alias):
 
 ### `main.rs`
 Binary entry: declares every `src/*.rs` module (plus
-`frontlines/timeline.rs` via `frontlines`) and calls `ui::run()`.
+`frontlines/timeline.rs` via `frontlines`). `--height-*` and `--probe-*`
+run those tools and exit; otherwise it calls `ui::run()`.
 There is no `lib.rs`.
 
 ## Header template (for per-file doc comments)

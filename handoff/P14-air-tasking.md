@@ -423,58 +423,16 @@ Notes:
 
 ### 3.5 Player-threshold cell (per side × area; N = 1 in v1)
 
-- An **area** is a target point: an objective, or an attack-arrow tip.
-- The cell for side s watches the **other** side's planes. For example, `THNaa` triggers NATO sorties and watches DPRK-coalition planes, `PlaneCoalitions [1]`, the same as the US templates' zones.
-- v1 builds the one-player path only (D1, U16). The path for two or more players is in §3.9 and is built in step 12.
+**As built (step 4, 2026-10-18; decisions 0023, 0024 and 0025, flight 2J).** This section replaced the two-check-zone cell of earlier drafts. Details, the review and the flight: `handoff/sessions/2026-10-18-p14-step4.md`; code and tests: `src/airtask/threshold.rs`.
 
-**State: two sets per area, HOT and COLD.** Exactly one is on, except for 0.05 s at each change, when both are on.
-- Consumers own one relay in each set: `ENii HOT` / `ENii COLD` for each clock entry on the area (§3.7), and `SNjj HOT` / `SNjj COLD` for each sortie copy on the area (§3.2).
-- A consumer pulses both of its relays. Exactly one passes. This gives an "else" branch with no race timer (D37).
-- Each consumer's builder creates its own pair and registers it in `SideLogic.hot_consumers` and `SideLogic.cold_consumers` (§3.0). The threshold builder runs after them and lists exactly the registered relays.
-- **Make-before-break.** A change switches the new set on at once and the old set off 0.05 s later. So a consumer's pulse is never lost.
-- Start state: COLD on, HOT off (the HOT set is in `SideLogic.init_off`).
-
-```
- THsaa ENTRY ZONE (MCU_CheckZone Closer 1, radius R, other coalition), pulsed at Mission Begin
-   └─► THsaa ARM (latch)
-         ├─► THsaa ENTRY OFF (MCU_Deactivate: THsaa ENTRY ZONE, THsaa ARM)   <- one switch closes the zone and the latch
-         └─► THsaa DWELL (timer D)
-
- CHECK (an event, not an MCU): THsaa DWELL and THsaa HOLD each target these four
-   ├─► THsaa CHECK ARM (MCU_Activate: THsaa INNER CLOSE OUT)                                 ⟲ re-arm, first
-   ├─► THsaa INNER ON (MCU_Activate: THsaa INNER)
-   ├─► THsaa INNER PULSE (timer 0.1 s) ─► THsaa INNER (MCU_CheckZone Closer 1, radius R/2, other coalition)
-   └─► THsaa INNER CLOSE (timer 2 s)
-         ├─► THsaa INNER OFF (MCU_Deactivate: THsaa INNER)                  <- first the zone is switched off
-         └─► THsaa INNER CLOSE DELAY (timer 0.05 s) ─► THsaa INNER CLOSE OUT (relay)   <- then, one step later, the timeout counts
-
- PASS (an event: the output of THsaa INNER; a player is inside r_in now). THsaa INNER targets
-   ├─► THsaa PASS OFF (MCU_Deactivate: THsaa INNER CLOSE OUT, THsaa INNER)  <- a later passer-by cannot pass without a new CHECK
-   ├─► THsaa HOT ON (MCU_Activate: set THsaa HOT)
-   ├─► THsaa COLD OFF DELAY (timer 0.05 s) ─► THsaa COLD OFF (MCU_Deactivate: set THsaa COLD)
-   ├─► THsaa HOLD (timer H)                                                 <- presence re-check; HOT stays on while it runs
-   └─► ZNii ARMED for every zone entry on this area  (§3.8; from SideLogic.pass_subscribers)
-
- FAIL (an event: the output of THsaa INNER CLOSE OUT; nobody was inside r_in). THsaa INNER CLOSE OUT targets
-   ├─► THsaa COLD ON (MCU_Activate: set THsaa COLD)
-   ├─► THsaa HOT OFF DELAY (timer 0.05 s) ─► THsaa HOT OFF (MCU_Deactivate: set THsaa HOT)
-   └─► THsaa REARM (timer 1 s)
-         ├─► THsaa REARM ON (MCU_Activate: THsaa ARM, THsaa ENTRY ZONE)                       ⟲ re-arm
-         └─► THsaa ENTRY PULSE (timer 0.1 s) ─► THsaa ENTRY ZONE
-```
-
-- **CHECK, PASS and FAIL are names of events, not MCUs.** Earlier drafts had a relay for each; the node before it now lists the relay's targets itself (3 MCUs fewer per area, U13). A trace build puts its breadcrumbs on `THsaa INNER` (PASS) and `THsaa INNER CLOSE OUT` (FAIL).
-- **A pass and a timeout in the same tick give a pass only** (third review, T9). The timeout switches the inner zone off and counts 0.05 s later. If the zone fired in that tick, `PASS OFF` has closed `INNER CLOSE OUT` by then. Without the delay, both could fire, both sets would go off 0.05 s later, and a sortie's end pulse would reach neither branch.
-
-- Cycle: entry → ARM closes → DWELL → CHECK. A pass switches the area HOT and re-checks every H. A fail (at the first CHECK or at a re-check) switches the area COLD, re-opens ARM and re-arms the entry zone.
-- **HOT stays on during a re-check** and goes off only when the re-check fails (review finding C5). Earlier drafts switched HOT off at every re-check, so a sortie's end or a clock draw in that gap failed although a player was there.
-- `INNER CLOSE OUT` deactivates the inner zone on a fail, and `PASS OFF` deactivates it on a pass. Without that, a pulsed zone keeps watching and a later passer-by would pass without a dwell. Whether deactivating a waiting check zone stops it is risk h.
-- The entry zone deactivates itself when it fires, as the templates' Zone IN does. Whether a pulsed Closer 1 zone fires repeatedly while a plane stays inside is risk o (probe C5); the ARM latch makes the cell correct either way.
-- **23 MCUs and 2 check zones per (side, area).**
-- Known weaknesses (accepted in the design):
-  - AI may count (risk a, D30).
-  - After a pass, the area stays HOT until the next re-check, up to H seconds after the player has left.
-  - A player who loiters between r_in and R never makes the area HOT.
+- An **area** is a target point: an objective, or an attack-arrow tip. The cell for side s watches the **other** side's **players**: `THNaa` (NATO sorties) watches country 501, `THDaa` watches 601. The app's own AI flies 602 / 503 (decision 0008; the rewrite of placed copies is step 7).
+- **Entry:** one `MCU_TR_ComplexTrigger` per area (`THsaa TRIGGER`, radius r_in, filtered to the players' country, the flown 1N shape). Its Object Entered closes the `ARM` latch, which switches the trigger off and starts `DWELL` (D).
+- **Presence check:** a check zone at r_in (`THsaa INNER`, Closer 1, the other side's coalition), switched on by `CHECK ON` and pulsed 0.1 s later by `INNER PULSE` (flight 1A's c). A switched-on Complex Trigger does **not** report a plane already inside (flight 2J), so the trigger is used for the entry only.
+- **PASS** (`INNER` fires): `PASS OFF`, HOT on at once, COLD off 0.05 s later, `HOLD` (H) re-checks while HOT, and the area's `pass_subscribers`. **FAIL** (`CLOSE DELAY`, 0.05 s after the 2 s `CLOSE` switched the zone off): COLD on, HOT off 0.05 s later, `REARM ON` re-opens `ARM` and the trigger. A pass and a timeout in one tick give one outcome only.
+- **State:** HOT and COLD sets of consumer relays (§3.0 pairs, make-before-break); COLD starts on, the HOT set is in `init_off`. Every poll in flight 2J passed exactly one relay of a pair.
+- **Timing (U24):** D = F-80 transit of r_in rounded up to 10 s (60 s at R = 12 km), H = 2D (120 s); `timing::derived_timing`.
+- **19 MCUs, 1 Complex Trigger and 1 check zone per (side, area).**
+- Known weaknesses: an enemy-coalition AI plane inside r_in at a check passes like a player (but the app's AI alone never starts a cycle); a plane already inside when the mission loads is not seen until it re-enters (unflown); a straight pass slower than about 720 km/h through the centre passes; HOT stays up to H after the player leaves; a mission maker's own AI on 601 or 501 counts.
 
 ### 3.6 Weighted re-armable randomizer
 
@@ -487,6 +445,20 @@ The structure copies the re-armable `flights::build_randomizer` (`flights.rs` �
 Differences: names carry the `CLK s` prefix, and exclusion acts on `ENii RANDOM` (not on the Outs), so `ReOpen Outputs` does not undo it.
 
 ### 3.7 Front end A: mission clock (per side)
+
+**As built (step 5, 2026-10-18; decision 0029, option B).** Same behaviour as the original design below, with a smaller inside, because flight 0 settled what the original hedged against (f: a timer's Random % is rolled per trigger; J1: deactivating a running timer cancels it; J3: an Activate and a pulse in one tick drop the pulse; J4: a relay latch drops a same-tick double). Code and tests: `src/airtask/clock.rs`; scope, diagram and test list: `handoff/sessions/2026-10-18-p14-step5.md`.
+
+- **Quiet roll and jitter are J random timers into a latch.** `TICK` → `SLOT ON` (re-arms the `SLOT OPEN` latch) and `JITTER k` (`Time` 0.1 + (k−1)·step, `Random` p_k = `weighted_random_pct([100−q; J] ++ [q·J])[k]`, 27 / 36 / 57 % at the defaults) → `SLOT OPEN`. The first that passes opens the slot; about q % of slots stay quiet. No `QUIET ROLL`, no jitter randomizer, no `JITTER k DELAY`.
+- **`ATTEMPT END` is cancelled directly** by `WIN` (no `ATTEMPT ARM`, no `ATTEMPT END OUT`); `REROLL ON` re-arms it at `SLOT OPEN`.
+- **The entry randomizer is `INPUT` → `ReOpen Outputs` and the `RANDOM` timers**; attempts never overlap, so there is no `CloseInput` or `Wait for Output`. A = L + 0.5 s and the slot window min(300, (a + 10)·A) are unchanged.
+- **`DRAW` is the 0.3 s timer** and pulses `LAST CLEAR`; the accepted exception below is 0.3 s, not 0.2 s.
+- **`ENii LAST SET` is one Activate.** The next slot excludes every entry started since the last slot opened, not only the most recent. Step 6 measures whether that matters on a busy area against the alternative (B′); the bar is half a launch per 3-hour mission (0029).
+- **`ENii GO` → `CLK s WIN`, then the `COPY r` pointers last run first**, so a pointer activated by the previous copy's `START` cannot take `GO`'s pulse in the same tick.
+- **No `Seeded` variant; `RandomImpl` is removed.**
+- **MCUs: 11 per clock entry (10 for the last in the waterfall), 17 + J + a per side** (20 + a at J = 3). The three-entry, three-area test plan has 55 (the original design: 76).
+- The entry order is shuffled per side from `AirPlan.seed` by `clock::waterfall_order` (SplitMix64); step 6 uses the same order for its stagger. `clock::validate_schedule(side, schedule, entries)` holds the schedule checks and the two §3.7 rules below.
+
+**Original design (2026-09-27),** kept for its reasoning; where it differs from the list above, the list above is what is built.
 
 ```
  Translator Mission Begin ─► CLK s FIRST (timer, first slot) ─► CLK s TICK (relay)
@@ -533,11 +505,24 @@ Differences: names carry the `CLK s` prefix, and exclusion acts on `ENii RANDOM`
 - **A request needs no answer.** If the gate is shut, the pulse is dropped and the slot stays quiet (D17). There is no REQ, GRANTED or DENIED relay per copy.
 - **Starting states** (`SideLogic.init_off`): `ENii LAST`, `CLK s REROLL` (clock); `ENii COPY r` for r ≥ 2 (assemble).
 - **MCUs: 12 per clock entry** (11 for the last one in the waterfall, which has no closer): `AVAILABLE`, `RANDOM ON`, `LAST`, `EXCLUDE`, `RANDOM`, `OUT`, its closer, `HOT`, `COLD`, `GO` and the two `LAST SET` switches. `ENii EXHAUSTED` is one more MCU per entry, owned by `assemble_side` and shared by both front ends. One `CLK s WIN` Deactivate per side serves every `GO`. The per-side count is about 40 with three jitter steps, plus one `AREA aa OUT` per area; step 5 pins the exact number.
-- `QUIET ROLL`, `JITTER` and `RANDOM` rely on the Timer `Random` % being rolled each time the timer is triggered (risk f). The builder takes `RandomImpl::{InMission, Seeded}`:
+- `QUIET ROLL`, `JITTER` and `RANDOM` rely on the Timer `Random` % being rolled each time the timer is triggered (risk f, confirmed in flight 0; decision 0029 removed `RandomImpl` and the `Seeded` variant). The original builder took `RandomImpl::{InMission, Seeded}`:
   - `InMission` (primary) is the diagram above.
   - `Seeded` (fallback if f fails) makes every choice at Generate time from the plan seed (`AirPlan.seed`). The clock is unrolled into S = ceil(6 h / period) slots. Each slot gets a fixed jitter step, a fixed quiet flag, and an ordered entry list (a weighted sample without replacement over the clock-eligible entries). In the mission, a slot tries its list in order through the same `ENii HOT` / `ENii COLD` pairs: the first HOT, available, not-LAST entry wins, and "reroll" means the next entry in the list (U6). After slot S the clock stops. The zone chance becomes a fixed per-zone sequence of 8 fire/skip outcomes, stepped by a one-hot pointer at each arming and cycled.
 
 ### 3.8 Front end B: check zone (per entry tagged Zone or Both)
+
+**As built (step 6, 2026-10-22; decision 0030, option C).** Same behaviour as the original design below, with a smaller inside, because flight 0 settled what it hedged against (J1: deactivating a running timer cancels it; J3: an Activate and a pulse in one tick drop the pulse; a pulse into an inactive timer is dropped). Code and tests: `src/airtask/zone.rs`; scope, diagram and test list: `handoff/sessions/2026-10-22-p14-step6.md`.
+
+- **No `ARMED` relay.** `THsaa INNER` pulses `ZNii CHANCE` and `ZNii MISS WAIT` directly (both are the area's `pass_subscribers`); the zone is armed while both are on. `ZNii DISARM` (Deactivate: both) is pulsed by the outcome: by `CHANCE` on a success (which also cancels the running `MISS WAIT`) and by `MISS WAIT` on a miss.
+- **Direct cancels (J1).** `GRANTED` deactivates `DENY WAIT` itself; no `MISS WAIT OUT` or `DENY WAIT OUT`. `FIRE ARM` re-activates `WAITING` and `DENY WAIT` at the roll, 0.05 s before `FIRE` (R4-2 holds). `ARM` (end of the cooldown) re-activates `CHANCE` and `MISS WAIT`.
+- **No `REARM` relay.** `ENii EXHAUSTED` deactivates `CHANCE`, `MISS WAIT` and `COOLDOWN`; a running cooldown is cancelled and a later pulse into it is dropped.
+- `FIRE` → `DENY WAIT`, then the `COPY r` pointers last run first (as `ENii GO`). Stagger p·(T_count + 0.2) s, p from `clock::waterfall_order` over the side's zone entries, per area.
+- **Input check:** `zone::validate_zone` (an Error) when the threshold hold H is not longer than the longest `MISS WAIT` plus 1 s (PASS events are at least H apart), and for a chance outside 1..=100 % or a bad cooldown; `build_side` refuses on the same text. Step 7's `validate` calls it per side.
+- **No debug subtitles** in the zone (0030); step 7 decides them for both front ends.
+- **MCUs: 11 per zone entry, none per side** (the original: 17), plus the shared `ENii EXHAUSTED`.
+- **The clock's no-repeat rule (0029 B) stays:** the busy-area check found B and B′ within half a launch per 3-hour mission in all four scenarios (session note, "Busy-area check").
+
+**Original design (2026-09-27),** kept for its reasoning; where it differs from the list above, the list above is what is built.
 
 ```
  THsaa INNER (the PASS event, §3.5) ─► ZNii ARMED (relay; ON = armed)
@@ -790,10 +775,10 @@ impl Default for TotalsLimits { fn default() -> Self { Self { aircraft: 96, mcus
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum ZoneOutImpl      { #[default] CheckZone, Watchdog }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum LossesImpl       { #[default] Type13 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum CounterResetImpl { #[default] SetVal, Ring }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum RandomImpl       { #[default] InMission, Seeded }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum RandomImpl       { #[default] InMission, Seeded }      // removed by decision 0029 (flight 0 confirmed f)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum BudgetImpl       { #[default] HeadCount, SingleSlot }      // §3.3
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum CensusImpl       { #[default] Spaced, SameTick }           // §3.3, probe E7
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum PresenceCheckImpl { #[default] PulseInside, Closer0Race }   // risk c
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)] pub enum PresenceCheckImpl { #[default] PulseInside, Closer0Race }   // risk c; removed by decision 0025 (one presence check)
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Strategies {
@@ -1194,7 +1179,7 @@ T-k (budget) is in Probe 2 (step 3), so it is built from the real `budget.rs`. T
 | v (flight 2) | Step 3 | The extension needs no new order | If the order needs renewing, the shell adds `SNjj RENEW`, so the order is given again when the extension starts, and not after the sortie has ended (§3.4) | No |
 | b, d | Step 12 | — | — | — |
 
-- Every builder whose fallback is a strategy enum (`ZoneOutImpl`, `RandomImpl`, `BudgetImpl`, `CensusImpl`, `PresenceCheckImpl`) takes it from `AirPlan.strategies`. **Each variant of these enums, primary and fallback, gets its own structural test and at least one walker scenario** (names in the steps below). `LossesImpl` also comes from the plan but has only `Type13` (decision 0017).
+- Every builder whose fallback is a strategy enum (`ZoneOutImpl`, `RandomImpl`, `BudgetImpl`, `CensusImpl`; `PresenceCheckImpl` until decision 0025 removed it) takes it from `AirPlan.strategies`. **Each variant of these enums, primary and fallback, gets its own structural test and at least one walker scenario** (names in the steps below). `LossesImpl` also comes from the plan but has only `Type13` (decision 0017).
 - The h, p and q fallbacks are **not** strategy variants: they are small local code changes made after the probe results, only if a result calls for them. The walker already runs every scenario under `ReverseTargets` and all three re-trigger modes, so the cases they guard are exercised before then.
 - **A "build stops" row means: stop, write the result into `handoff/P14-probe-results.md`, and ask the user.** Do not invent a new fallback during the build.
 - **Gates (§10).** Step 3 starts after the flight 0 results are in. Step 4 starts after the flight 1A results are in. Step 2 has no engine assumptions and does not wait. Flight 1G settled result g on event 13; step 3 builds only `LossesImpl::Type13` (decisions 0011/0017). Flight 2 T-l checks a crash without damage.
@@ -1794,7 +1779,7 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 
 **Files:** `src/airtask/threshold.rs`.
 
-**Depends on:** steps 1 and 1b, and the **flight 1A results** (gate G1, §10). Strategy enum: `PresenceCheckImpl` (CHECK and the re-check). v1 builds the one-player path only (§3.5); the Complex Trigger path is step 12. The builder takes a `SideLogic` whose `hot_consumers`, `cold_consumers` and `pass_subscribers` are already filled (it runs after the front ends, §3.0); its tests fill them with stand-in relays.
+**Depends on:** steps 1 and 1b, and the **flight 1A results** (gate G1, §10). Strategy enum: `PresenceCheckImpl` (CHECK and the re-check), removed by decision 0025. v1 builds the one-player path only (§3.5); the counted path is step 12. **As built (2026-10-18), §3.5 and its acceptance tests changed (decisions 0023 to 0025): the list below is the original draft; the built tests are in `src/airtask/threshold.rs` and listed in `handoff/sessions/2026-10-18-p14-step4.md`.** The builder takes a `SideLogic` whose `hot_consumers`, `cold_consumers` and `pass_subscribers` are already filled (it runs after the front ends, §3.0); its tests fill them with stand-in relays.
 
 **Acceptance:**
 - `threshold_structure`: `THNaa ENTRY ZONE` (Closer 1, `Zone = 12000`, coalition of the other side) targets `ARM` only; `ARM` targets `ENTRY OFF` and `DWELL`; `ENTRY OFF` deactivates `ENTRY ZONE` and `ARM`; `DWELL.Time = 120`; `INNER` (`Zone = 6000`); `INNER CLOSE.Time = 2`, and it targets `INNER OFF` and `INNER CLOSE DELAY` (`Time = 0.05`), which targets `INNER CLOSE OUT`; `HOLD.Time = 240`. There is no `CHECK`, `PASS` or `FAIL` MCU. `DWELL` and `HOLD` each target exactly `CHECK ARM`, `INNER ON`, `INNER PULSE` and `INNER CLOSE`. `INNER` targets `PASS OFF`, `HOT ON`, `COLD OFF DELAY` (0.05 s), `HOLD` and exactly the area's `SideLogic.pass_subscribers`. `INNER CLOSE OUT` targets `COLD ON`, `HOT OFF DELAY` (0.05 s) and `REARM`. `REARM` re-activates `ARM` and `ENTRY ZONE` and re-pulses `ENTRY ZONE`. `HOT ON` / `HOT OFF` list exactly the area's `hot_consumers`, and `COLD ON` / `COLD OFF` its `cold_consumers`. `SideLogic.init_off` contains the HOT set, and `SideLogic.mission_begin` contains `ENTRY ZONE`.
@@ -1818,7 +1803,7 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 
 **Files:** `src/airtask/clock.rs`.
 
-**Depends on:** steps 3 and 4. Built with `RandomImpl::{InMission, Seeded}`; the default comes from the flight 0 result f.
+**Depends on:** steps 3 and 4. Built with `RandomImpl::{InMission, Seeded}`; the default comes from the flight 0 result f. **As built (2026-10-18), decision 0029 B changed the inside of the clock and removed `Seeded`: the list below is the original draft; the built tests are in `src/airtask/clock.rs` and listed in `handoff/sessions/2026-10-18-p14-step5.md`.**
 
 **Walker test plan, pinned in code** (`clock_test_plan()`): the lifecycle scenarios below need more grants than the defaults allow, so they use `runs = 6` on every entry, budget 6, and a scripted `DONE HUB` for each copy 60 s after its `START`. Scenarios that state other values say so.
 
@@ -1854,7 +1839,7 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 
 **Files:** `src/airtask/zone.rs`.
 
-**Depends on:** steps 3 and 4.
+**Depends on:** steps 3 and 4. **As built (2026-10-22), decision 0030 C changed the inside of the zone cell: the list below is the original draft; the built tests are in `src/airtask/zone.rs` and listed in `handoff/sessions/2026-10-22-p14-step6.md`.** `zone_seeded_chance_sequence_structure` and `zone_debug_subtitles_only_when_enabled` were dropped (0029, 0030).
 
 **Acceptance (tests):**
 - `zone_structure`: an entry with mode Zone: `ZNii CHANCE Random = 50`, `ZNii COOLDOWN.Time = 900`. `ZNii ARMED` is a target of the area's `THsaa INNER` and targets `ARMED ARM`, which activates `MISS WAIT OUT` only. `ZNii CHANCE` targets `FIRE ARM` (which activates `WAITING` and `DENY WAIT OUT`), `FIRE OFF` and `FIRE`; `FIRE.Time = 0.05`. `FIRE` targets every `ENii COPY r` and `DENY WAIT` (`Time = 1`). Every copy's `START` targets `ZNii GRANTED`, which deactivates `DENY WAIT OUT`. `DENY WAIT OUT` and every copy's `DONE HUB` target `ZNii WAITING`, which targets `ZNii COOLDOWN` and its own Deactivate. `ZNii WAITING` starts OFF.
@@ -1875,6 +1860,7 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
   - `zone_no_request_after_runs_starts`.
   - `zone_fire_then_later_chance_miss_reaches_cooldown`: a FIRE, its `DONE HUB`, re-arm, then a failed chance roll: `COOLDOWN` starts and the zone re-arms.
   - `zone_clock_done_does_not_start_idle_zone_cooldown`.
+  - **Busy-area check of the clock's no-repeat rule (decision 0029, added 2026-10-18):** one area, a player loitering for 3 h, zone and clock both on it; 200 paired runs (same seed) of `LAST SET` as built (B) and as the two-switch rule (B′), for 2 and 4 entries on the area and budget 1 and 2. Report launches on the area, slots lost and B′'s repeats per 3-hour mission. If B and B′ differ by less than half a launch per mission in every case, B stays; otherwise the user chooses.
 
 ### Step 7. Export integration — S–M. Branch `claude/p14-export`
 
@@ -2174,3 +2160,6 @@ The repo does not prove any of these in game. The shipped files only show what t
   - **Stale text (T15).** Step 0b names its MCUs; risk v and D5 corrected.
   - **No further full review (U23).** These last changes are not reviewed by a second model. Fable re-reads each step's section when it scopes that step for Astra.
 - **Gate-switch view (2026-10-08, user).** §10 item 26 added: explore a cell library of the gate idioms (relay, latch, once-gate, threshold, reset, pair) shared by every builder, scoped after step 3. Not scheduled; no design, count or step changed.
+- **2026-10-18, step 4 built.** §3.5 rewritten as built: one country-filtered Complex Trigger per area for the entry and a pulsed check zone for the presence check, 19 MCUs (decisions 0023, 0024, 0025; flight 2J showed a switched-on Complex Trigger misses a plane already inside). U24 timing in `timing.rs`. `PresenceCheckImpl` removed.
+- **2026-10-18, step 5 built.** §3.7 opens with the clock as built (decision 0029 B): quiet roll and jitter as J random timers into a latch, `ATTEMPT END` cancelled directly, a 2-MCU entry randomizer, one-Activate `LAST SET`, `GO` lists copy pointers last run first; 11 MCUs per entry and 17 + J + a per side (55 on the three-entry test plan, from 76). `RandomImpl` and the `Seeded` variants removed (flight 0 confirmed f). Step 6 adds a busy-area check of the `LAST SET` rule (B against B′).
+- **2026-10-22, step 6 built.** §3.8 opens with the zone as built (decision 0030 C): `INNER` pulses `CHANCE` and `MISS WAIT` directly, one `DISARM` at the outcome, direct cancels of `MISS WAIT`, `DENY WAIT` and `COOLDOWN`; 11 MCUs per zone entry (from 17); a hold check in `zone::validate_zone`; no debug subtitles. The busy-area check keeps the clock's `LAST SET` rule B.
