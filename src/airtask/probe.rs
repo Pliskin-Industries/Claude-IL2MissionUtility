@@ -120,13 +120,14 @@ pub(crate) enum Flight {
     TwoG,
     TwoH,
     TwoI,
+    TwoJ,
     Load,
 }
 
 impl Flight {
-    const ALL: [Self; 21] = [
+    const ALL: [Self; 22] = [
         Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG, Self::OneH, Self::OneJ,
-        Self::OneK, Self::OneL, Self::OneM, Self::OneP, Self::Two, Self::TwoB, Self::TwoC, Self::TwoD, Self::TwoE, Self::TwoF, Self::TwoG, Self::TwoH, Self::TwoI, Self::Load,
+        Self::OneK, Self::OneL, Self::OneM, Self::OneP, Self::Two, Self::TwoB, Self::TwoC, Self::TwoD, Self::TwoE, Self::TwoF, Self::TwoG, Self::TwoH, Self::TwoI, Self::TwoJ, Self::Load,
     ];
 
     fn stem(self) -> &'static str {
@@ -151,6 +152,7 @@ impl Flight {
             Self::TwoG => "P14_Probe_2G",
             Self::TwoH => "P14_Probe_2H",
             Self::TwoI => "P14_Probe_2I",
+            Self::TwoJ => "P14_Probe_2J",
             Self::Load => "P14_Load_Probe",
         }
     }
@@ -177,6 +179,7 @@ impl Flight {
             Self::TwoG => RUN_SHEET_2G,
             Self::TwoH => RUN_SHEET_2H,
             Self::TwoI => RUN_SHEET_2I,
+            Self::TwoJ => RUN_SHEET_2J,
             Self::Load => &[],
         }
     }
@@ -185,7 +188,8 @@ impl Flight {
         // 0018 changed flight 2's shell. 0019 changes placement in 1M's Y1
         // and every sortie in 2B/2C/2D, even with their original Dense inputs.
         // 0020 and 0022 change the placed Pairs densities in 2E and 2G.
-        matches!(self, Self::OneM | Self::Two | Self::TwoB | Self::TwoC | Self::TwoD | Self::TwoE | Self::TwoG)
+        // 0025 removed the trigger-reactivation cell that KD and KE flew in 2J.
+        matches!(self, Self::OneM | Self::Two | Self::TwoB | Self::TwoC | Self::TwoD | Self::TwoE | Self::TwoG | Self::TwoJ)
     }
 
     fn regenerates_flown_files(self) -> bool {
@@ -196,7 +200,7 @@ impl Flight {
     }
 
     fn writes_schedule(self) -> bool {
-        matches!(self, Self::TwoB | Self::TwoC | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI)
+        matches!(self, Self::TwoB | Self::TwoC | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ)
     }
 
     fn empty_target_sorties(self) -> &'static [EmptyTargetSortie] {
@@ -243,7 +247,7 @@ impl Flight {
                 script: "f80c10",
             }],
             Self::Zero | Self::OneA | Self::OneG | Self::OneH | Self::OneJ | Self::OneK
-                | Self::OneL | Self::OneM | Self::OneP | Self::Two | Self::TwoB | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI | Self::Load => &[],
+                | Self::OneL | Self::OneM | Self::OneP | Self::Two | Self::TwoB | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::Load => &[],
         }
     }
 }
@@ -872,6 +876,95 @@ const TWO_H_SORTIES: &[EmptyTargetSortie] = &[
     } },
 ];
 
+// Flight 2J: k1/k3 and the unmodified step 4 cells. All distances are from K14.
+const TWO_J_START_S: f64 = 0.0;
+const TWO_J_OFF_S: f64 = 5.0;
+const TWO_J_LOOP_START_S: f64 = 30.0;
+const TWO_J_APPROACH_START_S: f64 = 60.0;
+const TWO_J_ON_1_S: f64 = 180.0;
+const TWO_J_CONTROL_S: f64 = 190.0;
+const TWO_J_OFF_1_S: f64 = 200.0;
+const TWO_J_ON_2_S: f64 = 240.0;
+const TWO_J_OFF_2_S: f64 = 260.0;
+const TWO_J_ON_3_S: f64 = 300.0;
+const TWO_J_OFF_3_S: f64 = 320.0;
+const TWO_J_KB_START_S: f64 = 399.5;
+const TWO_J_KB_ACTIVATE_S: f64 = 400.0; // HVAR MISSION BEGIN takes 0.5 s.
+const TWO_J_KB_CONTROL_S: f64 = 560.0;
+const TWO_J_DELETE_S: f64 = 600.0;
+const TWO_J_KB_ON_S: f64 = 700.0;
+const TWO_J_KB_OFF_S: f64 = 720.0;
+const TWO_J_POLL_END_S: f64 = 780.0;
+const TWO_J_POLL_STEP_S: f64 = 20.0;
+const TWO_J_LEAVE_S: f64 = 810.0;
+const TWO_J_CLOSE_S: f64 = 900.0;
+const TWO_J_RADIUS_M: f64 = 6000.0;
+const TWO_J_APPROACH_KM: f64 = 20.0;
+const TWO_J_STRAIGHT_KM: f64 = 30.0;
+const TWO_J_ORBIT_EAST_KM: f64 = 20.0; // Remove 2B's displacement, not its octagon.
+const TWO_J_ALTITUDE_M: f64 = 3050.0;
+const TWO_J_LOOP_SPEED_KMH: f64 = 500.0;
+const TWO_J_KB_SPEED_KMH: f64 = 660.0;
+const TWO_J_PAIR_SIZE: usize = 2;
+const TWO_J_APPROACH_VERTEX: usize = 6; // The western (-2, 0) vertex.
+const TWO_J_OUTSIDE_M: f64 = 100_000.0;
+const TWO_J_POLL_START_S: f64 = TWO_J_APPROACH_START_S;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TriggerSwitch {
+    block: &'static str,
+    time_s: f64,
+}
+const TWO_J_KA_SWITCHES: &[TriggerSwitch] = &[
+    TriggerSwitch { block: "MCU_Deactivate", time_s: TWO_J_OFF_S },
+    TriggerSwitch { block: "MCU_Activate", time_s: TWO_J_ON_1_S },
+    TriggerSwitch { block: "MCU_Deactivate", time_s: TWO_J_OFF_1_S },
+    TriggerSwitch { block: "MCU_Activate", time_s: TWO_J_ON_2_S },
+    TriggerSwitch { block: "MCU_Deactivate", time_s: TWO_J_OFF_2_S },
+    TriggerSwitch { block: "MCU_Activate", time_s: TWO_J_ON_3_S },
+    TriggerSwitch { block: "MCU_Deactivate", time_s: TWO_J_OFF_3_S },
+];
+const TWO_J_KB_SWITCHES: &[TriggerSwitch] = &[
+    TriggerSwitch { block: "MCU_Deactivate", time_s: TWO_J_OFF_S },
+    TriggerSwitch { block: "MCU_Activate", time_s: TWO_J_KB_ON_S },
+    TriggerSwitch { block: "MCU_Deactivate", time_s: TWO_J_KB_OFF_S },
+];
+const TWO_J_KC_SWITCHES: &[TriggerSwitch] = &[
+    TriggerSwitch { block: "MCU_Deactivate", time_s: TWO_J_OFF_S },
+    TriggerSwitch { block: "MCU_Activate", time_s: TWO_J_ON_1_S },
+    TriggerSwitch { block: "MCU_Deactivate", time_s: TWO_J_OFF_1_S },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ThresholdProbeRoute { Orbit, Approach, Straight }
+
+struct ThresholdProbeCell {
+    cell: &'static str,
+    country: i32,
+    route: ThresholdProbeRoute,
+    activate_s: f64,
+    delete_s: f64,
+    switches: &'static [TriggerSwitch],
+    control_s: Option<f64>,
+    threshold_prefix: Option<&'static str>,
+}
+const TWO_J_CELLS: &[ThresholdProbeCell] = &[
+    ThresholdProbeCell { cell: "KA", country: COUNTRY_USA, route: ThresholdProbeRoute::Orbit, activate_s: TWO_J_LOOP_START_S, delete_s: TWO_J_CLOSE_S, switches: TWO_J_KA_SWITCHES, control_s: Some(TWO_J_CONTROL_S), threshold_prefix: None },
+    ThresholdProbeCell { cell: "KB", country: COUNTRY_USA, route: ThresholdProbeRoute::Straight, activate_s: TWO_J_KB_ACTIVATE_S, delete_s: TWO_J_POLL_END_S, switches: TWO_J_KB_SWITCHES, control_s: Some(TWO_J_KB_CONTROL_S), threshold_prefix: None },
+    ThresholdProbeCell { cell: "KC", country: COUNTRY_NATO_AI, route: ThresholdProbeRoute::Orbit, activate_s: TWO_J_LOOP_START_S, delete_s: TWO_J_CLOSE_S, switches: TWO_J_KC_SWITCHES, control_s: Some(TWO_J_CONTROL_S), threshold_prefix: None },
+    ThresholdProbeCell { cell: "KD", country: COUNTRY_USA, route: ThresholdProbeRoute::Approach, activate_s: TWO_J_APPROACH_START_S, delete_s: TWO_J_DELETE_S, switches: &[], control_s: None, threshold_prefix: Some("THD01") },
+    ThresholdProbeCell { cell: "KE", country: COUNTRY_NATO_AI, route: ThresholdProbeRoute::Approach, activate_s: TWO_J_APPROACH_START_S, delete_s: TWO_J_DELETE_S, switches: &[], control_s: None, threshold_prefix: Some("THD02") },
+    ThresholdProbeCell { cell: "KF", country: COUNTRY_USA, route: ThresholdProbeRoute::Approach, activate_s: TWO_J_APPROACH_START_S, delete_s: TWO_J_DELETE_S, switches: &[], control_s: None, threshold_prefix: Some("THD03") },
+];
+pub(crate) const RUN_SHEET_2J: &[Cell] = &[
+    Cell { key: "KA", centre_km: (140.0, -90.0), arm_s: TWO_J_OFF_S, close_s: TWO_J_CLOSE_S },
+    Cell { key: "KB", centre_km: (230.0, -90.0), arm_s: TWO_J_OFF_S, close_s: TWO_J_CLOSE_S },
+    Cell { key: "KC", centre_km: (140.0, 0.0), arm_s: TWO_J_OFF_S, close_s: TWO_J_CLOSE_S },
+    Cell { key: "KD", centre_km: (230.0, 0.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_J_CLOSE_S },
+    Cell { key: "KE", centre_km: (140.0, -45.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_J_CLOSE_S },
+    Cell { key: "KF", centre_km: (230.0, -45.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_J_CLOSE_S },
+];
+
 const TWO_I_CLOSE_S: f64 = 2100.0;
 const TWO_I_LEAVE_S: f64 = 1680.0;
 const TWO_I_LEAVE_CUE_S: f64 = 1650.0;
@@ -1191,6 +1284,11 @@ pub(crate) const CUES: &[Cue] = &[
     Cue { flight: Flight::TwoI, time_s: RUN_SHEET_2I[5].arm_s, text: "Flight 2I: IY4 starts (Yak as shipped)" },
     Cue { flight: Flight::TwoI, time_s: TWO_I_LEAVE_CUE_S, text: "Flight 2I: leave the server at 28:00" },
     Cue { flight: Flight::TwoI, time_s: TWO_I_CLOSE_S, text: "Flight 2I closed. Every aircraft has a Delete. End the mission normally" },
+    Cue { flight: Flight::TwoJ, time_s: TWO_J_START_S, text: "Flight 2J: spectate. No recording needed. Leave the server at 13:30" },
+    Cue { flight: Flight::TwoJ, time_s: TWO_J_ON_1_S, text: "Flight 2J: KA and KC triggers switched on" },
+    Cue { flight: Flight::TwoJ, time_s: TWO_J_DELETE_S, text: "Flight 2J: KD KE KF pairs deleted. Expect KD and KF to go COLD by 13:00" },
+    Cue { flight: Flight::TwoJ, time_s: TWO_J_POLL_END_S, text: "Flight 2J: leave the server at 13:30" },
+    Cue { flight: Flight::TwoJ, time_s: TWO_J_CLOSE_S, text: "Flight 2J closed. Every aircraft has a Delete. End the mission normally" },
 ];
 
 const A1_START_KM: (f64, f64) = (-30.0, 60.0);
@@ -2401,6 +2499,7 @@ struct Probe {
     arm: i32,
     close_off: i32,
     sources: Vec<TraceSource>,
+    input_observations: Vec<(i32, Vec<i32>)>,
     hand_sources: HashSet<i32>,
     map: TraceMap,
 }
@@ -2440,6 +2539,7 @@ impl Probe {
             arm: 0,
             close_off: 0,
             sources: vec![],
+            input_observations: vec![],
             hand_sources: HashSet::new(),
             map: TraceMap::default(),
         }
@@ -2614,7 +2714,30 @@ impl Probe {
     fn observe(&mut self, source: i32, text: &str) {
         let subtitle = self.subtitle(text, 1);
         self.link(source, subtitle);
+        self.observe_breadcrumb(source);
+    }
+
+    /// Register an observation without editing the plain builder output.
+    fn observe_breadcrumb(&mut self, source: i32) {
         self.sources.push(self.source(source, None, None));
+    }
+
+    /// Activate/Deactivate Targets switch state; they do not pulse a breadcrumb.
+    /// Observe their always-active command input, only when making the traced copy.
+    fn observe_command(&mut self, source: i32) {
+        let command = by_id(&self.root, source);
+        assert!(matches!(command.block_type.as_str(), "MCU_Activate" | "MCU_Deactivate"));
+        let mut inputs = Vec::new();
+        self.root.for_each(&mut |node| {
+            if node.targets.contains(&source) {
+                assert!(matches!(node.block_type.as_str(), "MCU_Timer" | "MCU_CheckZone"),
+                    "{:?}: command observation needs pulse inputs", command.name());
+                inputs.push(node.index.unwrap());
+            }
+        });
+        assert!(!inputs.is_empty(), "{:?}: command has no input", command.name());
+        self.observe_breadcrumb(source);
+        self.input_observations.push((source, inputs));
     }
 
     fn readout(&mut self, source: i32, text: &str, threshold: i32) -> i32 {
@@ -2992,6 +3115,16 @@ impl Probe {
     }
 
     fn traced(mut self, carrier: TraceCarrier) -> (Il2Entity, TraceMap) {
+        for (index, inputs) in std::mem::take(&mut self.input_observations) {
+            let source = self.source(index, None, None);
+            let blocks = trace::breadcrumb(carrier, &mut self.map, &mut self.next_id, source);
+            let breadcrumb = self.map.entries.last().unwrap().breadcrumb_index;
+            for input in inputs {
+                self.link(input, breadcrumb);
+            }
+            self.root.children.extend(blocks);
+            self.hand_sources.insert(index);
+        }
         let indexes = self
             .sources
             .iter()
@@ -4773,7 +4906,253 @@ fn build_no_damage_loss(p: &mut Probe) {
     p.icon("T-l1 fuel zero", cell.centre_km, COALITION_NATO);
 }
 
+fn threshold_probe_orbit(cell: Cell) -> Vec<(f64, f64)> {
+    TWO_B_ORBIT_OFFSETS_KM.iter().map(|offset| world((
+        cell.centre_km.0 + offset.0,
+        cell.centre_km.1 + offset.1 - TWO_J_ORBIT_EAST_KM,
+    ))).collect()
+}
+
+fn build_threshold_probe_pair(p: &mut Probe, row: &ThresholdProbeCell) {
+    let cell = p.cell.expect("flight 2J pair cell");
+    let name = format!("{} pair", cell.key);
+    if row.route == ThresholdProbeRoute::Straight {
+        let start = (cell.centre_km.0 - TWO_J_STRAIGHT_KM, cell.centre_km.1);
+        let exit = (cell.centre_km.0 + TWO_J_STRAIGHT_KM, cell.centre_km.1);
+        let flight = p.ai_with_close_delete(&name, TWO_J_PAIR_SIZE, start, exit, TWO_J_KB_START_S);
+        p.set_flight_plane_country(flight, row.country);
+        p.ai_delete_at(&name, row.delete_s);
+        // Keep the helper's early Delete; safety close below always uses singles.
+        let delete = id(&p.root, &format!("{name} CLOSE DELETE"));
+        let close = id(&p.root, &format!("{} CLOSE", cell.key));
+        by_id_mut(&mut p.root, close).targets.retain(|target| *target != delete);
+        let targets = by_id(&p.root, close).targets.clone();
+        by_id_mut(&mut p.root, close).set_targets(targets);
+        let begin = id(by_id(&p.root, flight), TEMPLATE_MISSION_BEGIN);
+        by_id_mut(&mut p.root, flight).for_each_mut(&mut |node| {
+            if let Some(index) = node.index {
+                let old = node.name().unwrap_or("node");
+                node.set_name(&format!("{name} {index} {old}"));
+            }
+            if node.block_type == "Plane" {
+                node.set_property("Engageable", "0");
+                node.set_property("AiRTBDecision", AiRtbDecision::Disabled.property());
+            }
+            if node.block_type == "MCU_Waypoint" {
+                node.set_property("Speed", format!("{TWO_J_KB_SPEED_KMH:.0}"));
+                // The straight pass ends 30 km beyond KB, without an attack order.
+                node.set_targets(vec![]);
+            }
+        });
+        by_id_mut(&mut p.root, flight).set_name(&name);
+        p.observe(begin, "KB pair activated");
+        return;
+    }
+
+    // 2B's first Yak pair and closed waypoint loop, translated onto this centre.
+    // Only the pair, formation and path waypoint are copied, never AttackArea.
+    let source = parse_group_file(TWO_B_ENEMY).expect("flight 2J Yak source parses");
+    let shape = super::library::inspect_sortie(&source)
+        .unwrap_or_else(|errors| panic!("{}: Yak shape {errors:?}", cell.key));
+    let pair = &shape.planes[..TWO_J_PAIR_SIZE];
+    assert_eq!(pair[0], shape.navigation_lead, "{}: Yak navigation lead", cell.key);
+    let orbit = threshold_probe_orbit(cell);
+    let start = match row.route {
+        ThresholdProbeRoute::Orbit => orbit[0],
+        ThresholdProbeRoute::Approach => world((cell.centre_km.0 - TWO_J_APPROACH_KM, cell.centre_km.1)),
+        ThresholdProbeRoute::Straight => unreachable!(),
+    };
+    let mut flight = source.clone();
+    flight.children = pair.iter().flat_map(|&entity| [
+        by_id(&source, shape.plane_objects[&entity]).clone(), by_id(&source, entity).clone(),
+    ]).collect();
+    let pivot = by_id(&flight, shape.plane_objects[&pair[0]]).pos_xz().unwrap();
+    let heading = match row.route {
+        ThresholdProbeRoute::Orbit => TWO_B_ENEMY_ROTATION_DEG,
+        _ => 0.0,
+    };
+    crate::placement::rotate_tree(&mut flight, pivot, heading);
+    crate::placement::move_anchor_to(&mut flight, pivot, start);
+    flight.for_each_mut(&mut |node| {
+        if matches!(node.block_type.as_str(), "Plane" | "MCU_TR_Entity") {
+            node.set_property("YPos", format!("{TWO_J_ALTITUDE_M:.3}"));
+        }
+        if node.block_type == "Plane" {
+            node.set_property("Country", row.country.to_string());
+            node.set_property("StartType", PlaneStart::Air.as_i32().to_string());
+            node.set_property("AiRTBDecision", AiRtbDecision::Disabled.property());
+            node.set_property("Engageable", "0");
+        }
+    });
+    let (mut flight, _) = crate::duplicate::duplicate_template(&flight, &mut p.next_id);
+    flight.for_each_mut(&mut |node| {
+        if let Some(index) = node.index {
+            node.set_name(&format!("{name} {index}"));
+        }
+    });
+    flight.set_name(&name);
+    let entities = block_ids(&flight, "MCU_TR_Entity");
+    let lead = entities[0];
+    p.add(flight);
+    let activate = p.control("MCU_Activate", &format!("{name} ACTIVATE"), &[]);
+    by_id_mut(&mut p.root, activate).set_objects(entities.clone());
+    let formation_source = block_ids(&source, "MCU_CMD_Formation")[0];
+    let mut formation = crate::recon::clone_named(by_id(&source, formation_source), &mut p.next_id, &format!("{name} FORMATION"));
+    formation.set_objects(vec![lead]);
+    formation.set_targets(vec![]);
+    formation.set_property("FormationDensity", "2"); // Pairs Loose (0020), no Cover.
+    let formation = p.add(formation);
+    let wp_source = by_id(&source, shape.path_waypoints[&shape.navigation_lead]);
+    let waypoints: Vec<_> = orbit.iter().enumerate().map(|(index, point)| {
+        let mut wp = crate::recon::clone_named(wp_source, &mut p.next_id, &format!("{name} ORBIT {}", index + 1));
+        wp.set_property("XPos", format!("{:.3}", point.0));
+        wp.set_property("ZPos", format!("{:.3}", point.1));
+        wp.set_property("YPos", format!("{TWO_J_ALTITUDE_M:.3}"));
+        wp.set_property("Speed", format!("{TWO_J_LOOP_SPEED_KMH:.0}"));
+        wp.set_property("Priority", TWO_B_ORBIT_PRIORITY);
+        wp.set_objects(vec![lead]);
+        wp.set_targets(vec![]);
+        p.add(wp)
+    }).collect();
+    for (index, &wp) in waypoints.iter().enumerate() {
+        p.link(wp, waypoints[(index + 1) % waypoints.len()]);
+        p.close_node(wp);
+    }
+    let first = match row.route {
+        ThresholdProbeRoute::Orbit => 1,
+        _ => TWO_J_APPROACH_VERTEX,
+    };
+    let orders = p.relay(&format!("{name} ORDERS"), TWO_B_ORDERS_DELAY_S);
+    by_id_mut(&mut p.root, orders).set_targets(vec![formation, waypoints[first]]);
+    let start = p.at(&format!("{name} ACTIVATE AT"), row.activate_s, &[activate, orders]);
+    p.observe(start, &format!("{} pair activated", cell.key));
+    if row.delete_s < TWO_J_CLOSE_S {
+        let deletes: Vec<_> = entities.iter().enumerate().map(|(index, &entity)| {
+            p.delete(&format!("{name} {} DELETE", index + 1), &[entity])
+        }).collect();
+        let delete = p.at(&format!("{name} DELETE AT"), row.delete_s, &deletes);
+        p.observe(delete, &format!("{} pair deleted", cell.key));
+    }
+}
+
+fn build_threshold_probe_switches(p: &mut Probe, row: &ThresholdProbeCell) {
+    let cell = p.cell.expect("flight 2J switch cell");
+    let name = format!("{}-CT", cell.key);
+    let mut node = p.reference_mcu("MCU_TR_ComplexTrigger", &name);
+    node.properties.retain(|(key, _)| !matches!(key.as_str(), "ObjectScript" | "ObjectName"));
+    node.set_property("Country", COUNTRY_USA.to_string());
+    node.set_property("Radius", format!("{TWO_J_RADIUS_M:.0}"));
+    let trigger = p.add(node);
+    p.close_node(trigger);
+    for (event, verb, suffix) in [
+        (EVENT_OBJECT_ENTERED, "entered", "ENTERED"), (EVENT_OBJECT_LEFT, "left", "LEFT"),
+    ] {
+        let relay = p.relay(&format!("{name} {suffix}"), 0.0);
+        attach_event(by_id_mut(&mut p.root, trigger), event, relay);
+        p.observe(relay, &format!("{name} {verb}"));
+        if event == EVENT_OBJECT_ENTERED {
+            for count in 2..=6 {
+                p.readout(relay, &format!("{name} {verb} {count}+"), count);
+            }
+        }
+    }
+    for switch in row.switches {
+        let state = if switch.block == "MCU_Activate" { "ON" } else { "OFF" };
+        let action = p.switch_at(switch.block, &format!("{name} {state} {}", switch.time_s), switch.time_s, &[trigger]);
+        p.observe_command(action);
+    }
+    let zone_name = format!("{}-Z", cell.key);
+    let zone = p.zone(&zone_name, TWO_J_RADIUS_M, true, COALITION_NATO, cell.centre_km);
+    p.at(&format!("{zone_name} PULSE"), row.control_s.expect("2J control pulse"), &[zone]);
+    p.observe(zone, &format!("{zone_name} fired"));
+}
+
+fn add_threshold_probe_side(p: &mut Probe, rows: &[ThresholdProbeCell]) {
+    use super::{AirSide, SideLogic, Strategies, ThresholdSpec};
+    let mut logic = SideLogic::default();
+    let mut areas = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let cell = *RUN_SHEET_2J.iter().find(|cell| cell.key == row.cell).unwrap();
+        p.cell = Some(cell);
+        areas.push(world(cell.centre_km));
+        let prefix = row.threshold_prefix.expect("2J threshold row");
+        let hot = p.relay(&format!("{prefix} HOT consumer"), 0.0);
+        let cold = p.relay(&format!("{prefix} COLD consumer"), 0.0);
+        let subscriber = p.relay(&format!("{prefix} SUBSCRIBER"), 0.0);
+        logic.hot_consumers.insert(index + 1, vec![hot]);
+        logic.cold_consumers.insert(index + 1, vec![cold]);
+        logic.pass_subscribers.insert(index + 1, vec![subscriber]);
+        logic.init_off.push(hot);
+        p.observe(hot, &format!("{prefix} poll HOT"));
+        p.observe(cold, &format!("{prefix} poll COLD"));
+        p.observe(subscriber, &format!("{prefix} passed"));
+        let polls = ((TWO_J_POLL_END_S - TWO_J_POLL_START_S) / TWO_J_POLL_STEP_S) as usize;
+        for poll in 0..=polls {
+            p.at(&format!("{prefix} POLL {}", poll + 1), TWO_J_POLL_START_S + poll as f64 * TWO_J_POLL_STEP_S, &[hot, cold]);
+        }
+    }
+    let built = super::threshold::build_side(AirSide::Dprk, &areas, &ThresholdSpec::default(),
+        &Strategies::default(), &mut logic, &mut p.next_id)
+        .unwrap_or_else(|error| panic!("flight 2J {}: {error}", rows[0].cell));
+    for node in built {
+        let prefix = node.name().unwrap().split_once(' ').unwrap().0;
+        let row = rows.iter().find(|row| row.threshold_prefix == Some(prefix)).expect("2J threshold prefix");
+        p.cell = RUN_SHEET_2J.iter().find(|cell| cell.key == row.cell).copied();
+        if matches!(node.block_type.as_str(), "MCU_TR_ComplexTrigger" | "MCU_CheckZone") {
+            // The probe owns this incoming safety-close link; the built node
+            // itself, including all its outgoing links, remains byte-identical.
+            let close = id(&p.root, &format!("{} CLOSE OFF", row.cell));
+            p.link(close, node.index.unwrap());
+        }
+        p.add(node);
+    }
+    p.cell = None;
+    let init = super::assemble::emit_side_logic(AirSide::Dprk, &logic,
+        std::slice::from_mut(&mut p.root), &mut p.next_id).expect("flight 2J side initialization");
+    for mut node in init {
+        if node.block_type == "MCU_TR_MissionBegin" {
+            // Probe::new already owns the builder's Mission Begin name.
+            node.set_name("KD KE Translator Mission Begin");
+        }
+        p.add(node);
+    }
+    for row in rows {
+        let prefix = row.threshold_prefix.unwrap();
+        for role in ["ARM", "CLOSE DELAY", "DWELL", "HOLD"] {
+            p.observe_breadcrumb(id(&p.root, &format!("{prefix} {role}")));
+        }
+        p.observe_breadcrumb(id(&p.root, &format!("{prefix} INNER")));
+        for role in ["CHECK ON", "HOT ON", "COLD ON", "REARM ON"] {
+            p.observe_command(id(&p.root, &format!("{prefix} {role}")));
+        }
+    }
+}
+
+fn build_threshold_probe() -> Probe {
+    let mut p = Probe::new(Flight::TwoJ);
+    for (&cell, row) in RUN_SHEET_2J.iter().zip(TWO_J_CELLS) {
+        p.start_cell(cell);
+        build_threshold_probe_pair(&mut p, row);
+        if row.threshold_prefix.is_none() {
+            build_threshold_probe_switches(&mut p, row);
+        }
+        let close = id(&p.root, &format!("{} CLOSE", cell.key));
+        for (index, entity) in block_ids(named(&p.root, cell.key), "MCU_TR_Entity").into_iter().enumerate() {
+            let delete = p.delete(&format!("{} aircraft {} CLOSE DELETE", cell.key, index + 1), &[entity]);
+            p.link(close, delete);
+        }
+        p.observe(close, &format!("{} safety close", cell.key));
+        p.icon(&format!("{} map", cell.key), cell.centre_km, COALITION_NATO);
+    }
+    add_threshold_probe_side(&mut p, &TWO_J_CELLS[3..]);
+    p.cues(Flight::TwoJ);
+    p
+}
+
 fn build(flight: Flight) -> Probe {
+    if flight == Flight::TwoJ {
+        return build_threshold_probe();
+    }
     if flight == Flight::Load {
         return build_load_probe();
     }
@@ -4888,6 +5267,152 @@ pub(crate) fn generate_probe_2i() -> Il2Entity {
     build(Flight::TwoI).root
 }
 
+pub(crate) fn generate_probe_2j() -> Il2Entity {
+    build(Flight::TwoJ).root
+}
+
+fn threshold_probe_arrival_s(row: &ThresholdProbeCell) -> f64 {
+    let distance_m = match row.route {
+        ThresholdProbeRoute::Orbit => return row.activate_s,
+        ThresholdProbeRoute::Approach => TWO_J_APPROACH_KM * 1000.0,
+        ThresholdProbeRoute::Straight => TWO_J_STRAIGHT_KM * 1000.0,
+    };
+    let speed = if row.route == ThresholdProbeRoute::Straight { TWO_J_KB_SPEED_KMH } else { TWO_J_LOOP_SPEED_KMH };
+    row.activate_s + (distance_m - TWO_J_RADIUS_M) / (speed / 3.6)
+}
+
+/// Ideal ground tracks, one sample per second. The pair shares a nominal path;
+/// this tests two simultaneous Entered events, not formation dynamics or TAS.
+fn threshold_probe_point(cell: Cell, row: &ThresholdProbeCell, second: f64) -> (f64, f64) {
+    let centre = world(cell.centre_km);
+    if second >= row.delete_s {
+        return (centre.0 + TWO_J_OUTSIDE_M, centre.1 + TWO_J_OUTSIDE_M);
+    }
+    let elapsed = second - row.activate_s;
+    if row.route == ThresholdProbeRoute::Straight {
+        return (centre.0 + (-TWO_J_STRAIGHT_KM * 1000.0 + elapsed * TWO_J_KB_SPEED_KMH / 3.6)
+            .min(TWO_J_STRAIGHT_KM * 1000.0), centre.1);
+    }
+    let orbit = threshold_probe_orbit(cell);
+    let mut distance = elapsed * TWO_J_LOOP_SPEED_KMH / 3.6;
+    let mut vertex = 0;
+    if row.route == ThresholdProbeRoute::Approach {
+        let start = (centre.0 - TWO_J_APPROACH_KM * 1000.0, centre.1);
+        vertex = TWO_J_APPROACH_VERTEX;
+        let transit = orbit[vertex].0 - start.0;
+        if distance < transit {
+            return (start.0 + distance, start.1);
+        }
+        distance -= transit;
+    }
+    loop {
+        let from = orbit[vertex];
+        let to = orbit[(vertex + 1) % orbit.len()];
+        let length = (to.0 - from.0).hypot(to.1 - from.1);
+        if distance <= length {
+            let ratio = distance / length;
+            return (from.0 + ratio * (to.0 - from.0), from.1 + ratio * (to.1 - from.1));
+        }
+        distance -= length;
+        vertex = (vertex + 1) % orbit.len();
+    }
+}
+
+fn threshold_probe_walk_input() -> super::testkit::WalkerInput {
+    use super::shell::test_support::ticks;
+    use super::testkit::{ScriptedTrack, WalkerInput};
+    let mut input = WalkerInput { until: ticks(TWO_J_CLOSE_S), ..WalkerInput::default() };
+    for (&cell, row) in RUN_SHEET_2J.iter().zip(TWO_J_CELLS) {
+        for _ in 0..TWO_J_PAIR_SIZE {
+            input.tracks.push(ScriptedTrack {
+                coalition: 2,
+                country: row.country,
+                samples: (row.activate_s as u32..=TWO_J_CLOSE_S as u32).map(|second| {
+                    let second = f64::from(second);
+                    let point = threshold_probe_point(cell, row, second);
+                    (ticks(second), point.0, point.1)
+                }).collect(),
+            });
+        }
+    }
+    input
+}
+
+fn threshold_probe_walk(root: &Il2Entity) -> super::testkit::WalkerLog {
+    use super::testkit::{DeactivateRunningTimer, TimerRetrigger, WalkerConfig, walk};
+    walk(root, WalkerConfig {
+        timer_retrigger: TimerRetrigger::Restart,
+        deactivate_running_timer: DeactivateRunningTimer::Cancels,
+        ..WalkerConfig::default()
+    }, &threshold_probe_walk_input())
+}
+
+fn threshold_probe_outputs(root: &Il2Entity, log: &super::testkit::WalkerLog, row: &ThresholdProbeCell) -> String {
+    use super::shell::test_support::times;
+    use super::testkit::TICKS_PER_SECOND;
+    let names = if let Some(prefix) = row.threshold_prefix {
+        ["ARM", "CHECK ON", "INNER", "HOT ON", "CLOSE DELAY", "COLD ON", "REARM ON", "SUBSCRIBER"]
+            .iter().map(|role| format!("{prefix} {role}")).collect::<Vec<_>>()
+    } else {
+        [format!("{}-CT ENTERED", row.cell), format!("{}-CT LEFT", row.cell), format!("{}-Z", row.cell)]
+            .into_iter().collect()
+    };
+    names.iter().map(|name| {
+        let seconds = times(log, id(root, name)).into_iter()
+            .map(|tick| format!("{:.2}", tick as f64 / TICKS_PER_SECOND as f64)).collect::<Vec<_>>();
+        format!("{name}: {}", if seconds.is_empty() { "silent".into() } else { seconds.join(", ") })
+    }).collect::<Vec<_>>().join("; ")
+}
+
+fn threshold_probe_schedule(root: &Il2Entity) -> String {
+    use std::fmt::Write as _;
+    use super::shell::test_support::ticks;
+    use super::testkit::TICKS_PER_SECOND;
+    let log = threshold_probe_walk(root);
+    let mut report = format!("# Flight 2J generator schedule (decision 0025)\n\n\
+The flown 2J files are frozen in handoff/p14-probes/flight2j/. This schedule describes the current generator, whose KD, KE and KF cells all use ZonePulse. It does not replace the flown record.\n\n\
+Spectate. No recording needed. Leave the server at 13:30 ({TWO_J_LEAVE_S} s); safety close is {TWO_J_CLOSE_S} s. No spawns.\n\n\
+KA, KC, KD, KE and KF use 2B's first Yak-9P pair, country changed to NATO 601 or 602, at {TWO_J_ALTITUDE_M} m and {TWO_J_LOOP_SPEED_KMH} km/h. The copied octagon has radius 2 km and is centred on its own cell, removing 2B's 20 km east offset. Pairs fly Loose (2), with Engageable 0 and AiRTBDecision 0, no AttackArea or Cover. This lower altitude avoids requiring 500 km/h at 8000 m; actual speed and formation tracking remain unmeasured. KD to KF start 20 km west, fly to the western loop vertex, and enter 6 km at 160.8 s (first walker sample 161 s). The ideal track reaches the loop at 189.6 s.\n\n\
+KB uses the 1N F-80C pair from ai_with_close_delete, 3050 m, waypoint Speed 660. Its START is {TWO_J_KB_START_S} s and MISSION BEGIN adds 0.5 s, so activation is {TWO_J_KB_ACTIVATE_S} s. Nominal ground speed {TWO_J_KB_SPEED_KMH} km/h gives entry 530.91 s and exit 596.36 s (samples 531 through 596); the centre crossing is 563.64 s. Flight 1N measured about 733 km/h on this waypoint setting: that would give entry 517.87 s and exit 576.81 s. The 560 s control is inside either window, and the 700 s switch is after both. The 30 km beyond-centre waypoint has no outgoing attack order.\n\n\
+KD, KE and KF are one untouched build_side(Dprk, [KD, KE, KF], default spec) call, named THD01, THD02 and THD03 by the builder. Each has its own registered HOT/COLD consumer and subscriber; HOT is in init_off. One SideLogic registry feeds one emit_side_logic call. Its Mission Begin is named KD KE Translator Mission Begin to distinguish the probe's own Translator Mission Begin; AT D INIT and AT D INIT OFF keep the builder's names. No product MCU properties or links are otherwise changed in the plain Group. Traced instrumentation appends only observation links: switch breadcrumbs fan out from their pulse inputs, because Activate/Deactivate Targets change state rather than emit pulses.\n\n\
+The walker uses Restart, Cancels and depth-first delivery. Two tracks per pair follow the nominal polygon or straight path at one-second samples, then move outside at deletion. Mission load and every trigger switch-on take tracks already inside as known and report nothing. KA, KB and KC stay silent, and KE never arms, matching flight 2J. KD now uses the same cell as KF: both pass at entry + 60.1 s, recheck every 120.1 s, and fail after deletion. The frozen THD01 entry at 212.00 s is not reproduced; see testkit.rs for that model limit. These times are generator predictions, not flown measurements.\n\n\
+| Cell | Centre km from K14 | X m | Z m | Aircraft / country | Activate s | Predicted 6 km arrival s | Switches s | Delete s | Walker prediction |\n\
+|---|---|---:|---:|---|---:|---:|---|---:|---|\n");
+    let mut windows = Vec::new();
+    for (&cell, row) in RUN_SHEET_2J.iter().zip(TWO_J_CELLS) {
+        let centre = world(cell.centre_km);
+        let switches = row.switches.iter().map(|switch| format!("{} {}", if switch.block == "MCU_Activate" { "ON" } else { "OFF" }, switch.time_s))
+            .collect::<Vec<_>>().join(", ");
+        let aircraft = if row.route == ThresholdProbeRoute::Straight { "F-80C pair" } else { "Yak-9P pair" };
+        writeln!(report, "| {} | ({:.0}, {:.0}) | {:.0} | {:.0} | {aircraft} / {} | {:.1} | {:.2} | {} | {:.1} | {} |",
+            cell.key, cell.centre_km.0, cell.centre_km.1, centre.0, centre.1, row.country, row.activate_s,
+            threshold_probe_arrival_s(row), switches, row.delete_s,
+            threshold_probe_outputs(root, &log, row)).unwrap();
+        windows.push((cell.key, ticks(row.activate_s), ticks(row.delete_s), TWO_J_PAIR_SIZE));
+    }
+    report.push_str("\n## Consumer polls\n\nEvery 20 s from 60 through 780 s, one timer per cell pulses both stand-ins. Exactly one output passes each poll. KD and KF are HOT at polls 240 through 700 s, COLD otherwise. KE is always COLD. Passes leave HOT and COLD overlapping for 0.05 s between polls, as built.\n\n## Aircraft alive\n\nActivation inclusive, deletion exclusive. Counts assume no losses.\n\n| From s | Until s | Cells | Aircraft alive |\n|---:|---:|---|---:|\n");
+    let mut boundaries = BTreeSet::from([ticks(TWO_J_START_S), ticks(TWO_J_CLOSE_S)]);
+    boundaries.extend(windows.iter().flat_map(|window| [window.1, window.2]));
+    let maximum = append_probe_aircraft_intervals(&mut report, &windows, boundaries);
+    writeln!(report, "\nMost aircraft alive at once: {maximum}. Safety close has one Delete per aircraft entity, including aircraft deleted earlier.\n\n## Cues\n\n| Time s | Subtitle |\n|---:|---|").unwrap();
+    for cue in CUES.iter().filter(|cue| cue.flight == Flight::TwoJ) {
+        writeln!(report, "| {} | {} |", cue.time_s, cue.text).unwrap();
+    }
+    writeln!(report, "\n## Walker pulse schedule\n\nTimer rows are expiry/output. No waypoint arrival inputs are needed: the tracks drive the zones.\n\n| Time s | Index | Type | Name |\n|---:|---:|---|---|").unwrap();
+    for pulse in log.pulses {
+        writeln!(report, "| {:.2} | {} | {} | {} |", pulse.t as f64 / TICKS_PER_SECOND as f64, pulse.index,
+            by_id(root, pulse.index).block_type, pulse.name).unwrap();
+    }
+    report
+}
+
+fn write_threshold_probe_schedule(root: &Il2Entity) {
+    let path = Path::new("target/p14/P14_Probe_2J_schedule.md");
+    std::fs::write(path, threshold_probe_schedule(root)).expect("write flight 2J schedule");
+    use std::io::Write as _;
+    writeln!(std::io::stdout().lock(), "WROTE {}", path.display()).unwrap();
+}
+
 fn reflight_walk_input(root: &Il2Entity) -> super::testkit::WalkerInput {
     use super::shell::test_support::ticks;
     use super::testkit::{ScriptedTrack, WalkerInput};
@@ -4899,6 +5424,7 @@ fn reflight_walk_input(root: &Il2Entity) -> super::testkit::WalkerInput {
             let target = world(cell.centre_km);
             input.tracks.push(ScriptedTrack {
                 coalition: TWO_B_TRACK_COALITION,
+                country: COUNTRY_DPRK,
                 // Deletion is modeled by moving the last sample outside the
                 // zone; the walker does not simulate aircraft existence.
                 samples: (enemy.activate_s as u32..=enemy.delete_s as u32).map(|second| {
@@ -5533,9 +6059,9 @@ fn serialize_probe(root: &Il2Entity) -> String {
 }
 
 fn write_probe(flight: Flight, carrier: TraceCarrier) {
-    // Decisions 0018/0019/0020/0022: these builders test current code; their flown
+    // Decisions 0018/0019/0020/0022/0025: these builders test current code; their flown
     // artifacts must remain the evidence of the old shell/placement.
-    assert!(!flight.is_frozen(), "decisions 0018/0019/0020/0022: {} is frozen; use a new flight name", flight.stem());
+    assert!(!flight.is_frozen(), "decisions 0018/0019/0020/0022/0025: {} is frozen; use a new flight name", flight.stem());
     let dir = Path::new("target/p14");
     std::fs::create_dir_all(dir).expect("create target/p14");
     let probe = build(flight);
@@ -5616,6 +6142,7 @@ fn write_probe(flight: Flight, carrier: TraceCarrier) {
     if flight.writes_schedule() {
         match flight {
             Flight::TwoB => write_reflight_schedule(&plain_root),
+            Flight::TwoJ => write_threshold_probe_schedule(&plain_root),
             Flight::TwoC | Flight::TwoD | Flight::TwoE | Flight::TwoF | Flight::TwoG | Flight::TwoH | Flight::TwoI => write_empty_target_schedule(&plain_root, flight),
             _ => unreachable!("{}: no schedule writer", flight.stem()),
         }
@@ -5867,6 +6394,12 @@ fn write_p14_probe_2i() {
     write_probe(Flight::TwoI, TraceCarrier::default());
 }
 
+#[test]
+#[ignore = "writes target/p14 flight 2J and its run sheet and schedule"]
+fn write_p14_probe_2j() {
+    write_probe(Flight::TwoJ, TraceCarrier::default());
+}
+
 fn build_load_probe() -> Probe {
     use super::assemble::{assemble_side, emit_side_logic};
     use super::library::builtin_library;
@@ -6010,6 +6543,7 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     for flight in Flight::ALL {
         // 0018 freezes flight 2's shell; 0019 freezes placement in 1M,
         // 2B, 2C and 2D. 0020/0022 freeze 2E and 2G's placed Pairs.
+        // 0025 freezes 2J after removing the cell KD and KE flew.
         // Load is unflown. All other flown files regenerate, including 2F and 2H.
         if !flight.regenerates_flown_files() {
             continue;
@@ -6046,7 +6580,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     // excluded by 0018. The remaining flights use unchanged or frozen inputs.
     // 2F (flown 2026-10-17) and 2H (flown 2026-10-18) add four files each.
     // 0020/0022 remove 2E and 2G's eight files from the previous total of 56.
-    // 2I (flown 2026-10-18) adds four files.
+    // 2I (flown 2026-10-18) adds four files. 0025 freezes 2J, removing its
+    // four flown files from the previous total of 56.
     assert_eq!(compared, 52);
 }
 
@@ -6401,7 +6936,7 @@ fn flight2c_spawn_is_nato_and_cannot_trip_zones() {
         assert_eq!(zone.property("Closer"), Some("1"));
         assert_eq!(number(zone, "Zone"), 35_000.0);
         let (x, z) = zone.pos_xz().unwrap();
-        input.tracks.push(ScriptedTrack { coalition: 2, samples: vec![(ticks(0.0), x, z)] });
+        input.tracks.push(ScriptedTrack { coalition: 2, country: COUNTRY_USA, samples: vec![(ticks(0.0), x, z)] });
     }
     let log = walk(&root, WalkerConfig::default(), &input);
     for cell in ["C0a", "C0b", "C0c", "C1a", "C1b", "C1c", "C2a", "C2b", "C2c", "C3a", "C3b", "C3c"] {
@@ -7025,6 +7560,496 @@ fn flight2e_run_sheet_and_cues_match_plan() {
         "EY keeps its shipped 300 s attack", "DONE HUB at 720.5 s, DELETE DELAY at 781.1 s",
         "Formation commands as written", "both attack timers are observed", "Predicted pulse and command schedule",
     ] { assert!(report.contains(line), "flight 2E run sheet missing {line}"); }
+}
+
+#[test]
+fn flight2j_cells_countries_radii_and_switches_match_table() {
+    let root = generate_probe_2j();
+    assert_eq!(Flight::TwoJ.stem(), "P14_Probe_2J");
+    assert!(Flight::ALL.contains(&Flight::TwoJ));
+    assert!(Flight::TwoJ.is_frozen());
+    assert!(!Flight::TwoJ.regenerates_flown_files()); // 0025 keeps the flown record.
+    assert!(Flight::TwoJ.writes_schedule());
+    assert_eq!(RUN_SHEET_2J.len(), 6);
+    assert_eq!(TWO_J_CELLS.len(), 6);
+    for ((cell, row), (key, km, country, activate, delete, prefix)) in RUN_SHEET_2J.iter().zip(TWO_J_CELLS).zip([
+        ("KA", (140.0, -90.0), 601, 30.0, 900.0, None),
+        ("KB", (230.0, -90.0), 601, 400.0, 780.0, None),
+        ("KC", (140.0, 0.0), 602, 30.0, 900.0, None),
+        ("KD", (230.0, 0.0), 601, 60.0, 600.0, Some("THD01")),
+        ("KE", (140.0, -45.0), 602, 60.0, 600.0, Some("THD02")),
+        ("KF", (230.0, -45.0), 601, 60.0, 600.0, Some("THD03")),
+    ]) {
+        assert_eq!((cell.key, cell.centre_km, cell.close_s), (key, km, 900.0), "{key}: cell");
+        assert_eq!((row.cell, row.country, row.activate_s, row.delete_s), (key, country, activate, delete), "{key}: aircraft window");
+        assert_eq!(row.threshold_prefix, prefix, "{key}: threshold prefix");
+        let copy = named(&root, &format!("{key} pair"));
+        assert_eq!(copy.count_block_type("Plane"), 2, "{key}: pair");
+        for plane in block_ids(copy, "Plane") {
+            let plane = by_id(copy, plane);
+            assert_eq!(number(plane, "Country"), f64::from(country), "{key}: country");
+            assert_eq!(plane.property("Engageable"), Some("0"), "{key}: non-targetable");
+            assert_eq!(plane.property("AiRTBDecision"), Some("0"), "{key}: remains controllable");
+            assert_eq!(number(plane, "YPos"), 3050.0, "{key}: altitude");
+        }
+        let trigger_name = prefix.map_or_else(|| format!("{key}-CT"), |prefix| format!("{prefix} TRIGGER"));
+        let trigger = named(&root, &trigger_name);
+        assert_eq!(trigger.pos_xz(), Some(world(km)), "{key}: trigger centre");
+        assert_eq!(number(trigger, "Radius"), 6000.0, "{key}: radius");
+        assert_eq!(trigger.property("Country"), Some("601"), "{key}: watched country");
+        assert_eq!(trigger.property("Cylinder"), Some("1"), "{key}: cylinder");
+        if let Some(prefix) = prefix {
+            let inner = named(&root, &format!("{prefix} INNER"));
+            assert_eq!(inner.block_type, "MCU_CheckZone", "{key}: presence check");
+            assert_eq!(inner.pos_xz(), Some(world(km)), "{key}: inner centre");
+            assert_eq!(number(inner, "Zone"), 6000.0, "{key}: inner radius");
+            assert_eq!(inner.property("PlaneCoalitions"), Some("[2]"), "{key}: inner coalition");
+        }
+        assert_eq!(named(&root, &format!("{key} map")).property("Coalitions"), Some("[2]"), "{key}: NATO map icon");
+    }
+    for (cell, switches, control) in [
+        ("KA", vec![("OFF", 5.0), ("ON", 180.0), ("OFF", 200.0), ("ON", 240.0), ("OFF", 260.0), ("ON", 300.0), ("OFF", 320.0)], 190.0),
+        ("KB", vec![("OFF", 5.0), ("ON", 700.0), ("OFF", 720.0)], 560.0),
+        ("KC", vec![("OFF", 5.0), ("ON", 180.0), ("OFF", 200.0)], 190.0),
+    ] {
+        let row = TWO_J_CELLS.iter().find(|row| row.cell == cell).unwrap();
+        assert_eq!(row.switches.len(), switches.len(), "{cell}: switch count");
+        for (switch, (state, time)) in row.switches.iter().zip(switches) {
+            let block = if state == "ON" { "MCU_Activate" } else { "MCU_Deactivate" };
+            assert_eq!((switch.block, switch.time_s), (block, time), "{cell}: switch");
+            let name = format!("{cell}-CT {state} {time}");
+            let action = named(&root, &name);
+            assert_eq!(action.block_type, block, "{cell}: switch type");
+            assert_eq!(action.targets, [id(&root, &format!("{cell}-CT"))], "{cell}: switch target");
+            assert_at(&root, &format!("{name} AT"), time, &[action.index.unwrap()]);
+        }
+        let zone = named(&root, &format!("{cell}-Z"));
+        assert_eq!(number(zone, "Zone"), 6000.0, "{cell}: control radius");
+        assert_eq!(zone.property("Closer"), Some("1"), "{cell}: control closer");
+        assert_eq!(zone.property("PlaneCoalitions"), Some("[2]"), "{cell}: control coalition");
+        assert_at(&root, &format!("{cell}-Z PULSE"), control, &[zone.index.unwrap()]);
+    }
+}
+
+#[test]
+fn flight2j_complex_triggers_equal_flight1n_shape() {
+    let original = generate_probe_1n();
+    let root = generate_probe_2j();
+    let reference = named(&original, "YN-CT");
+    for (cell, km) in [("KA", (140.0, -90.0)), ("KB", (230.0, -90.0)), ("KC", (140.0, 0.0))] {
+        let actual = named(&root, &format!("{cell}-CT"));
+        let mut expected = reference.clone();
+        expected.index = actual.index;
+        expected.set_property("Index", actual.index.unwrap().to_string());
+        expected.set_name(&format!("{cell}-CT"));
+        let centre = world(km);
+        expected.set_property("XPos", format!("{:.3}", centre.0));
+        expected.set_property("ZPos", format!("{:.3}", centre.1));
+        expected.set_property("Radius", "6000");
+        expected.set_property("Country", "601");
+        expected.children.clear();
+        for (event, role) in [(58, "ENTERED"), (60, "LEFT")] {
+            attach_event(&mut expected, event, id(&root, &format!("{cell}-CT {role}")));
+        }
+        assert_eq!(serialize_group(actual), serialize_group(&expected), "{cell}: 1N reference shape and only OnEvents outputs");
+        assert!(actual.targets.is_empty(), "{cell}: no Targets output");
+        assert_eq!(actual.properties.iter().filter(|(key, _)| key == "Enabled").count(), 2, "{cell}: duplicate Enabled retained");
+    }
+}
+
+#[test]
+fn flight2j_flown_zone_pulse_cell_matches_the_builder() {
+    use super::{AirSide, SideLogic, Strategies, ThresholdSpec};
+    use std::collections::BTreeMap;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct CellNode {
+        block_type: String,
+        properties: Vec<(String, String)>,
+        children: Vec<CellNode>,
+    }
+
+    fn normalized(node: &Il2Entity, labels: &BTreeMap<i32, String>, observations: &BTreeSet<i32>) -> CellNode {
+        let label = |index: &i32| labels.get(index)
+            .unwrap_or_else(|| panic!("{:?}: unregistered link {index}", node.name()));
+        CellNode {
+            block_type: node.block_type.clone(),
+            // Preserve property order, duplicate keys (including Enabled), and
+            // every value except Index and the names/links normalized below.
+            properties: node.properties.iter().filter_map(|(key, value)| {
+                let value = match key.as_str() {
+                    "Index" => return None,
+                    "Name" => format!("\"{}\"", label(&node.index.unwrap())),
+                    "Targets" => format!("{:?}", node.targets.iter()
+                        .filter(|index| labels.contains_key(index) || !observations.contains(index))
+                        .map(label).collect::<Vec<_>>()),
+                    "Objects" => format!("{:?}", node.objects.iter().map(label).collect::<Vec<_>>()),
+                    "TarId" => label(&value.parse().unwrap()).clone(),
+                    _ => value.clone(),
+                };
+                Some((key.clone(), value))
+            }).collect(),
+            // OnEvents/OnEvent retain their block types, Type and all other
+            // properties; TarId is resolved to the same role labels as Targets.
+            children: node.children.iter().map(|child| normalized(child, labels, observations)).collect(),
+        }
+    }
+
+    let flown = flown_formation_probe(Flight::TwoJ);
+    let cell = named(&flown, "KF");
+    let mut logic = SideLogic::default();
+    // The flown probe registered one HOT relay, one COLD relay and one pass
+    // subscriber, with HOT in init_off. Use unrelated IDs to test role mapping.
+    logic.hot_consumers.insert(1, vec![1]);
+    logic.cold_consumers.insert(1, vec![2]);
+    logic.pass_subscribers.insert(1, vec![3]);
+    logic.init_off.push(1);
+    let mut next = 4;
+    let built = super::threshold::build_side(AirSide::Dprk, &[world((230.0, -45.0))],
+        &ThresholdSpec::default(), &Strategies::default(), &mut logic, &mut next).unwrap();
+    assert_eq!(built.len(), 19, "flown ZonePulse cell MCU count");
+    let mut built_labels = BTreeMap::new();
+    let mut flown_labels = BTreeMap::new();
+    for (index, role) in [(1, "HOT consumer"), (2, "COLD consumer"), (3, "SUBSCRIBER")] {
+        built_labels.insert(index, role.to_owned());
+        flown_labels.insert(id(cell, &format!("THD03 {role}")), role.to_owned());
+    }
+    for node in &built {
+        let role = node.name().unwrap().strip_prefix("THD01 ").unwrap();
+        assert!(built_labels.insert(node.index.unwrap(), role.to_owned()).is_none());
+        assert!(flown_labels.insert(id(cell, &format!("THD03 {role}")), role.to_owned()).is_none());
+    }
+
+    // Only ignore Targets outside the cell/registrations that are identified
+    // by the frozen sidecar's breadcrumb_index (MissionObjective MCUs), or the
+    // three exact observation subtitle names below. Never discard an unknown
+    // link just because it is external; Objects and OnEvents must all resolve.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("handoff/p14-probes/flight2j/P14_Probe_2J_traced.trace.json");
+    let map = trace::read_trace_sidecar(&path).unwrap();
+    let mut observations: BTreeSet<_> = map.entries.iter().map(|entry| {
+        assert_eq!(by_id(&flown, entry.breadcrumb_index).block_type, "MCU_TR_MissionObjective");
+        entry.breadcrumb_index
+    }).collect();
+    for role in ["poll HOT", "poll COLD", "passed"] {
+        let subtitle = named(cell, &format!("THD03 {role}"));
+        assert_eq!(subtitle.block_type, "MCU_TR_Subtitle");
+        observations.insert(subtitle.index.unwrap());
+    }
+    for expected in &built {
+        let role = &built_labels[&expected.index.unwrap()];
+        let actual = named(cell, &format!("THD03 {role}"));
+        assert_eq!(normalized(actual, &flown_labels, &observations),
+            normalized(expected, &built_labels, &BTreeSet::new()), "flown THD03 {role}");
+    }
+}
+
+#[test]
+fn flight2j_routes_land_and_full_segment_separation() {
+    fn distance(point: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+        let dx = b.0 - a.0;
+        let dz = b.1 - a.1;
+        let length2 = dx * dx + dz * dz;
+        let ratio = if length2 == 0.0 { 0.0 } else {
+            (((point.0 - a.0) * dx + (point.1 - a.1) * dz) / length2).clamp(0.0, 1.0)
+        };
+        (point.0 - a.0 - ratio * dx).hypot(point.1 - a.1 - ratio * dz)
+    }
+    let root = generate_probe_2j();
+    let terrain = crate::watermap::TerrainMap::builtin().unwrap();
+    for &cell in RUN_SHEET_2J {
+        let centre = world(cell.centre_km);
+        assert!(terrain.is_land_xz(centre.0, centre.1), "{}: centre over water", cell.key);
+        let pair = named(&root, &format!("{} pair", cell.key));
+        let planes = block_ids(pair, "Plane");
+        let lead = by_id(pair, planes[0]).pos_xz().unwrap();
+        let mut segments = Vec::new();
+        if cell.key == "KB" {
+            assert_eq!(lead, (centre.0 - 30_000.0, centre.1), "KB: start 30 km before centre");
+            for wp in block_ids(pair, "MCU_Waypoint") {
+                let wp = by_id(pair, wp);
+                assert_eq!(number(wp, "Speed"), 660.0, "KB: waypoint speed");
+                assert_eq!(wp.pos_xz(), Some((centre.0 + 30_000.0, centre.1)), "KB: end 30 km beyond centre");
+                assert!(wp.targets.is_empty(), "KB: no attack after the straight pass");
+                segments.push((lead, wp.pos_xz().unwrap()));
+            }
+        } else {
+            let waypoints: Vec<_> = (1..=8).map(|index| named(&root, &format!("{} pair ORBIT {index}", cell.key))).collect();
+            for (index, wp) in waypoints.iter().enumerate() {
+                let point = wp.pos_xz().unwrap();
+                assert!(((point.0 - centre.0).hypot(point.1 - centre.1) - 2000.0).abs() < 0.001, "{}: centred 2 km octagon", cell.key);
+                assert_eq!(number(wp, "Speed"), 500.0, "{}: orbit speed", cell.key);
+                assert_eq!(number(wp, "YPos"), 3050.0, "{}: orbit altitude", cell.key);
+                assert_eq!(wp.targets, [waypoints[(index + 1) % 8].index.unwrap()], "{}: closed loop", cell.key);
+                segments.push((point, waypoints[(index + 1) % 8].pos_xz().unwrap()));
+            }
+            let formation = named(&root, &format!("{} pair FORMATION", cell.key));
+            assert_eq!(formation.property("FormationType"), Some("19"), "{}: Pairs", cell.key);
+            assert_eq!(formation.property("FormationDensity"), Some("2"), "{}: Loose", cell.key);
+            let first = if matches!(cell.key, "KA" | "KC") { 1 } else { 6 };
+            let orders = named(&root, &format!("{} pair ORDERS", cell.key));
+            assert_eq!(orders.targets, [formation.index.unwrap(), waypoints[first].index.unwrap()], "{}: first orders", cell.key);
+            if first == 6 {
+                assert_eq!(lead, (centre.0 - 20_000.0, centre.1), "{}: 20 km approach", cell.key);
+            } else {
+                assert_eq!(lead, (centre.0, centre.1 - 2000.0), "{}: already on loop", cell.key);
+            }
+            segments.push((lead, waypoints[first].pos_xz().unwrap()));
+        }
+        for other in RUN_SHEET_2J.iter().filter(|other| other.key != cell.key) {
+            let point = world(other.centre_km);
+            assert!((point.0 - centre.0).hypot(point.1 - centre.1) >= 40_000.0, "{}/{}: centre separation", cell.key, other.key);
+            // Include both copied formation slots, conservatively translating
+            // every full line segment by each aircraft's initial offset.
+            for plane in &planes {
+                let slot = by_id(pair, *plane).pos_xz().unwrap();
+                let offset = (slot.0 - lead.0, slot.1 - lead.1);
+                for &(a, b) in &segments {
+                    assert!(distance(point, (a.0 + offset.0, a.1 + offset.1), (b.0 + offset.0, b.1 + offset.1)) >= 15_000.0,
+                        "{}/{}: aircraft {plane} route too close", cell.key, other.key);
+                }
+            }
+        }
+    }
+}
+
+fn assert_threshold_probe_times(root: &Il2Entity, log: &super::testkit::WalkerLog, name: &str, seconds: &[f64]) {
+    use super::shell::test_support::{ticks, times};
+    assert_eq!(times(log, id(root, name)), seconds.iter().map(|&second| ticks(second)).collect::<Vec<_>>(), "flight 2J {name}");
+}
+
+#[test]
+fn flight2j_walks_every_cell() {
+    let root = generate_probe_2j();
+    let log = threshold_probe_walk(&root);
+    // Flight 2J: KA's three switch-ons, KB's off-time crossing and KC's AI
+    // country all stay silent. The controls still find their pairs inside.
+    for cell in ["KA", "KB", "KC"] {
+        for event in ["ENTERED", "LEFT"] {
+            assert_threshold_probe_times(&root, &log, &format!("{cell}-CT {event}"), &[]);
+        }
+    }
+    for count in 2..=6 {
+        assert_threshold_probe_times(&root, &log, &format!("READ KA-CT entered {count}+"), &[]);
+    }
+    for (name, time) in [("KA-Z", 190.0), ("KB-Z", 560.0), ("KC-Z", 190.0)] {
+        assert_threshold_probe_times(&root, &log, name, &[time]);
+    }
+    for prefix in ["THD01", "THD03"] {
+        assert_threshold_probe_times(&root, &log, &format!("{prefix} ARM"), &[161.0]);
+        assert_threshold_probe_times(&root, &log, &format!("{prefix} CHECK ON"), &[221.0, 341.1, 461.2, 581.3, 701.4]);
+        for role in ["INNER", "HOT ON", "SUBSCRIBER"] {
+            assert_threshold_probe_times(&root, &log, &format!("{prefix} {role}"), &[221.1, 341.2, 461.3, 581.4]);
+        }
+        for role in ["CLOSE DELAY", "COLD ON", "REARM ON"] {
+            assert_threshold_probe_times(&root, &log, &format!("{prefix} {role}"), &[703.45]);
+        }
+    }
+    for role in ["ARM", "INNER", "CHECK ON", "CLOSE DELAY", "HOT ON", "COLD ON", "REARM ON", "SUBSCRIBER"] {
+        assert_threshold_probe_times(&root, &log, &format!("THD02 {role}"), &[]);
+    }
+}
+
+#[test]
+fn flight2j_frozen_files_keep_flown_threshold_cells() {
+    assert_frozen_files_parse_and_links_resolve(Flight::TwoJ);
+    let flown = flown_formation_probe(Flight::TwoJ);
+    assert_eq!(flown.count_block_type("MCU_TR_ComplexTrigger"), 6);
+    assert_eq!(named(&flown, "THD01 SEEN").block_type, "MCU_Timer");
+    for (cell, prefix, zones) in [("KD", "THD01", 0), ("KE", "THD02", 0), ("KF", "THD03", 1)] {
+        let group = named(&flown, cell);
+        assert_eq!(group.count_block_type("MCU_TR_ComplexTrigger"), 1, "{cell}: flown trigger");
+        assert_eq!(group.count_block_type("MCU_CheckZone"), zones, "{cell}: flown presence check");
+        assert_eq!(named(group, &format!("{prefix} TRIGGER")).property("Country"), Some("601"));
+    }
+    for cell in ["KA", "KB", "KC"] {
+        assert_eq!(named(&flown, &format!("{cell}-CT")).block_type, "MCU_TR_ComplexTrigger");
+    }
+}
+
+#[test]
+fn flight2j_polls_pass_exactly_one_consumer_with_predicted_state() {
+    use super::shell::test_support::{ticks, times};
+    let root = generate_probe_2j();
+    let log = threshold_probe_walk(&root);
+    for prefix in ["THD01", "THD02", "THD03"] {
+        let hot = times(&log, id(&root, &format!("{prefix} poll HOT")));
+        let cold = times(&log, id(&root, &format!("{prefix} poll COLD")));
+        assert_eq!(hot.len() + cold.len(), 37, "{prefix}: 37 polls, one output each");
+        for second in (60..=780).step_by(20) {
+            let tick = ticks(f64::from(second));
+            let expected_hot = prefix != "THD02" && (240..=700).contains(&second);
+            assert_eq!((hot.contains(&tick), cold.contains(&tick)), (expected_hot, !expected_hot), "{prefix}: poll at {second} s");
+            let snapshot = log.snapshots.iter().find(|snapshot| snapshot.t == tick).unwrap();
+            assert_eq!((snapshot.active[&id(&root, &format!("{prefix} HOT consumer"))], snapshot.active[&id(&root, &format!("{prefix} COLD consumer"))]),
+                (expected_hot, !expected_hot), "{prefix}: consumer state at {second} s");
+        }
+    }
+}
+
+#[test]
+fn flight2j_names_links_breadcrumbs_and_close_are_sound() {
+    use super::shell::test_support::times;
+    use super::testkit::assert_links_resolve;
+    let probe = build(Flight::TwoJ);
+    let plain = probe.root.clone();
+    let sources = probe.sources.clone();
+    let (traced, map) = probe.traced(TraceCarrier::default());
+    assert_eq!(plain.count_block_type("Plane"), 12);
+    assert!(Flight::TwoJ.spawns().is_empty());
+    assert_eq!(spawn_json(Flight::TwoJ), "[]\n");
+    assert_eq!(plain.children.iter().filter(|node| node.block_type == "MCU_TR_MissionBegin").count(), 2,
+        "one probe Mission Begin and one shared threshold Mission Begin");
+    let begin = named(&plain, "KD KE Translator Mission Begin");
+    let init = named(&plain, "AT D INIT");
+    let off = named(&plain, "AT D INIT OFF");
+    assert_eq!(begin.targets, [init.index.unwrap()]);
+    assert_eq!(number(init, "Time"), 0.5);
+    assert_eq!(init.targets, [off.index.unwrap()]);
+    assert_eq!(off.targets, ["THD01", "THD02", "THD03"].map(|prefix| id(&plain, &format!("{prefix} HOT consumer"))),
+        "one side initialization covers all three cells");
+    for root in [&plain, &traced] {
+        let mut indexes = HashSet::new();
+        let mut names = HashSet::new();
+        root.for_each(&mut |node| {
+            if let Some(index) = node.index {
+                assert!(indexes.insert(index), "2J: duplicate Index {index}");
+                if let Some(name) = node.name() {
+                    assert!(names.insert(name.to_owned()), "2J: duplicate name {name}");
+                }
+            }
+        });
+        assert_links_resolve(root);
+        root.for_each(&mut |node| {
+            for key in ["LinkTrId", "MisObjID", "TarId", "CmdId"] {
+                if let Some(value) = node.property(key) {
+                    assert!(indexes.contains(&value.parse::<i32>().unwrap()), "2J {:?}: unresolved {key}", node.name());
+                }
+            }
+        });
+    }
+    let breadcrumbs: HashSet<_> = map.entries.iter().map(|entry| entry.breadcrumb_index).collect();
+    let mut stripped = traced.clone();
+    remove_ids(&mut stripped, &breadcrumbs);
+    assert_eq!(serialize_group(&stripped), serialize_group(&plain), "2J: instrumentation only appends breadcrumb links");
+    assert_eq!(map.entries.len(), sources.len(), "2J: every requested observation appears exactly once");
+    let plain_log = threshold_probe_walk(&plain);
+    let traced_log = threshold_probe_walk(&traced);
+    for source in &sources {
+        let entries: Vec<_> = map.entries.iter().filter(|entry| entry.source_index == source.index).collect();
+        assert_eq!(entries.len(), 1, "{}: one breadcrumb", source.name);
+        assert_eq!(times(&traced_log, entries[0].breadcrumb_index), times(&plain_log, source.index), "{}: breadcrumb actually pulses", source.name);
+    }
+    plain.for_each(&mut |node| {
+        if let Some(index) = node.index {
+            assert_eq!(times(&traced_log, index), times(&plain_log, index), "{:?}: tracing leaves behaviour unchanged", node.name());
+        }
+    });
+    for cell in ["KA", "KB", "KC", "KD", "KE", "KF"] {
+        let group = named(&plain, cell);
+        let entities: BTreeSet<_> = block_ids(group, "MCU_TR_Entity").into_iter().collect();
+        let close = named(&plain, &format!("{cell} CLOSE"));
+        assert_eq!(number(close, "Time"), 900.0, "{cell}: close time");
+        let deletes: Vec<_> = close.targets.iter().map(|&index| by_id(&plain, index))
+            .filter(|node| node.block_type == "MCU_Delete").collect();
+        assert_eq!(deletes.len(), 2, "{cell}: one safety Delete per entity");
+        assert!(deletes.iter().all(|node| node.objects.len() == 1), "{cell}: individual Deletes");
+        assert_eq!(deletes.iter().flat_map(|node| node.objects.iter().copied()).collect::<BTreeSet<_>>(), entities, "{cell}: close covers every aircraft");
+    }
+}
+
+#[test]
+fn flight2j_tracks_arrivals_deletes_and_twelve_aircraft_limit() {
+    use super::shell::test_support::ticks;
+    let root = generate_probe_2j();
+    let log = threshold_probe_walk(&root);
+    let input = threshold_probe_walk_input();
+    assert_eq!(input.tracks.len(), 12);
+    for (cell, activate, delete) in [
+        ("KA", 30.0, 900.0), ("KB", 400.0, 780.0), ("KC", 30.0, 900.0),
+        ("KD", 60.0, 600.0), ("KE", 60.0, 600.0), ("KF", 60.0, 600.0),
+    ] {
+        for entity in block_ids(named(&root, cell), "MCU_TR_Entity") {
+            let command_times = |kind| log.pulses.iter().filter(|pulse| {
+                let node = by_id(&root, pulse.index);
+                node.block_type == kind && node.objects.contains(&entity)
+            }).map(|pulse| pulse.t).collect::<Vec<_>>();
+            assert_eq!(command_times("MCU_Activate"), [ticks(activate)], "{cell}: entity {entity} activation");
+            let expected = if delete == 900.0 { vec![ticks(900.0)] } else { vec![ticks(delete), ticks(900.0)] };
+            assert_eq!(command_times("MCU_Delete"), expected, "{cell}: entity {entity} early and safety Deletes");
+        }
+    }
+    for ((cell, row), tracks) in RUN_SHEET_2J.iter().zip(TWO_J_CELLS).zip(input.tracks.chunks(2)) {
+        let centre = world(cell.centre_km);
+        for track in tracks {
+            assert_eq!(track.coalition, 2, "{}: NATO track", cell.key);
+            assert_eq!(track.country, row.country, "{}: country track", cell.key);
+            let inside: Vec<_> = track.samples.iter().filter(|&&(_, x, z)| (x - centre.0).hypot(z - centre.1) <= 6000.0).collect();
+            let (first, last) = match cell.key {
+                "KA" | "KC" => (30.0, 899.0), "KB" => (531.0, 596.0), _ => (161.0, 599.0),
+            };
+            assert_eq!((inside.first().unwrap().0, inside.last().unwrap().0), (ticks(first), ticks(last)), "{}: actual scripted inside window", cell.key);
+            assert_eq!(track.samples.iter().find(|sample| sample.0 == ticks(row.delete_s)).unwrap().1, centre.0 + 100_000.0, "{}: track leaves exactly at Delete", cell.key);
+        }
+    }
+    let entities: HashSet<_> = block_ids(&root, "MCU_TR_Entity").into_iter().collect();
+    let mut alive = BTreeSet::new();
+    let mut maximum = 0;
+    for pulse in &log.pulses {
+        let node = by_id(&root, pulse.index);
+        for &entity in node.objects.iter().filter(|entity| entities.contains(entity)) {
+            match node.block_type.as_str() {
+                "MCU_Activate" => { alive.insert(entity); }
+                "MCU_Delete" => { alive.remove(&entity); }
+                _ => {}
+            }
+        }
+        maximum = maximum.max(alive.len());
+        assert!(alive.len() <= 12, "2J: aircraft cap at {}", pulse.t);
+    }
+    assert_eq!(maximum, 12);
+    assert!(alive.is_empty(), "2J: safety close deletes all aircraft");
+    for (name, second) in [("KD pair DELETE AT", 600.0), ("KE pair DELETE AT", 600.0), ("KF pair DELETE AT", 600.0), ("KB pair DELETE AT", 780.0)] {
+        assert_threshold_probe_times(&root, &log, name, &[second]);
+    }
+}
+
+#[test]
+fn flight2j_run_sheet_and_cues_match_plan() {
+    let root = generate_probe_2j();
+    assert_eq!((TWO_J_LEAVE_S, TWO_J_CLOSE_S), (810.0, 900.0));
+    let cues: Vec<_> = CUES.iter().filter(|cue| cue.flight == Flight::TwoJ).map(|cue| (cue.time_s, cue.text)).collect();
+    assert_eq!(cues, [
+        (0.0, "Flight 2J: spectate. No recording needed. Leave the server at 13:30"),
+        (180.0, "Flight 2J: KA and KC triggers switched on"),
+        (600.0, "Flight 2J: KD KE KF pairs deleted. Expect KD and KF to go COLD by 13:00"),
+        (780.0, "Flight 2J: leave the server at 13:30"),
+        (900.0, "Flight 2J closed. Every aircraft has a Delete. End the mission normally"),
+    ]);
+    let log = threshold_probe_walk(&root);
+    let report = threshold_probe_schedule(&root);
+    for (second, text) in cues {
+        assert_threshold_probe_times(&root, &log, text, &[second]);
+        assert!(report.contains(&format!("| {second} | {text} |")), "2J: schedule cue {text}");
+    }
+    for line in [
+        "| KA | (140, -90) | 245934 | 179477 | Yak-9P pair / 601 | 30.0 | 30.00 | OFF 5, ON 180, OFF 200, ON 240, OFF 260, ON 300, OFF 320 | 900.0 |",
+        "| KB | (230, -90) | 335934 | 179477 | F-80C pair / 601 | 400.0 | 530.91 | OFF 5, ON 700, OFF 720 | 780.0 |",
+        "| KC | (140, 0) | 245934 | 269477 | Yak-9P pair / 602 | 30.0 | 30.00 |",
+        "| KD | (230, 0) | 335934 | 269477 | Yak-9P pair / 601 | 60.0 | 160.80 |",
+        "| KE | (140, -45) | 245934 | 224477 | Yak-9P pair / 602 | 60.0 | 160.80 |",
+        "| KF | (230, -45) | 335934 | 224477 | Yak-9P pair / 601 | 60.0 | 160.80 |",
+        "KA-CT ENTERED: silent", "KB-CT ENTERED: silent", "KC-CT ENTERED: silent",
+        "THD01 CLOSE DELAY: 703.45", "THD02 ARM: silent", "THD03 CLOSE DELAY: 703.45",
+        "| 0.0 | 30.0 | none | 0 |", "| 30.0 | 60.0 | KA, KC | 4 |",
+        "| 60.0 | 400.0 | KA, KC, KD, KE, KF | 10 |", "| 400.0 | 600.0 | KA, KB, KC, KD, KE, KF | 12 |",
+        "| 600.0 | 780.0 | KA, KB, KC | 6 |", "| 780.0 | 900.0 | KA, KC | 4 |",
+        "Most aircraft alive at once: 12", "## Walker pulse schedule", "flown 2J files are frozen",
+        "build_side(Dprk, [KD, KE, KF], default spec)", "named THD01, THD02 and THD03 by the builder",
+        "One SideLogic registry feeds one emit_side_logic call",
+    ] {
+        assert!(report.contains(line), "2J schedule missing {line}");
+    }
 }
 
 #[test]
@@ -9531,6 +10556,7 @@ fn probe_files_parse_and_links_resolve() {
         (Flight::TwoG, generate_probe_2g()),
         (Flight::TwoH, generate_probe_2h()),
         (Flight::TwoI, generate_probe_2i()),
+        (Flight::TwoJ, generate_probe_2j()),
         (Flight::Load, build(Flight::Load).root),
     ] {
         let (traced, _) = build(flight).traced(TraceCarrier::default());
@@ -12422,6 +13448,12 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::TwoI, "IY2", (140.0, 0.0), 150.0, 2100.0),
         (Flight::TwoI, "IY3", (230.0, 0.0), 800.0, 2100.0),
         (Flight::TwoI, "IY4", (140.0, 0.0), 830.0, 2100.0),
+        (Flight::TwoJ, "KA", (140.0, -90.0), 5.0, 900.0),
+        (Flight::TwoJ, "KB", (230.0, -90.0), 5.0, 900.0),
+        (Flight::TwoJ, "KC", (140.0, 0.0), 5.0, 900.0),
+        (Flight::TwoJ, "KD", (230.0, 0.0), 60.0, 900.0),
+        (Flight::TwoJ, "KE", (140.0, -45.0), 60.0, 900.0),
+        (Flight::TwoJ, "KF", (230.0, -45.0), 60.0, 900.0),
     ];
     let expected_cues = [
         (
@@ -12616,6 +13648,11 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::TwoI, 830.0, "Flight 2I: IY4 starts (Yak as shipped)"),
         (Flight::TwoI, 1650.0, "Flight 2I: leave the server at 28:00"),
         (Flight::TwoI, 2100.0, "Flight 2I closed. Every aircraft has a Delete. End the mission normally"),
+        (Flight::TwoJ, 0.0, "Flight 2J: spectate. No recording needed. Leave the server at 13:30"),
+        (Flight::TwoJ, 180.0, "Flight 2J: KA and KC triggers switched on"),
+        (Flight::TwoJ, 600.0, "Flight 2J: KD KE KF pairs deleted. Expect KD and KF to go COLD by 13:00"),
+        (Flight::TwoJ, 780.0, "Flight 2J: leave the server at 13:30"),
+        (Flight::TwoJ, 900.0, "Flight 2J closed. Every aircraft has a Delete. End the mission normally"),
     ];
     assert_eq!(CUES.len(), expected_cues.len());
     for (&cue, &(flight, time_s, text)) in CUES.iter().zip(&expected_cues) {

@@ -20,16 +20,18 @@ fn f80_transit_with_override(radius_m: f64, cruise_override_kmh: Option<f64>) ->
     2.0 * radius_m / (speed_kmh / 3.6)
 }
 
-/// Window/dwell default independently to the rounded transit. Hold defaults to
-/// twice the effective window, including a manual window override (H = 2W).
+/// U24: dwell defaults to the inner-radius transit rounded up to 10 seconds;
+/// hold defaults to twice the effective dwell, including its manual override.
+/// The step 12 window still uses the outer-radius transit. Overrides win.
 pub fn derived_timing(t: &ThresholdSpec) -> DerivedTiming {
-    let rounded_s = (f80_transit_s(t.radius_m) / 10.0).ceil() * 10.0;
-    let window_s = t.window_s.unwrap_or(rounded_s);
+    let rounded_transit = |radius| (f80_transit_s(radius) / 10.0).ceil() * 10.0;
+    let inner_m = t.radius_m * t.inner_ratio;
+    let dwell_s = t.dwell_s.unwrap_or_else(|| rounded_transit(inner_m));
     DerivedTiming {
-        window_s,
-        dwell_s: t.dwell_s.unwrap_or(rounded_s),
-        hold_s: t.hold_s.unwrap_or(2.0 * window_s),
-        inner_m: t.radius_m * t.inner_ratio,
+        window_s: t.window_s.unwrap_or_else(|| rounded_transit(t.radius_m)),
+        dwell_s,
+        hold_s: t.hold_s.unwrap_or(2.0 * dwell_s),
+        inner_m,
     }
 }
 
@@ -48,8 +50,8 @@ mod tests {
                 }),
                 DerivedTiming {
                     window_s,
-                    dwell_s: window_s,
-                    hold_s: 2.0 * window_s,
+                    dwell_s: window_s / 2.0,
+                    hold_s: window_s,
                     inner_m: radius_m / 2.0
                 }
             );
@@ -62,8 +64,8 @@ mod tests {
             derived_timing(&t),
             DerivedTiming {
                 window_s: 70.0,
-                dwell_s: 120.0,
-                hold_s: 140.0,
+                dwell_s: 60.0,
+                hold_s: 120.0,
                 inner_m: 6000.0,
             }
         );
@@ -74,7 +76,7 @@ mod tests {
             DerivedTiming {
                 window_s: 120.0,
                 dwell_s: 85.0,
-                hold_s: 240.0,
+                hold_s: 170.0,
                 inner_m: 6000.0,
             }
         );
@@ -97,6 +99,18 @@ mod tests {
         assert_eq!(
             (derived.window_s, derived.dwell_s, derived.hold_s),
             (0.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            derived_timing(&ThresholdSpec {
+                inner_ratio: 0.4,
+                ..ThresholdSpec::default()
+            }),
+            DerivedTiming {
+                window_s: 120.0,
+                dwell_s: 50.0,
+                hold_s: 100.0,
+                inner_m: 4800.0,
+            }
         );
     }
 

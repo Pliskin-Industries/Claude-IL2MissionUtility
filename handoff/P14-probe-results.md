@@ -917,6 +917,31 @@ Closest same-pair pass at Tacview's 0.2 s frames (`tools/p14/flight2i_spacing.py
 - **The steady-turn crossing (the second kind, flight 2F) remains at every setting**: Yak pairs at Loose and the F-51's covering pair at Safe both crossed within 10 m on station, and one F-51 was lost (1 of 72 aircraft-sorties in this flight). No formation value removes it; it is the game bug of decision 0021.
 - **No further change is proposed.** The build stands; the residual on-station risk is recorded in decision 0021 and bug report 3.
 
+## Flight 2J (does a switched-on Complex Trigger report a plane already inside? The step 4 cells) — 2026-10-18, one run, no Tacview
+
+Probe `P14_Probe_2J_traced` (`handoff/p14-probes/flight2j/`; design and predictions `handoff/sessions/2026-10-18-p14-step4.md`; prompt `handoff/P14-flight-2j-codex-prompt.md`), built from `codex/p14-4` (`56a383b`) as `P14_Probe_2J_20261018` without the resaver, hosted by the game client on this PC (game `261013`), no pilot, Claude on the briefing screen. Session `2026-10-18_17-03-13`, logs `src/testdata/missionlog/real_43/` (50 files). The host left at about 13:40; mission end logged at 857.7 s. Server speed 1.00× wall time; no aircraft lost. Replay: no dead links.
+
+AI pairs of country 601 stood in for NATO players (flight 1N: a trigger filtered to 601 fires for AI of 601). Loiterers: flight 2B's Yak-9P pair, country changed, 3050 m, 500 km/h, a 2 km octagon on the cell centre, Pairs Loose. Every trigger is 6 km, `Country = 601`, the flown 1N shape.
+
+| Cell | What | Expected if k1 holds | Flown |
+|---|---|---|---|
+| KA | trigger off at 5 s; a 601 pair activated inside it at 30 s; switched on at 180, 240, 300 s (off 20 s after each) | Object Entered after each switch-on | **silent all three times**; the control zone KA-Z fired at 190 s (the pair was inside) |
+| KB | trigger off while a 601 pair flew straight through; switched on at 700 s after it had left | silent | silent; KB-Z fired at 560 s (the pair was inside then) |
+| KC | trigger off; a 602 pair loitering inside; switched on at 180 s | silent | silent; KC-Z fired at 190 s |
+| KD `THD01` | step 4 cell, `TriggerReactivate`, 601 pair arriving | ARM, PASS 60 s later, a re-check every 120 s | ARM 151.98 s; CHECK ON 211.98 s, **SEEN 212.00 s** (PASS, HOT); re-check CHECK ON 332.00 s, **nothing reported, FAIL 334.04 s** (COLD, REARM) with the pair still loitering; COLD for the rest of the run |
+| KE `THD02` | `TriggerReactivate`, 602 pair loitering | never | never ARM, never HOT |
+| KF `THD03` | `ZonePulse`, 601 pair arriving, deleted at 600 s | PASS at entry + 60.1 s; re-checks; FAIL after the delete | ARM 152.02 s; PASS 212.12, 332.12, 452.12, 572.12 s; FAIL 694.16 s (COLD, REARM), the first re-check after the delete |
+
+Consumer polls (every 20 s from 60 to 780 s, both stand-ins pulsed): in all three cells **exactly one of the HOT / COLD pair passed at every one of the 37 polls**. THD01 HOT 220–320 s; THD03 HOT 220–680 s; THD02 COLD throughout.
+
+### What this changes (reading)
+
+- **A Complex Trigger switched on does not report a plane that is already inside (k1 false).** KA, three times, with the pair inside (its control zone fired). THD01's re-check at 332 s missed its own loitering pair.
+- **THD01's first pass (212.00 s, 0.02 s after the switch-on) is the exception, and its cause is not proven.** The likeliest reading: the wingman. Its entry came a moment after the lead's, after `ENTRY OFF` had switched the trigger off at 151.98 s. The trigger reported that unreported entry when it was switched on. KA's pair, activated inside a switched-off trigger, never counted as entering.
+- **The `ZonePulse` cell works in the game as designed**, including the 0.1 s pulse, the re-check cadence (120.1 s), the fail after the loiterer is deleted, and make-before-break.
+- **The default becomes `ZonePulse`**, as decision 0023 laid down for this outcome (decision 0024). Its known weakness stands: an enemy-coalition AI plane inside r_in at a check passes like a player; the entry still needs a player-country plane.
+- The trigger's country filter holds on switch-on (KC, THD02), and a switched-off trigger reports nothing (KB).
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
