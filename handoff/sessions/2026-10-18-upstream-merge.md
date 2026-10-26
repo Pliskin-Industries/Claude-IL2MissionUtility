@@ -94,6 +94,16 @@ Measured by recording every P14 baseline and running the flown-probe byte checks
 - **Repository size:** upstream's history adds about 150 MB uncompressed: two old release executables (`IL2MissionUtility-v0.3-Alpha.exe`, `-v0.5-Alpha.exe`, about 51 MB each), the height grid (31 MB) and `References/_gen.Mission` (17 MB). A merge keeps them in our history even if they are deleted later. Every file is under GitHub's 100 MB limit.
 - **Decision number 0023 is taken** by the step 4 branch (`codex/p14-4`, `0023-step-4-threshold-one-complex-trigger-per-area.md`); the new Proposed record here was first numbered 0024 and is **0026** (allocated by the coordinating session: `codex/p14-4` keeps 0023 to 0025, `codex/p14-8` takes 0027 and 0028). The merge commit `c3792eb` still says 0024 in its message.
 
+## 6b. Main merged in (2026-10-26)
+
+`origin/main` (`141af6e`, PR #32: P14 steps 4 to 6, decisions 0023 to 0025, 0029, 0030) was merged into this branch, as asked by the coordinating session. Main's code changes are all in `src/airtask/` and merge cleanly with the upstream merge. The only conflict was the index in `docs/decisions/README.md` (rows put in number order). `STATE.md` and `src/airtask/` are as on `main`.
+
+- `cargo test --offline`: **876 passed, 0 failed, 30 ignored** (781 / 0 / 28 before; the difference is main's step 4 to 6 tests).
+- `flown_probes_regenerate_byte_for_byte_except_flight2`: passes, **52 files**; the flight 1M and 1P frozen inputs still match.
+- Warnings: **81 build, 306 clippy** (82 / 307 before).
+- No baseline changed in this merge; Generate output is as in §5.
+- Decision numbers: 0026 (this branch) fits between main's 0025 and 0029. 0027 and 0028 are step 8's (`codex/p14-8`). **The next free number is 0031.**
+
 ## 7b. For the UI sessions (steps 8 and 9)
 
 - `src/ui.rs`, `src/shell.rs` and `src/help.rs` merge with **no conflict**: every change in them is upstream's, taken as upstream wrote it. Nothing of ours was added to them, so `codex/p14-8` rebases onto upstream's versions only.
@@ -112,5 +122,5 @@ Measured by recording every P14 baseline and running the flown-probe byte checks
 - Template Builder writes Korea editor formation ids (upstream); 0019 to 0022 apply by formation type, with Column - Pairs (4) counted as Pairs. Unflown: ids 4, 5, 8.
 - Generate changes from the merge: `template.Group` one line, `exclusive.Group` the 3-hour window; nothing for Air Tasking or the flown probes.
 - New Proposed decision 0026 (Air Tasking and upstream's strikes and CAPs) replaces STATE "Waiting on the user" item 4.
-- Test line after the merge: 781 passed, 0 failed, 28 ignored; 82 build / 307 clippy warnings; 52 flown probe files byte-identical.
+- Test line after merging `main` (2026-10-26): 876 passed, 0 failed, 30 ignored; 81 build / 306 clippy warnings; 52 flown probe files byte-identical.
 - Game fact added to `docs/il2-loader-and-log-facts.md`: `FormationType` 19 and 20 fly as Pairs and Wedge on game 1.005 (flights 2D to 2I), although upstream lists 19 as "Reserved - 15" in the Korea editor's list.

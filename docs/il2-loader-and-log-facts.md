@@ -136,3 +136,10 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **A Loose formation arrives later:** F-51 pairs at Loose reached `WP 1` 4–9 s after the same raid at Safe (318.5 s transit).
 - **Computer use, in spectator view:** a slow press on the sky (button down, 0.5 s, up), then 3 s before the key, gave the game keyboard focus where a quick click did not. `open_application` on the running game starts a second copy, which only shows an "already running" error; dismiss it with OK. A taskbar preview (from a remote-desktop window) can take focus from the game; only the user could dismiss it.
 - **Pairs at Loose removes the entry-reversal collision, not the steady-turn crossing** (flight 2I, the built-ins as shipped under decisions 0020 and 0022): the Yak raid lost nothing in twelve raids, but on station its wingmen still crossed their leads at 9.7–10.8 m; an F-51 covering pair at Safe crossed at 8.1 m and lost an aircraft.
+
+## Found on 2026-10-18 (flight 2J, game 1.005)
+
+- **A Complex Trigger switched on (MCU_Activate) does not report a plane that is already inside.** Three switch-ons with a 601 pair inside a 601 trigger gave nothing (a check zone at the same place fired). A threshold cell that switched its trigger on again as a presence check missed its own loitering pair at the re-check. A switch-on can report an entry the trigger had not reported yet: 0.02 s after one switch-on it reported, most likely the wingman whose entry came just after the trigger was switched off. Do not use a switched-on trigger as a presence check; pulse a check zone (decision 0024).
+- **A switched-off Complex Trigger reports nothing**, and it does not report later what crossed it while it was off (KB). Its country filter holds when it is switched on (KC).
+- **An aircraft activated inside a switched-off trigger is not reported as entering when the trigger is switched on** (KA).
+- A Yak-9P pair with its `Country` changed to 601 or 602 flies a 2 km waypoint octagon at 3050 m and 500 km/h and stays inside a 6 km circle: every control zone and every ZonePulse check found it inside.
