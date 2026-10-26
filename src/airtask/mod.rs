@@ -252,12 +252,12 @@ pub struct TotalsLimits {
 impl Default for TotalsLimits {
     fn default() -> Self {
         Self {
-            aircraft: 96,
-            mcus: 1500,
-            check_zones: 40,
+            aircraft: 240,
+            mcus: 2300,
+            check_zones: 48,
         }
     }
-} // D36
+} // D36; decision 0032: the upstream author's idle load test
 
 // Strategy enums (§8 step 0d table). The Default is the primary design.
 // ThresholdImpl::Counted and CounterResetImpl are reserved for step 12 (§3.9); v1 builders accept only OnePlayer.
