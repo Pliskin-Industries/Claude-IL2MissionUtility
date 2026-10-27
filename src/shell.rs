@@ -894,7 +894,7 @@ pub fn mode_rail(ui: &mut Ui, labels: &[&str], selected: &mut usize) -> bool {
         resp.on_hover_text(format!("Ctrl {}", i + 1));
     }
     ui.add_space(4.0);
-    ui.label(RichText::new("Ctrl 1–6").small().color(c::NEUTRAL_700));
+    ui.label(RichText::new("Ctrl 1–7").small().color(c::NEUTRAL_700));
     ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
@@ -1183,6 +1183,9 @@ pub fn read_shortcuts(ctx: &egui::Context, map_active: bool) -> Shortcuts {
         s.help = i.consume_key(Modifiers::NONE, Key::F1);
         // Not consumed: egui's own popups, combo boxes and text edits also close on Esc.
         s.escape = i.key_pressed(Key::Escape);
+        if i.consume_key(Modifiers::COMMAND, Key::Num7) {
+            s.tab = Some(6);
+        }
         let nums = [
             Key::Num1,
             Key::Num2,

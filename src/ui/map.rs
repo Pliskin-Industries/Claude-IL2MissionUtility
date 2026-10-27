@@ -5765,7 +5765,7 @@ impl super::GroupGeneratorApp {
         }
     }
 
-    fn placement_seed() -> u64 {
+    pub(super) fn placement_seed() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
@@ -7159,7 +7159,7 @@ impl super::GroupGeneratorApp {
         Ok(out)
     }
 
-    fn current_mark(&self) -> TimelineMark {
+    pub(super) fn current_mark(&self) -> TimelineMark {
         let max = TIMELINE.len().saturating_sub(1);
         let i = self.front_t.round().clamp(0.0, max as f32) as usize;
         TIMELINE.get(i).copied().unwrap_or(TIMELINE[0])

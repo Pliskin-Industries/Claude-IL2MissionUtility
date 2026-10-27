@@ -8,7 +8,15 @@
 #   key         -Keys 1,2,Esc,F1,Enter  plain key presses
 #   ctrl        -Keys G,Z,1             Ctrl+key
 #   shiftclick  -X -Y                   Shift+left click
-# Coordinates are client pixels = pixels of the `shot` image (100% scaling).
+# Coordinates are client pixels = pixels of the `shot` image, in physical
+# pixels: the script makes itself per-monitor DPI aware, so this holds at any
+# Windows scaling. (Unaware, at 150 % it saw scaled sizes and `shot` captured
+# only the top-left of the window; 2026-10-21.)
+# The app's minimum window is 1280 x 800 logical pixels: at 150 % that is
+# 1920 x 1200 physical, larger than a 1920 x 1080 screen, and egui then draws
+# past the client area. Zoom the app out with Ctrl - (egui's own zoom, 0.1 per
+# step) so the window fits, e.g. three steps = about 1400 x 1000 logical in a
+# 1470 x 1050 client.
 #
 # Uses REAL input (SetCursorPos / mouse_event / keybd_event): winit ignores
 # posted mouse messages. Every action first brings the app to the front and
@@ -31,6 +39,7 @@ using System;
 using System.Runtime.InteropServices;
 public class UiLiveDrv {
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint f);
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -45,6 +54,8 @@ public class UiLiveDrv {
 }
 "@
 }
+# Per-monitor aware v2 (-4): real pixels for every call below in this process.
+[void][UiLiveDrv]::SetProcessDpiAwarenessContext([IntPtr]-4)
 $proc = Get-Process il2_mission_utility -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -like '*\target\debug\il2_mission_utility.exe' -and $_.MainWindowTitle -eq 'IL-2 Group Generator' } |
     Select-Object -First 1

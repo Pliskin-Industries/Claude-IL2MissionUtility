@@ -97,6 +97,7 @@ struct Harness {
     time: f64,
     mods: Modifiers,
     pointer: Pos2,
+    screen: Vec2,
     dir: PathBuf,
 }
 
@@ -120,22 +121,14 @@ impl Harness {
         app.harvest_missions_dir = dir.join("missions").display().to_string();
         app.mark_saved(AppMode::Template);
         app.mark_saved(AppMode::Map);
-        let mut h = Harness {
-            ctx,
-            app,
-            nodes: Vec::new(),
-            time: 0.0,
-            mods: Modifiers::NONE,
-            pointer: Pos2::ZERO,
-            dir,
-        };
+        let mut h = Harness { ctx, app, nodes: Vec::new(), time: 0.0, mods: Modifiers::NONE, pointer: Pos2::ZERO, screen: SCREEN, dir };
         h.settle();
         h
     }
 
     fn step(&mut self, events: Vec<Event>) {
         let raw = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SCREEN)),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.screen)),
             time: Some(self.time),
             modifiers: self.mods,
             events,
@@ -348,17 +341,7 @@ fn rail_and_ctrl_numbers_switch_every_tab() {
         h.tab(label);
         assert!(h.app.mode == mode, "rail {label}");
     }
-    for (i, key) in [
-        Key::Num1,
-        Key::Num2,
-        Key::Num3,
-        Key::Num4,
-        Key::Num5,
-        Key::Num6,
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    for (i, key) in [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7].into_iter().enumerate() {
         h.key_with(key, CTRL);
         assert!(h.app.mode == MODES[i].0, "Ctrl {}", i + 1);
     }
@@ -380,6 +363,7 @@ fn f1_and_rail_help_open_the_help_for_the_tab() {
 #[test]
 fn every_tab_has_a_primary_button_with_its_shortcut() {
     let mut h = Harness::new("primary");
+    assert_eq!(MODES.len(), 7);
     for (mode, label) in MODES {
         h.tab(label);
         let primary = if mode == AppMode::Map {
@@ -2462,6 +2446,18 @@ fn every_ui_glyph_is_in_a_loaded_font() {
     let mut missing = std::collections::BTreeSet::new();
     let sources = [
         include_str!("ui.rs"),
+        include_str!("ui/air.rs"),
+        include_str!("airtask/mod.rs"),
+        include_str!("airtask/library.rs"),
+        include_str!("airtask/pool.rs"),
+        include_str!("airtask/standalone.rs"),
+        include_str!("airtask/timing.rs"),
+        include_str!("airtask/clock.rs"),
+        include_str!("in_theatre.rs"),
+        // These newly covered backends have Korean parser/JSON test data,
+        // not UI copy. Keep the original UI-source coverage unchanged.
+        include_str!("trace.rs").split("#[cfg(test)]").next().unwrap(),
+        include_str!("missionlog.rs").split("#[cfg(test)]").next().unwrap(),
         include_str!("shell.rs"),
         include_str!("help.rs"),
         include_str!("../USER_MANUAL.md"),
@@ -2486,52 +2482,38 @@ fn every_ui_glyph_is_in_a_loaded_font() {
 #[test]
 fn side_panel_controls_stay_inside_their_panel() {
     // (tab, left panel width, right panel width), after the 172 px rail.
-    const PANELS: [(&str, f32, f32); 6] = [
+    const PANELS: [(&str, f32, f32); 7] = [
         ("Template", 270.0, 304.0),
         ("Army Generator", 330.0, 300.0),
         ("Fighter Pack", 270.0, 304.0),
         ("Exclusive Activation", 290.0, 290.0),
         ("Airfield", 290.0, 270.0),
         ("Map", 56.0, 304.0),
+        ("Air Tasking", 270.0, 304.0),
     ];
     let mut h = Harness::new("panelfit");
     let mut out = Vec::new();
     for (tab, left_w, right_w) in PANELS {
         h.tab(tab);
+        if tab == "Air Tasking" { fill_air_pool(&mut h); }
         let left = (shell::RAIL_W, shell::RAIL_W + left_w);
         let right = (SCREEN.x - right_w, SCREEN.x);
-        for n in &h.nodes {
-            let control = matches!(
-                n.role,
-                Role::Button
-                    | Role::CheckBox
-                    | Role::ComboBox
-                    | Role::Slider
-                    | Role::SpinButton
-                    | Role::TextInput
-            );
+        let mut check = |h: &Harness, state: &str| { for n in &h.nodes {
+            let control = matches!(n.role, Role::Button | Role::CheckBox | Role::ComboBox | Role::Slider | Role::SpinButton | Role::TextInput);
             if !control || n.rect.width() <= 0.0 || n.rect.top() < shell::HEADER_H {
                 continue;
             }
             let x = n.rect.left();
             let inside = |(a, b): (f32, f32)| x >= a - 0.5 && x < b;
             if inside(left) && n.rect.right() > left.1 + 0.5 {
-                out.push(format!(
-                    "{tab} left: {:?} {:?} ends at {}",
-                    n.label,
-                    n.role,
-                    n.rect.right()
-                ));
+                out.push(format!("{tab} {state} left: {:?} {:?} ends at {}", n.label, n.role, n.rect.right()));
             }
             if inside(right) && n.rect.right() > right.1 + 0.5 {
-                out.push(format!(
-                    "{tab} right: {:?} {:?} ends at {}",
-                    n.label,
-                    n.role,
-                    n.rect.right()
-                ));
+                out.push(format!("{tab} {state} right: {:?} {:?} ends at {}", n.label, n.role, n.rect.right()));
             }
-        }
+        }};
+        check(&h, "initial");
+        if tab == "Air Tasking" { visit_air_category_controls(&mut h, check); }
     }
     assert!(
         out.is_empty(),
@@ -2548,6 +2530,7 @@ fn button_labels_stay_on_one_line() {
     let mut tall = Vec::new();
     for (_, label) in MODES {
         h.tab(label);
+        if label == "Air Tasking" { fill_air_pool(&mut h); }
         if label == "Map" {
             for dock in ["Period", "Forces", "Terrain"] {
                 h.click_prefix_if_present(dock);
@@ -2555,6 +2538,9 @@ fn button_labels_stay_on_one_line() {
             }
         }
         collect_tall_buttons(&h, label, &mut tall);
+        if label == "Air Tasking" {
+            visit_air_category_controls(&mut h, |h, state| collect_tall_buttons(h, &format!("Air Tasking › {state}"), &mut tall));
+        }
     }
     tall.sort();
     tall.dedup();
@@ -2566,6 +2552,9 @@ fn button_labels_stay_on_one_line() {
 }
 
 fn collect_tall_buttons(h: &Harness, tab: &str, out: &mut Vec<String>) {
+    if tab.starts_with("Air Tasking") {
+        assert!(!h.app.air_plan.pool.is_empty() && h.app.air_selected.is_some());
+    }
     for n in &h.nodes {
         // Tree chips are 36 px by design; the Map dock tabs (40 px, top row
         // of the dock) are skipped. A wrapped label makes a button 40 px.
@@ -2705,4 +2694,885 @@ fn map_generate_without_air_matches_baseline() {
     assert_eq!(dialog::pending(), 0);
     assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
     crate::baseline_tests::assert_fixture_matches(&out);
+}
+
+// ── Air Tasking ──────────────────────────────────────────────────────────
+
+fn air_targets(h: &mut Harness) {
+    h.app.custom_front_xz = vec![(200_000.0, 0.0), (200_000.0, 499_200.0)];
+    h.app.east_objectives = vec![(190_000.0, 200_000.0), (180_000.0, 250_000.0)];
+    h.app.nato_objectives = vec![(210_000.0, 200_000.0)];
+    h.app.attack_arrows = vec![
+        ((220_000.0, 300_000.0), (180_000.0, 300_000.0)),
+        ((180_000.0, 350_000.0), (220_000.0, 350_000.0)),
+    ];
+    h.app.air_plan.seed = 7;
+}
+
+fn fill_air_pool(h: &mut Harness) {
+    use crate::airtask::{self, PoolEntry};
+    air_targets(h);
+    let entries = h.app.with_air_context(|ctx| h.app.air_plan.library.iter().map(|sortie| {
+        PoolEntry::new(sortie.id.clone(), airtask::target_choices(ctx, sortie.side)[0].target)
+    }).collect::<Vec<_>>());
+    h.app.air_plan.pool.clear();
+    for entry in entries { airtask::add_entry(&mut h.app.air_plan, entry); }
+    h.app.air_selected = Some(0);
+    h.settle();
+}
+
+fn air_scroll(h: &mut Harness, x: f32, delta: f32) {
+    h.move_to(Pos2::new(x, 600.0));
+    h.step(vec![Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: Vec2::new(0.0, delta),
+        modifiers: Modifiers::NONE,
+    }]);
+    for _ in 0..20 { h.step(Vec::new()); }
+}
+
+fn air_open_section(h: &mut Harness, title: &str) {
+    air_scroll(h, SCREEN.x - 100.0, 10000.0);
+    for _ in 0..12 {
+        if let Some(node) = h.nodes.iter().find(|n| n.label == title && n.role == Role::Button
+            && n.rect.center().y > shell::HEADER_H && n.rect.center().y < SCREEN.y - shell::STATUS_H).cloned() {
+            h.click_at(node.rect.center());
+            return;
+        }
+        air_scroll(h, SCREEN.x - 100.0, -240.0);
+    }
+    panic!("could not open Air Tasking section {title}: {:?}", h.labels());
+}
+
+fn air_type(h: &mut Harness, field: &str, text: &str) {
+    h.click(field);
+    h.key_with(Key::A, CTRL);
+    h.step(vec![Event::Text(text.into())]);
+    h.settle();
+}
+
+fn air_choose_category(h: &mut Harness, category: &str) {
+    air_scroll(h, shell::RAIL_W + 130.0, -10000.0);
+    h.click("Sortie category");
+    // The Categories tab may also contain a plain label with this name.
+    let option = h.all(category).into_iter().find(|n| n.role == Role::Button).unwrap();
+    h.click_at(option.rect.center());
+    assert_eq!(h.app.air_plan.library[h.app.air_library_selected.unwrap()].category, category);
+}
+
+fn air_filter(h: &mut Harness, category: &str) {
+    h.click("Pool category filter");
+    h.click(category);
+}
+
+/// Exercise the new controls in their normal, popup and inline-edit states.
+fn visit_air_category_controls(h: &mut Harness, mut check: impl FnMut(&Harness, &str)) {
+    h.click("Pool category filter");
+    check(h, "Pool filter popup");
+    h.click("Strike");
+    check(h, "Filtered pool");
+    air_filter(h, "All categories");
+    air_scroll(h, shell::RAIL_W + 130.0, -10000.0);
+    h.click("Sortie category");
+    check(h, "Sortie category popup");
+    h.key(Key::Escape);
+    h.click("Categories");
+    check(h, "Categories");
+    h.click("Rename Strike");
+    check(h, "Rename category");
+    h.click("Cancel");
+    h.click("Pool");
+}
+
+#[test]
+fn air_tasking_category_combo_is_undoable() {
+    let mut h = Harness::new("air_category_combo");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let before = h.app.air_plan.clone();
+    air_choose_category(&mut h, "Interdiction");
+    assert_eq!(h.app.air_plan.library[0].category, "Interdiction");
+    assert!(h.has("Sortie 1 category: Interdiction"));
+    assert!(h.labels().iter().any(|s| s.contains("NATO · Objective 1 · Interdiction")));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+}
+
+#[test]
+fn air_tasking_category_counts_use_singular_and_plural() {
+    let mut h = Harness::new("air_category_counts");
+    h.tab("Air Tasking");
+    h.click("Categories");
+    for (name, label) in [("Air alert", "1 sortie"), ("Interdiction", "0 sorties"), ("Strike", "3 sorties")] {
+        let row = h.find(&format!("Rename {name}")).rect;
+        assert!(h.all(label).iter().any(|n| (n.rect.center().y - row.center().y).abs() < 0.5), "{name}: missing {label}");
+    }
+    assert!(!h.has("1 sorties"));
+}
+
+#[test]
+fn air_tasking_category_rows_keep_fixed_columns_while_renaming() {
+    let mut h = Harness::new("air_category_columns");
+    let long_name = "Night interdiction and maritime patrol along the entire northern coastline";
+    crate::airtask::add_category(&mut h.app.air_plan, long_name).unwrap();
+    h.tab("Air Tasking");
+    h.click("Categories");
+    let names = h.app.air_plan.categories.clone();
+    for screen in [Vec2::new(1280.0, 800.0), SCREEN] {
+        h.screen = screen;
+        h.settle();
+        let rename = h.find("Rename Air alert").rect;
+        let remove = h.find("Remove category Air alert").rect;
+        let name_left = h.find("Air alert").rect.left();
+        let count_right = h.find("0 sorties").rect.right();
+        for name in &names {
+            let rename_row = h.find(&format!("Rename {name}")).rect;
+            let remove_row = h.find(&format!("Remove category {name}")).rect;
+            assert!((rename_row.left() - rename.left()).abs() < 0.5, "Rename {name}: {rename_row:?}");
+            assert!((remove_row.left() - remove.left()).abs() < 0.5, "Remove {name}: {remove_row:?}");
+            assert!((h.find(name).rect.left() - name_left).abs() < 0.5, "name must start at the left column edge: {name}");
+            let count = h.nodes.iter().find(|n| n.role == Role::Label && (n.label.ends_with(" sortie") || n.label.ends_with(" sorties"))
+                && (n.rect.center().y - rename_row.center().y).abs() < 0.5).unwrap();
+            assert!((count.rect.right() - count_right).abs() < 0.5, "count must be right aligned: {count:?}");
+        }
+        let name_column = h.find(long_name).rect;
+        let mut input_edges: Option<(f32, f32)> = None;
+        for name in &names {
+            h.click(&format!("Rename {name}"));
+            let input = h.find("Rename category").rect;
+            assert!((input.left() - name_column.left()).abs() < 0.5 && input.right() >= name_column.right(), "rename input must fill the name column: {input:?} vs {name_column:?}");
+            if let Some((left, right)) = input_edges {
+                assert!((input.left() - left).abs() < 0.5 && (input.right() - right).abs() < 0.5, "rename input changed column edges: {input:?}");
+            }
+            input_edges = Some((input.left(), input.right()));
+            assert!((h.find("0 sorties").rect.right() - count_right).abs() < 0.5);
+            assert!((h.find("Save").rect.left() - rename.left()).abs() < 0.5);
+            assert!((h.find("Cancel").rect.left() - remove.left()).abs() < 0.5);
+            h.click("Cancel");
+        }
+    }
+}
+
+#[test]
+fn air_tasking_category_names_are_left_aligned_and_truncated_with_hover_text() {
+    fn text_shape<'a>(shape: &'a egui::Shape, name: &str, bounds: Rect) -> Option<&'a egui::epaint::TextShape> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == name && bounds.contains(text.pos) => Some(text),
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| text_shape(shape, name, bounds)),
+            _ => None,
+        }
+    }
+    let mut h = Harness::new("air_category_name_layout");
+    h.screen = Vec2::new(1280.0, 800.0);
+    let long_name = "Night interdiction and maritime patrol along the entire northern coastline";
+    crate::airtask::add_category(&mut h.app.air_plan, long_name).unwrap();
+    h.tab("Air Tasking");
+    h.click("Categories");
+    let out = h.ctx.run(RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, h.screen)),
+        time: Some(h.time),
+        ..Default::default()
+    }, |ctx| h.app.ui(ctx));
+    h.time += 1.0 / 60.0;
+    for name in ["Air alert", long_name] {
+        let text = out.shapes.iter().find_map(|s| text_shape(&s.shape, name, h.find(name).rect)).unwrap();
+        assert_eq!(text.galley.job.halign, egui::Align::LEFT);
+        assert!((text.pos.x - h.find(name).rect.left()).abs() < 0.5);
+        assert_eq!(text.galley.elided, name == long_name);
+        assert_eq!(text.galley.rows.len(), 1);
+    }
+    assert_eq!(h.all(long_name).len(), 1);
+    h.move_to(h.find(long_name).rect.center());
+    for _ in 0..60 { h.step(Vec::new()); }
+    assert!(h.all(long_name).len() >= 2, "hover must show the full category name");
+}
+
+#[test]
+fn air_tasking_categories_add_rename_remove_and_undo() {
+    let mut h = Harness::new("air_categories_edit");
+    h.tab("Air Tasking");
+    h.click("Categories");
+    let before = h.app.air_plan.clone();
+    air_type(&mut h, "New category", " Night raids ");
+    h.click("Add category");
+    assert_eq!(h.app.air_plan.categories.last().unwrap(), "Night raids");
+    assert!(h.has("Rename Night raids") && h.has("0 sorties"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+    air_type(&mut h, "New category", "Night raids");
+    h.click("Add category");
+    air_choose_category(&mut h, "Night raids");
+    let before = h.app.air_plan.clone();
+    h.click("Rename Night raids");
+    air_type(&mut h, "Rename category", "Maritime");
+    h.click("Save");
+    assert_eq!(h.app.air_plan.library[0].category, "Maritime");
+    assert!(h.has("Rename Maritime"));
+    assert!(!h.app.air_plan.categories.iter().any(|s| s == "Night raids"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+    h.click("Remove category Night raids");
+    assert_eq!(h.app.air_plan.library[0].category, "Air alert");
+    assert!(!h.app.air_plan.categories.iter().any(|s| s == "Night raids"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+}
+
+#[test]
+fn air_tasking_category_errors_are_inline_and_cancel_keeps_plan() {
+    let mut h = Harness::new("air_categories_errors");
+    h.tab("Air Tasking");
+    h.click("Categories");
+    let before = h.app.air_plan.clone();
+    h.click("Add category");
+    assert!(h.labels().iter().any(|s| s.contains("Enter a category name.")));
+    air_type(&mut h, "New category", " STRIKE ");
+    h.click("Add category");
+    assert!(h.labels().iter().any(|s| s.contains("A category named STRIKE already exists.")));
+    h.click("Rename Air alert");
+    air_type(&mut h, "Rename category", "Strike");
+    h.click("Save");
+    assert!(h.labels().iter().any(|s| s.contains("A category named Strike already exists.")));
+    h.click("Cancel");
+    assert!(!h.has("Save"));
+    assert_eq!(h.app.air_plan, before);
+}
+
+#[test]
+fn air_tasking_pool_category_filter_hides_rows_and_limits_auto_fill() {
+    let mut h = Harness::new("air_category_filter");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    air_filter(&mut h, "Strike");
+    assert!(h.has("POOL · 3 OF 6"));
+    for entry in [2, 5, 6] { assert!(h.has(&format!("Entry {entry} weight"))); }
+    for entry in [1, 3, 4] { assert!(!h.has(&format!("Entry {entry} weight"))); }
+    let before = h.app.air_plan.clone();
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.app.air_plan.pool.len(), 11);
+    assert_eq!(h.status(), "Added 5 entries · Strike");
+    assert_eq!(&h.app.air_plan.pool[..6], &before.pool);
+    assert!(h.app.air_plan.pool[6..].iter().all(|e| h.app.air_plan.sortie(&e.sortie_id).unwrap().category == "Strike"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+    air_filter(&mut h, "All categories");
+    assert!(h.has("POOL · 6"));
+    for entry in 1..=6 { assert!(h.has(&format!("Entry {entry} weight"))); }
+}
+
+#[test]
+fn air_tasking_auto_fill_uses_singular_for_one_entry() {
+    let mut h = Harness::new("air_autofill_singular");
+    h.tab("Air Tasking");
+    air_targets(&mut h);
+    h.app.attack_arrows.clear();
+    h.settle();
+    air_filter(&mut h, "Air alert");
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.status(), "Added 1 entry · Air alert");
+    h.app.air_plan.pool.clear();
+    h.app.air_plan.library.truncate(1);
+    air_filter(&mut h, "All categories");
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.status(), "Added 1 entry");
+}
+
+#[test]
+fn air_tasking_loads_category_label_from_user_template() {
+    let mut h = Harness::new("air_file_category");
+    h.tab("Air Tasking");
+    air_targets(&mut h);
+    let input = std::fs::read_to_string(repo("TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group")).unwrap();
+    let mut root = crate::parser::parse_group_file(&input).unwrap();
+    root.set_property("Desc", "\"Notes\nCategory: Interdiction\"".to_string());
+    let path = h.out("Interdiction.Group");
+    std::fs::write(&path, crate::serialize::serialize_group(&root)).unwrap();
+    dialog::answer(vec![path]);
+    h.key_with(Key::O, CTRL);
+    air_scroll(&mut h, shell::RAIL_W + 130.0, -10000.0);
+    assert_eq!(h.app.air_plan.library[6].category, "Interdiction");
+    assert!(h.has("Sortie 7 category: Interdiction"));
+    assert!(h.has("Sortie category"));
+    h.click("Add to pool");
+    root.set_property("Desc", "\"Category: sTrIkE\"".to_string());
+    let path = h.out("MixedCase.Group");
+    std::fs::write(&path, crate::serialize::serialize_group(&root)).unwrap();
+    dialog::answer(vec![path]);
+    h.key_with(Key::O, CTRL);
+    air_scroll(&mut h, shell::RAIL_W + 130.0, -10000.0);
+    assert_eq!(h.app.air_plan.library[7].category, "sTrIkE", "file label keeps its spelling");
+    assert_eq!(h.app.air_plan.categories.iter().filter(|c| c.eq_ignore_ascii_case("Strike")).count(), 1);
+    h.click("Add to pool");
+    air_filter(&mut h, "Strike");
+    assert!(!h.has("Entry 1 weight"));
+    assert!(h.has("Entry 2 weight"));
+    assert_eq!(dialog::pending(), 0);
+}
+
+#[test]
+fn air_tasking_six_builtins_show_decision_0031_categories() {
+    let mut h = Harness::new("air_builtin_categories");
+    h.tab("Air Tasking");
+    assert_eq!(h.app.air_plan.categories, ["Air alert", "Strike", "Close support", "Armed recon", "Interdiction"]);
+    let expected = ["Air alert", "Strike", "Close support", "Armed recon", "Strike", "Strike"];
+    let mut shown = std::collections::BTreeSet::new();
+    for _ in 0..6 {
+        shown.extend(h.labels());
+        air_scroll(&mut h, shell::RAIL_W + 130.0, -220.0);
+    }
+    for (i, category) in expected.into_iter().enumerate() {
+        assert_eq!(h.app.air_plan.library[i].category, category);
+        assert!(shown.contains(&format!("Sortie {} category: {category}", i + 1)));
+    }
+}
+
+#[test]
+fn air_tasking_mode_popup_does_not_select_the_row_under_it() {
+    let mut h = Harness::new("air_mode_selection");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let first = h.find("Pool entry 1").rect;
+    h.click_at(Pos2::new(first.left() + 80.0, first.center().y));
+    assert_eq!(h.app.air_selected, Some(0));
+    h.click("Entry 1 mode");
+    let zone = h.find("Zone").rect.center();
+    let underlying = h.nodes.iter().find(|n| n.label.starts_with("Pool entry ") && n.rect.contains(zone)).unwrap();
+    assert_ne!(underlying.label, "Pool entry 1", "regression click must overlap another row");
+    h.click_at(zone);
+    assert_eq!(h.app.air_plan.pool[0].mode, crate::airtask::TriggerMode::Zone);
+    assert_eq!(h.app.air_selected, Some(0));
+    let second = h.find("Pool entry 2").rect;
+    h.click_at(Pos2::new(second.left() + 80.0, second.center().y));
+    assert_eq!(h.app.air_selected, Some(1));
+}
+
+#[test]
+fn air_tasking_unnoted_draft_edit_is_committed_and_undoable() {
+    let mut h = Harness::new("air_unnoted_edit");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let before = h.app.air_plan.clone();
+    let mut draft = before.clone();
+    draft.pool[0].weight = 9;
+    h.app.apply_air_edit(draft, None);
+    h.settle();
+    assert_eq!(h.app.air_plan.pool[0].weight, 9);
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+}
+
+#[test]
+fn ctrl_7_opens_air_tasking() {
+    let mut h = Harness::new("air_ctrl7");
+    h.key_with(Key::Num7, CTRL);
+    assert!(h.app.mode == AppMode::AirTasking);
+    assert!(h.has("AIR TASKING"));
+    h.key(Key::F1);
+    assert!(h.app.help_topic == HelpTopic::AirTasking);
+}
+
+#[test]
+fn plain_7_on_map_does_not_panic() {
+    let mut h = Harness::new("air_plain7");
+    h.tab("Map");
+    h.key(Key::Num4);
+    h.key(Key::Num7);
+    assert!(h.app.mode == AppMode::Map);
+    assert!(h.app.map_drawing_mode == MapDrawingMode::AttackArrow);
+}
+
+#[test]
+fn air_tasking_undo_restores_weight_change() {
+    let mut h = Harness::new("air_weight_undo");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let before = h.app.air_plan.pool.clone();
+    let weight = h.find("Entry 1 weight").rect.center();
+    h.drag(weight, weight + Vec2::new(40.0, 0.0));
+    assert_ne!(h.app.air_plan.pool[0].weight, before[0].weight);
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan.pool, before, "one Undo restores the start of the drag");
+}
+
+#[test]
+fn air_tasking_threshold_n_is_fixed_at_1() {
+    let mut h = Harness::new("air_players");
+    h.tab("Air Tasking");
+    let players = h.all("Players").into_iter().find(|n| n.role == Role::SpinButton).unwrap();
+    assert!(players.disabled);
+    h.drag(players.rect.center(), players.rect.center() + Vec2::new(100.0, 0.0));
+    assert_eq!(h.app.air_plan.threshold.players_n, 1);
+    assert!(h.has("Two or more players comes with the multi-player phase."));
+}
+
+#[test]
+fn air_plan_first_entry_ticks_include_in_base_map() {
+    let mut h = Harness::new("air_first");
+    h.tab("Air Tasking");
+    air_targets(&mut h);
+    h.settle();
+    assert!(!h.app.air_plan.include_in_base_map);
+    air_scroll(&mut h, shell::RAIL_W + 130.0, -10000.0);
+    h.click("Add to pool");
+    assert_eq!(h.app.air_plan.pool.len(), 1);
+    assert!(h.app.air_plan.include_in_base_map);
+    h.key_with(Key::Z, CTRL);
+    assert!(h.app.air_plan.pool.is_empty());
+    assert!(!h.app.air_plan.include_in_base_map);
+}
+
+#[test]
+fn air_tasking_tab_shows_builtin_library() {
+    let mut h = Harness::new("air_library");
+    h.tab("Air Tasking");
+    let names = h.app.air_plan.library.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names.len(), 6);
+    let mut shown = std::collections::BTreeSet::new();
+    for _ in 0..5 {
+        shown.extend(h.labels());
+        air_scroll(&mut h, shell::RAIL_W + 130.0, -220.0);
+    }
+    for name in names { assert!(shown.contains(&name), "missing {name}"); }
+    assert!(shown.contains("✔ Valid · war span (unsourced)"));
+}
+
+#[test]
+fn air_tasking_builtin_remove_disabled() {
+    let mut h = Harness::new("air_builtin_remove");
+    h.tab("Air Tasking");
+    air_scroll(&mut h, shell::RAIL_W + 130.0, -10000.0);
+    assert!(h.find("Remove").disabled);
+    assert!(h.has("Built-in sorties stay in the library."));
+    assert_eq!(h.app.air_plan.library.len(), 6);
+}
+
+#[test]
+fn air_tasking_shows_totals() {
+    let mut h = Harness::new("air_totals");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    air_scroll(&mut h, SCREEN.x - 100.0, -10000.0);
+    let totals = h.app.with_air_context(|ctx| crate::airtask::totals(&h.app.air_plan, ctx));
+    for (label, values) in [("Copies", totals.copies), ("Aircraft", totals.aircraft), ("MCUs", totals.mcus), ("Check zones", totals.check_zones)] {
+        for (column, value) in [values[0], values[1], values[0] + values[1]].into_iter().enumerate() {
+            assert!(h.has(&format!("{label} {}: {value}", ["DPRK", "NATO", "All"][column])), "{:?}", h.labels());
+        }
+    }
+}
+
+#[test]
+fn air_tasking_widgets_are_28_px_with_a_filled_pool() {
+    let mut h = Harness::new("air_sizes");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    h.ctx.style_mut(|style| style.animation_time = 0.0);
+    h.app.air_plan.strategies.budget = crate::airtask::BudgetImpl::SingleSlot;
+    h.app.air_plan.threshold.dwell_s = Some(120.0);
+    h.app.air_plan.threshold.hold_s = Some(240.0);
+    h.settle();
+    for title in ["Schedule · DPRK", "Schedule · NATO", "Zone triggers", "Hard stop"] { air_open_section(&mut h, title); }
+    air_scroll(&mut h, SCREEN.x - 100.0, 10000.0);
+    let mut small = Vec::new();
+    let mut disabled = std::collections::BTreeSet::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut check = |h: &Harness, _state: &str| {
+        for n in &h.nodes {
+            if matches!(n.role, Role::Button | Role::CheckBox | Role::ComboBox | Role::Slider | Role::SpinButton | Role::TextInput) && n.rect.width() > 0.0 {
+                seen.insert(n.label.clone());
+                if n.disabled { disabled.insert(n.label.clone()); }
+                if n.rect.height() < 27.5 { small.push(format!("{:?} {:?}: {} px", n.label, n.role, n.rect.height())); }
+            }
+        }
+    };
+    for _ in 0..10 {
+        check(&h, "settings");
+        air_scroll(&mut h, SCREEN.x - 100.0, -220.0);
+    }
+    visit_air_category_controls(&mut h, &mut check);
+    for field in ["Entry 6 weight", "Entry 6 runs", "Dwell D", "Hold H", "First slot", "Period", "Jitter steps", "× step", "Quiet", "Arrive in M", "Chance", "Cooldown", "Spawn distance", "Margin", "Extension", "Include in base map"] {
+        assert!(seen.contains(field), "not checked: {field}; {seen:?}");
+    }
+    assert!(disabled.contains("Players"));
+    assert!(disabled.contains("Remove"));
+    for field in ["Pool", "Categories", "Pool category filter", "Sortie category", "Rename Strike", "Remove category Strike", "New category", "Add category", "Rename category", "Save", "Cancel", "Interdiction"] {
+        assert!(seen.contains(field), "category control not checked: {field}; {seen:?}");
+    }
+    assert!(small.is_empty(), "targets under 28 px, including disabled controls: {small:?}");
+}
+
+#[test]
+fn air_tasking_controls_fit_the_minimum_window() {
+    let mut h = Harness::new("air_minimum");
+    h.screen = Vec2::new(1280.0, 800.0);
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let left_end = shell::RAIL_W + 270.0;
+    let right_start = h.screen.x - 304.0;
+    let check = |h: &Harness, state: &str| { for n in &h.nodes {
+        if !matches!(n.role, Role::Button | Role::CheckBox | Role::ComboBox | Role::Slider | Role::SpinButton | Role::TextInput) || n.rect.width() == 0.0 {
+            continue;
+        }
+        assert!(n.rect.right() <= h.screen.x + 0.5, "{state} beyond window: {n:?}");
+        if n.rect.top() >= shell::HEADER_H {
+            let x = n.rect.left();
+            if (shell::RAIL_W..left_end).contains(&x) { assert!(n.rect.right() <= left_end + 0.5, "beyond library: {n:?}"); }
+            if (left_end..right_start).contains(&x) { assert!(n.rect.right() <= right_start + 0.5, "beyond centre: {n:?}"); }
+        }
+    }};
+    check(&h, "Pool");
+    assert!(h.has("Entry 6 weight") && h.has("Entry 6 runs"));
+    visit_air_category_controls(&mut h, check);
+    for label in ["Pool", "Categories"] {
+        let n = h.all(label).into_iter().find(|n| n.role == Role::Button).unwrap();
+        assert!((n.rect.height() - 28.0).abs() < 0.5, "{n:?}");
+        let size = h.ctx.fonts(|f| f.layout_no_wrap(label.into(), egui::FontId::new(13.0, theme::bold_family()), c::TEXT).size());
+        assert!(size.x <= n.rect.width() && size.y <= 28.0, "{label} does not fit on one line");
+    }
+}
+
+#[test]
+fn air_tasking_library_footer_is_pinned_inside_the_minimum_panel() {
+    let mut h = Harness::new("air_pinned_library_footer");
+    h.screen = Vec2::new(1280.0, 800.0);
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    assert_eq!(h.app.air_plan.library.len(), 6);
+    assert!(!h.app.air_plan.pool.is_empty());
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("air_left")).unwrap().rect;
+    assert!((panel.width() - 270.0).abs() < 0.5, "{panel:?}");
+    let category = h.find("Sortie category").rect;
+    let target = h.all("NATO objective 1").into_iter().find(|n| n.role == Role::ComboBox).unwrap().rect;
+    let add = h.find("Add to pool");
+    let selected = h.find_prefix("Selected: ").rect;
+    let hint = h.find("Built-in sorties stay in the library.").rect;
+    for rect in [selected, category, target, add.rect, h.find("Remove").rect, hint] {
+        assert!(panel.contains_rect(rect), "footer must be fully visible before scrolling: {rect:?} outside {panel:?}");
+    }
+    assert!(!add.disabled);
+    assert!((category.right() - target.right()).abs() < 0.5, "combos must fill the same footer width");
+    assert!(panel.right() - category.right() < 10.0, "combo must reach the footer's right edge");
+    assert!(panel.bottom() - hint.bottom() < 10.0, "footer must sit at the bottom of the panel");
+    let first_card = h.find("Library sortie 1").rect;
+    h.move_to(first_card.center());
+    h.step(vec![Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: Vec2::new(0.0, -10000.0),
+        modifiers: Modifiers::NONE,
+    }]);
+    for _ in 0..20 { h.step(Vec::new()); }
+    let last_card = h.find("Library sortie 6").rect;
+    assert!(panel.contains_rect(last_card) && last_card.bottom() < selected.top(), "cards must scroll above the footer: {last_card:?}");
+    assert_eq!(h.find("Add to pool").rect, add.rect, "scrolling cards must not move the footer");
+    assert_eq!(h.find("Sortie category").rect, category);
+    assert_eq!(h.find("Built-in sorties stay in the library.").rect, hint);
+    let before = h.app.air_plan.pool.len();
+    h.click("Add to pool");
+    assert_eq!(h.app.air_plan.pool.len(), before + 1);
+}
+
+#[test]
+fn air_tasking_add_to_pool_uses_the_picked_target() {
+    use crate::airtask::{AirSide, TargetRef};
+    let mut h = Harness::new("air_target_pick");
+    h.tab("Air Tasking");
+    air_targets(&mut h);
+    h.app.nato_objectives.push((230_000.0, 260_000.0));
+    h.settle();
+    air_scroll(&mut h, shell::RAIL_W + 130.0, -10000.0);
+    h.click("NATO objective 1");
+    h.click("NATO objective 2");
+    h.click("Add to pool");
+    assert_eq!(h.app.air_plan.pool[0].target, TargetRef::Objective { side: AirSide::Nato, xz: (230_000.0, 260_000.0) });
+}
+
+#[test]
+fn air_tasking_auto_fill_adds_each_target_once() {
+    use crate::airtask::{self, AirSide};
+    let mut h = Harness::new("air_autofill");
+    h.tab("Air Tasking");
+    air_targets(&mut h);
+    h.settle();
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.app.air_plan.pool.len(), 2 * 3 + 4 * 2);
+    assert_eq!(h.status(), "Added 14 entries");
+    h.app.with_air_context(|ctx| {
+        for sortie in &h.app.air_plan.library {
+            for choice in airtask::target_choices(ctx, sortie.side) {
+                assert_eq!(h.app.air_plan.pool.iter().filter(|e| e.sortie_id == sortie.id
+                    && airtask::resolve_target(&e.target, ctx) == Some(choice)).count(), 1);
+            }
+        }
+        assert_eq!(airtask::target_choices(ctx, AirSide::Dprk).len(), 3);
+    });
+    let before = h.app.air_plan.clone();
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.app.air_plan, before);
+    assert_eq!(h.status(), "Added 0 entries");
+    h.key_with(Key::Z, CTRL);
+    assert!(h.app.air_plan.pool.is_empty(), "a no-op auto-fill keeps the previous undo");
+}
+
+#[test]
+fn air_tasking_switched_off_entry_stays_in_pool() {
+    let mut h = Harness::new("air_off");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let before = h.app.air_plan.pool.clone();
+    h.click("Entry 1 enabled");
+    assert_eq!(h.app.air_plan.pool.len(), 6);
+    assert!(!h.app.air_plan.pool[0].enabled);
+    assert_eq!(h.app.air_plan.pool[0].target, before[0].target);
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan.pool, before);
+}
+
+#[test]
+fn air_tasking_remove_user_template_takes_its_entries_and_undo_restores_both() {
+    let mut h = Harness::new("air_remove_user");
+    h.tab("Air Tasking");
+    air_targets(&mut h);
+    dialog::answer(vec![repo("TemplateExamples/Historical1950/1950_US_F51_ArmedRecon_2plus2.Group")]);
+    h.key_with(Key::O, CTRL);
+    air_scroll(&mut h, shell::RAIL_W + 130.0, -10000.0);
+    h.click("Add to pool");
+    let before = h.app.air_plan.clone();
+    h.click("Remove");
+    assert_eq!(h.app.air_plan.library.len(), 6);
+    assert!(h.app.air_plan.pool.is_empty());
+    let label = h.app.air_undo.label().unwrap();
+    assert!(label.contains(&before.library[6].name) && label.ends_with("and 1 entry"));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+}
+
+#[test]
+fn air_tasking_reset_keeps_library_and_draws_a_new_seed() {
+    let mut h = Harness::new("air_reset");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    dialog::answer(vec![repo("TemplateExamples/Historical1950/1950_US_F51_ArmedRecon_2plus2.Group")]);
+    h.key_with(Key::O, CTRL);
+    h.app.air_plan.budget.per_side = [3, 4];
+    h.app.air_plan.schedule[0].period_min = 37.0;
+    h.app.air_plan.threshold.dwell_s = Some(90.0);
+    crate::airtask::add_category(&mut h.app.air_plan, "Unused").unwrap();
+    crate::airtask::set_category(&mut h.app.air_plan, 6, "Night raids");
+    let before = h.app.air_plan.clone();
+    h.click("Reset");
+    assert!(h.app.confirm == Some(Confirm::ResetAirPlan));
+    assert_eq!(h.app.air_plan, before);
+    h.key(Key::Escape);
+    assert!(h.app.confirm.is_none());
+    assert_eq!(h.app.air_plan, before);
+    h.click("Reset");
+    let button = h.all("Reset").into_iter().max_by(|a, b| a.rect.top().total_cmp(&b.rect.top())).unwrap();
+    h.click_at(button.rect.center());
+    assert_ne!(h.app.air_plan.seed, before.seed);
+    assert_eq!(h.app.air_plan, crate::airtask::AirPlan {
+        library: before.library.clone(), seed: h.app.air_plan.seed,
+        categories: ["Air alert", "Strike", "Close support", "Armed recon", "Interdiction", "Night raids"].map(str::to_owned).to_vec(),
+        ..Default::default()
+    });
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+}
+
+#[test]
+fn air_tasking_ctrl_o_adds_a_user_template() {
+    let mut h = Harness::new("air_ctrl_o");
+    h.tab("Air Tasking");
+    let path = repo("TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group");
+    dialog::answer(vec![path.clone()]);
+    h.key_with(Key::O, CTRL);
+    assert_eq!(h.app.air_plan.library.len(), 7);
+    assert_eq!(h.app.air_plan.library[6].source, crate::airtask::SortieSource::File(path.clone()));
+    dialog::answer(vec![path]);
+    h.key_with(Key::O, CTRL);
+    assert_eq!(h.app.air_plan.library.len(), 7, "same file is not added twice");
+    let missing = h.out("missing.Group");
+    dialog::answer(vec![missing]);
+    h.key_with(Key::O, CTRL);
+    assert!(matches!(h.app.status, Status::Error(_)));
+    assert_eq!(h.app.air_plan.library.len(), 7);
+    assert_eq!(dialog::pending(), 0);
+}
+
+#[test]
+fn air_tasking_header_shows_map_date_and_entry_count() {
+    let mut h = Harness::new("air_header");
+    h.app.front_t = crate::frontlines::TIMELINE.iter().position(|m| (m.year, m.month, m.day) == (1950, 9, 15)).unwrap() as f32;
+    h.tab("Air Tasking");
+    assert!(h.has("Map date 15 Sep 1950 · 0 entries"));
+    fill_air_pool(&mut h);
+    assert!(h.has("Map date 15 Sep 1950 · 6 entries"));
+    h.app.air_plan.pool.truncate(1);
+    h.settle();
+    assert!(h.has("Map date 15 Sep 1950 · 1 entry"));
+}
+
+#[test]
+fn air_tasking_selected_entry_shows_hard_stop() {
+    use crate::airtask::TriggerMode;
+    let mut h = Harness::new("air_hard_stop");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    h.app.air_selected = Some(1); // HVAR: 600 s on station, 300 s clock arrival.
+    h.settle();
+    assert!(h.has("35 min"));
+    h.app.air_plan.pool[1].mode = TriggerMode::Zone;
+    h.settle();
+    assert!(h.has("32.7 min"));
+    h.app.air_plan.pool[1].mode = TriggerMode::Both;
+    h.settle();
+    assert!(h.has("32.7 min"));
+    assert!(!h.has("35 min"));
+    h.app.air_plan.library[1].wp_speed_kmh = 0.0;
+    h.settle();
+    assert!(h.has("—"));
+    h.app.air_selected = Some(3); // Armed recon: 1200 s on station.
+    h.settle();
+    assert!(h.has("45 min"));
+}
+
+#[test]
+fn air_tasking_orphaned_entry_shows_orphaned_and_a_cross() {
+    let mut h = Harness::new("air_orphan");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    h.app.nato_objectives.clear();
+    h.settle();
+    assert!(h.has("Orphaned"));
+    assert!(h.all("✖").iter().any(|node| node.role == Role::Label));
+}
+
+#[test]
+fn air_tasking_manual_timing_and_heading_changes_undo() {
+    let mut h = Harness::new("air_settings_undo");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let before = h.app.air_plan.clone();
+    h.click("Override");
+    assert_eq!(h.app.air_plan.pool[0].heading_override, Some(0.0));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+    h.click("Manual timing");
+    let timing = crate::airtask::derived_timing(&before.threshold);
+    assert_eq!(h.app.air_plan.threshold.dwell_s, Some(timing.dwell_s));
+    assert_eq!(h.app.air_plan.threshold.hold_s, Some(timing.hold_s));
+    h.click("Manual timing");
+    assert_eq!(h.app.air_plan.threshold.dwell_s, None);
+    assert_eq!(h.app.air_plan.threshold.hold_s, None);
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan.threshold.dwell_s, Some(timing.dwell_s));
+}
+
+#[test]
+fn air_tasking_standalone_matches_public_builder_and_keeps_seed() {
+    let mut h = Harness::new("air_standalone");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let seed = h.app.air_plan.seed;
+    let expected = h.app.with_air_context(|ctx| crate::airtask::build_air_group(&h.app.air_plan, ctx)).unwrap();
+    let path = h.out("Air.Group");
+    dialog::answer(vec![path.clone()]);
+    h.key_with(Key::G, CTRL);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let root = crate::parser::parse_group_file(&text).unwrap();
+    assert_eq!(root.name(), Some("Air Tasking"));
+    assert_eq!(root.index, Some(1));
+    assert_eq!(root, expected);
+    assert_eq!(h.app.air_plan.seed, seed);
+    dialog::answer(vec![path.clone()]);
+    h.key_with(Key::G, CTRL);
+    assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+}
+
+#[test]
+#[ignore = "needs step 7"]
+fn air_tasking_generate_disabled_until_validate_passes() {
+    use crate::airtask::{self, IssueSeverity};
+    let mut h = Harness::new("air_validate");
+    h.tab("Air Tasking");
+    air_targets(&mut h);
+    for scenario in ["empty", "orphaned", "budget zero"] {
+        match scenario {
+            "empty" => h.app.air_plan.pool.clear(),
+            "orphaned" => { fill_air_pool(&mut h); h.app.east_objectives.clear(); h.app.nato_objectives.clear(); },
+            _ => { fill_air_pool(&mut h); h.app.air_plan.budget.per_side[0] = 0; },
+        }
+        h.settle();
+        let errors = h.app.with_air_context(|ctx| airtask::validate(&h.app.air_plan, ctx))
+            .into_iter().filter(|issue| issue.severity == IssueSeverity::Error).collect::<Vec<_>>();
+        assert!(!errors.is_empty(), "{scenario} must have a validation error");
+        assert!(h.find("Generate File").disabled, "{scenario}");
+        h.key_with(Key::G, CTRL); // No dialog answer: disabled Ctrl G must not open one.
+        let chip = h.find_prefix("⚠ ");
+        h.click_at(chip.rect.center());
+        for issue in errors { assert!(h.has(&issue.text), "{scenario}: missing Check text {}", issue.text); }
+        h.key(Key::Escape);
+    }
+}
+
+#[test]
+#[ignore = "needs step 7"]
+fn air_tasking_generate_file_writes_air_pack() {
+    let mut h = Harness::new("air_file_step7");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let path = h.out("Air.Group");
+    dialog::answer(vec![path.clone()]);
+    h.key_with(Key::G, CTRL);
+    let root = crate::parser::parse_group_file(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(root.name(), Some("Air Tasking"));
+    assert_eq!(root.block_type, "Group");
+    let mut groups = Vec::new();
+    let mut indexes = Vec::new();
+    root.for_each(&mut |node| {
+        if node.block_type == "Group" { groups.push(node.name().unwrap_or("").to_owned()); }
+        if let Some(id) = node.index { indexes.push(id); }
+    });
+    assert_eq!(groups.iter().filter(|name| name.as_str() == "Air Tasking").count(), 1);
+    for side in ["DPRK", "NATO"] {
+        assert!(groups.iter().any(|name| name.contains(side) && name.contains("Logic")), "missing {side} Logic: {groups:?}");
+    }
+    indexes.sort_unstable();
+    assert_eq!(indexes, (1..=indexes.len() as i32).collect::<Vec<_>>());
+    root.for_each(&mut |node| {
+        for id in node.targets.iter().chain(&node.objects) { assert!(indexes.binary_search(id).is_ok(), "dangling link {id}"); }
+        for key in ["LinkTrId", "MisObjID", "TarId", "CmdId"] {
+            if let Some(id) = node.property(key).and_then(|text| text.parse::<i32>().ok()).filter(|id| *id > 0) {
+                assert!(indexes.binary_search(&id).is_ok(), "dangling {key} {id}");
+            }
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs step 7"]
+fn air_tasking_totals_above_limit_are_orange_and_do_not_block_generate() {
+    let mut h = Harness::new("air_limits");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    h.app.air_plan.limits = crate::airtask::TotalsLimits { aircraft: 0, mcus: 0, check_zones: 0 };
+    h.settle();
+    assert!(!h.find("Generate File").disabled);
+    let issues = h.app.with_air_context(|ctx| crate::airtask::validate(&h.app.air_plan, ctx));
+    assert!(issues.iter().any(|i| i.severity == crate::airtask::IssueSeverity::Warning));
+    air_scroll(&mut h, SCREEN.x - 100.0, -10000.0);
+    let totals = h.app.with_air_context(|ctx| crate::airtask::totals(&h.app.air_plan, ctx));
+    let out = h.ctx.run(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SCREEN)), ..Default::default() }, |ctx| h.app.ui(ctx));
+    fn orange_at(shape: &egui::Shape, text: &str, bounds: Rect) -> bool {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().any(|s| orange_at(s, text, bounds)),
+            egui::Shape::Text(t) => t.galley.job.text == text && bounds.expand(1.0).contains(t.pos)
+                && t.galley.job.sections.iter().any(|s| s.format.color == c::WARN_TEXT),
+            _ => false,
+        }
+    }
+    for (label, values) in [("Aircraft", totals.aircraft), ("MCUs", totals.mcus), ("Check zones", totals.check_zones)] {
+        let all = values[0] + values[1];
+        assert!(all > 0);
+        let node = h.find(&format!("{label} All: {all}"));
+        assert!(out.shapes.iter().any(|s| orange_at(&s.shape, &all.to_string(), node.rect)), "{label} total is not orange");
+    }
 }
