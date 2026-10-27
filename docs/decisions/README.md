@@ -72,5 +72,6 @@ What this makes easier, harder or necessary.
 | [0034](0034-acceptance-mission-is-a-trace-build.md) | The step 11 acceptance mission is observed by a trace build, not debug subtitles | Accepted |
 | [0035](0035-one-air-pack-rooted-at-air-tasking.md) | `build_air_packs` returns one pack rooted at the `Air Tasking` group | Accepted |
 | [0036](0036-acceptance-test-before-step-9.md) | Fly the Air Tasking acceptance test before step 9 | Accepted |
+| [0037](0037-map-ai-off-player-countries.md) | Move the Map's own AI aircraft off the player countries when Air Tasking is in the mission | Proposed |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
