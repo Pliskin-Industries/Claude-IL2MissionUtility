@@ -6,9 +6,17 @@ use super::budget::census_delay;
 use super::library::{BUILTINS, inspect_sortie, nodes};
 use super::place::{SortiePlacement, place_air_sortie};
 use super::shell::{ShellIds, ShellSpec, by_id_mut, group, wrap_sortie};
-use super::{AirContext, AirPlan, AirSide, SideLogic, SortieSource, TargetRef, TriggerMode};
+use super::{AirContext, AirPlan, AirSide, PoolEntry, SideLogic, SortieSource, TargetRef, TriggerMode};
 use crate::ast::Il2Entity;
+use crate::frontlines::AIR_TASKING_GROUP;
 use crate::{duplicate, mapclip, mapfighters, parser, placement, template};
+
+pub(crate) const RUNS_RANGE: std::ops::RangeInclusive<u8> = 1..=6;
+
+pub(crate) fn side_tree_names(side: AirSide) -> [String; 2] {
+    let label = side.label();
+    ["Logic", "Sorties"].map(|kind| format!("{AIR_TASKING_GROUP} {label} {kind}"))
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CopyIds {
@@ -73,6 +81,28 @@ fn resolve(target: TargetRef, ctx: &AirContext<'_>) -> Option<(AirSide, (f64, f6
     }
 }
 
+/// Shared geometry for assembly, preview and the cross-side path check, using
+/// the library item's speed shown to the user.
+pub(crate) fn resolve_placement(
+    entry: &PoolEntry,
+    plan: &AirPlan,
+    ctx: &AirContext<'_>,
+    wp_speed_kmh: f64,
+) -> Option<(AirSide, SortiePlacement)> {
+    let (side, target, arrow_heading) = resolve(entry.target, ctx)?;
+    let rtb = mapfighters::rtb_ao_point(side == AirSide::Dprk, target.0, target.1, ctx.aabb);
+    let heading_deg = entry
+        .heading_override
+        .or(arrow_heading)
+        .unwrap_or_else(|| placement::heading_toward(rtb, target));
+    let spawn_dist_m = if entry.mode == TriggerMode::Clock {
+        wp_speed_kmh / 3.6 * plan.schedule[side.idx()].arrive_min * 60.0
+    } else {
+        plan.zone.spawn_dist_km * 1000.0
+    };
+    Some((side, SortiePlacement { target, heading_deg, spawn_dist_m, rtb }))
+}
+
 /// Stage an entire side so an invalid template cannot leave half a registry.
 pub(crate) fn assemble_side(
     side: AirSide,
@@ -83,15 +113,11 @@ pub(crate) fn assemble_side(
 ) -> Result<SideCopies, String> {
     let mut alloc = *next_id;
     let mut registry = logic.clone();
-    let label = if side == AirSide::Dprk {
-        "DPRK"
-    } else {
-        "NATO"
-    };
+    let [logic_name, sorties_name] = side_tree_names(side);
     let mut result = SideCopies {
         trees: vec![
-            group(&format!("Air Tasking {label} Logic"), &mut alloc),
-            group(&format!("Air Tasking {label} Sorties"), &mut alloc),
+            group(&logic_name, &mut alloc),
+            group(&sorties_name, &mut alloc),
         ],
         entries: Vec::new(),
         areas: Vec::new(),
@@ -117,7 +143,9 @@ pub(crate) fn assemble_side(
         if sortie.side != side || ctx.date < sortie.valid.from || ctx.date > sortie.valid.to {
             continue;
         }
-        let Some((target_side, target, arrow_heading)) = resolve(entry.target, ctx) else {
+        let Some((target_side, placement)) =
+            resolve_placement(entry, plan, ctx, sortie.wp_speed_kmh)
+        else {
             result.warnings.push(format!(
                 "Entry {} has an orphaned target; skipped",
                 pool_index + 1
@@ -130,7 +158,7 @@ pub(crate) fn assemble_side(
                 pool_index + 1
             ));
         }
-        if !(1..=6).contains(&entry.runs) {
+        if !RUNS_RANGE.contains(&entry.runs) {
             return Err(format!("Entry {} needs 1..=6 runs", pool_index + 1));
         }
         let text = match &sortie.source {
@@ -151,28 +179,14 @@ pub(crate) fn assemble_side(
                 sortie.name
             ));
         }
+        let target = placement.target;
         let area = if let Some(index) = result.areas.iter().position(|&p| p == target) {
             index + 1
         } else {
             result.areas.push(target);
             result.areas.len()
         };
-        let rtb = mapfighters::rtb_ao_point(side == AirSide::Dprk, target.0, target.1, ctx.aabb);
-        let heading_deg = entry
-            .heading_override
-            .or(arrow_heading)
-            .unwrap_or_else(|| placement::heading_toward(rtb, target));
-        let spawn_dist_m = if entry.mode == TriggerMode::Clock {
-            shape.wp_speed_kmh / 3.6 * plan.schedule[side.idx()].arrive_min * 60.0
-        } else {
-            plan.zone.spawn_dist_km * 1000.0
-        };
-        let placement = SortiePlacement {
-            target,
-            heading_deg,
-            spawn_dist_m,
-            rtb,
-        };
+        let spawn_dist_m = placement.spawn_dist_m;
         let entry_number = result.entries.len() + 1;
         let entry_prefix = format!("E{}{:02}", side.letter(), entry_number);
         let exhausted = template::mcu(

@@ -179,6 +179,16 @@ exhaustion. `emit_side_logic` applies deferred links and writes the side's
 Mission Begin / INIT / INIT OFF. `SideCopies` returns copy and entry ids
 for later front-end builders. **Air Tasking generation.**
 
+### `airtask/export.rs` — the export, validation, totals and preview
+Bodies of the four public `airtask` functions (`build_air_packs`, `validate`,
+`totals`, `preview`). One evaluation per call: entry eligibility and input
+checks, then per side assemble → clock → zone → threshold → budget → emit,
+then the app's AI country (602 / 503) on every copied plane. Output is one
+pack rooted at `Air Tasking` (decision 0035). D30 within r_in (0033), totals
+limits (0032), D41 locale conflicts. Tests pin `export_test_plan()` and
+`acceptance_test_plan()`; the ignored `write_p14_acceptance_mission` writes
+the step 11 trace build (0034). **Air Tasking generation, Map export.**
+
 ### `airfield.rs` — SP airfield → multiplayer
 `inspect_airfield` / `AirfieldInfo` (player planes, checkzones to
 unlink, strip count, vehicles/AI planes/blocks) and `clean_airfield`

@@ -31,17 +31,8 @@ pub struct PlacedSortie {
     pub warnings: Vec<String>,
 }
 
-pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<PlacedSortie, String> {
-    // All fallible validation precedes mutation, including the speed fallback.
-    let shape = inspect_sortie(root).map_err(|errors| errors.join("; "))?;
-    let plane_objects: BTreeSet<_> = shape.plane_objects.values().copied().collect();
-    for &plane in &plane_objects {
-        if by_id(root, plane).property("AiRTBDecision").is_none() {
-            return Err(format!(
-                "{MISSING_AI_RTB_DECISION} {plane}. {REGENERATE_TEMPLATE}"
-            ));
-        }
-    }
+/// The lead's spawn before serialization, also used by the geometry preview.
+pub(crate) fn spawn_point(p: &SortiePlacement) -> Result<(f64, f64), String> {
     if [
         p.target.0,
         p.target.1,
@@ -64,6 +55,21 @@ pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<Pla
     if !spawn.0.is_finite() || !spawn.1.is_finite() {
         return Err(SPAWN_OVERFLOW.into());
     }
+    Ok(spawn)
+}
+
+pub fn place_air_sortie(root: &mut Il2Entity, p: &SortiePlacement) -> Result<PlacedSortie, String> {
+    // All fallible validation precedes mutation, including the speed fallback.
+    let shape = inspect_sortie(root).map_err(|errors| errors.join("; "))?;
+    let plane_objects: BTreeSet<_> = shape.plane_objects.values().copied().collect();
+    for &plane in &plane_objects {
+        if by_id(root, plane).property("AiRTBDecision").is_none() {
+            return Err(format!(
+                "{MISSING_AI_RTB_DECISION} {plane}. {REGENERATE_TEMPLATE}"
+            ));
+        }
+    }
+    let spawn = spawn_point(p)?;
     let missing: Vec<_> = shape
         .leads
         .iter()
