@@ -1,0 +1,432 @@
+<title>Air Tasking Tab Mockup</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600&family=Barlow+Condensed:wght@600&display=swap">
+<style>
+/* Layout: the app frame at its 1280 x 800 minimum window, then the open questions. Single light theme on purpose: the egui app has one look. */
+:root{
+  color-scheme: light;
+  --bg:#f2f2f3; --surface:#e9e9ea; --text:#1d1f20; --divider:#d0d0d1; --mark:#7d7e7f;
+  --a100:#eef6ff; --a200:#d6ebff; --a300:#b5d9fd; --a400:#94bce3; --a500:#749dc4; --a600:#597ea3; --a700:#416180; --a800:#2c455d; --a900:#1d2d3d; --accent:#5980a6;
+  --n100:#f5f5f8; --n200:#e7e7ea; --n300:#d4d4d7; --n400:#b7b7ba; --n500:#98989b; --n600:#7a7a7d; --n700:#5d5d60; --n800:#424244; --n900:#2b2b2d;
+  --dprk:#ad3136; --nato:#416180; --warn:#c9913a; --warn-text:#93661c;
+  --note:#7b4fa8; --note-bg:#f4eefa;          /* mockup annotations only, never in the app */
+  --page:#dcdcde;
+  --f-head:"Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body:"Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono:ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{background:var(--page);color:var(--text);font-family:var(--f-body);font-size:13px;line-height:1.4;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+.wrap{max-width:1312px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+.intro{display:flex;flex-direction:column;gap:6px;max-width:860px}
+.intro h1{font:600 26px/1.1 var(--f-head);letter-spacing:.03em;text-transform:uppercase;margin:0;text-wrap:balance}
+.intro p{margin:0;font-size:14px;line-height:1.5;color:var(--n800)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12px;color:var(--n800)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:22px;height:14px;border:1.5px dashed var(--note);background:var(--note-bg)}
+.pinsw{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--note);color:#fff;font:600 11px/1 var(--f-body)}
+.scroller{overflow-x:auto;padding:8px 8px 14px;margin:0 -8px}
+
+/* ---------- the app frame ---------- */
+.app{width:1280px;height:800px;background:var(--bg);border:1px solid var(--n400);box-shadow:0 3px 10px rgba(43,43,45,.16);display:flex;flex-direction:column;position:relative}
+.row{flex:1;display:flex;min-height:0}
+.rail{width:172px;flex:none;border-right:1px solid var(--divider);display:flex;flex-direction:column;padding:14px 10px;gap:2px}
+.brand{font:600 17px/1 var(--f-head);letter-spacing:.04em;text-transform:uppercase;padding:0 8px 16px}
+.mode{display:flex;gap:8px;align-items:center;min-height:32px;padding:0 8px;font-size:13px}
+.mode i{font:normal 12px var(--f-mono);color:var(--n600)}
+.mode.on{background:var(--a200);color:var(--a900);font-weight:600}
+.mode.on i{color:var(--a900);opacity:.75}
+.mode.new{box-shadow:inset 3px 0 0 var(--accent)}
+.railhint{padding:6px 8px 0;font-size:12px;color:var(--n700)}
+.kbd{font:12px var(--f-mono);padding:1px 5px;border:1px solid var(--divider);color:var(--n700);white-space:nowrap}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+header.hd{height:54px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid var(--divider)}
+.hd h2{margin:0;font:600 22px/1 var(--f-head);letter-spacing:.02em;text-transform:uppercase;white-space:nowrap}
+.hd .file{font-style:italic;color:var(--n700);white-space:nowrap}
+.sp{flex:1}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:28px;padding:4px 11px;font:600 13px/1.2 var(--f-head);letter-spacing:.01em;border:1px solid var(--divider);background:transparent;color:var(--text);white-space:nowrap}
+.btn.small{min-height:28px;padding:3px 9px}
+.btn[disabled]{opacity:.45}
+.btn.primary{position:relative;background:var(--accent);border-color:var(--accent);color:var(--bg);min-height:32px;padding:6px 16px}
+.btn.primary .kbd{border-color:rgba(255,255,255,.45);color:var(--bg);opacity:.85}
+.corner{position:absolute;width:11px;height:11px;color:var(--mark)}
+.corner::before,.corner::after{content:"";position:absolute;background:currentColor}
+.corner::before{left:5px;top:0;width:1px;height:100%}.corner::after{top:5px;left:0;width:100%;height:1px}
+.tl{top:-6px;left:-6px}.tr{top:-6px;right:-6px}.bl{bottom:-6px;left:-6px}.br{bottom:-6px;right:-6px}
+.ready{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 8px;color:var(--warn-text);font-size:13px;white-space:nowrap}
+.grid3{flex:1;display:grid;grid-template-columns:270px minmax(0,1fr) 304px;min-height:0}
+.panel{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.panel.left{border-right:1px solid var(--divider)}
+.panel.right{border-left:1px solid var(--divider)}
+.pad{padding:14px;display:flex;flex-direction:column;gap:10px}
+.st{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.st b{font:600 14px/1 var(--f-head);letter-spacing:.08em;text-transform:uppercase}
+.st span{font-size:12px;color:var(--n700)}
+.hint{font-size:12px;color:var(--n700)}
+.hint a{color:var(--a700)}
+.mono{font:12px var(--f-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--n700)}
+.marker{width:12px;height:12px;flex:none}
+/* library cards */
+.card{position:relative;border:1px solid var(--divider);padding:8px 10px;display:flex;flex-direction:column;gap:4px}
+.card.sel{border-color:var(--accent);background:var(--a100)}
+.card .nm{display:flex;gap:7px;align-items:flex-start;font-weight:600;font-size:13px;line-height:1.3}
+.card .nm .marker{margin-top:3px}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.tag{display:inline-flex;align-items:center;font-size:12px;padding:1px 7px;border:1px solid var(--divider);color:var(--n800);white-space:nowrap}
+.tag.acc{background:var(--a100);border-color:var(--a300);color:var(--a800)}
+.badge{display:flex;gap:6px;align-items:baseline;font-size:12px}
+.ok{color:var(--a700)}
+.bad{color:var(--warn-text)}
+.libfoot{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-top:1px solid var(--divider);margin-top:auto}
+.btnrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.combo{display:inline-flex;align-items:center;justify-content:space-between;gap:6px;height:28px;padding:0 8px;border:1px solid var(--divider);background:var(--n100);font-size:13px;white-space:nowrap}
+.combo::after{content:"";width:6px;height:6px;border-right:1.5px solid var(--n700);border-bottom:1.5px solid var(--n700);transform:translateY(-2px) rotate(45deg)}
+/* centre */
+.centre{background-image:linear-gradient(var(--n200) 1px,transparent 1px),linear-gradient(90deg,var(--n200) 1px,transparent 1px);background-size:32px 32px}
+.sheet{background:var(--bg);border:1px solid var(--divider);padding:12px 12px 10px;display:flex;flex-direction:column;gap:8px}
+table.pool{width:100%;border-collapse:collapse;font-size:13px}
+.pool th{text-align:left;font:600 12px/1 var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--n700);padding:6px 4px;border-bottom:1px solid var(--divider);white-space:nowrap}
+.pool td{padding:0 4px;height:34px;border-bottom:1px solid var(--n200);white-space:nowrap}
+.pool tr.sel td{background:var(--a100)}
+.pool tr.sel td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
+.pool tr.off td{color:var(--n600)}
+.pool .r{text-align:right}
+.cell{display:flex;align-items:center;gap:6px;overflow:hidden}
+.cell .tx{overflow:hidden;text-overflow:ellipsis}
+.chk{width:16px;height:16px;flex:none;border:1px solid var(--accent);background:var(--accent);color:var(--bg);font-size:11px;line-height:14px;text-align:center}
+.chk.no{background:transparent;border-color:var(--n500)}
+.dv{display:inline-flex;align-items:center;justify-content:flex-end;width:40px;height:26px;padding:0 6px;border:1px solid var(--divider);background:var(--n100);font:12px var(--f-mono)}
+.cmb{display:inline-flex;align-items:center;justify-content:space-between;width:74px;height:26px;padding:0 6px;border:1px solid var(--divider);background:var(--n100);font-size:13px}
+.cmb::after{content:"";width:5px;height:5px;border-right:1.5px solid var(--n700);border-bottom:1.5px solid var(--n700);transform:translateY(-2px) rotate(45deg)}
+.x{display:inline-grid;place-items:center;width:28px;height:28px;border:1px solid transparent;color:var(--n700)}
+.orph{color:var(--warn-text);font-weight:600}
+.strip{display:grid;grid-template-columns:44px 1fr;gap:6px 8px;align-items:center;font-size:12px}
+.lane{height:22px;border:1px solid var(--divider);background:repeating-linear-gradient(90deg,transparent 0 calc(100%/6 - 1px),var(--n200) calc(100%/6 - 1px) calc(100%/6));position:relative}
+.axis{display:flex;justify-content:space-between;font:12px var(--f-mono);color:var(--n600)}
+.issues{display:flex;flex-direction:column;gap:4px;font-size:13px}
+/* right */
+.selblock{padding:14px;display:flex;flex-direction:column;gap:9px;border-bottom:1px solid var(--divider)}
+.kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--a700)}
+.selname{font:600 22px/1.05 var(--f-head);letter-spacing:.01em}
+.fg{display:grid;grid-template-columns:96px 1fr;gap:8px 10px;align-items:center}
+.fg>span:nth-child(odd){color:var(--n700)}
+.slider{display:grid;grid-template-columns:1fr 34px;gap:10px;align-items:center}
+.track{height:4px;background:var(--n300);position:relative}
+.track i{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}
+.track b{position:absolute;top:-6px;width:16px;height:16px;margin-left:-8px;background:var(--bg);border:1.5px solid var(--accent);border-radius:50%}
+.seg{display:inline-flex;border:1px solid var(--divider)}
+.seg span{display:inline-flex;align-items:center;min-height:28px;padding:0 10px;font-size:13px}
+.seg span+span{border-left:1px solid var(--divider)}
+.seg span.on{background:var(--accent);color:var(--bg)}
+.sec{padding:12px 14px;display:flex;flex-direction:column;gap:9px;border-bottom:1px solid var(--divider)}
+.sech{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:20px}
+.sech b{display:flex;gap:7px;align-items:center;font:600 14px/1 var(--f-head);letter-spacing:.08em;text-transform:uppercase}
+.sech b small{font-size:10px;letter-spacing:0}
+.sech span{font-size:12px;color:var(--n700);text-align:right}
+.ro{display:inline-flex;align-items:center;height:28px;padding:0 8px;border:1px dashed var(--divider);font:12px var(--f-mono);color:var(--n800)}
+.lock{display:flex;gap:6px;align-items:center}
+.totals{width:100%;border-collapse:collapse;font-size:13px}
+.totals th{font:600 12px var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--n700);text-align:right;padding:4px 4px;border-bottom:1px solid var(--divider)}
+.totals th:first-child,.totals td:first-child{text-align:left}
+.totals td{padding:4px;text-align:right;border-bottom:1px solid var(--n200);font:12px var(--f-mono);font-variant-numeric:tabular-nums}
+.totals td:first-child{font:13px var(--f-body)}
+footer.status{height:30px;flex:none;display:flex;align-items:center;gap:8px;padding:0 14px;border-top:1px solid var(--divider);font-size:13px;color:var(--n800)}
+footer.status .sq{width:8px;height:8px;background:var(--accent)}
+footer.status a{color:var(--a700)}
+/* annotations */
+.late{position:relative;outline:1.5px dashed var(--note);outline-offset:3px;background-color:var(--note-bg)}
+.late-tag{position:absolute;right:4px;top:-11px;font:600 11px/1 var(--f-body);background:var(--note);color:#fff;padding:3px 6px;letter-spacing:.02em;white-space:nowrap;z-index:2}
+.pin{position:absolute;z-index:3;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--note);color:#fff;font:600 11px/1 var(--f-body);box-shadow:0 0 0 2px var(--bg);text-decoration:none}
+.pin:hover,.pin:focus-visible{outline:2px solid var(--note);outline-offset:2px}
+
+/* ---------- questions ---------- */
+.qs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:14px}
+.q{background:var(--bg);border:1px solid var(--divider);padding:14px 16px;display:flex;flex-direction:column;gap:7px;min-width:0;scroll-margin-top:16px}
+.q:target{border-color:var(--note);box-shadow:0 0 0 2px var(--note-bg)}
+.qh{display:flex;gap:10px;align-items:baseline}
+.qh .pinsw{flex:none;transform:translateY(3px)}
+.qh h3{margin:0;font:600 17px/1.2 var(--f-head);letter-spacing:.02em;text-wrap:balance}
+.q p{margin:0;font-size:13px;line-height:1.5;color:var(--n800);max-width:68ch}
+.q .rec{color:var(--a800)}
+.q .rec b{font-weight:600}
+.q code{font:12px var(--f-mono);background:var(--surface);padding:0 3px}
+h2.part{margin:8px 0 0;font:600 20px/1.1 var(--f-head);letter-spacing:.06em;text-transform:uppercase}
+.facts{display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:1.5;color:var(--n800);max-width:900px;margin:0;padding-left:18px}
+</style>
+
+<div class="wrap">
+  <div class="intro">
+    <h1>Air Tasking rail tab · P14 step 8</h1>
+    <p>The seventh rail tab (Ctrl 7) at the minimum window, 1280 × 800, built from the redesign tokens and the turn 2 screens. Sample data: the six built-in sorties, one user template, and a Map dated 15 Sep 1950 with three objectives and one arrow.</p>
+    <div class="legend">
+      <span><i class="sw"></i>Filled by step 7 (<code>validate</code>, <code>preview</code>, <code>totals</code> are stubs today); shown empty but labelled</span>
+      <span><i class="pinsw">1</i>Decision, listed under the frame</span>
+    </div>
+  </div>
+
+  <div class="scroller">
+  <div class="app" role="img" aria-label="Mockup of the Air Tasking tab">
+    <div class="row">
+      <!-- rail -->
+      <nav class="rail">
+        <div class="brand">IL-2 Group<br>Generator</div>
+        <div class="mode"><i>01</i>Template</div>
+        <div class="mode"><i>02</i>Army Generator</div>
+        <div class="mode"><i>03</i>Fighter Pack</div>
+        <div class="mode"><i>04</i>Exclusive Activation</div>
+        <div class="mode"><i>05</i>Airfield</div>
+        <div class="mode"><i>06</i>Map</div>
+        <div class="mode on"><i>07</i>Air Tasking</div>
+        <div class="railhint">Ctrl 1–7</div>
+        <div class="sp"></div>
+        <div class="mode" style="color:var(--a700)">Help<span class="sp"></span><span class="kbd">F1</span></div>
+      </nav>
+
+      <div class="main">
+        <header class="hd" style="position:relative">
+          <h2>Air Tasking</h2>
+          <span class="file">Map date 15 Sep 1950 · 7 entries</span>
+          <a class="pin" href="#q8" style="left:356px;top:16px">8</a>
+          <div class="sp"></div>
+          <button class="btn">Add template… <span class="kbd">Ctrl O</span></button>
+          <button class="btn">Reset</button>
+          <a class="pin" href="#q6" style="right:356px;top:-2px">6</a>
+          <span class="ready">⚠ 1 to do ▾</span>
+          <button class="btn primary"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Generate File <span class="kbd">Ctrl G</span></button>
+          <a class="pin" href="#q5" style="right:6px;top:4px">5</a>
+        </header>
+
+        <div class="grid3">
+          <!-- LEFT: library -->
+          <section class="panel left">
+            <div class="pad" style="overflow:hidden">
+              <div class="st"><b>Library · 7</b><span>valid for 15 Sep 1950</span></div>
+
+              <div class="card">
+                <div class="nm"><svg class="marker" viewBox="-12 -12 24 24" style="transform:rotate(180deg)"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--nato)"/></svg>US F-80C HVAR Strike on Armor (Jul 1950)</div>
+                <div class="chips"><span class="tag acc">Strike</span><span class="tag">4 × F-80C</span></div>
+                <div class="badge ok">✔ <span class="muted">Valid · war span (unsourced)</span></div>
+              </div>
+
+              <div class="card sel"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                <div class="nm"><svg class="marker" viewBox="-12 -12 24 24" style="transform:rotate(180deg)"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--nato)"/></svg>US F-51D Armed Recon 2+2 (Nov–Dec 1950)</div>
+                <div class="chips"><span class="tag acc">Armed recon</span><span class="tag">Escorted</span><span class="tag">2 + 2 × F-51D</span></div>
+                <div class="badge ok">✔ <span class="muted">Valid · war span (unsourced)</span></div>
+              </div>
+
+              <div class="card">
+                <div class="nm"><svg class="marker" viewBox="-12 -12 24 24"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--dprk)"/></svg>DPRK Il-10 Attack on Kimpo 2x4 (27 Jun 1950)</div>
+                <div class="chips"><span class="tag acc">Strike</span><span class="tag">2 × 4 × Il-10</span></div>
+                <div class="badge ok">✔ <span class="muted">Valid · war span (unsourced)</span></div>
+              </div>
+
+              <div class="card">
+                <div class="nm"><svg class="marker" viewBox="-12 -12 24 24"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--dprk)"/></svg>La11_Night_Intruder <span class="tag" style="margin-left:auto;font-weight:400">File</span></div>
+                <div class="chips"><span class="tag acc">Strike</span><span class="tag">2 × La-11</span></div>
+                <div class="badge bad">✖ <span>La-11 from 15 Apr 1953 [S9 p.685]</span></div>
+              </div>
+
+              <div class="hint">+ 3 more: F-80C Air Alert, F-51D Close Support, Yak Airfield Raid</div>
+            </div>
+            <div class="libfoot" style="position:relative">
+              <a class="pin" href="#q1" style="left:-11px;top:10px">1</a>
+              <div class="hint" style="color:var(--text)">Selected: <b>F-51D Armed Recon 2+2</b></div>
+              <div class="btnrow">
+                <span class="muted" style="font-size:12px">Target</span>
+                <span class="combo" style="flex:1">NATO objective 2</span>
+              </div>
+              <div class="btnrow">
+                <button class="btn">Add to pool</button>
+                <button class="btn" disabled>Remove</button>
+              </div>
+              <div class="hint">Built-in sorties stay in the library.</div>
+            </div>
+          </section>
+
+          <!-- CENTRE: pool + timeline + issues -->
+          <section class="panel centre">
+            <div style="padding:14px 16px 0;display:flex;flex-direction:column;gap:10px;min-height:0;flex:1">
+              <div class="sheet" style="position:relative">
+                <a class="pin" href="#q2" style="right:-11px;top:-11px">2</a>
+                <a class="pin" href="#q3" style="left:-11px;top:46px">3</a>
+                <div class="st"><b>Pool · 7</b>
+                  <span style="display:flex;gap:8px;align-items:center">DPRK 3 · NATO 4 <button class="btn small">Auto-fill from objectives</button></span>
+                </div>
+                <table class="pool">
+                  <colgroup><col style="width:26px"><col><col style="width:110px"><col style="width:50px"><col style="width:84px"><col style="width:50px"><col style="width:40px"><col style="width:34px"></colgroup>
+                  <thead><tr><th></th><th>Sortie</th><th>Target</th><th class="r">Wt</th><th>Mode</th><th class="r">Runs</th><th>OK</th><th></th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="chk">✔</span></td><td><div class="cell"><svg class="marker" viewBox="-12 -12 24 24" style="transform:rotate(180deg)"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--nato)"/></svg><span class="tx">US F-80C HVAR Strike on Armor</span></div></td><td>Objective 1</td><td class="r"><span class="dv">8</span></td><td><span class="cmb">Clock</span></td><td class="r"><span class="dv">3</span></td><td class="ok">✔</td><td><span class="x">✖</span></td></tr>
+                    <tr class="sel"><td><span class="chk">✔</span></td><td><div class="cell"><svg class="marker" viewBox="-12 -12 24 24" style="transform:rotate(180deg)"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--nato)"/></svg><span class="tx">US F-51D Armed Recon 2+2</span></div></td><td>Objective 2</td><td class="r"><span class="dv">5</span></td><td><span class="cmb">Both</span></td><td class="r"><span class="dv">3</span></td><td class="ok">✔</td><td><span class="x">✖</span></td></tr>
+                    <tr><td><span class="chk">✔</span></td><td><div class="cell"><svg class="marker" viewBox="-12 -12 24 24" style="transform:rotate(180deg)"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--nato)"/></svg><span class="tx">US F-51D Close Support 4-ship</span></div></td><td>Arrow 1</td><td class="r"><span class="dv">5</span></td><td><span class="cmb">Clock</span></td><td class="r"><span class="dv">2</span></td><td class="ok">✔</td><td><span class="x">✖</span></td></tr>
+                    <tr class="off"><td><span class="chk no"></span></td><td><div class="cell"><svg class="marker" viewBox="-12 -12 24 24" style="transform:rotate(180deg)"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--n500)"/></svg><span class="tx">US F-80C Air Alert 4-ship</span></div></td><td>Objective 1</td><td class="r"><span class="dv">5</span></td><td><span class="cmb">Zone</span></td><td class="r"><span class="dv">3</span></td><td class="ok">✔</td><td><span class="x">✖</span></td></tr>
+                    <tr><td><span class="chk">✔</span></td><td><div class="cell"><svg class="marker" viewBox="-12 -12 24 24"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--dprk)"/></svg><span class="tx">DPRK Yak Airfield Raid 2+2</span></div></td><td>Objective 1</td><td class="r"><span class="dv">5</span></td><td><span class="cmb">Clock</span></td><td class="r"><span class="dv">3</span></td><td class="ok">✔</td><td><span class="x">✖</span></td></tr>
+                    <tr><td><span class="chk">✔</span></td><td><div class="cell"><svg class="marker" viewBox="-12 -12 24 24"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--dprk)"/></svg><span class="tx">DPRK Il-10 Attack on Kimpo 2x4</span></div></td><td class="orph">Orphaned</td><td class="r"><span class="dv">5</span></td><td><span class="cmb">Clock</span></td><td class="r"><span class="dv">3</span></td><td class="bad">✖</td><td><span class="x">✖</span></td></tr>
+                    <tr><td><span class="chk">✔</span></td><td><div class="cell"><svg class="marker" viewBox="-12 -12 24 24"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--dprk)"/></svg><span class="tx">La11_Night_Intruder</span></div></td><td>Objective 1</td><td class="r"><span class="dv">5</span></td><td><span class="cmb">Clock</span></td><td class="r"><span class="dv">3</span></td><td class="bad">✖</td><td><span class="x">✖</span></td></tr>
+                  </tbody>
+                </table>
+                <div class="hint">Runs: at most this many sorties of the entry per mission, clock and zone together. Help ›</div>
+              </div>
+
+              <div class="sheet late" style="gap:6px">
+                <span class="late-tag">after step 7 · airtask::preview</span>
+                <a class="pin" href="#q4" style="left:-11px;top:-11px">4</a>
+                <div class="st"><b>Slot timeline</b><span>0–3 h · one row per side</span></div>
+                <div class="strip">
+                  <span style="display:flex;gap:5px;align-items:center"><svg class="marker" viewBox="-12 -12 24 24"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--dprk)"/></svg>DPRK</span><div class="lane"></div>
+                  <span style="display:flex;gap:5px;align-items:center"><svg class="marker" viewBox="-12 -12 24 24" style="transform:rotate(180deg)"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--nato)"/></svg>NATO</span><div class="lane"></div>
+                  <span></span><div class="axis"><span>0:00</span><span>0:30</span><span>1:00</span><span>1:30</span><span>2:00</span><span>2:30</span><span>3:00</span></div>
+                </div>
+                <div class="hint">Ticks: slot times · shading: jitter span · fainter tick: higher quiet chance.</div>
+              </div>
+
+              <div class="sheet late" style="gap:6px;margin-bottom:14px">
+                <span class="late-tag">after step 7 · airtask::validate</span>
+                <div class="st"><b>Plan check</b><span>errors block Generate · warnings do not</span></div>
+                <div class="issues">
+                  <div class="muted">No issues reported.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- RIGHT: selection then settings -->
+          <section class="panel right">
+            <div class="selblock" style="position:relative">
+              <a class="pin" href="#q9" style="right:8px;top:8px">9</a>
+              <span class="kicker">Selected · pool entry 2</span>
+              <span class="selname">F-51D Armed Recon 2+2</span>
+              <span class="hint" style="display:flex;gap:6px;align-items:center"><svg class="marker" viewBox="-12 -12 24 24" style="transform:rotate(180deg)"><path d="M-8 -9H8V3L0 11L-8 3Z" fill="var(--nato)"/></svg>NATO · Objective 2 · escort flies Cover</span>
+              <div class="fg">
+                <span>Heading</span><span style="display:flex;gap:8px;align-items:center"><span class="chk no"></span>Override <span class="ro" style="width:64px">auto</span></span>
+                <span>Hard stop</span><span class="ro late" style="justify-self:start">— min</span>
+              </div>
+              <div class="btnrow"><button class="btn">Remove from pool</button></div>
+            </div>
+
+            <div class="sec">
+              <div class="sech"><b><small>▼</small>Budget</b><span>DPRK 2 · NATO 2</span></div>
+              <div class="fg">
+                <span>DPRK max active</span><div class="slider"><div class="track"><i style="width:20%"></i><b style="left:20%"></b></div><span class="mono" style="text-align:right">2</span></div>
+                <span>NATO max active</span><div class="slider"><div class="track"><i style="width:20%"></i><b style="left:20%"></b></div><span class="mono" style="text-align:right">2</span></div>
+              </div>
+              <div class="hint">At most this many sorties fly at once on each side. Help ›</div>
+            </div>
+
+            <div class="sec">
+              <div class="sech"><b><small>▼</small>Threshold</b><span>1 player · 12 km</span></div>
+              <div class="fg">
+                <span>Players</span><span class="lock"><span class="ro">1</span><span class="hint">Two or more players comes with the multi-player phase.</span></span>
+                <span>Radius R</span><div class="slider"><div class="track"><i style="width:40%"></i><b style="left:40%"></b></div><span class="mono" style="text-align:right">12 km</span></div>
+                <span>Dwell · hold</span><span style="display:flex;gap:6px"><span class="ro">120 s</span><span class="ro">240 s</span><span class="ro">r 6 km</span></span>
+              </div>
+              <div class="hint">From F-80C cruise 732 km/h.</div>
+              <div style="display:flex;gap:8px;align-items:center;min-height:28px"><span class="chk no"></span>Manual timing</div>
+            </div>
+
+            <div class="sec" style="padding-block:0">
+              <div class="sech" style="min-height:40px"><b><small>▶</small>Schedule · DPRK</b><span>10 min, every 20 · ±6</span></div>
+            </div>
+            <div class="sec" style="padding-block:0">
+              <div class="sech" style="min-height:40px"><b><small>▶</small>Schedule · NATO</b><span>10 min, every 20 · ±6</span></div>
+            </div>
+            <div class="sec" style="padding-block:0">
+              <div class="sech" style="min-height:40px"><b><small>▶</small>Zone triggers</b><span>50 % · 15 min · 30 km</span></div>
+            </div>
+            <div class="sec" style="padding-block:0">
+              <div class="sech" style="min-height:40px"><b><small>▶</small>Hard stop</b><span>+10 min · extend 10 min</span></div>
+            </div>
+
+            <div class="sec" style="border-bottom:0;position:relative">
+              <div class="sech"><b><small>▼</small>Output</b><span>in base map</span></div>
+              <div style="display:flex;gap:8px;align-items:center;min-height:28px"><span class="chk">✔</span>Include in base map</div>
+              <div class="late" style="padding:4px 2px 2px">
+                <span class="late-tag">after step 7 · airtask::totals</span>
+                <table class="totals">
+                  <thead><tr><th></th><th>DPRK</th><th>NATO</th><th>All</th></tr></thead>
+                  <tbody>
+                    <tr><td>Copies</td><td>0</td><td>0</td><td>0</td></tr>
+                    <tr><td>Aircraft</td><td>0</td><td>0</td><td>0</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+    <footer class="status">
+      <span class="sq"></span>Weight of US F-80C HVAR Strike set to 8.
+      <span class="sp"></span><span class="muted">Changed weight</span> <a href="#">Undo</a> <span class="kbd">Ctrl Z</span>
+    </footer>
+  </div>
+  </div>
+
+  <div class="intro">
+    <h2 class="part">What the frame shows</h2>
+  </div>
+  <ul class="facts">
+    <li><b>Left, Library (270 px).</b> The built-ins and user templates as cards: side marker, name, role chips, planes, and the date badge for the Map date. A built-in cannot be removed, and the reason shows under the button, not only on hover.</li>
+    <li><b>Centre, Pool.</b> One row per entry. Weight, Mode and Runs edit in the row. A grey row is switched off. An orphaned target or a failed date check turns the row's OK cell to ✖. Under the pool: the slot timeline and the plan check, both empty until step 7.</li>
+    <li><b>Right (304 px).</b> The selected entry first (README §4), then Budget, Threshold, Schedule DPRK, Schedule NATO, Zone triggers, Hard stop and Output. Each section collapses to a one-line summary. Threshold's dwell, hold and inner radius come from <code>airtask::derived_timing</code>, which already works.</li>
+    <li><b>Works today:</b> library (<code>builtin_library</code>, <code>load_user_sortie</code>), pool edits, undo, all settings, derived timing. <b>Waits for step 7:</b> the timeline, the plan check, the totals and Generate's output.</li>
+    <li>The Output section in the frame shows two of the four total rows; the build shows Copies, Aircraft, MCUs and Check zones.</li>
+  </ul>
+
+  <div class="intro">
+    <h2 class="part">Decisions, 2026-10-18</h2>
+    <p>Each one was a place where plan §6.1 was unclear or conflicted with the redesign rules. You approved the mockup and every recommendation; they are recorded in decisions 0027 and 0028.</p>
+  </div>
+  <div class="qs">
+    <article class="q" id="q1"><div class="qh"><i class="pinsw">1</i><h3>How does an entry get into the pool on this tab?</h3></div>
+      <p>§6.1 gives the rail tab no way to add an entry. Only the Map dock's "Auto-fill from objectives" adds entries, and that is step 9, which waits for the upstream merge. Until then the pool could not be filled, and the step 8 tests that need an entry could only set it in code.</p>
+      <p class="rec"><b>Decided:</b> "Add to pool" on the selected library card, with a target list of that side's Map objectives and arrows; and "Auto-fill from objectives" in the pool header. The auto-fill rule is plan logic, so it goes into <code>airtask</code> as one public function that step 9's dock button calls too. Also, as its own step after the upstream merge (decision 0028): upstream's "+ Mission" CAP / Strike builder makes library sorties, and Map › Missions snap targets (tanks, truck routes, rail, ships, airbases, bridges, dams) become pool targets.</p></article>
+
+    <article class="q" id="q2"><div class="qh"><i class="pinsw">2</i><h3>A nine-column pool table does not fit</h3></div>
+      <p>At 1280 px the centre is about 534 px. §6.1's nine columns (Sortie, Side, Target, Weight, Mode, Runs, Heading, Valid, ✖) need more, and the redesign puts "the current selection first" in the right panel.</p>
+      <p class="rec"><b>Decided:</b> the side becomes the marker in the Sortie cell; Weight, Mode and Runs stay editable in the row; Heading override moves to the selected-entry block. Long names are cut with "…" and shown in full on hover.</p></article>
+
+    <article class="q" id="q3"><div class="qh"><i class="pinsw">3</i><h3>Where is an entry switched on and off?</h3></div>
+      <p><code>PoolEntry.enabled</code> exists, but §6.1 gives it no control.</p>
+      <p class="rec"><b>Decided:</b> a checkbox in the first column. A switched-off row is grey and is left out of Generate.</p></article>
+
+    <article class="q" id="q4"><div class="qh"><i class="pinsw">4</i><h3>Where do the slot timelines go?</h3></div>
+      <p>§6.1 puts one strip inside each side's Schedule section, in the 304 px right panel, under eight fields.</p>
+      <p class="rec"><b>Decided:</b> one Slot timeline panel in the centre, under the pool, with both sides on one 0–3 h axis. It uses the same draw helper step 9's dock will use. The Schedule sections keep only their fields.</p></article>
+
+    <article class="q" id="q5"><div class="qh"><i class="pinsw">5</i><h3>What should Generate do before step 7?</h3></div>
+      <p>Today <code>validate</code>, <code>totals</code>, <code>preview</code> and <code>build_air_packs</code> return empty results. Wired as §6.1 says, readiness shows only the checks the UI can see, totals read 0, and Generate File would write an Air Tasking group with no sorties in it.</p>
+      <p class="rec"><b>Decided:</b> wire the tab to the real API now and change nothing at step 7. The step 8b tests that need step 7 are written now and marked <code>#[ignore = "needs step 7"]</code>; step 7 removes the marks. Nothing ships from this branch before step 7 lands.</p></article>
+
+    <article class="q" id="q6"><div class="qh"><i class="pinsw">6</i><h3>What does Reset clear?</h3></div>
+      <p>§6.1 adds a Reset confirmation but does not say what it keeps.</p>
+      <p class="rec"><b>Decided:</b> Reset empties the pool, restores every setting to its default and draws a new seed. It keeps the library, so user templates stay, the same way Template Builder's Reset keeps the catalog. Ctrl Z undoes it.</p></article>
+
+    <article class="q" id="q7"><div class="qh"><i class="pinsw">7</i><h3>Removing a user template that the pool uses</h3></div>
+      <p>§6.1 does not say what happens to the pool entries of a removed library item.</p>
+      <p class="rec"><b>Decided:</b> they are removed with it, and one Ctrl Z restores the template and its entries. The undo label names both, for example "Removed La11_Night_Intruder and 1 entry".</p></article>
+
+    <article class="q" id="q8"><div class="qh"><i class="pinsw">8</i><h3>What goes next to the title?</h3></div>
+      <p>Other tabs show the file being edited. The plan is not a file.</p>
+      <p class="rec"><b>Decided:</b> the Map date and the entry count, for example "Map date 15 Sep 1950 · 7 entries", because the date decides which sorties are valid.</p></article>
+
+    <article class="q" id="q9"><div class="qh"><i class="pinsw">9</i><h3>The hard-stop time per entry</h3></div>
+      <p>§4.4 wants each entry's hard stop (arrival + attack time + margin + extension) in a tooltip. No public <code>airtask</code> function returns it, and the UI must not compute it.</p>
+      <p class="rec"><b>Decided:</b> add one small public function next to <code>derived_timing</code> in <code>airtask/timing.rs</code>, with a test, as part of this step, and show the value in the selected-entry block. </article>
+
+    <article class="q" id="q10"><div class="qh"><i class="pinsw">10</i><h3>Section style</h3></div>
+      <p>§6.1 says every section uses <code>shell::section_title</code>; the redesign says settings sections collapse to a one-line summary (<code>shell::settings_section</code>).</p>
+      <p class="rec"><b>Decided:</b> <code>settings_section</code>, with Budget, Threshold and Output open at first. The 28 px guard test opens every section.</p></article>
+  </div>
+
+  <div class="intro">
+    <h2 class="part">Facts to know, no decision needed</h2>
+  </div>
+  <ul class="facts">
+    <li>Every built-in's models (F-80C, F-51D, Yak-9P, Il-10) have no sourced date in <code>in_theatre.rs</code>, so they are valid for any date in the war, even though their names carry dates such as "Jun–Jul 1950". Only La-11 and MiG-15bis have sourced dates today.</li>
+    <li>Objectives and arrows are named by their order on the Map ("Objective 2", "Arrow 1"). The Map does not draw those numbers yet; step 9 draws the targets.</li>
+    <li>The tab goes in a new file, <code>src/ui/air.rs</code>, with small hooks in <code>ui.rs</code>, <code>shell.rs</code> and <code>help.rs</code>, so the upstream merge (which split <code>ui.rs</code> into <code>src/ui/*.rs</code>) conflicts as little as possible.</li>
+  </ul>
+</div>

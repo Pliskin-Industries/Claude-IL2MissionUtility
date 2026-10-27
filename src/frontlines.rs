@@ -25,21 +25,21 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use crate::aircraft::{aircraft_by_id, AircraftType};
+use crate::aircraft::{AircraftType, aircraft_by_id};
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;
-use crate::geo::{latlon_to_xz, on_map, MAP_MAX, MAP_MIN};
-use crate::locale::{merge_template_sidecars, LocaleTable};
+use crate::geo::{MAP_MAX, MAP_MIN, latlon_to_xz, on_map};
+use crate::locale::{LocaleTable, merge_template_sidecars};
 use crate::mapclip::{
-    apply_salients, clip_ring_to_aabb, extend_front_to_aabb_ex, format_clip_preview,
-    influence_minus_salients, multipolygon_rings, prepare_front, WorldAabb,
+    WorldAabb, apply_salients, clip_ring_to_aabb, extend_front_to_aabb_ex, format_clip_preview,
+    influence_minus_salients, multipolygon_rings, prepare_front,
 };
-use crate::parser::parse_group_file;
 use crate::pack::group_anchor_xz;
+use crate::parser::parse_group_file;
 
 mod timeline;
 pub use timeline::{
-    front_xz, mark_for_battle, preview_front_xz, timeline_index, TimelineMark, TIMELINE,
+    TIMELINE, TimelineMark, front_xz, mark_for_battle, preview_front_xz, timeline_index,
 };
 
 const LINE_STEP: f64 = 4_000.0;
@@ -68,6 +68,10 @@ const EAST_B: i32 = 0;
 const BATTLE_RADIUS: f64 = 12_000.0;
 const ARROW_LENGTH: f64 = 32_000.0;
 pub const ARROW_TAIL_WIDTH: f64 = 4_200.0;
+/// Vertex 4 of an attack arrow sits this fraction of the half tail width off the
+/// tip, toward the first tail corner's side (`attack_arrow_points`). Load
+/// moves it back (`arrow_tail_tip`), so arrow tips survive a round trip.
+const ARROW_TIP_INSET: f64 = 0.12;
 /// Include reference groups this far outside the drawn AO.
 pub const PLACE_MARGIN: f64 = 10_000.0;
 /// Clear this much on each side of the front between the two influence areas.
@@ -128,7 +132,10 @@ pub fn sectors() -> [Sector; 6] {
     let ox = span_x * OVERLAP;
     let oz = span_z * OVERLAP;
     let names = [
-        ("SW Yellow Sea south", "Ongjin, Haeju approaches, west coastal plain"),
+        (
+            "SW Yellow Sea south",
+            "Ongjin, Haeju approaches, west coastal plain",
+        ),
         ("SC Seoul–Inchon", "Suwon, Inchon, Seoul, Han River"),
         ("SE East Coast south", "Sokcho, Yangyang, Punchbowl south"),
         ("NW Pyongyang", "Pyongyang, Sariwon, Yellow Sea north"),
@@ -331,11 +338,12 @@ pub struct MapGroundPack {
 }
 
 /// One air-tasking sortie pack parked on the map.
-#[allow(dead_code)] // P14
 #[derive(Debug, Clone)]
 pub struct MapAirPack {
     pub root: Il2Entity,
 }
+
+pub const AIR_TASKING_GROUP: &str = "Air Tasking";
 
 /// A previously generated Korea base map, split back into Map-mode pieces.
 #[derive(Clone, Debug)]
@@ -346,6 +354,8 @@ pub struct ImportedBaseMap {
     pub attack_arrows: Vec<((f64, f64), (f64, f64))>,
     pub fighters: Vec<ImportedFighterPack>,
     pub armies: Vec<ImportedArmy>,
+    #[allow(dead_code)] // P14: read by the Map Load UI in step 9.
+    pub air_tasking_found: bool,
     pub refs: Vec<MapRefGroup>,
     pub year: Option<u16>,
     pub season: Option<Season>,
@@ -387,7 +397,7 @@ pub struct FrontOptions {
     /// Dated TIMELINE slot. `None` resolves the first mark for `year`+`season`.
     pub timeline_idx: Option<usize>,
     pub custom_front: Option<Vec<(f64, f64)>>,
-	pub salients: Vec<Vec<(f64, f64)>>,
+    pub salients: Vec<Vec<(f64, f64)>>,
     /// User-drawn attack axes `(tail, tip)` in world X/Z. Colored by the side the tail sits on.
     pub user_attacks: Vec<((f64, f64), (f64, f64))>,
     /// Linked fighter packs placed on the map (one coalition).
@@ -396,6 +406,8 @@ pub struct FrontOptions {
     pub ship_packs: Vec<MapShipPack>,
     /// Randomizer ground packs parked on open terrain (one per coalition).
     pub ground_packs: Vec<MapGroundPack>,
+    /// Air Tasking packs with each side's logic and placed sorties.
+    pub air_packs: Vec<MapAirPack>,
 }
 
 impl Default for FrontOptions {
@@ -420,6 +432,7 @@ impl Default for FrontOptions {
             fighter_packs: Vec::new(),
             ship_packs: Vec::new(),
             ground_packs: Vec::new(),
+            air_packs: Vec::new(),
         }
     }
 }
@@ -1089,11 +1102,7 @@ pub fn timeline_preview(t: f32) -> TimelinePreview {
         if !on_map(x, z) {
             continue;
         }
-        battles.push(PreviewBattleMark {
-            name: b.name,
-            x,
-            z,
-        });
+        battles.push(PreviewBattleMark { name: b.name, x, z });
     }
     TimelinePreview { battles }
 }
@@ -1104,9 +1113,9 @@ fn aircraft_ids(year: u16, season: Season) -> &'static [&'static str] {
             &["f80c10", "f51d", "yak9p", "la11"]
         }
         (1950, Season::Fall) => &["f80c10", "f51d", "f84e", "yak9p", "la11", "mig15bis"],
-        (1950, Season::Winter) => {
-            &["f80c10", "f51d", "f84e", "f86a5", "yak9p", "la11", "mig15bis"]
-        }
+        (1950, Season::Winter) => &[
+            "f80c10", "f51d", "f84e", "f86a5", "yak9p", "la11", "mig15bis",
+        ],
         _ => &[
             "f86a5", "f84e", "f80c10", "f51d", "mig15bis", "la11", "yak9p",
         ],
@@ -1133,6 +1142,7 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
         && opts.fighter_packs.is_empty()
         && opts.ship_packs.is_empty()
         && opts.ground_packs.is_empty()
+        && opts.air_packs.is_empty()
     {
         return Err("enable at least one layer.".into());
     }
@@ -1186,10 +1196,7 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
     let mut front_runs = 0usize;
     let mut influence_rings = 0usize;
 
-    let raw_base = opts
-        .custom_front
-        .clone()
-        .unwrap_or_else(|| front_xz(mark));
+    let raw_base = opts.custom_front.clone().unwrap_or_else(|| front_xz(mark));
     let extended_base = extend_front_to_aabb_ex(&raw_base, aabb, true, stretch_east);
     let dense_base = densify(&extended_base, LINE_STEP);
     let (composite_front, patches) = apply_salients(dense_base.clone(), &opts.salients);
@@ -1413,14 +1420,9 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
     }
 
     if opts.influence {
-        if let Some((north_mp, south_mp)) = influence_minus_salients(
-            &dense_base,
-            aabb,
-            AOI_GAP,
-            true,
-            stretch_east,
-            &patches,
-        ) {
+        if let Some((north_mp, south_mp)) =
+            influence_minus_salients(&dense_base, aabb, AOI_GAP, true, stretch_east, &patches)
+        {
             let mut g = named_group("Areas of influence", &mut next_id);
             let mut n = 0usize;
             for (label, country, mp) in [
@@ -1433,7 +1435,8 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
                     if open_ring(ring).len() < 3 {
                         continue;
                     }
-                    g.children.push(influence_area(label, country, ring, &mut next_id));
+                    g.children
+                        .push(influence_area(label, country, ring, &mut next_id));
                     n += 1;
                 }
             }
@@ -1455,32 +1458,26 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
     }
 
     if !opts.fighter_packs.is_empty() {
-        let groups = stamp_rooted_packs(
-            opts.fighter_packs.iter().map(|p| &p.root),
-            &mut next_id,
-        );
+        let groups = stamp_rooted_packs(opts.fighter_packs.iter().map(|p| &p.root), &mut next_id);
         children.extend(groups);
     }
 
     if !opts.ship_packs.is_empty() {
-        let groups = stamp_rooted_packs(
-            opts.ship_packs.iter().map(|p| &p.root),
-            &mut next_id,
-        );
+        let groups = stamp_rooted_packs(opts.ship_packs.iter().map(|p| &p.root), &mut next_id);
         children.extend(groups);
     }
 
     if !opts.ground_packs.is_empty() {
-        let groups = stamp_rooted_packs(
-            opts.ground_packs.iter().map(|p| &p.root),
-            &mut next_id,
-        );
+        let groups = stamp_rooted_packs(opts.ground_packs.iter().map(|p| &p.root), &mut next_id);
         children.extend(groups);
     }
 
-    let (border, bn) = aoi_border_group(
-        aabb, &proto, &mut next_id, &mut locale, &mut next_lc,
-    );
+    if !opts.air_packs.is_empty() {
+        let groups = stamp_rooted_packs(opts.air_packs.iter().map(|p| &p.root), &mut next_id);
+        children.extend(groups);
+    }
+
+    let (border, bn) = aoi_border_group(aabb, &proto, &mut next_id, &mut locale, &mut next_lc);
     icon_count += bn;
     children.push(border);
 
@@ -1508,8 +1505,20 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
     Ok(FrontPack {
         root,
         locale,
-        period_label: if opts.custom_front.is_some() { "Custom user drawing" } else if dated { mark.title } else { snap.label },
-        period_note: if opts.custom_front.is_some() { "Generated from hand-drawn map preview line." } else if dated { mark.note } else { snap.note },
+        period_label: if opts.custom_front.is_some() {
+            "Custom user drawing"
+        } else if dated {
+            mark.title
+        } else {
+            snap.label
+        },
+        period_note: if opts.custom_front.is_some() {
+            "Generated from hand-drawn map preview line."
+        } else if dated {
+            mark.note
+        } else {
+            snap.note
+        },
         aircraft: suggested_aircraft(mark.year, mark.season),
         icon_count,
         notes,
@@ -1540,8 +1549,7 @@ const MAP_LAYER_NAMES: &[&str] = &[
 
 /// True when `root` looks like a file written by [`generate_front`].
 pub fn looks_like_base_map(root: &Il2Entity) -> bool {
-    root.name()
-        .is_some_and(|n| n.starts_with("Korea Base Map"))
+    root.name().is_some_and(|n| n.starts_with("Korea Base Map"))
         || root.find_by_name("AO outline").is_some()
         || root.find_by_name("Front line").is_some()
 }
@@ -1579,11 +1587,16 @@ pub fn inspect_base_map(root: &Il2Entity) -> Result<ImportedBaseMap, String> {
 
     let mut fighters = Vec::new();
     let mut armies = Vec::new();
+    let mut air_tasking_found = false;
     for child in &root.children {
         if child.block_type != "Group" {
             continue;
         }
         let name = child.name().unwrap_or("");
+        if name == AIR_TASKING_GROUP {
+            air_tasking_found = true;
+            continue;
+        }
         if MAP_LAYER_NAMES.iter().any(|n| *n == name) {
             continue;
         }
@@ -1637,6 +1650,7 @@ pub fn inspect_base_map(root: &Il2Entity) -> Result<ImportedBaseMap, String> {
         attack_arrows,
         fighters,
         armies,
+        air_tasking_found,
         refs,
         year,
         season,
@@ -1697,7 +1711,11 @@ fn front_polyline_from_group(group: &Il2Entity) -> Vec<(f64, f64)> {
         .map(|c| c.pts)
         .filter(|pts| pts.len() >= 2)
         .collect();
-    runs.sort_by(|a, b| a[0].1.partial_cmp(&b[0].1).unwrap_or(std::cmp::Ordering::Equal));
+    runs.sort_by(|a, b| {
+        a[0].1
+            .partial_cmp(&b[0].1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut out = Vec::new();
     for run in runs {
         if out.last().is_some_and(|p| same_export_xz(*p, run[0])) {
@@ -1764,10 +1782,19 @@ fn attack_arrows_from_group(group: &Il2Entity) -> Vec<((f64, f64), (f64, f64))> 
         .collect()
 }
 
+/// Inverse of `attack_arrow_points`: the tail is the midpoint of the two tail
+/// corners, and the tip is vertex 4 moved back across the arrow by the inset
+/// the writer applied (`ARROW_TIP_INSET` of the half tail width).
 fn arrow_tail_tip(pts: &[(f64, f64)]) -> Option<((f64, f64), (f64, f64))> {
     if pts.len() >= 6 {
         let tail = ((pts[0].0 + pts[1].0) * 0.5, (pts[0].1 + pts[1].1) * 0.5);
-        let tip = pts[4];
+        // pts[1] - pts[0] spans the full tail width across the arrow, so half
+        // of it times the inset is the offset the writer applied.
+        let back = 0.5 * ARROW_TIP_INSET;
+        let tip = (
+            pts[4].0 + (pts[1].0 - pts[0].0) * back,
+            pts[4].1 + (pts[1].1 - pts[0].1) * back,
+        );
         if (tip.0 - tail.0).hypot(tip.1 - tail.1) < 1.0 {
             return None;
         }
@@ -1811,7 +1838,10 @@ fn icon_chains(group: &Il2Entity) -> Vec<IconChain> {
         return Vec::new();
     }
     let by_id: HashMap<i32, &IconVert> = verts.iter().map(|v| (v.id, v)).collect();
-    let targeted: HashSet<i32> = verts.iter().flat_map(|v| v.targets.iter().copied()).collect();
+    let targeted: HashSet<i32> = verts
+        .iter()
+        .flat_map(|v| v.targets.iter().copied())
+        .collect();
     let mut used = HashSet::new();
     let mut out = Vec::new();
     let mut starts: Vec<&IconVert> = verts.iter().filter(|v| !targeted.contains(&v.id)).collect();
@@ -1849,7 +1879,10 @@ fn icon_chains(group: &Il2Entity) -> Vec<IconChain> {
 }
 
 fn looks_like_fighter_pack(entity: &Il2Entity) -> bool {
-    entity.children.iter().any(|c| c.name() == Some("NodeGates"))
+    entity
+        .children
+        .iter()
+        .any(|c| c.name() == Some("NodeGates"))
         && entity.children.iter().any(|c| c.name() == Some("Group 1"))
 }
 
@@ -1953,9 +1986,7 @@ fn parse_base_map_period(name: &str) -> (Option<u16>, Option<Season>, Option<usi
         .iter()
         .copied()
         .find(|s| s.label().eq_ignore_ascii_case(&season_label));
-    let idx = year.and_then(|y| {
-        season.map(|s| timeline_index(y, s))
-    });
+    let idx = year.and_then(|y| season.map(|s| timeline_index(y, s)));
     (year, season, idx)
 }
 
@@ -2066,8 +2097,14 @@ fn attack_arrows_group(
         let eastern = area_is_eastern(area);
         let path = attack_arrow_from_area(&xz, area.name, eastern);
         let (icons, c) = emit_attack_chain(
-            area.name, area.desc, &path, faction_style(eastern, LINE_ATTACK_ARROW),
-            proto, next_id, locale, next_lc,
+            area.name,
+            area.desc,
+            &path,
+            faction_style(eastern, LINE_ATTACK_ARROW),
+            proto,
+            next_id,
+            locale,
+            next_lc,
         );
         n += c;
         g.children.extend(icons);
@@ -2093,7 +2130,10 @@ pub fn attack_arrow_points(tail: (f64, f64), tip: (f64, f64), tail_width: f64) -
         (tail.0 + px * hw, tail.1 + pz * hw),
         rail(0.33, hw * 0.85),
         rail(0.66, hw * 0.55),
-        (tip.0 - px * hw * 0.12, tip.1 - pz * hw * 0.12),
+        (
+            tip.0 - px * hw * ARROW_TIP_INSET,
+            tip.1 - pz * hw * ARROW_TIP_INSET,
+        ),
         rail(0.82, hw * 1.05),
     ]
 }
@@ -2155,17 +2195,29 @@ fn aoi_border_group(
         ("AO outer border", AOI_BORDER_GAP, outer),
     ] {
         let ring = aabb_rectangle(aabb, pad);
-        let dense = densify(&{
-            let mut r = ring.clone();
-            r.push(ring[0]);
-            r
-        }, LINE_STEP);
+        let dense = densify(
+            &{
+                let mut r = ring.clone();
+                r.push(ring[0]);
+                r
+            },
+            LINE_STEP,
+        );
         let mut pts = dense;
         if pts.len() >= 2 && pts.first() == pts.last() {
             pts.pop();
         }
         let (icons, c) = emit_icon_chain(
-            label, "Stay inside this box", &pts, style, true, true, proto, next_id, locale, next_lc,
+            label,
+            "Stay inside this box",
+            &pts,
+            style,
+            true,
+            true,
+            proto,
+            next_id,
+            locale,
+            next_lc,
         );
         n += c;
         g.children.extend(icons);
@@ -2300,7 +2352,12 @@ fn downsample_dots(dots: Vec<PreviewDot>, cap: usize) -> Vec<PreviewDot> {
     out
 }
 
-fn collect_preview_dots(entity: &Il2Entity, group_depth: usize, out: &mut Vec<PreviewDot>, cap: usize) {
+fn collect_preview_dots(
+    entity: &Il2Entity,
+    group_depth: usize,
+    out: &mut Vec<PreviewDot>,
+    cap: usize,
+) {
     if out.len() >= cap {
         return;
     }
@@ -2347,8 +2404,14 @@ fn polyline_icons(
     locale: &mut LocaleTable,
     next_lc: &mut i32,
 ) -> (Vec<Il2Entity>, usize) {
-    let xz: Vec<(f64, f64)> = latlon.iter().copied().map(|(la, lo)| latlon_to_xz(la, lo)).collect();
-    polyline_xz_icons(name, desc, &xz, style, closed, keep, proto, next_id, locale, next_lc)
+    let xz: Vec<(f64, f64)> = latlon
+        .iter()
+        .copied()
+        .map(|(la, lo)| latlon_to_xz(la, lo))
+        .collect();
+    polyline_xz_icons(
+        name, desc, &xz, style, closed, keep, proto, next_id, locale, next_lc,
+    )
 }
 
 fn polyline_xz_icons(
@@ -2387,7 +2450,16 @@ fn polyline_xz_icons(
     let mut n = 0usize;
     for (run_i, run) in runs.into_iter().enumerate() {
         let (icons, c) = emit_icon_chain(
-            name, desc, &run, style, run_i == 0, false, proto, next_id, locale, next_lc,
+            name,
+            desc,
+            &run,
+            style,
+            run_i == 0,
+            false,
+            proto,
+            next_id,
+            locale,
+            next_lc,
         );
         n += c;
         out.extend(icons);
@@ -2457,11 +2529,7 @@ fn emit_icon_chain_at(
     for (i, &(x, z)) in run.iter().enumerate() {
         let last = i + 1 == run.len();
         let targets = if last {
-            if closed {
-                vec![ids[0]]
-            } else {
-                vec![]
-            }
+            if closed { vec![ids[0]] } else { vec![] }
         } else {
             vec![ids[i + 1]]
         };
@@ -2712,7 +2780,10 @@ mod tests {
         assert!(s[0].x_max > s[3].x_min, "south/north overlap in X");
         assert!(s[0].z_max > s[1].z_min, "west/center overlap in Z");
         let (px, pz) = latlon_to_xz(39.04, 125.76);
-        assert!(s.iter().any(|sec| sec.contains(px, pz)), "Pyongyang on a sector");
+        assert!(
+            s.iter().any(|sec| sec.contains(px, pz)),
+            "Pyongyang on a sector"
+        );
     }
 
     #[test]
@@ -2765,10 +2836,7 @@ mod tests {
         assert_eq!(icons[0].property("RColor"), Some("255"));
         assert_eq!(icons[0].property("GColor"), Some("255"));
         assert_eq!(icons[0].property("Coalitions"), Some("[1, 2]"));
-        assert_eq!(
-            icons.last().unwrap().property("LineType"),
-            Some("1")
-        );
+        assert_eq!(icons.last().unwrap().property("LineType"), Some("1"));
         assert_eq!(icons.last().unwrap().property("GColor"), Some("0"));
         assert_eq!(icons.last().unwrap().property("BColor"), Some("0"));
         assert_eq!(
@@ -2778,17 +2846,22 @@ mod tests {
         assert!(icons.iter().all(|i| i.property("Name").is_none()));
         assert_eq!(icons[0].property("LCName"), Some("2"));
         assert!(
-            icons.iter().skip(1).all(|i| i.property("LCName") == Some("0")),
+            icons
+                .iter()
+                .skip(1)
+                .all(|i| i.property("LCName") == Some("0")),
             "unlabeled front vertices must not steal airfield LC strings"
         );
         let usa = pack.root.find_by_name("USA Influence Area").unwrap();
         assert_eq!(usa.block_type, "MCU_TR_InfluenceArea");
         assert_eq!(usa.property("Country"), Some("601"));
         assert_eq!(usa.children[0].block_type, "Boundary");
-        assert!(usa.children[0]
-            .properties
-            .iter()
-            .any(|(k, v)| k.is_empty() && v.contains(',')));
+        assert!(
+            usa.children[0]
+                .properties
+                .iter()
+                .any(|(k, v)| k.is_empty() && v.contains(','))
+        );
         let dprk = pack.root.find_by_name("DPRK Influence Area").unwrap();
         assert_eq!(dprk.property("Country"), Some("503"));
         fn xz_pair(v: &str) -> Option<(f64, f64)> {
@@ -2920,8 +2993,8 @@ mod tests {
 
     #[test]
     fn aoi_template_uses_influence_area_boundaries() {
-        let root = parse_il2_document(include_str!("../TemplateExamples/AoI.Group"))
-            .expect("parse AoI");
+        let root =
+            parse_il2_document(include_str!("../TemplateExamples/AoI.Group")).expect("parse AoI");
         let usa = root.find_by_name("USA Influence Area").unwrap();
         assert_eq!(usa.block_type, "MCU_TR_InfluenceArea");
         assert_eq!(usa.property("Country"), Some("601"));
@@ -2929,7 +3002,12 @@ mod tests {
         assert!(usa.children[0].properties.len() > 10);
         let dprk = root.find_by_name("DPRK Influence Area").unwrap();
         assert_eq!(dprk.property("Country"), Some("503"));
-        assert!(dprk.children[0].properties.iter().any(|(k, v)| k.is_empty() && v.contains(',')));
+        assert!(
+            dprk.children[0]
+                .properties
+                .iter()
+                .any(|(k, v)| k.is_empty() && v.contains(','))
+        );
     }
 
     #[test]
@@ -3036,7 +3114,10 @@ mod tests {
             ..FrontOptions::default()
         })
         .unwrap();
-        let group = pack.root.find_by_name("Attack arrows").expect("attack arrows");
+        let group = pack
+            .root
+            .find_by_name("Attack arrows")
+            .expect("attack arrows");
         let icons: Vec<_> = group
             .children
             .iter()
@@ -3123,7 +3204,10 @@ mod tests {
             .find(|c| c.block_type == "MCU_Icon")
             .expect("buildup icon");
         assert_eq!(icon.property("LineType"), Some("12"));
-        let defense = pack.root.find_by_name("Defensive positions").expect("defense");
+        let defense = pack
+            .root
+            .find_by_name("Defensive positions")
+            .expect("defense");
         let def_icon = defense
             .children
             .iter()
@@ -3157,12 +3241,21 @@ mod tests {
         assert_eq!(attack_icon.property("RColor"), Some("0"));
         assert_eq!(attack_icon.property("GColor"), Some("120"));
         assert_eq!(attack_icon.property("BColor"), Some("150"));
-        assert!(attacks.children.iter().filter(|c| c.block_type == "MCU_Icon").count() >= 6);
-        assert!(attacks
-            .children
-            .iter()
-            .filter(|c| c.block_type == "MCU_Icon")
-            .all(|c| c.property("LineType") == Some("11")));
+        assert!(
+            attacks
+                .children
+                .iter()
+                .filter(|c| c.block_type == "MCU_Icon")
+                .count()
+                >= 6
+        );
+        assert!(
+            attacks
+                .children
+                .iter()
+                .filter(|c| c.block_type == "MCU_Icon")
+                .all(|c| c.property("LineType") == Some("11"))
+        );
     }
 
     #[test]
@@ -3238,10 +3331,14 @@ mod tests {
 
     #[test]
     fn corrected_templates_use_line_types_11_and_12() {
-        let attack = parse_group_file(include_str!("../TemplateExamples/CorrectedAttack_arrow.Group"))
-            .expect("attack");
-        let defend = parse_group_file(include_str!("../TemplateExamples/CorrectedDefendArea.Group"))
-            .expect("defend");
+        let attack = parse_group_file(include_str!(
+            "../TemplateExamples/CorrectedAttack_arrow.Group"
+        ))
+        .expect("attack");
+        let defend = parse_group_file(include_str!(
+            "../TemplateExamples/CorrectedDefendArea.Group"
+        ))
+        .expect("defend");
         let a_icons: Vec<_> = attack
             .children
             .iter()
@@ -3348,10 +3445,7 @@ mod tests {
         let aabb = WorldAabb::from_corners(80_000.0, 100_000.0, 160_000.0, 220_000.0);
         let pack = generate_front(&FrontOptions {
             aabb,
-            custom_front: Some(vec![
-                (110_000.0, 90_000.0),
-                (110_000.0, 230_000.0),
-            ]),
+            custom_front: Some(vec![(110_000.0, 90_000.0), (110_000.0, 230_000.0)]),
             salients: vec![vec![
                 (110_000.0, 130_000.0),
                 (250_000.0, 150_000.0),
@@ -3416,9 +3510,11 @@ mod tests {
         }
         let mut root = Il2Entity::new("Group");
         root.children.push(positioned("Airfield", 1000.0, 2000.0));
-        root.children.push(positioned("MCU_TR_Entity", 1100.0, 2100.0));
+        root.children
+            .push(positioned("MCU_TR_Entity", 1100.0, 2100.0));
         root.children.push(positioned("Block", 1200.0, 2200.0));
-        root.children.push(positioned("MCU_Waypoint", 1300.0, 2300.0));
+        root.children
+            .push(positioned("MCU_Waypoint", 1300.0, 2300.0));
         root.children.push(positioned("MCU_Timer", 1500.0, 2500.0));
         let mut nested = Il2Entity::new("Group");
         nested.children.push(positioned("Block", 1400.0, 2400.0));
@@ -3429,14 +3525,22 @@ mod tests {
         assert!(dots.iter().any(|d| d.kind == PreviewKind::Airfield
             && (d.x - 1000.0).abs() < 0.1
             && (d.z - 2000.0).abs() < 0.1));
-        assert!(dots.iter().any(|d| d.kind == PreviewKind::LinkedEntity
-            && (d.x - 1100.0).abs() < 0.1));
-        assert!(dots.iter().any(|d| d.kind == PreviewKind::Block
-            && (d.x - 1200.0).abs() < 0.1));
-        assert!(dots.iter().any(|d| d.kind == PreviewKind::Block
-            && (d.x - 1400.0).abs() < 0.1));
-        assert!(dots.iter().any(|d| d.kind == PreviewKind::Block
-            && (d.x - 1300.0).abs() < 0.1));
+        assert!(
+            dots.iter()
+                .any(|d| d.kind == PreviewKind::LinkedEntity && (d.x - 1100.0).abs() < 0.1)
+        );
+        assert!(
+            dots.iter()
+                .any(|d| d.kind == PreviewKind::Block && (d.x - 1200.0).abs() < 0.1)
+        );
+        assert!(
+            dots.iter()
+                .any(|d| d.kind == PreviewKind::Block && (d.x - 1400.0).abs() < 0.1)
+        );
+        assert!(
+            dots.iter()
+                .any(|d| d.kind == PreviewKind::Block && (d.x - 1300.0).abs() < 0.1)
+        );
         assert!(!dots.iter().any(|d| (d.x - 1500.0).abs() < 0.1));
     }
 
@@ -3474,9 +3578,7 @@ mod tests {
         assert!(!pack.locale.contains_text("Wave 1"));
         let g1 = pack.root.find_by_name("Group 1").expect("Group 1");
         assert!(
-            g1.children
-                .iter()
-                .all(|c| c.block_type != "MCU_Icon"),
+            g1.children.iter().all(|c| c.block_type != "MCU_Icon"),
             "wave icons should not be exported"
         );
         let wp = pack.root.find_by_name("RTB - 1").expect("RTB");
@@ -3520,7 +3622,12 @@ mod tests {
         assert!((got.z_min - aabb.z_min).abs() < 5.0);
         assert!((got.z_max - aabb.z_max).abs() < 5.0);
         assert!(imported.front.len() >= 2);
-        assert!(imported.front.iter().any(|&(x, _)| (x - 130_000.0).abs() < 500.0));
+        assert!(
+            imported
+                .front
+                .iter()
+                .any(|&(x, _)| (x - 130_000.0).abs() < 500.0)
+        );
         assert_eq!(imported.attack_arrows.len(), 1);
         let (t, p) = imported.attack_arrows[0];
         assert!((t.0 - tail.0).abs() < 50.0 && (t.1 - tail.1).abs() < 50.0);
@@ -3528,6 +3635,46 @@ mod tests {
         assert_eq!(imported.armies.len(), 1);
         assert!(imported.armies[0].eastern);
         assert!(imported.fighters.is_empty());
+    }
+
+    #[test]
+    fn user_attack_arrows_round_trip_through_load() {
+        // Generate, then Load, then Generate again: each arrow's tail and tip
+        // come back where they were drawn (no sideways offset, no drift).
+        let custom = vec![
+            (130_000.0, 200_000.0),
+            (128_000.0, 240_000.0),
+            (132_000.0, 280_000.0),
+        ];
+        let arrows = vec![
+            ((140_000.0, 220_000.0), (145_000.0, 250_000.0)),
+            ((120_000.0, 210_000.0), (138_000.0, 214_000.0)),
+            ((150_000.0, 270_000.0), (120_000.0, 255_000.0)),
+            ((110_000.0, 260_000.0), (110_000.0, 230_000.0)),
+        ];
+        let mut opts = FrontOptions {
+            aabb: WorldAabb::from_corners(100_000.0, 200_000.0, 160_000.0, 280_000.0),
+            front: true,
+            battles: false,
+            buildups: false,
+            defenses: false,
+            attacks: false,
+            naval: false,
+            custom_front: Some(custom),
+            user_attacks: arrows.clone(),
+            ..FrontOptions::default()
+        };
+        for round in 0..2 {
+            let pack = generate_front(&opts).unwrap();
+            let imported = inspect_base_map(&pack.root).expect("inspect");
+            assert_eq!(imported.attack_arrows.len(), arrows.len(), "round {round}");
+            for (&(tail, tip), &(t, p)) in arrows.iter().zip(&imported.attack_arrows) {
+                let off = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1);
+                assert!(off(tail, t) < 1.0, "round {round}: tail {t:?} for {tail:?}");
+                assert!(off(tip, p) < 1.0, "round {round}: tip {p:?} for {tip:?}");
+            }
+            opts.user_attacks = imported.attack_arrows;
+        }
     }
 
     #[test]

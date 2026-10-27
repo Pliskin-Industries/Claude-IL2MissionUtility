@@ -7,6 +7,8 @@ use super::{AirSide, BudgetImpl, CensusImpl, SideLogic, Strategies};
 use crate::ast::Il2Entity;
 use crate::template;
 
+pub(crate) const BUDGET_RANGE: std::ops::RangeInclusive<u8> = 1..=6;
+
 pub(crate) fn census_delay(census: CensusImpl, order: usize) -> f64 {
     match census {
         CensusImpl::Spaced => order as f64 / 20.0, // Flight 0: E7 confirmed; Spaced remains the census default.
@@ -34,7 +36,7 @@ pub(crate) fn build_side(
         BudgetImpl::HeadCount => n, // Flight 0: E1/E2/E4 confirmed; HeadCount remains the budget default.
         BudgetImpl::SingleSlot => 1,
     };
-    assert!((1..=6).contains(&n), "validated air budget must be 1..=6");
+    assert!(BUDGET_RANGE.contains(&n), "validated air budget must be 1..=6");
     let mut root = group("Budget", next_id);
     let mut ids = BTreeMap::new();
     for (name, kind, time) in [

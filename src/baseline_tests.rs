@@ -400,7 +400,9 @@ fn trace_off_changes_nothing() {
     // Decision 0016: Fighter Pack death events target each aircraft's Delay Delete.
     // This baseline's Heavy Wedge stays Safe (1), per decision 0019.
     // Pairs fly Loose except under Cover (decisions 0020/0022).
-    assert_eq!(fingerprint, 0x3b860e163e2b4cbe);
+    // Upstream v0.7.0 merge (2026-10-18): template.Group writes the Korea editor id
+    // for Heavy Wedge (23 -> 8); exclusive.Group gains each plan's 3-hour WINDOW.
+    assert_eq!(fingerprint, 0x1171aa00b3b1051c);
 
     fn check_source(dir: &Path) {
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -430,4 +432,196 @@ fn trace_off_changes_nothing() {
         }
     }
     check_source(&repo("src"));
+}
+
+/// Reuse the unchanged fixture's placed packs and original map settings. A
+/// second stamp allocates the same indexes; the tests below pin every byte.
+pub(crate) fn air_export_options() -> FrontOptions {
+    let fixture = base_map_fixture();
+    let named = |name| fixture.root.find_by_name(name).unwrap().clone();
+    FrontOptions {
+        battles: false,
+        buildups: false,
+        defenses: false,
+        attacks: false,
+        naval: false,
+        user_attacks: vec![((140_000.0, 220_000.0), (130_000.0, 240_000.0))],
+        fighter_packs: vec![MapFighterPack { root: named("NATO Fighters Wave 1 pack 1") }],
+        ship_packs: vec![MapShipPack { root: named("Eastern Shipping") }],
+        ground_packs: vec![
+            MapGroundPack { root: named("Eastern Ground") },
+            MapGroundPack { root: named("Eastern DPRK ML20 Arty") },
+        ],
+        ..FrontOptions::default()
+    }
+}
+
+/// Match the UI's AirContext front for the selected timeline mark.
+pub(crate) fn air_export_front(opts: &FrontOptions) -> Vec<(f64, f64)> {
+    let raw = opts.custom_front.clone().filter(|line| !line.is_empty()).unwrap_or_else(|| {
+        let i = opts.timeline_idx.unwrap_or_else(|| frontlines::timeline_index(opts.year, opts.season));
+        frontlines::preview_front_xz(i as f32)
+    });
+    let dense = frontlines::densify(&raw, 4000.0);
+    let (composite, _) = crate::mapclip::apply_salients(dense.clone(), &opts.salients);
+    if composite.len() >= 2 { composite } else { dense }
+}
+
+pub(crate) mod air_export_tests {
+    use super::*;
+    use crate::airtask::{self, AirContext, AirPlan, AirSide, PoolEntry, TargetRef};
+
+    fn check_baseline(opts: &FrontOptions, label: &str) {
+        let pack = frontlines::generate_front(opts).unwrap();
+        let mut fixture = Fixture::new("base_map.Group", pack.root, &[SHIPS, ARMOR, ARMY]);
+        for ext in LANG_EXTS {
+            fixture.locales.entry((*ext).into()).or_default().overlay(pack.locale.clone());
+        }
+        let dir = repo(&format!("target/p14/step7-{label}"));
+        assert_fixture_matches(&fixture.write(&dir));
+    }
+
+    fn context<'a>(opts: &'a FrontOptions, front: &'a [(f64, f64)]) -> AirContext<'a> {
+        AirContext {
+            east_objectives: &[], nato_objectives: &[], arrows: &opts.user_attacks,
+            front, aabb: opts.aabb, date: (1950, 9, 15),
+        }
+    }
+
+    fn arrow_plan(ctx: &AirContext<'_>) -> AirPlan {
+        let mut plan = AirPlan { library: airtask::builtin_library(), seed: 7, ..AirPlan::default() };
+        let (tail, tip) = ctx.arrows[0];
+        let side = if crate::mapclip::point_north_of_front(ctx.front, tail.0, tail.1) { AirSide::Dprk } else { AirSide::Nato };
+        let sortie = plan.library.iter().find(|sortie| sortie.side == side).unwrap();
+        plan.pool.push(PoolEntry::new(sortie.id.clone(), TargetRef::Arrow { tail, tip }));
+        plan
+    }
+
+    fn same_imported_units(a: &frontlines::ImportedBaseMap, b: &frontlines::ImportedBaseMap) {
+        assert_eq!(a.armies.len(), b.armies.len());
+        assert_eq!(a.fighters.len(), b.fighters.len());
+        for (a, b) in a.armies.iter().zip(&b.armies) {
+            assert_eq!((&a.name, a.eastern, &a.entity), (&b.name, b.eastern, &b.entity));
+        }
+        for (a, b) in a.fighters.iter().zip(&b.fighters) {
+            assert_eq!((&a.root, a.eastern, a.wave, &a.spots), (&b.root, b.eastern, b.wave, &b.spots));
+        }
+    }
+
+    #[test]
+    fn generate_front_with_empty_air_packs_matches_baseline() {
+        let mut opts = air_export_options();
+        opts.air_packs = Vec::new();
+        check_baseline(&opts, "empty-air");
+    }
+
+    #[test]
+    fn generate_front_with_disabled_air_plan_matches_baseline() {
+        let mut opts = air_export_options();
+        let line = air_export_front(&opts);
+        for (i, kind) in ["disabled", "orphaned", "out-of-date"].into_iter().enumerate() {
+            let mut ctx = context(&opts, &line);
+            let mut plan = arrow_plan(&ctx);
+            match i {
+                0 => plan.pool[0].enabled = false,
+                1 => ctx.arrows = &[],
+                _ => ctx.date = (1900, 1, 1),
+            }
+            let packs = airtask::build_air_packs(&plan, &ctx).unwrap();
+            assert!(packs.is_empty(), "{kind}");
+            opts.air_packs = packs;
+            check_baseline(&opts, kind);
+        }
+    }
+
+    #[test]
+    fn inspect_export_keeps_armies_and_flags_air() {
+        let mut opts = air_export_options();
+        let line = air_export_front(&opts);
+        let ctx = context(&opts, &line);
+        opts.air_packs = airtask::build_air_packs(&arrow_plan(&ctx), &ctx).unwrap();
+        let root = frontlines::generate_front(&opts).unwrap().root;
+        let loaded = frontlines::inspect_base_map(&root).unwrap();
+        let baseline = frontlines::inspect_base_map(&load("src/testdata/p14_baseline/base_map.Group")).unwrap();
+        assert!(loaded.air_tasking_found);
+        same_imported_units(&loaded, &baseline);
+        // Recognition takes precedence even over the fighter-pack signature.
+        let mut root = root;
+        let air = root.find_by_name_mut("Air Tasking").unwrap();
+        for name in ["NodeGates", "Group 1"] {
+            let mut child = Il2Entity::new("Group");
+            child.set_name(name);
+            air.children.push(child);
+        }
+        same_imported_units(&frontlines::inspect_base_map(&root).unwrap(), &baseline);
+    }
+
+    #[test]
+    fn inspect_baseline_has_no_air_tasking() {
+        let baseline = frontlines::inspect_base_map(&load("src/testdata/p14_baseline/base_map.Group")).unwrap();
+        let current = frontlines::inspect_base_map(&base_map_fixture().root).unwrap();
+        assert!(!baseline.air_tasking_found);
+        assert!(!current.air_tasking_found);
+        same_imported_units(&current, &baseline);
+    }
+
+    #[test]
+    fn inspect_keeps_a_user_group_whose_name_only_starts_with_air_tasking() {
+        let mut root = load("src/testdata/p14_baseline/base_map.Group");
+        let baseline = frontlines::inspect_base_map(&root).unwrap();
+        let mut user = root.find_by_name("Eastern Ground").unwrap().clone();
+        user.set_name("Air Tasking user units");
+        root.children.push(user.clone());
+        let loaded = frontlines::inspect_base_map(&root).unwrap();
+        assert!(!loaded.air_tasking_found);
+        assert_eq!(loaded.armies.len(), baseline.armies.len() + 1);
+        assert!(loaded.armies.iter().any(|army| army.entity == user));
+    }
+
+    pub(crate) fn check_load_then_generate(
+        plan: &AirPlan,
+        mut opts: FrontOptions,
+        ctx: &AirContext<'_>,
+    ) {
+        opts.air_packs = airtask::build_air_packs(plan, ctx).unwrap();
+        let first = frontlines::generate_front(&opts).unwrap().root;
+        let loaded = frontlines::inspect_base_map(&first).unwrap();
+        let baseline = frontlines::inspect_base_map(&load("src/testdata/p14_baseline/base_map.Group")).unwrap();
+        same_imported_units(&loaded, &baseline);
+        assert!(loaded.air_tasking_found);
+        opts.aabb = loaded.aabb.unwrap();
+        opts.custom_front = Some(loaded.front.clone());
+        opts.salients = loaded.salients;
+        opts.user_attacks = loaded.attack_arrows;
+        opts.fighter_packs = loaded.fighters.into_iter().map(|p| MapFighterPack { root: p.root }).collect();
+        opts.ship_packs.clear();
+        opts.ground_packs = loaded.armies.into_iter().map(|a| MapGroundPack { root: a.entity }).collect();
+        opts.ref_groups = loaded.refs;
+        let front = air_export_front(&opts);
+        // Keep the current plan's objectives. The UI clears them on Load;
+        // restoring or orphaning those UI targets belongs to step 9.
+        let ctx = AirContext {
+            east_objectives: ctx.east_objectives,
+            nato_objectives: ctx.nato_objectives,
+            arrows: &opts.user_attacks,
+            front: &front,
+            aabb: opts.aabb,
+            date: ctx.date,
+        };
+        // Arrow tips survive the Load round trip, so the arrow entry keeps
+        // its target and the plan stays clean.
+        let issues = airtask::validate(plan, &ctx);
+        assert!(issues.is_empty(), "{issues:?}");
+        opts.air_packs = airtask::build_air_packs(plan, &ctx).unwrap();
+        let regenerated = frontlines::generate_front(&opts).unwrap().root;
+        let air: Vec<_> = regenerated.children.iter().filter(|g| g.name() == Some("Air Tasking")).collect();
+        assert_eq!(air.len(), 1);
+        for side in ["DPRK", "NATO"] {
+            let sorties = format!("Air Tasking {side} Sorties");
+            assert!(air[0].children.iter().any(|g| g.name() == Some(sorties.as_str())), "missing {sorties}");
+        }
+        let reloaded = frontlines::inspect_base_map(&regenerated).unwrap();
+        assert_eq!(reloaded.armies.len(), baseline.armies.len());
+        assert_eq!(reloaded.fighters.len(), baseline.fighters.len());
+    }
 }

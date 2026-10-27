@@ -91,12 +91,19 @@ pub fn country_pack_tag(country: i32) -> &'static str {
         .iter()
         .find(|(id, _)| *id == country)
         .and_then(|(_, label)| label.split_whitespace().last())
-        .unwrap_or(if country / 100 == 6 { "NATO" } else { "Eastern" })
+        .unwrap_or(if country / 100 == 6 {
+            "NATO"
+        } else {
+            "Eastern"
+        })
 }
 
 /// Root group name written into a linked fighter pack.
 pub fn linked_fighter_pack_name(country: i32, group_count: usize) -> String {
-    format!("{} Fighters {group_count}pack - Linked", country_pack_tag(country))
+    format!(
+        "{} Fighters {group_count}pack - Linked",
+        country_pack_tag(country)
+    )
 }
 
 /// Suggested `.Group` filename for a linked fighter pack.
@@ -162,7 +169,11 @@ fn digit_code(c: char) -> &'static str {
 }
 
 pub fn encode_tcode_color(color: &str, number: u32) -> String {
-    let glyphs = if number >= 100 { 4 } else { number.to_string().len() };
+    let glyphs = if number >= 100 {
+        4
+    } else {
+        number.to_string().len()
+    };
     std::iter::repeat(tcode_color_digit(color))
         .take(glyphs)
         .collect()
@@ -181,11 +192,7 @@ pub fn callsign_for(country: i32, type_id: &str) -> i32 {
 }
 
 pub fn plane_coalitions_for_country(country: i32) -> &'static str {
-    if country / 100 == 6 {
-        "[1]"
-    } else {
-        "[2]"
-    }
+    if country / 100 == 6 { "[1]" } else { "[2]" }
 }
 
 pub fn aircraft_by_id(id: &str) -> Option<&'static AircraftType> {
@@ -208,7 +215,11 @@ pub fn loose_skill(recommended: i32, salt: usize) -> i32 {
 /// Lead skill is never below the wingman. They may be equal.
 pub fn pair_skills(recommended: i32, flight: usize, pair: usize) -> (i32, i32) {
     let lead = loose_skill(recommended, flight.wrapping_mul(8) + pair.wrapping_mul(2));
-    let wing = loose_skill(recommended, flight.wrapping_mul(8) + pair.wrapping_mul(2) + 1).min(lead);
+    let wing = loose_skill(
+        recommended,
+        flight.wrapping_mul(8) + pair.wrapping_mul(2) + 1,
+    )
+    .min(lead);
     (lead, wing)
 }
 
@@ -244,7 +255,10 @@ mod tests {
         for rec in 0..=4 {
             for f in 0..6 {
                 let (lead, wing) = pair_skills(rec, f, 0);
-                assert!(lead >= wing, "rec={rec} flight={f}: lead {lead} < wing {wing}");
+                assert!(
+                    lead >= wing,
+                    "rec={rec} flight={f}: lead {lead} < wing {wing}"
+                );
                 assert!((0..=4).contains(&lead));
                 assert!((0..=4).contains(&wing));
             }

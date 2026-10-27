@@ -91,22 +91,118 @@ pub struct RefCity {
 
 pub const MAJOR_CITIES: &[RefCity] = &[
     // Hardcoded exact coordinates provided by user
-    RefCity { name: "Seoul", x: 106815.0, z: 284406.0, dprk: false, label_left: false },
-    RefCity { name: "Suwon", x: 74954.0, z: 289050.0, dprk: false, label_left: false },
-    RefCity { name: "Sinuiju", x: 389078.0, z: 62514.0, dprk: true, label_left: false },
-    RefCity { name: "Hamhung", x: 367981.0, z: 330062.0, dprk: true, label_left: false },
-    RefCity { name: "Pyongyang", x: 268356.0, z: 177438.0, dprk: true, label_left: false },
-    RefCity { name: "Inchon", x: 96170.0, z: 255800.0, dprk: false, label_left: true },
-    RefCity { name: "Chunchon", x: 142827.0, z: 350759.0, dprk: false, label_left: false },
-    RefCity { name: "Wonsan", x: 284808.0, z: 323252.0, dprk: true, label_left: false },
-    RefCity { name: "Haeju", x: 159390.0, z: 174199.0, dprk: true, label_left: true },
-    RefCity { name: "Chaeryong", x: 199432.0, z: 165872.0, dprk: true, label_left: false },
-    RefCity { name: "Wonju", x: 84048.0, z: 372189.0, dprk: false, label_left: false },
-    RefCity { name: "Kaesong", x: 151881.0, z: 247830.0, dprk: true, label_left: true },
-    RefCity { name: "Kangnung", x: 131100.0, z: 454167.0, dprk: false, label_left: true },
-    RefCity { name: "Chinnampo", x: 235687.0, z: 147139.0, dprk: true, label_left: true },
-    RefCity { name: "Chongbong-ni", x: 173484.0, z: 423784.0, dprk: false, label_left: true },    
-	RefCity { name: "Hanjon-dong", x: 231311.4, z: 247023.41, dprk: true, label_left: true },
+    RefCity {
+        name: "Seoul",
+        x: 106815.0,
+        z: 284406.0,
+        dprk: false,
+        label_left: false,
+    },
+    RefCity {
+        name: "Suwon",
+        x: 74954.0,
+        z: 289050.0,
+        dprk: false,
+        label_left: false,
+    },
+    RefCity {
+        name: "Sinuiju",
+        x: 389078.0,
+        z: 62514.0,
+        dprk: true,
+        label_left: false,
+    },
+    RefCity {
+        name: "Hamhung",
+        x: 367981.0,
+        z: 330062.0,
+        dprk: true,
+        label_left: false,
+    },
+    RefCity {
+        name: "Pyongyang",
+        x: 268356.0,
+        z: 177438.0,
+        dprk: true,
+        label_left: false,
+    },
+    RefCity {
+        name: "Inchon",
+        x: 96170.0,
+        z: 255800.0,
+        dprk: false,
+        label_left: true,
+    },
+    RefCity {
+        name: "Chunchon",
+        x: 142827.0,
+        z: 350759.0,
+        dprk: false,
+        label_left: false,
+    },
+    RefCity {
+        name: "Wonsan",
+        x: 284808.0,
+        z: 323252.0,
+        dprk: true,
+        label_left: false,
+    },
+    RefCity {
+        name: "Haeju",
+        x: 159390.0,
+        z: 174199.0,
+        dprk: true,
+        label_left: true,
+    },
+    RefCity {
+        name: "Chaeryong",
+        x: 199432.0,
+        z: 165872.0,
+        dprk: true,
+        label_left: false,
+    },
+    RefCity {
+        name: "Wonju",
+        x: 84048.0,
+        z: 372189.0,
+        dprk: false,
+        label_left: false,
+    },
+    RefCity {
+        name: "Kaesong",
+        x: 151881.0,
+        z: 247830.0,
+        dprk: true,
+        label_left: true,
+    },
+    RefCity {
+        name: "Kangnung",
+        x: 131100.0,
+        z: 454167.0,
+        dprk: false,
+        label_left: true,
+    },
+    RefCity {
+        name: "Chinnampo",
+        x: 235687.0,
+        z: 147139.0,
+        dprk: true,
+        label_left: true,
+    },
+    RefCity {
+        name: "Chongbong-ni",
+        x: 173484.0,
+        z: 423784.0,
+        dprk: false,
+        label_left: true,
+    },
+    RefCity {
+        name: "Hanjon-dong",
+        x: 231311.4,
+        z: 247023.41,
+        dprk: true,
+        label_left: true,
+    },
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -122,26 +218,74 @@ pub struct RefWaterway {
 //  +-------- Z
 
 pub const MAJOR_WATERWAYS: &[RefWaterway] = &[
-    RefWaterway { name: "Yellow Sea", x: 100_000.0, z: 60_000.0 },
-    RefWaterway { name: "Sea of Japan", x: 250_000.0, z: 430_000.0 },
+    RefWaterway {
+        name: "Yellow Sea",
+        x: 100_000.0,
+        z: 60_000.0,
+    },
+    RefWaterway {
+        name: "Sea of Japan",
+        x: 250_000.0,
+        z: 430_000.0,
+    },
     // Off Map -- RefWaterway { name: "Korea Strait", x: 20_000.0, z: 250_000.0 },
     // Retaining a dedicated label for the Yalu River near Sinuiju
-    RefWaterway { name: "Yalu River", x: 405_000.0, z: 90_000.0 }, //*
-	RefWaterway { name: "Ch'ongch'on River", x: 336_000.0, z: 170_000.0 },
-	RefWaterway { name: "Taedong River", x: 252_000.0, z: 162_000.0 }, //*
-	RefWaterway { name: "Yesong River", x: 165_000.0, z: 230_000.0 },
-	RefWaterway { name: "Imjin River", x: 150_000.0, z: 275_000.0 }, //*
-	RefWaterway { name: "Han River", x: 130_000.0, z: 250_000.0 }, //*
-	RefWaterway { name: "Bukhan River", x: 125_000.0, z: 325_000.0 }, //*
-	RefWaterway { name: "Soyang River", x: 158_000.0, z: 380_000.0 }, 
+    RefWaterway {
+        name: "Yalu River",
+        x: 405_000.0,
+        z: 90_000.0,
+    }, //*
+    RefWaterway {
+        name: "Ch'ongch'on River",
+        x: 336_000.0,
+        z: 170_000.0,
+    },
+    RefWaterway {
+        name: "Taedong River",
+        x: 252_000.0,
+        z: 162_000.0,
+    }, //*
+    RefWaterway {
+        name: "Yesong River",
+        x: 165_000.0,
+        z: 230_000.0,
+    },
+    RefWaterway {
+        name: "Imjin River",
+        x: 150_000.0,
+        z: 275_000.0,
+    }, //*
+    RefWaterway {
+        name: "Han River",
+        x: 130_000.0,
+        z: 250_000.0,
+    }, //*
+    RefWaterway {
+        name: "Bukhan River",
+        x: 125_000.0,
+        z: 325_000.0,
+    }, //*
+    RefWaterway {
+        name: "Soyang River",
+        x: 158_000.0,
+        z: 380_000.0,
+    },
 ];
 
 /// Lower Yalu (Amnok), mouth at Korea Bay up toward Chosan.
 pub const YALU_LATLON: &[(f64, f64)] = &[
-    (39.80, 124.28), (39.86, 124.32), (39.95, 124.36),
-    (40.10, 124.40), (40.20, 124.53), (40.28, 124.65),
-    (40.36, 124.80), (40.46, 124.96), (40.54, 125.15),
-    (40.62, 125.38), (40.70, 125.58), (40.82, 125.80),
+    (39.80, 124.28),
+    (39.86, 124.32),
+    (39.95, 124.36),
+    (40.10, 124.40),
+    (40.20, 124.53),
+    (40.28, 124.65),
+    (40.36, 124.80),
+    (40.46, 124.96),
+    (40.54, 125.15),
+    (40.62, 125.38),
+    (40.70, 125.58),
+    (40.82, 125.80),
 ];
 
 pub fn yalu_river_xz() -> Vec<(f64, f64)> {
@@ -198,7 +342,7 @@ mod tests {
         let (x, z) = latlon_to_xz(REF_LAT, REF_LON);
         assert!((x - REF_X).abs() < 0.001);
         assert!((z - REF_Z).abs() < 0.001);
-        
+
         let (x2, z2) = latlon_to_xz(CAL_LAT, CAL_LON);
         assert!((x2 - CAL_X).abs() < 0.001);
         assert!((z2 - CAL_Z).abs() < 0.001);
@@ -207,7 +351,10 @@ mod tests {
     #[test]
     fn major_cities_split_north_south_and_stay_on_map() {
         let cities = cities_on_map();
-        assert!(cities.len() >= 12, "expected most listed cities on the Korea map");
+        assert!(
+            cities.len() >= 12,
+            "expected most listed cities on the Korea map"
+        );
         let seoul = cities.iter().find(|(c, ..)| c.name == "Seoul").unwrap();
         assert!(!seoul.0.dprk);
         let pyongyang = cities.iter().find(|(c, ..)| c.name == "Pyongyang").unwrap();

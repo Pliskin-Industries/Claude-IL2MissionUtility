@@ -10,10 +10,15 @@ use crate::{parser, template};
 
 pub(crate) const NATO_PLAYER_COUNTRY: i32 = 601;
 pub(crate) const DPRK_PLAYER_COUNTRY: i32 = 501;
-#[allow(dead_code)] // P14 step 7
 pub(crate) const NATO_AI_COUNTRY: i32 = 602;
-#[allow(dead_code)] // P14 step 7
 pub(crate) const DPRK_AI_COUNTRY: i32 = 503;
+
+pub(crate) fn ai_country(side: AirSide) -> i32 {
+    match side {
+        AirSide::Dprk => DPRK_AI_COUNTRY,
+        AirSide::Nato => NATO_AI_COUNTRY,
+    }
+}
 
 /// Object Entered, confirmed in flights 1N and 1D. See docs/il2-loader-and-log-facts.md.
 pub(crate) const OBJECT_ENTERED: i32 = 58;

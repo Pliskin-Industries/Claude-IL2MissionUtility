@@ -708,7 +708,10 @@ mod tests {
     fn early_war_is_finer_than_stalemate() {
         let weeks_1950: usize = TIMELINE.iter().filter(|m| m.year == 1950).count();
         let marks_1952: usize = TIMELINE.iter().filter(|m| m.year == 1952).count();
-        assert!(weeks_1950 >= 12, "1950 should be week/month scale, got {weeks_1950}");
+        assert!(
+            weeks_1950 >= 12,
+            "1950 should be week/month scale, got {weeks_1950}"
+        );
         assert!(marks_1952 <= 5, "1952 should stay coarse, got {marks_1952}");
     }
 
@@ -716,7 +719,10 @@ mod tests {
     fn hungnam_marks_have_a_pocket() {
         let n = TIMELINE.iter().filter(|m| m.pocket.is_some()).count();
         assert!(n >= 2);
-        let m = TIMELINE.iter().find(|m| m.day == 11 && m.month == 12).unwrap();
+        let m = TIMELINE
+            .iter()
+            .find(|m| m.day == 11 && m.month == 12)
+            .unwrap();
         assert!(m.pocket.is_some());
         assert!(pocket_xz(m).unwrap().len() >= 4);
         let hungnam_t = TIMELINE
@@ -729,7 +735,10 @@ mod tests {
 
     #[test]
     fn editor_map_winter_for_december() {
-        let m = TIMELINE.iter().find(|m| m.month == 12 && m.year == 1950).unwrap();
+        let m = TIMELINE
+            .iter()
+            .find(|m| m.month == 12 && m.year == 1950)
+            .unwrap();
         assert_eq!(m.editor_map(), "Winter");
         assert!(m.editor_hint().contains("Winter 1950"));
     }

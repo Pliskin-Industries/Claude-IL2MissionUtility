@@ -916,6 +916,8 @@ Rules: presentation only. Build on `theme.rs` / `shell.rs`. Text at least 12 px,
 
 ### 6.1 Rail tab "Air Tasking" (7th, Ctrl 7)
 
+**Changed by decision 0027 (2026-10-18):** the tab adds entries itself (Add to pool, Auto-fill, plan logic in `airtask/pool.rs`), the pool table and slot timeline layout, an on/off column, Reset scope, the header label, a hard-stop helper, collapsible sections, and wiring to the real API before step 7. Mockup: `docs/ui-redesign/design/air-tasking-tab.html`. Decision 0028 adds upstream's air-group builders as a later step. Where this section and 0027 differ, 0027 wins.
+
 **Enum, arrays and exhaustive matches** (the compiler flags these; `ui.rs`, approximate lines at `bf1a356`):
 - `enum AppMode` (≈169) → add `AirTasking`.
 - `MODES: [(AppMode,&str); 6]` (≈184) → 7, add `(AppMode::AirTasking, "Air Tasking")`. Also update its doc comment.
@@ -1033,6 +1035,8 @@ The D30 AI-trigger check, the slot-window cap warning, the totals warning (D36) 
 ---
 
 ## 7. Export integration
+
+**As built (step 7, 2026-10-27; decisions 0032 to 0035).** The bodies live in `src/airtask/export.rs`; `mod.rs` delegates. One pack rooted at `Air Tasking` (0035); the app's AI country 602 / 503 is set at export (0023 item 6); D30 is measured within r_in (0033); totals limits 240 / 2,300 / 48 (0032); the acceptance mission is a trace build, no debug subtitles (0034). Upstream v0.7.0 moved `generate_front_file` to `src/ui/map.rs`, so step 7's one UI line is there, not in `ui.rs`. `inspect_base_map` matches the group name exactly (`frontlines::AIR_TASKING_GROUP`), not by prefix. Scope, tests and totals: `handoff/sessions/2026-10-26-p14-step7.md`.
 
 - `FrontOptions` (`frontlines.rs` `FrontOptions`) gets `pub air_packs: Vec<MapAirPack>`, and its `Default` gets `Vec::new()`. The test constructions use `..FrontOptions::default()`. Only the literal in `generate_front_file` (`ui.rs`) lists every field with no `..Default`, so it needs the new line. **Step 7 adds that one line (`air_packs: Vec::new(),`) in the same commit as the field.** It is the only `ui.rs` line step 7 touches.
 - **Stamping.** In `generate_front` (`frontlines.rs` ≈1116), the packs are stamped near ≈1450-1473. Stamp the air packs **after the ground packs and before `aoi_border_group`**, with the same `stamp_rooted_packs(iter, &mut next_id)` (≈2200-2210). When the list is empty the loop does nothing and `next_id` does not change, so the output is byte-identical.
@@ -1862,6 +1866,8 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 
 ### Step 7. Export integration — S–M. Branch `claude/p14-export`
 
+**As built (2026-10-27, branch `codex/p14-7`, decisions 0032 to 0035):** see §7. The list below is the original draft; the built tests (all of these names, plus the review's additions) are in `src/airtask/export.rs` and `src/baseline_tests.rs` and listed in `handoff/sessions/2026-10-26-p14-step7.md`. `acceptance_mission_has_zone_entries_and_debug_subtitles` became `acceptance_mission_has_zone_entries_and_trace` (0034).
+
 **Files:** `src/airtask/mod.rs` (`build_air_packs`, `preview`, `validate`), `src/frontlines.rs` (`FrontOptions.air_packs`, stamping, `inspect_base_map` recognizer, `ImportedBaseMap.air_tasking_found`), plus the one `FrontOptions` line in `ui.rs` (§7). `airtask/mod.rs` also gets the body of `totals`.
 
 **Depends on:** steps 2–6 and the Probe 2 results.
@@ -1891,6 +1897,8 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 - `acceptance_mission_has_zone_entries_and_debug_subtitles`: the written mission has, per side, at least one `Zone` and one `Both` entry's `ZN*` cell, the clock and zone debug subtitles named in step 11, and `validate(acceptance_test_plan())` has exactly one D30 warning and no errors.
 
 ### Step 8. Air Tasking rail tab — M. Branch `claude/p14-ui-tab`
+
+**Built ahead of step 7 on `codex/p14-8` (decision 0027).** The tab lives in `src/ui/air.rs`; delegation prompt `handoff/P14-step-8-codex-prompt.md`. The 8b tests that need step 7 are ignored with `needs step 7`.
 
 **Files:** `src/ui.rs`, `src/shell.rs`, `src/help.rs`, `src/ui_tests.rs`, `USER_MANUAL.md` (stub section only).
 
@@ -2159,3 +2167,4 @@ The repo does not prove any of these in game. The shipped files only show what t
 - **2026-10-18, step 4 built.** §3.5 rewritten as built: one country-filtered Complex Trigger per area for the entry and a pulsed check zone for the presence check, 19 MCUs (decisions 0023, 0024, 0025; flight 2J showed a switched-on Complex Trigger misses a plane already inside). U24 timing in `timing.rs`. `PresenceCheckImpl` removed.
 - **2026-10-18, step 5 built.** §3.7 opens with the clock as built (decision 0029 B): quiet roll and jitter as J random timers into a latch, `ATTEMPT END` cancelled directly, a 2-MCU entry randomizer, one-Activate `LAST SET`, `GO` lists copy pointers last run first; 11 MCUs per entry and 17 + J + a per side (55 on the three-entry test plan, from 76). `RandomImpl` and the `Seeded` variants removed (flight 0 confirmed f). Step 6 adds a busy-area check of the `LAST SET` rule (B against B′).
 - **2026-10-22, step 6 built.** §3.8 opens with the zone as built (decision 0030 C): `INNER` pulses `CHANCE` and `MISS WAIT` directly, one `DISARM` at the outcome, direct cancels of `MISS WAIT`, `DENY WAIT` and `COOLDOWN`; 11 MCUs per zone entry (from 17); a hold check in `zone::validate_zone`; no debug subtitles. The busy-area check keeps the clock's `LAST SET` rule B.
+- **2026-10-27, step 7 built.** §7 opens with the export as built (decisions 0032 to 0035): `airtask/export.rs`, one pack rooted at `Air Tasking`, AI country at export, D30 within r_in, totals limits 240 / 2,300 / 48, the acceptance mission as a trace build. Acceptance plan totals: 84 aircraft, 1,092 MCUs, 40 check zones.

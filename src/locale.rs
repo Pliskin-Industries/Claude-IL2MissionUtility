@@ -38,6 +38,10 @@ impl LocaleTable {
         self.entries.get(&id).map(String::as_str)
     }
 
+    pub fn ids(&self) -> impl Iterator<Item = i32> + '_ {
+        self.entries.keys().copied()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

@@ -61,7 +61,15 @@ What this makes easier, harder or necessary.
 | [0023](0023-step-4-threshold-one-complex-trigger-per-area.md) | Step 4 threshold: one Complex Trigger per area, re-activated as the presence check | Accepted |
 | [0024](0024-threshold-presence-check-is-a-pulsed-check-zone.md) | The threshold's presence check is a pulsed check zone (ZonePulse), after flight 2J | Accepted |
 | [0025](0025-remove-trigger-reactivate.md) | Remove the TriggerReactivate presence check from the code | Accepted |
+| [0026](0026-air-tasking-and-upstream-strikes-and-caps.md) | Air Tasking schedules and budgets upstream's strikes and CAPs instead of placing its own | Proposed |
+| [0027](0027-air-tasking-rail-tab-design.md) | The Air Tasking rail tab (step 8): layout, adding entries, behaviour before step 7 | Accepted |
+| [0028](0028-upstream-air-groups-feed-the-pool.md) | Upstream's air-group builders feed the pool, as their own step after the upstream merge | Accepted |
 | [0029](0029-step-5-clock-lean-design.md) | Step 5 clock: a leaner build of plan §3.7 on flown facts | Accepted |
 | [0030](0030-step-6-zone-lean-design.md) | Step 6 zone front end: a leaner build of plan §3.8 on flown facts | Accepted |
+| [0031](0031-sortie-categories.md) | Sortie categories: a label in the template file, chosen by the user, and a pool filter | Accepted |
+| [0032](0032-air-tasking-totals-limits.md) | Air Tasking totals limits (D36) after the upstream author's load test | Accepted |
+| [0033](0033-d30-check-after-the-country-filter.md) | The D30 check after the country-filtered threshold: warn within r_in | Accepted |
+| [0034](0034-acceptance-mission-is-a-trace-build.md) | The step 11 acceptance mission is observed by a trace build, not debug subtitles | Accepted |
+| [0035](0035-one-air-pack-rooted-at-air-tasking.md) | `build_air_packs` returns one pack rooted at the `Air Tasking` group | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

@@ -12,6 +12,7 @@ use crate::ast::Il2Entity;
 use crate::template;
 
 const SLOT_WINDOW_CAP_S: f64 = 300.0;
+pub(crate) const WEIGHT_RANGE: std::ops::RangeInclusive<u8> = 1..=10;
 
 fn clock_entries(entries: &[EntryCopies]) -> impl Iterator<Item = &EntryCopies> {
     entries
@@ -144,7 +145,7 @@ pub(crate) fn build_side(
             .pool
             .get(entry.pool_index)
             .ok_or_else(|| error(&format!("entry {} has no pool entry", entry.number)))?;
-        if !(1..=10).contains(&pool.weight) {
+        if !WEIGHT_RANGE.contains(&pool.weight) {
             return Err(error(&format!(
                 "entry {} weight must be 1 to 10",
                 entry.number

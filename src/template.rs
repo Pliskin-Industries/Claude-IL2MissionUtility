@@ -4,8 +4,8 @@
 //! `Logic` (Zone IN / Zone Out checkzones, `ENABLE / PULSE IN` pulse,
 //! Activate or Spawn bring-up with optional `DeathCount` → `COOLDOWN`
 //! repeat, and the `MISSION END` cleanup hub — `Force Complete - High`,
-//! optional `RTB DELAY` → `RTB East/West n`, then deactivate, plus delete
-//! in Spawn mode),
+//! optional `RTB DELAY` → `RTB East/West n`, then deactivate; Spawn also
+//! deletes the unit entities),
 //! `Units` (cloned object + `MCU_TR_Entity` pairs, wingmen target-linked
 //! to their lead), `Orders` (command MCUs), and `Waypoints` (`WP n` path
 //! hops). Owns the seat model and its bookkeeping — catalog loading
@@ -14,9 +14,12 @@
 //! attack-area suggestions from `weapon_range`, and the order tree layout
 //! the GUI draws. It does NOT write `NodeGates` (fighter packs are linked
 //! by `pack.rs`), does not own payload/mod data (the seat only holds
-//! `payload_id` / `mod_mask` — `payloads.rs` owns the catalog), and does
-//! not lay out the `WP n` path (hops sit at 4 km along +X from the fixed
-//! 40 km origin; the path is hand-authored after generation).
+//! `payload_id` / `mod_mask` — `payloads.rs` owns the catalog). A `WP n`
+//! hop sits on the +X line unless that Goto stores an offset
+//! (`wp_north_m` / `wp_east_m`) or a loop (`loop_to`). Mission packages
+//! (`apply_mission_package`) fill those for a CAP diamond or a strike
+//! (formation by aircraft role, IP, 3 km AttackArea, home at high
+//! priority, Mission Complete).
 //!
 //! ## Public API
 //! * `struct TemplateOptions` + `fn generate_template` — the build.
@@ -33,6 +36,8 @@
 //!   `EntityEvent`, `EventHook` / `EventThen`, `normalize_order_chain`,
 //!   `insert_goto_waypoint_after`, `set_report_following`,
 //!   `used_waypoint_count` / `next_waypoint_number`,
+//!   `MissionPackage` / `apply_mission_package`,
+//!   `waypoint_offset_m` / `offset_label`,
 //!   `order_tree_columns` / `order_tree_layout`, `event_triggers_order`.
 //! * Zones: `ZoneCoalition`, `ZoneMix`, `zone_defaults`, `visual_range_m`,
 //!   `near_visual_range`, `zone_mix_for_seats`, AIR/GROUND/TRAIN zone
@@ -64,8 +69,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::aircraft::{
-    callsign_for, encode_tcode, encode_tcode_color, flight_color, flight_number,
-    plane_display_name, AircraftType, AIRCRAFT_TYPES,
+    AIRCRAFT_TYPES, AircraftType, callsign_for, encode_tcode, encode_tcode_color, flight_color,
+    flight_number, plane_display_name,
 };
 use crate::ast::Il2Entity;
 use crate::duplicate::duplicate_template;
@@ -81,6 +86,10 @@ const BAKED_ORDER_DELAY: f64 = 0.5;
 const BRING_UP_DELAY: f64 = 0.5;
 const AFTER_BRING_UP_DELAY: f64 = 0.5;
 const MISSION_END_TIME: f64 = 0.1;
+/// Counter beside flight cleanup. Each All destroyed event ticks it once.
+pub const ALL_DESTROYED: &str = "ALL DESTROYED";
+/// One-shot gate in front of a Goto that several abort events share.
+const GO_HOME_ONCE_PREFIX: &str = "Go Home Once ";
 const MISSION_END_ORDERS_TIME: f64 = 0.05;
 const RTB_DELAY: f64 = 0.5;
 const DELAYED_END_TIME: f64 = 2.0;
@@ -91,8 +100,16 @@ pub const DEFAULT_TIME_ON_TARGET_S: f32 = 180.0;
 pub const DEFAULT_TIMER_S: f32 = 5.0;
 /// World spacing between seats in a placement group. Not a UI control.
 pub const PLACEMENT_SPACING: f32 = 150.0;
-/// Path waypoint spacing along +X (north). Authored by hand after generate.
+/// Default path spacing along +X (north) when a Goto WP has no offset.
 pub const WAYPOINT_SPACING_M: f32 = 4_000.0;
+/// Strike AttackArea run, in seconds.
+pub const STRIKE_ATTACK_S: f32 = 120.0;
+/// Initial point, metres from the target. Long enough for the attack run to line up.
+pub const STRIKE_IP_M: f32 = 8_000.0;
+/// How far the IP sits off the inbound radial, in degrees. Yields a turn past 30°.
+pub const STRIKE_IP_OFFSET_DEG: f32 = 35.0;
+/// Start / home standoff when the AO edge is not known, in metres.
+pub const STRIKE_START_M: f32 = 20_000.0;
 pub const DEFAULT_ATTACK_AREA_M: f32 = 3000.0;
 /// MCU_Waypoint Area for aircraft path hops.
 pub const PLANE_WAYPOINT_AREA_M: &str = "300";
@@ -631,14 +648,23 @@ pub struct FormationPreset {
 pub const SAFE_AIR_FORMATION_DENSITY: i32 = 1;
 /// Loose for Pairs unless flying Cover (0020/0022); a game-bug workaround (0021).
 pub const LOOSE_AIR_FORMATION_DENSITY: i32 = 2;
-/// Pairs' formation id in `TemplateExamples/FormationTypes.Group`.
+/// Pairs' formation id in `TemplateExamples/FormationTypes.Group` (the Great
+/// Battles set). The six built-in sorties fly it, and flights 2D to 2I flew it.
 pub const PAIRS_AIR_FORMATION_TYPE: i32 = 19;
 
+/// The two aircraft formations that fly as pairs: the Great Battles Pairs
+/// (19) and the Korea editor's Column - Pairs ([`AIR_COLUMN_PAIRS`]).
+pub const fn is_pairs_air_formation(id: i32) -> bool {
+    id == PAIRS_AIR_FORMATION_TYPE || id == AIR_COLUMN_PAIRS
+}
+
+/// An aircraft formation preset. Density follows decisions 0019 and 0020:
+/// Pairs fly Loose, every other aircraft formation flies Safe.
 const fn air_form(id: i32, label: &'static str) -> FormationPreset {
     FormationPreset {
         id,
         label,
-        density: if id == PAIRS_AIR_FORMATION_TYPE {
+        density: if is_pairs_air_formation(id) {
             LOOSE_AIR_FORMATION_DENSITY
         } else {
             SAFE_AIR_FORMATION_DENSITY
@@ -646,34 +672,89 @@ const fn air_form(id: i32, label: &'static str) -> FormationPreset {
     }
 }
 
-const fn ground_form(id: i32, label: &'static str, density: i32) -> FormationPreset {
+const fn form(id: i32, label: &'static str) -> FormationPreset {
     FormationPreset {
         id,
         label,
-        density,
+        density: 0,
     }
 }
 
-/// Aircraft formations from `TemplateExamples/FormationTypes.Group`.
+/// Korea Formation Advanced aircraft list, 1-based. The dropdown starts at
+/// V-Form. `FormationType` 0 crashes this editor; a solo export of a real
+/// formation is 1. `TemplateExamples/FormationTypes.Group` is the Great
+/// Battles set (Pairs 19, Wedge 20, …) and is not this list.
+///
+/// Plane Column - Pairs is 4, the same integer as a vehicle's on-road
+/// one-way column. The lists are selected by unit kind. A plane formation
+/// is never rewritten onto the vehicle command.
+pub const AIR_V_FORM: i32 = 1;
+pub const AIR_COLUMN_PAIRS: i32 = 4;
+pub const AIR_FLIGHTS_WEDGE: i32 = 5;
+pub const AIR_HEAVY_WEDGE: i32 = 8;
+
 pub const AIR_FORMATIONS: &[FormationPreset] = &[
-    air_form(PAIRS_AIR_FORMATION_TYPE, "Pairs"),
-    air_form(20, "Wedge"),
-    air_form(21, "Right"),
-    air_form(22, "Left"),
-    air_form(23, "Heavy Wedge"),
-    air_form(24, "Heavy Echelon Right"),
-    air_form(26, "Heavy Combat Box"),
-    air_form(27, "User"),
+    air_form(AIR_V_FORM, "V-Form"),
+    air_form(2, "Left Edge Form"),
+    air_form(3, "Right Edge Form"),
+    air_form(AIR_COLUMN_PAIRS, "Column - Pairs"),
+    air_form(AIR_FLIGHTS_WEDGE, "Column - Flights wedge"),
+    air_form(6, "Column - Flights right"),
+    air_form(7, "Column - Flights left"),
+    air_form(AIR_HEAVY_WEDGE, "Heavy - Wedge"),
+    air_form(9, "Heavy - Echelon right"),
+    air_form(10, "Heavy - Echelon left"),
+    air_form(11, "Heavy - Combat box"),
+    air_form(12, "Heavy - User formation"),
+    air_form(13, "Reserved - 9"),
+    air_form(14, "Reserved - 10"),
+    air_form(15, "Reserved - 11"),
+    air_form(16, "Reserved - 12"),
+    air_form(17, "Reserved - 13"),
+    air_form(18, "Reserved - 14"),
+    air_form(PAIRS_AIR_FORMATION_TYPE, "Reserved - 15 (Pairs in the built-ins)"),
 ];
 
-/// Vehicle / convoy formations from `TemplateExamples/VehicleFormationTypes.Group`
-/// and `TemplateExamples/Simple Vehicle Formation 2 way column.Group`.
+/// Vehicle formation commands. On-road columns use the ids the editor writes
+/// (4 and 18). The rest follow the Korea combo after the aircraft block.
 pub const GROUND_FORMATIONS: &[FormationPreset] = &[
-    ground_form(4, "Road Column 1 way", 0),
-    ground_form(18, "Road Column 2 way", 1),
-    ground_form(10, "Panic Stop", 0),
-    ground_form(11, "Continue Moving", 0),
+    // Editor-saved values, not the aircraft dropdown. `VehicleFormationTypes.Group`
+    // and `DPRK Truck Run.Group` write one-way as 4; the two-way column
+    // writes 18 with FormationDensity 1 (Safe). Aircraft Column - Pairs is
+    // also 4, and aircraft Reserved - 14 is also 18. Those stay on the
+    // plane list. 19 and 20 were the old vehicle combo stand-ins, so a
+    // convoy still holding them is rewritten to 4 and 18.
+    form(4, "On Road Column one-way"),
+    FormationPreset {
+        id: 18,
+        label: "On Road Column two-way",
+        density: 1,
+    },
+    form(21, "Off Road Column"),
+    form(22, "Off Road User Formation"),
+    form(23, "Forward"),
+    form(24, "Backward"),
+    form(25, "Stop"),
+    form(26, "Panic Stop"),
+    form(27, "Continue Moving"),
+    form(28, "Set Direction and Stop"),
+    form(29, "Reset Off Road User Formation"),
+    form(30, "User Formation Line Left"),
+    form(31, "User Formation Line Right"),
+    form(32, "User Formation Line Center"),
+    form(33, "User Formation Line Back"),
 ];
+
+/// Korea flare dialog: Red, Green, White, in that order.
+pub const FLARE_COLORS: &[(i32, &str)] = &[(0, "Red"), (1, "Green"), (2, "White")];
+
+pub fn flare_label(color: i32) -> String {
+    FLARE_COLORS
+        .iter()
+        .find(|(id, _)| *id == color)
+        .map(|(_, label)| (*label).to_string())
+        .unwrap_or_else(|| format!("Color {color}"))
+}
 
 pub fn formations_for(kind: UnitKind) -> &'static [FormationPreset] {
     match kind {
@@ -742,6 +823,57 @@ pub fn set_air_formation_density(root: &mut Il2Entity) {
             node.set_property("FormationDensity", density.to_string());
         }
     });
+}
+
+/// `19` and `20` were the combo-row stand-ins for the two on-road columns.
+/// The editor stores those columns as 4 and 18. A ground formation still
+/// holding 19 or 20 is rewritten on export so the column stays on the road.
+fn editor_ground_formation(id: i32) -> i32 {
+    match id {
+        19 => 4,
+        20 => 18,
+        other => other,
+    }
+}
+
+/// Korea aircraft `FormationType` written to the file. Never returns 0.
+///
+/// 1–19 are the dropdown (V-Form is 1) and pass through, including 4
+/// (Column - Pairs) and 18 (Reserved - 14). Those integers are also
+/// vehicle on-road columns; this function is not used for vehicles.
+/// A stored 0 is the 2026-09-28 combo index for V-Form. It crashes the
+/// editor, so it is rewritten to [`AIR_V_FORM`].
+///
+/// 20–27 are the Great Battles ids from `FormationTypes.Group`. Wedge
+/// (20) becomes Column - Flights wedge; Heavy Wedge (23) becomes
+/// Heavy - Wedge. Great Battles Pairs is 19, which is Reserved - 15 on
+/// this list, so 19 is left alone.
+fn editor_air_formation(id: i32) -> i32 {
+    match id {
+        0 => AIR_V_FORM,
+        20 => AIR_FLIGHTS_WEDGE,
+        21 => 6,
+        22 => 7,
+        23 => AIR_HEAVY_WEDGE,
+        24 => 9,
+        26 => 11,
+        27 => 12,
+        1..=19 => id,
+        _ => AIR_V_FORM,
+    }
+}
+
+/// Formation shape for this aircraft. Fighters (and fighter-bombers) use
+/// Column - Pairs. Attack aircraft use Column - Flights wedge. Bombers
+/// use Heavy - Wedge. Anything else keeps that heavy default.
+pub fn air_formation_id(script: &str) -> i32 {
+    match crate::model_spec::class_for(script) {
+        crate::model_spec::ModelClass::Fighter | crate::model_spec::ModelClass::FighterBomber => {
+            AIR_COLUMN_PAIRS
+        }
+        crate::model_spec::ModelClass::Attack => AIR_FLIGHTS_WEDGE,
+        _ => AIR_HEAVY_WEDGE,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -919,6 +1051,13 @@ pub struct OrderSpec {
     pub altitude: f32,
     /// Other seats that receive this same command MCU (Objects). Empty = this unit only.
     pub shared_with: Vec<usize>,
+    /// Metres north (+X) of the group origin. With `wp_east_m`, this hop is not
+    /// placed on the default north line.
+    pub wp_north_m: Option<f32>,
+    /// Metres east (+Z) of the group origin.
+    pub wp_east_m: Option<f32>,
+    /// On arrival, this waypoint targets that earlier WP MCU so the pattern repeats.
+    pub loop_to: Option<u32>,
 }
 
 impl Default for OrderSpec {
@@ -932,7 +1071,7 @@ impl Default for OrderSpec {
             attack_g_targets: false,
             time_s: 600.0,
             priority: 1,
-            formation_type: 23,
+            formation_type: AIR_HEAVY_WEDGE,
             behaviour_filter: 8,
             flare_color: 0,
             effect_start: true,
@@ -942,6 +1081,9 @@ impl Default for OrderSpec {
             waypoint: 1,
             altitude: 0.0,
             shared_with: Vec::new(),
+            wp_north_m: None,
+            wp_east_m: None,
+            loop_to: None,
         }
     }
 }
@@ -952,7 +1094,7 @@ impl OrderSpec {
         match kind {
             UnitKind::Plane => {
                 order.kind = OrderKind::Formation;
-                order.formation_type = 23;
+                order.formation_type = AIR_HEAVY_WEDGE;
             }
             _ => {
                 order.kind = OrderKind::AttackArea;
@@ -967,6 +1109,9 @@ impl OrderSpec {
     /// Ground AttackArea radius follows the unit's known system range (capped at 3 km).
     pub fn for_unit(unit: &CatalogUnit) -> Self {
         let mut order = Self::for_kind(unit.kind);
+        if unit.is_air() {
+            order.formation_type = air_formation_id(&unit.script);
+        }
         if order.kind == OrderKind::AttackArea {
             order.attack_area =
                 weapon_range::attack_area_radius_m(&unit.script, DEFAULT_ATTACK_AREA_M);
@@ -1030,6 +1175,15 @@ pub fn priority_label(priority: i32) -> &'static str {
     }
 }
 
+/// Timer name for a Goto hop. A loop is named for the waypoint it returns to.
+pub fn goto_timer_name(order: &OrderSpec) -> String {
+    if let Some(back) = order.loop_to {
+        format!("Return to WP {}", back.max(1))
+    } else {
+        format!("Goto WP {}", order.waypoint.max(1))
+    }
+}
+
 /// Second line for a colored order chip: enough to check the tree at a glance.
 pub fn order_chip_detail(order: &OrderSpec, unit_kind: UnitKind) -> String {
     let pri = || priority_label(order.priority);
@@ -1075,15 +1229,20 @@ pub fn order_chip_detail(order: &OrderSpec, unit_kind: UnitKind) -> String {
         }
         OrderKind::ForceComplete | OrderKind::Land => pri().to_string(),
         OrderKind::GotoWaypoint => {
+            let looped = if order.loop_to.is_some() {
+                " · loop"
+            } else {
+                ""
+            };
             if order.altitude > 0.0 {
                 format!(
-                    "WP {} · {:.0}m · {}",
+                    "WP {} · {:.0}m · {}{looped}",
                     order.waypoint.max(1),
                     order.altitude,
                     pri()
                 )
             } else {
-                format!("WP {} · {}", order.waypoint.max(1), pri())
+                format!("WP {} · {}{looped}", order.waypoint.max(1), pri())
             }
         }
         OrderKind::Formation => formation_label(order.formation_type, unit_kind),
@@ -1132,11 +1291,7 @@ pub fn next_waypoint_number(seats: &[TemplateSeat]) -> u32 {
 /// Insert a Goto WP order after `after`. The new hop is numbered one past the
 /// current highest WP. Events pointing at later orders are shifted. Returns
 /// the new order index after chain normalize.
-pub fn insert_goto_waypoint_after(
-    seats: &mut [TemplateSeat],
-    seat: usize,
-    after: usize,
-) -> usize {
+pub fn insert_goto_waypoint_after(seats: &mut [TemplateSeat], seat: usize, after: usize) -> usize {
     let n = next_waypoint_number(seats);
     let mut spec = OrderSpec::default();
     spec.kind = OrderKind::GotoWaypoint;
@@ -1153,10 +1308,960 @@ pub fn insert_goto_waypoint_after(
     normalize_order_chain(&mut seats[seat].orders, &mut seats[seat].events, idx)
 }
 
-/// Where an entity event pulses: shared Force Complete, or an order in the chain.
+/// North (+X) and east (+Z) metres from the group origin for waypoint `wp_n`.
+/// An explicit hop offset wins; otherwise the hop sits on the north line.
+pub fn waypoint_offset_m(seats: &[TemplateSeat], wp_n: u32, spacing_m: f32) -> (f32, f32) {
+    let n = wp_n.max(1);
+    for seat in seats {
+        for order in &seat.orders {
+            if order.kind == OrderKind::GotoWaypoint
+                && order.waypoint.max(1) == n
+                && let (Some(north), Some(east)) = (order.wp_north_m, order.wp_east_m)
+            {
+                return (north, east);
+            }
+        }
+    }
+    (n as f32 * spacing_m, 0.0)
+}
+
+fn waypoint_world_xz(seats: &[TemplateSeat], wp_n: u32, spacing_m: f32) -> (f64, f64) {
+    let (north, east) = waypoint_offset_m(seats, wp_n, spacing_m);
+    (ORIGIN_X + f64::from(north), ORIGIN_Z + f64::from(east))
+}
+
+/// "4000 m north" / "2000 m west" / "4000 m north, 2000 m east".
+pub fn offset_label(north: f32, east: f32) -> String {
+    fn axis(v: f32, pos: &str, neg: &str) -> Option<String> {
+        if v.abs() < 1.0 {
+            None
+        } else if v > 0.0 {
+            Some(format!("{v:.0} m {pos}"))
+        } else {
+            Some(format!("{:.0} m {neg}", -v))
+        }
+    }
+    match (axis(north, "north", "south"), axis(east, "east", "west")) {
+        (Some(a), Some(b)) => format!("{a}, {b}"),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => "at the origin".into(),
+    }
+}
+
+/// Segments of each lead's Goto chain, in formation-view metres (north, east).
+/// The first hop leaves the origin. An event-owned Goto is a point, not the
+/// next leg. A `loop_to` hop draws back to that waypoint.
+pub fn mission_path_segments(
+    seats: &[TemplateSeat],
+    spacing_m: f32,
+) -> Vec<((f32, f32), (f32, f32))> {
+    let mut out = Vec::new();
+    for (si, seat) in seats.iter().enumerate() {
+        if !receives_orders(seats, si) {
+            continue;
+        }
+        let mut prev: Option<(f32, f32)> = None;
+        for (oi, order) in seat.orders.iter().enumerate() {
+            if order.kind != OrderKind::GotoWaypoint {
+                continue;
+            }
+            let here = waypoint_offset_m(seats, order.waypoint, spacing_m);
+            if !event_triggers_order(&seat.events, oi) {
+                if let Some(p) = prev {
+                    out.push((p, here));
+                } else {
+                    out.push(((0.0, 0.0), here));
+                }
+                prev = Some(here);
+            }
+            if let Some(back) = order.loop_to {
+                let there = waypoint_offset_m(seats, back, spacing_m);
+                out.push((here, there));
+            }
+        }
+    }
+    out
+}
+
+/// Aircraft mission filled in by **+ Mission**.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissionPackage {
+    Cap,
+    Strike,
+}
+
+impl MissionPackage {
+    pub fn label(self) -> &'static str {
+        match self {
+            MissionPackage::Cap => "CAP",
+            MissionPackage::Strike => "Strike",
+        }
+    }
+}
+
+/// What `apply_mission_package` changed, for the status line.
+#[derive(Debug)]
+pub struct AppliedMission {
+    pub label: &'static str,
+    pub detail: String,
+    /// Strike stays up when the other side never shows. The UI clears Zone Out.
+    pub disable_zone_out: bool,
+}
+
+/// Metres north (+X) and east (+Z) of the target for a strike start and its IP.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StrikeGeometry {
+    pub start_north: f32,
+    pub start_east: f32,
+    pub ip_north: f32,
+    pub ip_east: f32,
+}
+
+/// DPRK starts due north of the target. NATO starts to the south-east.
+/// The IP sits [`STRIKE_IP_M`] off that inbound radial by [`STRIKE_IP_OFFSET_DEG`].
+pub fn strike_geometry(western: bool, start_m: f32) -> StrikeGeometry {
+    let start_m = start_m.max(STRIKE_IP_M + 2_000.0);
+    let (start_north, start_east) = if western {
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        (-start_m * s, start_m * s)
+    } else {
+        (start_m, 0.0)
+    };
+    let inbound = start_east.atan2(start_north);
+    let ip = inbound + STRIKE_IP_OFFSET_DEG.to_radians();
+    StrikeGeometry {
+        start_north,
+        start_east,
+        ip_north: STRIKE_IP_M * ip.cos(),
+        ip_east: STRIKE_IP_M * ip.sin(),
+    }
+}
+
+/// Degrees from north (+X) toward east (+Z), from `from` to `to`.
+pub fn heading_toward(from_x: f64, from_z: f64, to_x: f64, to_z: f64) -> f64 {
+    let north = to_x - from_x;
+    let east = to_z - from_z;
+    east.atan2(north).to_degrees().rem_euclid(360.0)
+}
+
+/// Rotate a north/east offset so a formation that was facing north faces `heading_deg`.
+fn rotate_ne(north: f64, east: f64, heading_deg: f64) -> (f64, f64) {
+    let r = heading_deg.to_radians();
+    let (s, c) = (r.sin(), r.cos());
+    (north * c - east * s, north * s + east * c)
+}
+
+/// IP 8 km from the target, 35° off the line from the target back to `start`.
+pub fn strike_ip_toward(start_x: f64, start_z: f64, target_x: f64, target_z: f64) -> (f64, f64) {
+    let north = start_x - target_x;
+    let east = start_z - target_z;
+    let inbound = if north.hypot(east) < 1.0 {
+        0.0
+    } else {
+        east.atan2(north)
+    };
+    let ip = inbound + f64::from(STRIKE_IP_OFFSET_DEG).to_radians();
+    (
+        target_x + f64::from(STRIKE_IP_M) * ip.cos(),
+        target_z + f64::from(STRIKE_IP_M) * ip.sin(),
+    )
+}
+
+/// Where a click-placed strike sits. The click is the aircraft. The target lies
+/// `standoff_m` along the package inbound (south of a DPRK flight, north-west
+/// of a NATO flight). The IP stays 8 km off that inbound.
+pub fn strike_pose_from_start(
+    western: bool,
+    start_x: f64,
+    start_z: f64,
+    standoff_m: f32,
+) -> StrikePose {
+    let standoff = standoff_m.max(STRIKE_IP_M + 2_000.0);
+    let (dn, de) = if western {
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        (f64::from(standoff) * s, -f64::from(standoff) * s)
+    } else {
+        (-f64::from(standoff), 0.0)
+    };
+    let target_x = start_x + dn;
+    let target_z = start_z + de;
+    let geo = strike_geometry(western, standoff);
+    StrikePose {
+        target_x,
+        target_z,
+        start_x,
+        start_z,
+        ip_x: target_x + f64::from(geo.ip_north),
+        ip_z: target_z + f64::from(geo.ip_east),
+    }
+}
+
+/// Target, aircraft start (also the last waypoint), and the initial point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StrikePose {
+    pub target_x: f64,
+    pub target_z: f64,
+    pub start_x: f64,
+    pub start_z: f64,
+    pub ip_x: f64,
+    pub ip_z: f64,
+}
+
+impl StrikePose {
+    pub fn heading_deg(self) -> f64 {
+        heading_toward(self.start_x, self.start_z, self.ip_x, self.ip_z)
+    }
+}
+
+/// Heading change at the IP, degrees, from start → IP → target (the origin).
+pub fn strike_turn_deg(geo: StrikeGeometry) -> f32 {
+    let in_n = geo.ip_north - geo.start_north;
+    let in_e = geo.ip_east - geo.start_east;
+    let out_n = -geo.ip_north;
+    let out_e = -geo.ip_east;
+    let dot = in_n * out_n + in_e * out_e;
+    let mag = in_n.hypot(in_e) * out_n.hypot(out_e);
+    if mag < 1.0 {
+        return 0.0;
+    }
+    (dot / mag).clamp(-1.0, 1.0).acos().to_degrees()
+}
+
+/// Metres from a target to the AO edge along the strike inbound.
+/// A miss, or a start inside 1 km, falls back to [`STRIKE_START_M`].
+pub fn ao_edge_distance_m(
+    x_min: f64,
+    x_max: f64,
+    z_min: f64,
+    z_max: f64,
+    x: f64,
+    z: f64,
+    western: bool,
+) -> f32 {
+    let (dx, dz) = if western {
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        (-s, s)
+    } else {
+        (1.0, 0.0)
+    };
+    let along = |d: f64, min: f64, max: f64, p: f64| {
+        if d > 1e-9 {
+            (max - p) / d
+        } else if d < -1e-9 {
+            (min - p) / d
+        } else {
+            f64::INFINITY
+        }
+    };
+    let t = along(dx, x_min, x_max, x).min(along(dz, z_min, z_max, z));
+    if t.is_finite() && t >= 1_000.0 {
+        t as f32
+    } else {
+        STRIKE_START_M
+    }
+}
+
+/// Opposite-coalition ground a strike can be aimed at, in the order the
+/// Map Missions list stores them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrikeTargetClass {
+    Bridges,
+    Dams,
+    Airbases,
+    Ships,
+    Tanks,
+    TruckRoutes,
+}
+
+impl StrikeTargetClass {
+    pub const ALL: [StrikeTargetClass; 6] = [
+        StrikeTargetClass::Tanks,
+        StrikeTargetClass::TruckRoutes,
+        StrikeTargetClass::Ships,
+        StrikeTargetClass::Airbases,
+        StrikeTargetClass::Bridges,
+        StrikeTargetClass::Dams,
+    ];
+}
+
+pub fn default_strike_priority() -> Vec<StrikeTargetClass> {
+    StrikeTargetClass::ALL.to_vec()
+}
+
+/// First class in `priority` that has a point `inside` the AO. Among that
+/// class, the point nearest `center`.
+pub fn pick_strike_target(
+    priority: &[StrikeTargetClass],
+    candidates: &[(StrikeTargetClass, f64, f64)],
+    center: (f64, f64),
+    mut inside: impl FnMut(f64, f64) -> bool,
+) -> Option<(StrikeTargetClass, f64, f64)> {
+    for class in priority {
+        let mut best: Option<(f64, f64, f64)> = None;
+        for (kind, x, z) in candidates {
+            if kind != class || !inside(*x, *z) {
+                continue;
+            }
+            let d = (x - center.0).hypot(z - center.1);
+            let nearer = best.is_none_or(|(_, _, bd)| d < bd);
+            if nearer {
+                best = Some((*x, *z, d));
+            }
+        }
+        if let Some((x, z, _)) = best {
+            return Some((*class, x, z));
+        }
+    }
+    None
+}
+
+/// `Some(western)` when this group is a strike: a plane, an AttackArea, and a
+/// Mission Complete timer. A ground unit with an AttackArea is not a strike.
+pub fn strike_side(root: &Il2Entity) -> Option<bool> {
+    let mut attack = false;
+    let mut done = false;
+    let mut plane = false;
+    let mut country = None;
+    root.for_each(&mut |e| {
+        if e.block_type == "MCU_CMD_AttackArea" {
+            attack = true;
+        }
+        if e.name().is_some_and(|n| n.starts_with("Mission Complete")) {
+            done = true;
+        }
+        if e.block_type == "Plane" {
+            plane = true;
+            if country.is_none() {
+                country = e.property("Country").and_then(|s| s.parse().ok());
+            }
+        }
+    });
+    if plane && attack && done {
+        Some(western_country(country.unwrap_or(501)))
+    } else {
+        None
+    }
+}
+
+/// Strike plans pulled out of one base-map child, instead of an army pack.
+pub struct ImportedStrikes {
+    /// The file wrapped the plans in Exclusive Activation, so each name has
+    /// a trailing ` [n]` from that export.
+    pub packed: bool,
+    pub groups: Vec<Il2Entity>,
+}
+
+/// Planes, an AttackArea, and Mission Complete make a strike. An Exclusive
+/// Activation group yields each plan. A ground pack is returned unchanged.
+pub fn take_strike_missions(mut entity: Il2Entity) -> Result<ImportedStrikes, Il2Entity> {
+    let child_hits = entity
+        .children
+        .iter()
+        .filter(|c| strike_side(c).is_some())
+        .count();
+    let packed =
+        child_hits >= 2 || (child_hits >= 1 && entity.name() == Some("Exclusive Activation"));
+    if packed {
+        let kids = std::mem::take(&mut entity.children);
+        return Ok(ImportedStrikes {
+            packed: true,
+            groups: kids
+                .into_iter()
+                .filter(|c| strike_side(c).is_some())
+                .collect(),
+        });
+    }
+    if strike_side(&entity).is_some() {
+        return Ok(ImportedStrikes {
+            packed: false,
+            groups: vec![entity],
+        });
+    }
+    Err(entity)
+}
+
+/// Where a placed strike sits: Zone In is the target, the lead is the start,
+/// WP 1 is the IP. Later AttackAreas are the extra flight aims.
+pub struct StrikeLayout {
+    pub name: String,
+    pub western: bool,
+    pub target: (f64, f64),
+    pub start: (f64, f64),
+    pub ip: (f64, f64),
+    pub attacks: Vec<(usize, String, f64, f64)>,
+}
+
+pub fn strike_layout(group: &Il2Entity, packed: bool) -> Option<StrikeLayout> {
+    let western = strike_side(group)?;
+    let mut areas = Vec::new();
+    let mut lead = None;
+    let mut fallback = None;
+    group.for_each(&mut |e| {
+        if e.block_type == "MCU_CMD_AttackArea" {
+            areas.push(e.pos_xz());
+        }
+        if e.block_type != "Plane" {
+            return;
+        }
+        let Some(p) = e.pos_xz() else {
+            return;
+        };
+        if fallback.is_none() {
+            fallback = Some(p);
+        }
+        if e.property("NumberInFormation")
+            .and_then(|s| s.parse::<f64>().ok())
+            .is_some_and(|n| n.abs() < 0.5)
+        {
+            lead = Some(p);
+        }
+    });
+    let target = group
+        .find_by_name("Zone IN")
+        .and_then(|z| z.pos_xz())
+        .or_else(|| areas.iter().find_map(|p| *p))
+        .or(lead)
+        .or(fallback)?;
+    let start = lead
+        .or(fallback)
+        .or_else(|| group.find_by_name("WP 2").and_then(|w| w.pos_xz()))
+        .unwrap_or(target);
+    let ip = group
+        .find_by_name("WP 1")
+        .and_then(|w| w.pos_xz())
+        .unwrap_or(start);
+    let attacks = separable_flight_attacks(group)
+        .into_iter()
+        .filter_map(|slot| {
+            let (x, z) = areas.get(slot.ordinal).copied().flatten()?;
+            Some((slot.ordinal, slot.lead_name, x, z))
+        })
+        .collect();
+    Some(StrikeLayout {
+        name: strike_display_name(group.name().unwrap_or("Strike"), packed),
+        western,
+        target,
+        start,
+        ip,
+        attacks,
+    })
+}
+
+fn strike_display_name(name: &str, packed: bool) -> String {
+    let name = name.trim();
+    if !packed {
+        return name.to_string();
+    }
+    let Some(open) = name.rfind(" [") else {
+        return name.to_string();
+    };
+    let digits = &name[open + 2..];
+    if digits.ends_with(']')
+        && digits.len() > 1
+        && digits[..digits.len() - 1]
+            .chars()
+            .all(|c| c.is_ascii_digit())
+    {
+        let bare = name[..open].trim();
+        if bare.is_empty() {
+            "Strike".to_string()
+        } else {
+            bare.to_string()
+        }
+    } else {
+        name.to_string()
+    }
+}
+
+/// Move a strike so Zone In and the attack sit on `target`. Planes and the
+/// last waypoint go to the start (AO edge, or the baked standoff). The IP
+/// stays 8 km out with a turn of at least 30°. The formation faces the IP.
+pub fn retarget_strike_group(
+    group: &mut Il2Entity,
+    target_x: f64,
+    target_z: f64,
+    western: bool,
+    start_m: f32,
+) -> bool {
+    let geo = strike_geometry(western, start_m);
+    place_strike_at(
+        group,
+        StrikePose {
+            target_x,
+            target_z,
+            start_x: target_x + f64::from(geo.start_north),
+            start_z: target_z + f64::from(geo.start_east),
+            ip_x: target_x + f64::from(geo.ip_north),
+            ip_z: target_z + f64::from(geo.ip_east),
+        },
+    )
+}
+
+/// Put Zone In and the attack on the target, the aircraft and WP 2 on the
+/// start, and WP 1 on the IP. The parked formation turns to face the IP.
+/// Offsets between aircraft stay, rotated from the lead's current nose.
+pub fn place_strike_at(group: &mut Il2Entity, pose: StrikePose) -> bool {
+    if strike_side(group).is_none() {
+        return false;
+    }
+    let Some((zx, zz)) = group.find_by_name("Zone IN").and_then(|z| z.pos_xz()) else {
+        return false;
+    };
+    group.translate_xz(pose.target_x - zx, pose.target_z - zz);
+    let heading = pose.heading_deg();
+    let mut lead = None;
+    let mut fallback = None;
+    let mut lead_yori = 0.0;
+    group.for_each(&mut |e| {
+        if e.block_type != "Plane" {
+            return;
+        }
+        let Some(p) = e.pos_xz() else {
+            return;
+        };
+        if fallback.is_none() {
+            fallback = Some(p);
+        }
+        if e.property("NumberInFormation")
+            .and_then(|s| s.parse::<f64>().ok())
+            .is_some_and(|n| n.abs() < 0.5)
+        {
+            lead = Some(p);
+            lead_yori = e
+                .property("YOri")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+        }
+    });
+    if let Some((lx, lz)) = lead.or(fallback) {
+        let dx = pose.start_x - lx;
+        let dz = pose.start_z - lz;
+        let delta = heading - lead_yori;
+        group.for_each_mut(&mut |e| {
+            if e.block_type != "Plane" && e.block_type != "MCU_TR_Entity" {
+                return;
+            }
+            if let Some((x, z)) = e.pos_xz() {
+                let sx = x + dx;
+                let sz = z + dz;
+                let (rx, rz) = if delta.abs() < 0.05 {
+                    (sx, sz)
+                } else {
+                    let (n, eoff) = rotate_ne(sx - pose.start_x, sz - pose.start_z, delta);
+                    (pose.start_x + n, pose.start_z + eoff)
+                };
+                e.set_property("XPos", format!("{rx:.3}"));
+                e.set_property("ZPos", format!("{rz:.3}"));
+            }
+            if e.block_type == "Plane" || e.property("YOri").is_some() {
+                e.set_property("YOri", format!("{heading:.3}"));
+            }
+        });
+    }
+    let ip = (pose.ip_x, pose.ip_z);
+    let start = (pose.start_x, pose.start_z);
+    group.for_each_mut(&mut |e| {
+        if e.block_type != "MCU_Waypoint" {
+            return;
+        }
+        let at = match e.name() {
+            Some("WP 1") => Some(ip),
+            Some("WP 2") => Some(start),
+            _ => None,
+        };
+        if let Some((x, z)) = at {
+            e.set_property("XPos", format!("{x:.3}"));
+            e.set_property("ZPos", format!("{z:.3}"));
+        }
+    });
+    true
+}
+
+/// One AttackArea after the first, when a group has several flights and
+/// several AttackAreas. The first area stays the mission target. These can
+/// sit on their own points; the waypoints stay one plan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FlightAttack {
+    /// Index among `MCU_CMD_AttackArea` nodes in tree order.
+    pub ordinal: usize,
+    /// Flight lead this area commands, or "Flight N" when that is not one lead.
+    pub lead_name: String,
+}
+
+struct PlaneSeat {
+    index: i32,
+    entity: Option<i32>,
+    name: String,
+    formation: i32,
+    x: f64,
+    z: f64,
+    has_pos: bool,
+}
+
+/// Attack areas after the first, when there is more than one flight and more
+/// than one AttackArea. Otherwise the group keeps a single target.
+pub fn separable_flight_attacks(root: &Il2Entity) -> Vec<FlightAttack> {
+    let planes = plane_seats(root);
+    let flights = planes.iter().filter(|p| p.formation == 0).count();
+    let mut areas = Vec::new();
+    root.for_each(&mut |e| {
+        if e.block_type == "MCU_CMD_AttackArea" {
+            areas.push(e.objects.clone());
+        }
+    });
+    if flights < 2 || areas.len() < 2 {
+        return Vec::new();
+    }
+    areas
+        .into_iter()
+        .enumerate()
+        .skip(1)
+        .map(|(ordinal, objects)| FlightAttack {
+            ordinal,
+            lead_name: attack_lead_name(&objects, &planes, ordinal),
+        })
+        .collect()
+}
+
+/// Move the listed AttackAreas (by tree-order ordinal) onto their own points.
+/// The rest of the plan, including the first AttackArea, stays where it is.
+pub fn place_flight_attack_areas(group: &mut Il2Entity, aims: &[(usize, f64, f64)]) {
+    if aims.is_empty() {
+        return;
+    }
+    let mut ordinal = 0usize;
+    group.for_each_mut(&mut |e| {
+        if e.block_type != "MCU_CMD_AttackArea" {
+            return;
+        }
+        if let Some((_, x, z)) = aims.iter().find(|(n, _, _)| *n == ordinal) {
+            e.set_property("XPos", format!("{x:.3}"));
+            e.set_property("ZPos", format!("{z:.3}"));
+        }
+        ordinal += 1;
+    });
+}
+
+fn plane_seats(root: &Il2Entity) -> Vec<PlaneSeat> {
+    let mut planes = Vec::new();
+    root.for_each(&mut |e| {
+        if e.block_type != "Plane" {
+            return;
+        }
+        let Some(index) = e.index else {
+            return;
+        };
+        let (x, z, has_pos) = match e.pos_xz() {
+            Some((x, z)) => (x, z, true),
+            None => (0.0, 0.0, false),
+        };
+        planes.push(PlaneSeat {
+            index,
+            entity: e.property("LinkTrId").and_then(|s| s.parse().ok()),
+            name: e.name().unwrap_or("").to_string(),
+            formation: e
+                .property("NumberInFormation")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            x,
+            z,
+            has_pos,
+        });
+    });
+    planes
+}
+
+fn attack_lead_name(objects: &[i32], planes: &[PlaneSeat], ordinal: usize) -> String {
+    let fallback = format!("Flight {}", ordinal + 1);
+    let mut names = Vec::new();
+    for id in objects {
+        let Some(plane_i) = planes
+            .iter()
+            .position(|p| p.entity == Some(*id) || p.index == *id)
+        else {
+            continue;
+        };
+        let lead = lead_seat(planes, plane_i);
+        let name = planes[lead].name.trim();
+        if !name.is_empty() && !names.iter().any(|n: &String| n == name) {
+            names.push(name.to_string());
+        }
+    }
+    match names.as_slice() {
+        [one] => one.clone(),
+        _ => fallback,
+    }
+}
+
+fn lead_seat(planes: &[PlaneSeat], plane_i: usize) -> usize {
+    if planes[plane_i].formation == 0 {
+        return plane_i;
+    }
+    let leads: Vec<usize> = planes
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.formation == 0)
+        .map(|(i, _)| i)
+        .collect();
+    if leads.is_empty() {
+        return plane_i;
+    }
+    if planes[plane_i].has_pos {
+        let (x, z) = (planes[plane_i].x, planes[plane_i].z);
+        leads
+            .iter()
+            .copied()
+            .min_by(|&a, &b| {
+                let da = (planes[a].x - x).hypot(planes[a].z - z);
+                let db = (planes[b].x - x).hypot(planes[b].z - z);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(leads[0])
+    } else {
+        leads
+            .iter()
+            .copied()
+            .filter(|&i| i < plane_i)
+            .next_back()
+            .unwrap_or(leads[0])
+    }
+}
+
+const CAP_ABORTS: &[EntityEvent] = &[
+    EntityEvent::OnPlaneBingoMainMG,
+    EntityEvent::OnPlaneCriticalDamage,
+    EntityEvent::OnPilotWounded,
+];
+
+const STRIKE_ABORTS: &[EntityEvent] = &[
+    EntityEvent::OnPlaneBingoBombs,
+    EntityEvent::OnPlaneCriticalDamage,
+    EntityEvent::OnPilotWounded,
+];
+
+/// Replace this aircraft lead's orders with a CAP diamond or a strike.
+/// Wingmen of the lead get the same abort events. Strike also sets a bomb
+/// or rocket payload on each aircraft in the flight that has one.
+pub fn apply_mission_package(
+    seats: &mut [TemplateSeat],
+    seat: usize,
+    package: MissionPackage,
+    spacing_m: f32,
+) -> Result<AppliedMission, String> {
+    if seat >= seats.len() {
+        return Err("select a unit.".into());
+    }
+    if !seats[seat].unit.is_air() {
+        return Err("mission packages are for aircraft.".into());
+    }
+    if !receives_orders(seats, seat) {
+        return Err("wingmen take no orders. Select the lead.".into());
+    }
+    let spacing = if spacing_m >= 500.0 {
+        spacing_m
+    } else {
+        WAYPOINT_SPACING_M
+    };
+    let (rtb_north, rtb_east) = rtb_offset_m(seats[seat].country);
+    let western = western_country(seats[seat].country);
+    seats[seat].orders.clear();
+    seats[seat].events.clear();
+    let base = next_waypoint_number(seats).max(1);
+
+    let mut detail = match package {
+        MissionPackage::Cap => {
+            seats[seat].orders = cap_orders(base, spacing, rtb_north, rtb_east);
+            "Diamond patrol at low priority. RTB on bingo guns, critical damage, or wounded.".into()
+        }
+        MissionPackage::Strike => {
+            let script = seats[seat].unit.script.clone();
+            seats[seat].orders = strike_orders(base, western, &script);
+            force_strike_airstart(seats, seat);
+            strike_arm(seats, seat)
+        }
+    };
+    let mut unused = Vec::new();
+    normalize_order_chain(&mut seats[seat].orders, &mut unused, 0);
+    let rtb_i = seats[seat]
+        .orders
+        .iter()
+        .rposition(|o| o.kind == OrderKind::GotoWaypoint)
+        .unwrap_or(0);
+    let kinds = match package {
+        MissionPackage::Cap => CAP_ABORTS,
+        MissionPackage::Strike => STRIKE_ABORTS,
+    };
+    let mut hooks: Vec<EventHook> = kinds
+        .iter()
+        .copied()
+        .map(|kind| EventHook {
+            kind,
+            then: EventThen::Order(rtb_i),
+        })
+        .collect();
+    hooks.push(EventHook {
+        kind: EntityEvent::OnKilled,
+        then: EventThen::AllDestroyed,
+    });
+    let mut wingmen = 0usize;
+    for i in flight_indexes(seats, seat) {
+        if !seats[i].unit.is_air() {
+            continue;
+        }
+        seats[i].events = hooks.clone();
+        if i != seat {
+            wingmen += 1;
+        }
+    }
+    if wingmen > 0 {
+        detail.push_str(&format!(" {wingmen} wingmen use the same abort."));
+    }
+    detail.push_str(
+        " OnKilled on each attacker ticks ALL DESTROYED, which pulses MISSION END once when every attacker is gone.",
+    );
+    Ok(AppliedMission {
+        label: package.label(),
+        detail,
+        disable_zone_out: package == MissionPackage::Strike,
+    })
+}
+
+fn flight_indexes(seats: &[TemplateSeat], lead: usize) -> Vec<usize> {
+    let mut out = vec![lead];
+    for (i, seat) in seats.iter().enumerate() {
+        if seat.role == FlightRole::Follows(lead) {
+            out.push(i);
+        }
+    }
+    out
+}
+
+/// South of the origin, east for NATO and west for DPRK. Same side as the
+/// zone-out RTB, without a per-group stagger.
+fn rtb_offset_m(country: i32) -> (f32, f32) {
+    let east = if western_country(country) {
+        2_000.0
+    } else {
+        -2_000.0
+    };
+    (-5_000.0, east)
+}
+
+fn placed_goto(
+    waypoint: u32,
+    priority: i32,
+    north: f32,
+    east: f32,
+    loop_to: Option<u32>,
+) -> OrderSpec {
+    let mut spec = OrderSpec::default();
+    spec.kind = OrderKind::GotoWaypoint;
+    spec.waypoint = waypoint;
+    spec.priority = priority;
+    spec.wp_north_m = Some(north);
+    spec.wp_east_m = Some(east);
+    spec.loop_to = loop_to;
+    spec
+}
+
+fn cap_orders(base: u32, spacing: f32, rtb_north: f32, rtb_east: f32) -> Vec<OrderSpec> {
+    let d = spacing;
+    vec![
+        placed_goto(base, 0, d, 0.0, None),
+        placed_goto(base + 1, 0, 0.0, d, None),
+        placed_goto(base + 2, 0, -d, 0.0, None),
+        placed_goto(base + 3, 0, 0.0, -d, Some(base)),
+        placed_goto(base + 4, 2, rtb_north, rtb_east, None),
+    ]
+}
+
+fn strike_orders(base: u32, western: bool, script: &str) -> Vec<OrderSpec> {
+    let geo = strike_geometry(western, STRIKE_START_M);
+    let mut form = OrderSpec::default();
+    form.kind = OrderKind::Formation;
+    // Attack aircraft: Column - Flights wedge. Fighters: Column - Pairs.
+    // Bombers: Heavy - Wedge. Not the Great Battles Wedge id 20.
+    form.formation_type = air_formation_id(script);
+    let mut attack = OrderSpec::default();
+    attack.kind = OrderKind::AttackArea;
+    attack.priority = 2;
+    attack.time_s = STRIKE_ATTACK_S;
+    attack.attack_area = DEFAULT_ATTACK_AREA_M;
+    attack.set_attack_area_target(AttackAreaTarget::Ground);
+    let mut report = OrderSpec::default();
+    report.kind = OrderKind::OnAreaAttacked;
+    report.delay_s = 0.0;
+    // Same window as AttackArea. OnAreaAttacked does not always fire, so this
+    // timer runs beside the attack and still starts the home Goto.
+    let mut tot = OrderSpec::default();
+    tot.kind = OrderKind::TimeOnTarget;
+    tot.time_s = STRIKE_ATTACK_S;
+    let mut done = OrderSpec::default();
+    done.kind = OrderKind::MissionComplete;
+    vec![
+        form,
+        placed_goto(base, 1, geo.ip_north, geo.ip_east, None),
+        attack,
+        report,
+        tot,
+        placed_goto(base + 1, 2, geo.start_north, geo.start_east, None),
+        done,
+    ]
+}
+
+fn force_strike_airstart(seats: &mut [TemplateSeat], lead: usize) {
+    for i in flight_indexes(seats, lead) {
+        if !seats[i].unit.is_air() {
+            continue;
+        }
+        let ceiling = crate::model_spec::ceiling_m(&seats[i].unit.script);
+        seats[i].altitude = AIR_START_ALTITUDE_M.min(ceiling).max(0.0);
+        seats[i].start_type = PlaneStart::Air.as_i32();
+    }
+}
+
+fn strike_arm(seats: &mut [TemplateSeat], lead: usize) -> String {
+    let shape = formation_label(air_formation_id(&seats[lead].unit.script), UnitKind::Plane);
+    let mut lead_summary = None;
+    let mut missing = false;
+    for i in flight_indexes(seats, lead) {
+        if !seats[i].unit.is_air() {
+            continue;
+        }
+        let script = seats[i].unit.script.clone();
+        if let Some(id) = payloads::strike_payload_id(&script) {
+            seats[i].payload_id = id;
+            if i == lead {
+                lead_summary = Some(payloads::payload_preview(&script, id));
+            }
+        } else if i == lead {
+            missing = true;
+        }
+    }
+    if let Some(summary) = lead_summary {
+        format!(
+            "Loadout {summary}. {shape}, IP 8 km, AttackArea 3 km for 2 min, then home. Time on Target runs with the attack and sends the flight home if OnAreaAttacked does not fire. Also home on bingo bombs, critical damage, or wounded. OnKilled ticks ALL DESTROYED and pulses MISSION END once the flight is gone. Zone Out will not end the mission."
+        )
+    } else if missing {
+        format!(
+            "No bomb or rocket loadout for this aircraft; payload unchanged. {shape}, IP 8 km, AttackArea 3 km for 2 min, then home. Time on Target runs with the attack and sends the flight home if OnAreaAttacked does not fire. OnKilled ticks ALL DESTROYED and pulses MISSION END once the flight is gone. Zone Out will not end the mission."
+        )
+    } else {
+        format!(
+            "{shape}, IP 8 km, AttackArea 3 km for 2 min, then home. Time on Target runs with the attack and sends the flight home if OnAreaAttacked does not fire. OnKilled ticks ALL DESTROYED and pulses MISSION END once the flight is gone. Zone Out will not end the mission."
+        )
+    }
+}
+
+/// Where an entity event pulses: shared Force Complete, the flight wipe
+/// counter, or an order in the chain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventThen {
     ForceComplete,
+    /// Ticks [`ALL_DESTROYED`]. The counter pulses MISSION END once, when
+    /// every attacking aircraft with this Then is gone.
+    AllDestroyed,
     Order(usize),
 }
 
@@ -1164,6 +2269,7 @@ impl EventThen {
     pub fn label(self, orders: &[OrderSpec]) -> String {
         match self {
             EventThen::ForceComplete => "Force Complete".into(),
+            EventThen::AllDestroyed => "All destroyed".into(),
             EventThen::Order(i) => orders
                 .get(i)
                 .map(|o| format!("{} {}", i + 1, o.kind.label()))
@@ -1303,8 +2409,8 @@ pub struct TemplateSeat {
 
 impl TemplateSeat {
     pub fn new(unit: CatalogUnit) -> Self {
-        let altitude = if unit.is_air() {
-            prop_f32(&unit.object, "YPos", 1000.0).max(0.0)
+        let mut altitude = if unit.is_air() {
+            prop_f32(&unit.object, "YPos", 0.0).max(0.0)
         } else {
             0.0
         };
@@ -1322,10 +2428,13 @@ impl TemplateSeat {
         let engageable = prop_bool(&unit.object, "Engageable", true);
         let limit_ammo = prop_bool(&unit.object, "LimitAmmo", true);
         let ai_rtb = prop_bool(&unit.object, "AiRTBDecision", false);
-        let start_type = PlaneStart::stored_for_altitude(
-            prop_i32(&unit.object, "StartType", 0),
-            altitude,
-        );
+        let mut start_type =
+            PlaneStart::stored_for_altitude(prop_i32(&unit.object, "StartType", 0), altitude);
+        if unit.is_air() && altitude <= 0.0 {
+            let ceiling = crate::model_spec::ceiling_m(&unit.script);
+            altitude = AIR_START_ALTITUDE_M.min(ceiling).max(0.0);
+            start_type = PlaneStart::Air.as_i32();
+        }
         let carriages = if unit.is_train() {
             unit.default_carriages()
         } else {
@@ -1660,7 +2769,8 @@ pub fn refresh_attack_areas_for_seat(seats: &mut [TemplateSeat], si: usize) {
     let mut jobs = Vec::new();
     for (owner, seat) in seats.iter().enumerate() {
         for (oi, order) in seat.orders.iter().enumerate() {
-            if order.kind == OrderKind::AttackArea && (owner == si || order.shared_with.contains(&si))
+            if order.kind == OrderKind::AttackArea
+                && (owner == si || order.shared_with.contains(&si))
             {
                 jobs.push((owner, oi));
             }
@@ -1674,6 +2784,58 @@ pub fn refresh_attack_areas_for_seat(seats: &mut [TemplateSeat], si: usize) {
 /// Shortest known weapon range of units assigned to this AttackArea.
 pub fn attack_area_range_limit(seats: &[TemplateSeat], owner: usize, order: usize) -> Option<f64> {
     weapon_range::shortest_range_m(order_scripts(seats, owner, order))
+}
+
+/// Index where a new Time on Target joins the last Attack / AttackArea,
+/// after that command's report and any Time on Target already stacked there.
+fn time_on_target_insert_at(orders: &[OrderSpec]) -> usize {
+    let Some(attack_at) = orders
+        .iter()
+        .rposition(|o| matches!(o.kind, OrderKind::Attack | OrderKind::AttackArea))
+    else {
+        return orders.len();
+    };
+    let mut at = attack_at + 1;
+    if orders.get(at).is_some_and(|o| {
+        o.kind.is_report() && o.kind.report_follows() == Some(orders[attack_at].kind)
+    }) {
+        at += 1;
+    }
+    while orders
+        .get(at)
+        .is_some_and(|o| o.kind == OrderKind::TimeOnTarget)
+    {
+        at += 1;
+    }
+    at
+}
+
+/// Append an order. Time on Target joins the last attack so the waypoint
+/// pulses it in parallel, instead of landing after Mission Complete with
+/// nothing linked. Event indexes past the insert move with it.
+pub fn append_tree_order(
+    orders: &mut Vec<OrderSpec>,
+    events: &mut [EventHook],
+    spec: OrderSpec,
+) -> usize {
+    let at = if spec.kind == OrderKind::TimeOnTarget {
+        time_on_target_insert_at(orders)
+    } else {
+        orders.len()
+    };
+    if at >= orders.len() {
+        orders.push(spec);
+        return orders.len() - 1;
+    }
+    for hook in events {
+        if let EventThen::Order(i) = hook.then {
+            if i >= at {
+                hook.then = EventThen::Order(i + 1);
+            }
+        }
+    }
+    orders.insert(at, spec);
+    at
 }
 
 pub fn remap_event_then(then: &mut EventThen, removed: usize) {
@@ -1785,6 +2947,10 @@ fn take_order_hop(orders: &[OrderSpec], i: &mut usize) -> Vec<usize> {
     col
 }
 
+fn is_column_spine(kind: OrderKind) -> bool {
+    kind == OrderKind::OnSpawned || (kind != OrderKind::TimeOnTarget && !kind.is_report())
+}
+
 /// Columns of the order tree. Sequential hops stay in line; Attack / AttackArea
 /// / Time on Target that sit together are stacked as a parallel branch. A TOT
 /// that follows a waypoint (or other hop) with no attack sits in that hop's
@@ -1823,6 +2989,97 @@ pub fn order_tree_columns(orders: &[OrderSpec]) -> Vec<Vec<usize>> {
         cols.push(take_order_hop(orders, &mut i));
     }
     cols
+}
+
+fn flatten_columns(cols: &[Vec<usize>]) -> Vec<usize> {
+    cols.iter().flat_map(|c| c.iter().copied()).collect()
+}
+
+fn reorder_orders(
+    orders: &mut Vec<OrderSpec>,
+    events: &mut [EventHook],
+    seq: &[usize],
+    keep: usize,
+) -> usize {
+    let mut mapping = vec![0usize; orders.len()];
+    for (new_i, &old_i) in seq.iter().enumerate() {
+        mapping[old_i] = new_i;
+    }
+    for hook in events {
+        if let EventThen::Order(i) = hook.then {
+            hook.then = EventThen::Order(mapping.get(i).copied().unwrap_or(i));
+        }
+    }
+    let new_keep = mapping.get(keep).copied().unwrap_or(0);
+    let old = std::mem::take(orders);
+    *orders = seq.iter().map(|&i| old[i].clone()).collect();
+    new_keep
+}
+
+/// True when `oi` can move one visual column left (`dir < 0`) or right.
+pub fn tree_order_can_shift(orders: &[OrderSpec], oi: usize, dir: i32) -> bool {
+    let mut trial = orders.to_vec();
+    shift_tree_order(&mut trial, &mut [], oi, dir).is_some()
+}
+
+/// Move one order one visual column. A command that is the only spine in its
+/// column takes the report and Time on Target stacked on it. A stacked report
+/// or Time on Target moves onto the neighboring column by itself. Event
+/// targets follow the order they point at. Returns the order's new index.
+pub fn shift_tree_order(
+    orders: &mut Vec<OrderSpec>,
+    events: &mut [EventHook],
+    oi: usize,
+    dir: i32,
+) -> Option<usize> {
+    let dir = dir.signum();
+    if dir == 0 || oi >= orders.len() {
+        return None;
+    }
+    let mut cols = order_tree_columns(orders);
+    let ci = cols.iter().position(|c| c.contains(&oi))?;
+    let spines = cols[ci]
+        .iter()
+        .filter(|i| is_column_spine(orders[**i].kind))
+        .count();
+    let only_spine = spines == 1 && is_column_spine(orders[oi].kind);
+    if only_spine {
+        let ti = ci as i32 + dir;
+        if ti < 0 || ti as usize >= cols.len() {
+            return None;
+        }
+        cols.swap(ci, ti as usize);
+    } else {
+        let ti = ci as i32 + dir;
+        if ti < 0 || ti as usize >= cols.len() {
+            return None;
+        }
+        let mut ti = ti as usize;
+        cols[ci].retain(|i| *i != oi);
+        if cols[ci].is_empty() {
+            cols.remove(ci);
+            if dir < 0 {
+                ti -= 1;
+            } else {
+                ti = ci;
+            }
+        }
+        if dir > 0 {
+            cols[ti].push(oi);
+        } else {
+            cols[ti].insert(0, oi);
+        }
+    }
+    let seq = flatten_columns(&cols);
+    let trial: Vec<OrderSpec> = seq.iter().map(|&i| orders[i].clone()).collect();
+    let new_oi = seq.iter().position(|&i| i == oi)?;
+    let after = order_tree_columns(&trial)
+        .iter()
+        .position(|c| c.contains(&new_oi))?;
+    if after == ci {
+        return None;
+    }
+    Some(reorder_orders(orders, events, &seq, oi))
 }
 
 /// One cell in the order tree: an order, or an event hooked to that column.
@@ -1996,25 +3253,36 @@ pub fn set_report_following(
     report_idx: usize,
     then_kind: OrderKind,
     unit_kind: UnitKind,
+    script: &str,
 ) {
     if report_idx >= orders.len() || !orders[report_idx].kind.is_report() {
         return;
     }
+    let preferred = |kind: UnitKind| {
+        if kind == UnitKind::Plane {
+            air_formation_id(script)
+        } else {
+            OrderSpec::for_kind(kind).formation_type
+        }
+    };
     let next = report_idx + 1;
     if next < orders.len() && !orders[next].kind.is_report() {
+        let was_formation = orders[next].kind == OrderKind::Formation;
         orders[next].kind = then_kind;
-        if then_kind == OrderKind::Formation {
-            let presets = formations_for(unit_kind);
-            if !presets.iter().any(|p| p.id == orders[next].formation_type) {
-                orders[next].formation_type = OrderSpec::for_kind(unit_kind).formation_type;
-            }
+        if then_kind == OrderKind::Formation
+            && (!was_formation
+                || !formations_for(unit_kind)
+                    .iter()
+                    .any(|p| p.id == orders[next].formation_type))
+        {
+            orders[next].formation_type = preferred(unit_kind);
         }
         return;
     }
     let mut spec = OrderSpec::for_kind(unit_kind);
     spec.kind = then_kind;
     if then_kind == OrderKind::Formation {
-        spec.formation_type = OrderSpec::for_kind(unit_kind).formation_type;
+        spec.formation_type = preferred(unit_kind);
     }
     orders.insert(next, spec);
 }
@@ -2046,10 +3314,7 @@ pub fn receives_orders(seats: &[TemplateSeat], index: usize) -> bool {
 
 /// True when at least one unit is a wingman target-linked to a lead.
 pub fn has_linked_wingmen(seats: &[TemplateSeat]) -> bool {
-    seats
-        .iter()
-        .enumerate()
-        .any(|(i, _)| is_follower(seats, i))
+    seats.iter().enumerate().any(|(i, _)| is_follower(seats, i))
 }
 
 pub fn order_seat_indexes(seats: &[TemplateSeat]) -> Vec<usize> {
@@ -2141,6 +3406,9 @@ pub struct TemplateOptions {
     /// MCU_Waypoint Priority (0 Low / 1 Medium / 2 High).
     pub waypoint_priority: i32,
     pub zone_coalition: ZoneCoalition,
+    /// When false, Zone Out deactivates itself and does not run MISSION END.
+    /// The group stays up if the other side never arrives.
+    pub zone_out_enabled: bool,
 }
 
 impl Default for TemplateOptions {
@@ -2162,6 +3430,7 @@ impl Default for TemplateOptions {
             waypoint_altitude: 0.0,
             waypoint_priority: 1,
             zone_coalition: ZoneCoalition::Western,
+            zone_out_enabled: true,
         }
     }
 }
@@ -2194,11 +3463,7 @@ fn layout_seat(layout: PlaceLayout, seat: usize, per: usize, spacing: f64) -> (f
                 let right = seat % 2 == 1;
                 (
                     -spacing * 0.70 * row,
-                    if right {
-                        spacing * row
-                    } else {
-                        -spacing * row
-                    },
+                    if right { spacing * row } else { -spacing * row },
                 )
             }
         }
@@ -2260,10 +3525,7 @@ pub fn finger_four_offset(index: usize, spacing: f64) -> (f64, f64) {
 /// Built-in aircraft types as catalog entries so the mode works before a
 /// user catalog is loaded.
 pub fn builtin_plane_catalog() -> Vec<CatalogUnit> {
-    AIRCRAFT_TYPES
-        .iter()
-        .map(synthetic_plane_unit)
-        .collect()
+    AIRCRAFT_TYPES.iter().map(synthetic_plane_unit).collect()
 }
 
 /// Planes, vehicles, infantry, trains, ships, and fixed objects from the bundled catalogs.
@@ -2342,9 +3604,10 @@ pub fn load_catalog_as_user_added(root: &Il2Entity) -> Vec<CatalogUnit> {
 
 pub fn merge_catalog(into: &mut Vec<CatalogUnit>, extra: Vec<CatalogUnit>) {
     for unit in extra {
-        if into.iter().any(|e| {
-            e.script.eq_ignore_ascii_case(&unit.script) && e.kind == unit.kind
-        }) {
+        if into
+            .iter()
+            .any(|e| e.script.eq_ignore_ascii_case(&unit.script) && e.kind == unit.kind)
+        {
             continue;
         }
         into.push(unit);
@@ -2355,9 +3618,10 @@ pub fn merge_catalog(into: &mut Vec<CatalogUnit>, extra: Vec<CatalogUnit>) {
 /// Country / name; append anything new.
 fn overlay_catalog(into: &mut Vec<CatalogUnit>, extra: Vec<CatalogUnit>) {
     for unit in extra {
-        if let Some(existing) = into.iter_mut().find(|e| {
-            e.script.eq_ignore_ascii_case(&unit.script)
-        }) {
+        if let Some(existing) = into
+            .iter_mut()
+            .find(|e| e.script.eq_ignore_ascii_case(&unit.script))
+        {
             *existing = unit;
         } else {
             into.push(unit);
@@ -2431,10 +3695,7 @@ fn collect_objects(root: &Il2Entity, kind: UnitKind, out: &mut Vec<CatalogUnit>)
         if objects.is_empty() {
             collect_block(root, "Vehicle", &mut objects);
         }
-        objects.retain(|o| {
-            o.property("Script")
-                .is_some_and(|s| is_fixed_script(s))
-        });
+        objects.retain(|o| o.property("Script").is_some_and(|s| is_fixed_script(s)));
     }
     if kind == UnitKind::Vehicle {
         objects.retain(|o| {
@@ -2449,9 +3710,10 @@ fn collect_objects(root: &Il2Entity, kind: UnitKind, out: &mut Vec<CatalogUnit>)
         });
     }
     for obj in objects {
-        if out.iter().any(|u| {
-            u.object.index.is_some() && u.object.index == obj.index && obj.index.is_some()
-        }) {
+        if out
+            .iter()
+            .any(|u| u.object.index.is_some() && u.object.index == obj.index && obj.index.is_some())
+        {
             continue;
         }
         let entity = linked_entity(root, obj).unwrap_or_else(synthetic_entity);
@@ -2545,6 +3807,53 @@ fn rtb_destination(western: bool, group: usize) -> (f64, f64) {
     )
 }
 
+/// Strike flights spawn on the high-priority home waypoint (the start), not
+/// at the target. Other packages stay on the formation origin.
+fn strike_spawn_offset(seats: &[TemplateSeat], si: usize) -> (f64, f64) {
+    let lead = if receives_orders(seats, si) {
+        si
+    } else {
+        flight_lead_of(seats, si)
+    };
+    let orders = &seats[lead].orders;
+    let strike = orders.iter().any(|o| o.kind == OrderKind::AttackArea)
+        && orders.iter().any(|o| o.kind == OrderKind::MissionComplete);
+    if !strike {
+        return (0.0, 0.0);
+    }
+    orders
+        .iter()
+        .find(|o| o.kind == OrderKind::GotoWaypoint && o.priority >= 2)
+        .and_then(|o| match (o.wp_north_m, o.wp_east_m) {
+            (Some(n), Some(e)) => Some((f64::from(n), f64::from(e))),
+            _ => None,
+        })
+        .unwrap_or((0.0, 0.0))
+}
+
+/// Yaw from the strike start toward the IP. Other packages keep their prototype yaw.
+fn strike_face_ip(seats: &[TemplateSeat], si: usize, home_n: f64, home_e: f64) -> Option<f64> {
+    if home_n.abs() <= 1.0 && home_e.abs() <= 1.0 {
+        return None;
+    }
+    let lead = if receives_orders(seats, si) {
+        si
+    } else {
+        flight_lead_of(seats, si)
+    };
+    let (ip_n, ip_e) = seats[lead].orders.iter().find_map(|o| {
+        if o.kind == OrderKind::GotoWaypoint && o.priority < 2 {
+            match (o.wp_north_m, o.wp_east_m) {
+                (Some(n), Some(e)) => Some((f64::from(n), f64::from(e))),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    })?;
+    Some(heading_toward(home_n, home_e, ip_n, ip_e))
+}
+
 /// Generate one proximity-triggered unit group.
 pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     if opts.seats.is_empty() {
@@ -2571,12 +3880,28 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     let mut placed = Vec::new();
     for (i, seat) in opts.seats.iter().enumerate() {
         let (dx, dz) = place_offset(opts.place_layout, i, per_group, spacing);
+        let (home_n, home_e) = strike_spawn_offset(&opts.seats, i);
+        let heading = strike_face_ip(&opts.seats, i, home_n, home_e);
+        let (dx, dz) = if let Some(h) = heading {
+            rotate_ne(dx, dz, h)
+        } else {
+            (dx, dz)
+        };
         let y = if seat.unit.is_air() {
             seat.altitude as f64
         } else {
             0.0
         };
-        placed.push(place_unit(seat, i, ORIGIN_X + dx, y, ORIGIN_Z + dz, per_group, &mut next_id)?);
+        placed.push(place_unit(
+            seat,
+            i,
+            ORIGIN_X + dx + home_n,
+            y,
+            ORIGIN_Z + dz + home_e,
+            per_group,
+            heading,
+            &mut next_id,
+        )?);
     }
 
     for i in 0..placed.len() {
@@ -2612,7 +3937,15 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     let mut pulse_out = timer("PULSE OUT", 0.1, &mut next_id, zx, zz);
 
     let mut zone_in_mcu = checkzone("Zone IN", zone_in, true, coalitions, &mut next_id, zx, zz);
-    let mut zone_out_mcu = checkzone("Zone Out", zone_out, false, coalitions, &mut next_id, zx, zz);
+    let mut zone_out_mcu = checkzone(
+        "Zone Out",
+        zone_out,
+        false,
+        coalitions,
+        &mut next_id,
+        zx,
+        zz,
+    );
 
     let mut deact_in = mcu("MCU_Deactivate", "Self Deactivate", &mut next_id, zx, zz);
     let mut react_out = mcu("MCU_Activate", "Zone Out ReActivate", &mut next_id, zx, zz);
@@ -2672,7 +4005,13 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
             zx,
             zz,
         ));
-        death_on = Some(mcu("MCU_Activate", "DeathCount ReActivate", &mut next_id, zx, zz));
+        death_on = Some(mcu(
+            "MCU_Activate",
+            "DeathCount ReActivate",
+            &mut next_id,
+            zx,
+            zz,
+        ));
         death_off = Some(mcu(
             "MCU_Deactivate",
             "DeathCount Deactivate",
@@ -2680,12 +4019,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
             zx,
             zz,
         ));
-        reset_modifier = Some(modifier_set_val(
-            "Modifier Set Value",
-            &mut next_id,
-            zx,
-            zz,
-        ));
+        reset_modifier = Some(modifier_set_val("Modifier Set Value", &mut next_id, zx, zz));
         reset_counter = Some(timer("Reset Counter", 0.5, &mut next_id, zx, zz));
     }
 
@@ -2693,7 +4027,13 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
         BringUp::Activate => "MISSION BEGIN",
         BringUp::Spawn => "SPAWN UNITS",
     };
-    let mut bring_up_timer = timer(bring_up_name, BRING_UP_DELAY, &mut next_id, bring_tx, bring_tz);
+    let mut bring_up_timer = timer(
+        bring_up_name,
+        BRING_UP_DELAY,
+        &mut next_id,
+        bring_tx,
+        bring_tz,
+    );
     let (after_tx, after_tz) = left_timer(0, 1);
     let mut after_bring_up = timer(
         "AFTER BRING UP",
@@ -2743,7 +4083,13 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
         None
     };
 
-    let mut mission_end = timer("MISSION END", MISSION_END_TIME, &mut next_id, end_tx, end_tz);
+    let mut mission_end = timer(
+        "MISSION END",
+        MISSION_END_TIME,
+        &mut next_id,
+        end_tx,
+        end_tz,
+    );
     let (meo_tx, meo_tz) = right_timer(0, 1);
     let mut mission_end_orders = timer(
         "MISSION END ORDERS",
@@ -2788,7 +4134,9 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
             let western = western_country(opts.seats[owner].country);
             let group = owner / per_group;
             let eid = placed[owner].entity_id;
-            if let Some(existing) = buckets.iter_mut().find(|(w, g, _)| *w == western && *g == group)
+            if let Some(existing) = buckets
+                .iter_mut()
+                .find(|(w, g, _)| *w == western && *g == group)
             {
                 if !existing.2.contains(&eid) {
                     existing.2.push(eid);
@@ -2851,13 +4199,12 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                 OrderKind::TimeOnTarget | OrderKind::Timer => order.time_s.max(0.0) as f64,
                 _ => order.delay_s.max(0.0) as f64,
             };
-            let delay = timer(
-                &format!("{} {}", order.kind.label(), si + 1),
-                wait,
-                &mut next_id,
-                tx,
-                tz,
-            );
+            let timer_name = if order.kind == OrderKind::GotoWaypoint {
+                goto_timer_name(order)
+            } else {
+                format!("{} {}", order.kind.label(), si + 1)
+            };
+            let delay = timer(&timer_name, wait, &mut next_id, tx, tz);
             if order.kind.is_report() {
                 steps.push(EmittedOrder {
                     delay,
@@ -2868,6 +4215,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     time_on_target: false,
                     mission_complete: false,
                     pause: false,
+                    loop_to: None,
                 });
                 continue;
             }
@@ -2881,6 +4229,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     time_on_target: false,
                     mission_complete: false,
                     pause: false,
+                    loop_to: order.loop_to,
                 });
                 continue;
             }
@@ -2894,6 +4243,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     time_on_target: true,
                     mission_complete: false,
                     pause: false,
+                    loop_to: None,
                 });
                 continue;
             }
@@ -2907,6 +4257,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     time_on_target: false,
                     mission_complete: false,
                     pause: true,
+                    loop_to: None,
                 });
                 continue;
             }
@@ -2920,6 +4271,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     time_on_target: false,
                     mission_complete: true,
                     pause: false,
+                    loop_to: None,
                 });
                 continue;
             }
@@ -2933,10 +4285,18 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     time_on_target: false,
                     mission_complete: false,
                     pause: false,
+                    loop_to: None,
                 });
                 continue;
             };
-            let mut cmd = build_order(order, block, seat.unit.kind, &mut next_id, ox, oz);
+            let mut cmd = build_order(
+                order,
+                block,
+                seat.unit.kind,
+                &mut next_id,
+                ox,
+                oz,
+            );
             cmd.set_objects(command_object_ids(order, si, &placed));
             if order.kind == OrderKind::Cover {
                 wire_other_unit(&mut cmd, &placed, &opts.seats, si, order.cover_lead);
@@ -2955,6 +4315,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                 time_on_target: false,
                 mission_complete: false,
                 pause: false,
+                loop_to: None,
             });
         }
         emitted.push(steps);
@@ -2965,12 +4326,13 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
 
     let mut waypoints = Vec::new();
     for w in 0..wp_count {
+        let (wx, wz) = waypoint_world_xz(&opts.seats, (w as u32) + 1, opts.waypoint_spacing);
         let mut wp = mcu(
             "MCU_Waypoint",
             &format!("WP {}", w + 1),
             &mut next_id,
-            ORIGIN_X + (w as f64 + 1.0) * opts.waypoint_spacing as f64,
-            ORIGIN_Z,
+            wx,
+            wz,
         );
         wp.set_property("Area", waypoint_area_m(&opts.seats));
         wp.set_property("Speed", format!("{:.0}", opts.waypoint_speed));
@@ -3105,6 +4467,18 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                     targets.push(cmd.index.unwrap());
                 } else if let Some(wp_n) = emitted[si][oi].goto_wp {
                     let idx = wp_n.max(1) as usize - 1;
+                    // An abort that Then's a Goto finishes the current order, then
+                    // the waypoint takes over — except when arrival at that
+                    // waypoint starts Mission Complete. Force Complete and the
+                    // waypoint fire together, and Force Complete cancels the hop,
+                    // so the flight circles. Cleanup Force Complete runs from
+                    // MISSION END after the aircraft are home.
+                    let event_owns = triggered[si].contains(&emitted[si][oi].source_index);
+                    if event_owns
+                        && !goto_arrival_starts_mission_complete(&emitted[si], oi, &triggered[si])
+                    {
+                        targets.push(force_id);
+                    }
                     if let Some(wp) = waypoints.get(idx) {
                         targets.push(wp.index.unwrap());
                     }
@@ -3114,7 +4488,13 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
                 targets.push(mission_end_id);
             } else if let Some(next_i) = chain_delay_to(&emitted[si], oi) {
                 let src = emitted[si][next_i].source_index;
-                if !triggered[si].contains(&src) {
+                // A report still starts the next order when abort events Then
+                // that same order (strike: OnAreaAttacked and the damage /
+                // bingo events share one high-priority Goto). Time on Target
+                // is the parallel failsafe: it starts that Goto even when
+                // OnAreaAttacked does not fire. Other hops wait for the event.
+                let failsafe = is_report || emitted[si][oi].time_on_target;
+                if failsafe || !triggered[si].contains(&src) {
                     targets.push(emitted[si][next_i].delay.index.unwrap());
                 }
             }
@@ -3124,7 +4504,20 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
 
     wire_waypoint_chain(&mut waypoints, &emitted, &triggered);
 
-    if repeat {
+    if !opts.zone_out_enabled {
+        // Stay up if the other side never arrives. Zone Out only turns itself off.
+        zone_out_mcu.set_targets(vec![deact_out_id]);
+        if repeat {
+            if let Some(id) = spawn_id {
+                cooldown.set_targets(vec![id]);
+            }
+            if let Some(dc) = death_count.as_mut() {
+                dc.set_targets(vec![cooldown_id]);
+            }
+        } else {
+            cooldown.set_targets(vec![react_in_id, pulse_id]);
+        }
+    } else if repeat {
         // Zone Out always cleans up and resets DeathCount. A full wipe only
         // starts COOLDOWN, which pulses the spawner so a new wave can appear
         // while the player is still inside.
@@ -3187,6 +4580,67 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
         }
     }
 
+    let wipe_n: i32 = opts
+        .seats
+        .iter()
+        .map(|s| {
+            s.events
+                .iter()
+                .filter(|e| e.then == EventThen::AllDestroyed)
+                .count() as i32
+        })
+        .sum();
+    let mut all_destroyed = None;
+    if wipe_n > 0 {
+        let (wx, wz) = right_timer(1, 0);
+        // Dropcount 0: the counter fires once, then stays spent.
+        let mut counter = counter(ALL_DESTROYED, wipe_n, 0, &mut next_id, wx, wz);
+        counter.set_targets(vec![mission_end_id]);
+        all_destroyed = Some(counter);
+    }
+    let wipe_id = all_destroyed.as_ref().and_then(|c| c.index);
+
+    // Several aircraft can raise the same abort within a second. A timer
+    // that is pulsed again fires again, and the second home waypoint does
+    // not restart the hop. One counter per flight (Dropcount 0) lets the
+    // first abort through and drops the rest. The attack report and Time
+    // on Target still pulse the Goto timer themselves.
+    let mut go_home_once: HashMap<(usize, usize), i32> = HashMap::new();
+    let mut go_home_counters: Vec<Il2Entity> = Vec::new();
+    for (si, seat) in opts.seats.iter().enumerate() {
+        let chain_si = if receives_orders(&opts.seats, si) {
+            si
+        } else {
+            flight_lead_of(&opts.seats, si)
+        };
+        for hook in &seat.events {
+            let EventThen::Order(oi) = hook.then else {
+                continue;
+            };
+            let Some(step) = emitted.get(chain_si).and_then(|steps| {
+                steps
+                    .iter()
+                    .find(|s| s.source_index == oi && s.goto_wp.is_some())
+            }) else {
+                continue;
+            };
+            if go_home_once.contains_key(&(chain_si, oi)) {
+                continue;
+            }
+            let Some(timer_id) = step.delay.index else {
+                continue;
+            };
+            let (tx, tz) = step.delay.pos_xz().unwrap_or((ORIGIN_X, ORIGIN_Z));
+            let waypoint = step.goto_wp.unwrap_or(0);
+            let name = go_home_once_name(chain_si, waypoint, &go_home_counters);
+            let mut gate = counter(&name, 1, 0, &mut next_id, tx, tz + MCU_GAP);
+            gate.set_targets(vec![timer_id]);
+            let id = gate.index.unwrap();
+            go_home_once.insert((chain_si, oi), id);
+            go_home_counters.push(gate);
+        }
+    }
+
     for (si, seat) in opts.seats.iter().enumerate() {
         let chain_si = if receives_orders(&opts.seats, si) {
             si
@@ -3196,14 +4650,15 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
         for hook in &seat.events {
             let tar = match hook.then {
                 EventThen::ForceComplete => Some(force_id),
-                EventThen::Order(oi) => emitted
-                    .get(chain_si)
-                    .and_then(|steps| {
+                EventThen::AllDestroyed => wipe_id,
+                EventThen::Order(oi) => go_home_once.get(&(chain_si, oi)).copied().or_else(|| {
+                    emitted.get(chain_si).and_then(|steps| {
                         steps
                             .iter()
                             .find(|s| s.source_index == oi)
                             .and_then(|s| s.delay.index)
-                    }),
+                    })
+                }),
             };
             let Some(tar) = tar else {
                 continue;
@@ -3240,6 +4695,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
     ]);
     logic.children.extend(delete_wait);
     logic.children.extend([bring_up_timer, after_bring_up]);
+    logic.children.extend(go_home_counters);
     if let Some(wait) = rtb_wait {
         logic.children.push(wait);
     }
@@ -3258,6 +4714,7 @@ pub fn generate_template(opts: &TemplateOptions) -> Result<Il2Entity, String> {
         death_off,
         reset_modifier,
         reset_counter,
+        all_destroyed,
     ] {
         if let Some(e) = extra {
             logic.children.push(e);
@@ -3304,6 +4761,7 @@ struct EmittedOrder {
     time_on_target: bool,
     mission_complete: bool,
     pause: bool,
+    loop_to: Option<u32>,
 }
 
 fn is_attack_emitted(step: &EmittedOrder) -> bool {
@@ -3421,6 +4879,12 @@ fn chain_delay_to(steps: &[EmittedOrder], oi: usize) -> Option<usize> {
         return None;
     }
     if steps[next].time_on_target && tot_owned_by_wp(steps, next) {
+        // The waypoint owns TOT, so the previous command must not start it.
+        // A report still has a Then: skip the sibling timer and start the
+        // order after the attack cluster (the home Goto).
+        if cur.report.is_some() {
+            return first_after_wp_cluster(steps, oi);
+        }
         return None;
     }
     if is_attack_emitted(cur) && tot_in_same_hop(steps, oi) {
@@ -3432,9 +4896,61 @@ fn chain_delay_to(steps: &[EmittedOrder], oi: usize) -> Option<usize> {
     Some(next)
 }
 
+/// True when arrival at this Goto's waypoint pulses Mission Complete.
+/// Force Complete then belongs to MISSION END, not to the Goto timer.
+fn goto_arrival_starts_mission_complete(
+    steps: &[EmittedOrder],
+    goto_oi: usize,
+    triggered: &HashSet<usize>,
+) -> bool {
+    let mut saw_attack = false;
+    let mut saw_tot = false;
+    for (j, later) in steps[goto_oi + 1..].iter().enumerate() {
+        if later.goto_wp.is_some() && triggered.contains(&later.source_index) {
+            continue;
+        }
+        if later.goto_wp.is_some() {
+            return false;
+        }
+        if later.mission_complete {
+            let event_owns = triggered.contains(&later.source_index);
+            return !saw_attack && !saw_tot && !event_owns;
+        }
+        if later.report.is_some() {
+            if parallel_after_report(steps, goto_oi + 1 + j) {
+                continue;
+            }
+            return false;
+        }
+        if is_attack_emitted(later) {
+            saw_attack = true;
+            continue;
+        }
+        if later.time_on_target {
+            saw_tot = true;
+            continue;
+        }
+        return false;
+    }
+    false
+}
+
+/// True when a report is sitting in front of an Attack / Time on Target that
+/// still belongs to this hop. The report must not hide that parallel timer.
+fn parallel_after_report(steps: &[EmittedOrder], report_oi: usize) -> bool {
+    for s in &steps[report_oi + 1..] {
+        if s.report.is_some() {
+            continue;
+        }
+        return is_attack_emitted(s) || s.time_on_target;
+    }
+    false
+}
+
 /// On arrival WP n pulses Attack / AttackArea and Time on Target together
-/// (order in the list does not matter). TOT expiry continues the chain.
-/// Mission Complete after a bare Goto WP is also pulsed from the waypoint.
+/// (order in the list does not matter, including a report stacked between
+/// them). TOT expiry continues the chain. Mission Complete after a bare
+/// Goto WP is also pulsed from the waypoint.
 fn wire_waypoint_chain(
     waypoints: &mut [Il2Entity],
     emitted: &[Vec<EmittedOrder>],
@@ -3451,9 +4967,22 @@ fn wire_waypoint_chain(
             if idx >= extra.len() {
                 continue;
             }
+            if let Some(back) = step.loop_to {
+                let back_idx = back.max(1) as usize - 1;
+                if let Some(id) = waypoints.get(back_idx).and_then(|w| w.index) {
+                    if !extra[idx].contains(&id) {
+                        extra[idx].push(id);
+                    }
+                }
+                continue;
+            }
             let mut saw_attack = false;
             let mut saw_tot = false;
-            for later in &steps[oi + 1..] {
+            for (j, later) in steps[oi + 1..].iter().enumerate() {
+                if later.goto_wp.is_some() && skip.is_some_and(|s| s.contains(&later.source_index))
+                {
+                    continue;
+                }
                 if later.goto_wp.is_some() {
                     if !saw_attack && !saw_tot {
                         pulse_from_wp(&mut extra, idx, &later.delay);
@@ -3468,6 +4997,9 @@ fn wire_waypoint_chain(
                     break;
                 }
                 if later.report.is_some() {
+                    if parallel_after_report(steps, oi + 1 + j) {
+                        continue;
+                    }
                     break;
                 }
                 if is_attack_emitted(later) {
@@ -3494,17 +5026,18 @@ fn wire_waypoint_chain(
 }
 
 fn previous_cmd_id(steps: &[EmittedOrder], before: usize, block: &str) -> Option<i32> {
-    steps[..before]
-        .iter()
-        .rev()
-        .find_map(|s| {
-            s.cmd
-                .as_ref()
-                .filter(|c| c.block_type == block)
-                .and_then(|c| c.index)
-        })
+    steps[..before].iter().rev().find_map(|s| {
+        s.cmd
+            .as_ref()
+            .filter(|c| c.block_type == block)
+            .and_then(|c| c.index)
+    })
 }
 
+/// Command `Objects` are the unit's `MCU_TR_Entity` (the plane's `LinkTrId`),
+/// not the world-object index. The Il-10 strike that crashes the editor
+/// links its formation to that entity; the link is a real plane. An empty
+/// `Objects` list is an MCU that was exported with nothing selected.
 fn command_object_ids(order: &OrderSpec, owner: usize, placed: &[PlacedUnit]) -> Vec<i32> {
     let mut ids = Vec::new();
     if owner < placed.len() {
@@ -3529,6 +5062,7 @@ fn place_unit(
     y: f64,
     z: f64,
     per_group: usize,
+    heading: Option<f64>,
     next_id: &mut i32,
 ) -> Result<PlacedUnit, String> {
     let spec = &seat.unit;
@@ -3541,6 +5075,9 @@ fn place_unit(
     object.set_property("XPos", format!("{x:.3}"));
     object.set_property("YPos", format!("{y:.3}"));
     object.set_property("ZPos", format!("{z:.3}"));
+    if let Some(h) = heading {
+        object.set_existing_property("YOri", format!("{h:.3}"));
+    }
     object.set_property("Country", seat.country.to_string());
     object.set_property("AILevel", seat.skill.clamp(0, 4).to_string());
     object.set_existing_property(
@@ -3591,6 +5128,9 @@ fn place_unit(
     entity.set_property("XPos", format!("{x:.3}"));
     entity.set_property("YPos", format!("{:.3}", y + 0.2));
     entity.set_property("ZPos", format!("{z:.3}"));
+    if let Some(h) = heading {
+        entity.set_existing_property("YOri", format!("{h:.3}"));
+    }
     entity.set_property("Enabled", "0");
     entity.set_name(&format!("{} entity", spec.kind.object_type()));
     entity
@@ -3783,11 +5323,17 @@ fn build_order(
             cmd.set_property("EmergencyOrdnanceDrop", "0");
         }
         OrderKind::Formation => {
-            cmd.set_property("FormationType", order.formation_type.to_string());
-            cmd.set_property(
-                "FormationDensity",
-                formation_density(order.formation_type, kind).to_string(),
-            );
+            let formation_type = if kind == UnitKind::Plane {
+                editor_air_formation(order.formation_type)
+            } else {
+                editor_ground_formation(order.formation_type)
+            };
+            cmd.set_property("FormationType", formation_type.to_string());
+            // Decisions 0019, 0020 and 0022 set aircraft density by formation
+            // type (Pairs Loose, others Safe); `set_air_formation_density`
+            // applies the Cover exception to the whole group afterwards.
+            let density = formation_density(formation_type, kind);
+            cmd.set_property("FormationDensity", density.to_string());
             cmd.set_property("FlightSize", "1");
             cmd.set_property("WaitForWingmen", "1");
         }
@@ -3848,6 +5394,15 @@ pub(crate) fn timer_random(
     let mut e = timer(name, time, next_id, x, z);
     e.set_property("Random", pct.to_string());
     e
+}
+
+fn go_home_once_name(lead: usize, waypoint: u32, taken: &[Il2Entity]) -> String {
+    let plain = format!("{GO_HOME_ONCE_PREFIX}{}", lead + 1);
+    if taken.iter().all(|c| c.name() != Some(plain.as_str())) {
+        plain
+    } else {
+        format!("{GO_HOME_ONCE_PREFIX}{} WP {waypoint}", lead + 1)
+    }
 }
 
 pub(crate) fn counter(name: &str, count: i32, drop: i32, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
@@ -4208,7 +5763,10 @@ fn collect_loaded_units(root: &Il2Entity) -> Vec<LoadedUnit> {
 }
 
 fn collect_unit_objects<'a>(e: &'a Il2Entity, out: &mut Vec<&'a Il2Entity>) {
-    if e.block_type == "Group" && e.name().is_some_and(|n| n.eq_ignore_ascii_case("NodeGates")) {
+    if e.block_type == "Group"
+        && e.name()
+            .is_some_and(|n| n.eq_ignore_ascii_case("NodeGates"))
+    {
         return;
     }
     if matches!(
@@ -4237,7 +5795,11 @@ fn kind_from_object(object: &Il2Entity) -> UnitKind {
     }
 }
 
-fn catalog_unit_matching(catalog: &[CatalogUnit], object: &Il2Entity, entity: &Il2Entity) -> CatalogUnit {
+fn catalog_unit_matching(
+    catalog: &[CatalogUnit],
+    object: &Il2Entity,
+    entity: &Il2Entity,
+) -> CatalogUnit {
     let script = object
         .property("Script")
         .map(|s| s.trim_matches('"').to_string())
@@ -4309,9 +5871,7 @@ fn apply_loaded_roles(
         seats[i].role = FlightRole::Follows(lead);
     }
     for i in 0..seats.len() {
-        if seats
-            .iter()
-            .any(|s| s.role == FlightRole::Follows(i))
+        if seats.iter().any(|s| s.role == FlightRole::Follows(i))
             && seats[i].role == FlightRole::Independent
         {
             seats[i].role = FlightRole::Lead;
@@ -4329,8 +5889,9 @@ fn read_bring_up(
     let mut activate = None;
     let mut death = None;
     let mut cooldown = None;
-    visit(root, &mut |e| {
-        match (e.block_type.as_str(), e.name().unwrap_or("")) {
+    visit(
+        root,
+        &mut |e| match (e.block_type.as_str(), e.name().unwrap_or("")) {
             ("MCU_Spawner", _) => spawn = Some(e),
             ("MCU_Activate", name)
                 if name.eq_ignore_ascii_case("Activate Units")
@@ -4341,8 +5902,8 @@ fn read_bring_up(
             ("MCU_Counter", "DeathCount") => death = Some(e),
             ("MCU_Timer", "COOLDOWN") => cooldown = Some(e),
             _ => {}
-        }
-    });
+        },
+    );
     if let Some(s) = spawn {
         opts.bring_up = BringUp::Spawn;
         mark_consumed(s, consumed);
@@ -4395,6 +5956,7 @@ fn read_zones(
     consumed: &mut HashSet<i32>,
     warnings: &mut Vec<String>,
 ) {
+    let mission_end_id = root.find_by_name("MISSION END").and_then(|e| e.index);
     let zone_in = root
         .find_by_name("Zone IN")
         .or_else(|| find_checkzone_named(root, "Zone In"));
@@ -4441,6 +6003,9 @@ fn read_zones(
                 opts.zone_out
             ));
         }
+        if let Some(end) = mission_end_id {
+            opts.zone_out_enabled = z.targets.contains(&end);
+        }
     }
     if opts.zone_out < opts.zone_in + 200.0 {
         let old = opts.zone_out;
@@ -4471,11 +6036,19 @@ fn read_zones(
         "Zone In ReActivate",
         "RTB DELAY",
         "COOLDOWN",
+        ALL_DESTROYED,
     ] {
         if let Some(e) = root.find_by_name(name) {
             mark_consumed(e, consumed);
         }
     }
+    visit(root, &mut |e| {
+        if e.block_type == "MCU_Counter"
+            && e.name().is_some_and(|n| n.starts_with(GO_HOME_ONCE_PREFIX))
+        {
+            mark_consumed(e, consumed);
+        }
+    });
     consume_named_block(root, "MCU_Deactivate", "Self Deactivate", consumed);
     consume_named_block(root, "MCU_Deactivate", "Deactivate Unit(s)", consumed);
 }
@@ -4513,11 +6086,67 @@ fn parse_zone_coalition(raw: &str) -> ZoneCoalition {
     }
 }
 
-fn parse_order_timer_name(name: &str) -> Option<(OrderKind, usize)> {
+/// `(kind, seat, return_to)`. Goto names carry a waypoint, not a seat.
+/// `return_to` is set for "Return to WP N". Other timers stay "{label} {seat+1}".
+fn classify_order_timer(name: &str) -> Option<(OrderKind, Option<usize>, Option<u32>)> {
+    if let Some(n) = name
+        .strip_prefix("Return to WP ")
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .filter(|n| *n >= 1)
+    {
+        return Some((OrderKind::GotoWaypoint, None, Some(n)));
+    }
+    if name
+        .strip_prefix("Goto WP ")
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .is_some_and(|n| n >= 1)
+    {
+        return Some((OrderKind::GotoWaypoint, None, None));
+    }
     let (label, num) = name.rsplit_once(' ')?;
     let seat = num.parse::<usize>().ok()?.checked_sub(1)?;
     let kind = OrderKind::from_label(label)?;
-    Some((kind, seat))
+    if kind == OrderKind::GotoWaypoint {
+        return Some((OrderKind::GotoWaypoint, None, None));
+    }
+    Some((kind, Some(seat), None))
+}
+
+/// Seat for a Goto timer: its own Objects, or the waypoint Objects those point at.
+fn goto_owner_seats(
+    timer: &Il2Entity,
+    by_index: &HashMap<i32, &Il2Entity>,
+    entity_to_seat: &HashMap<i32, usize>,
+    seats: &[TemplateSeat],
+) -> Vec<usize> {
+    let mut ids = timer.objects.clone();
+    if ids.is_empty() {
+        for &tid in &timer.targets {
+            if let Some(e) = by_index.get(&tid) {
+                if e.block_type == "MCU_Waypoint" {
+                    ids.extend(e.objects.iter().copied());
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for id in ids {
+        let Some(&si) = entity_to_seat.get(&id) else {
+            continue;
+        };
+        if si >= seats.len() {
+            continue;
+        }
+        let owner = if receives_orders(seats, si) {
+            si
+        } else {
+            flight_lead_of(seats, si)
+        };
+        if receives_orders(seats, owner) && !out.contains(&owner) {
+            out.push(owner);
+        }
+    }
+    out
 }
 
 fn parse_wp_number(name: &str) -> Option<u32> {
@@ -4538,7 +6167,13 @@ fn read_native_orders(
     timer_to_order: &mut HashMap<i32, (usize, usize)>,
     warnings: &mut Vec<String>,
 ) {
-    let mut timers: Vec<(OrderKind, usize, &Il2Entity)> = Vec::new();
+    struct Hit<'a> {
+        kind: OrderKind,
+        seat: Option<usize>,
+        return_to: Option<u32>,
+        timer: &'a Il2Entity,
+    }
+    let mut hits: Vec<Hit> = Vec::new();
     visit(root, &mut |e| {
         if e.block_type != "MCU_Timer" {
             return;
@@ -4546,12 +6181,80 @@ fn read_native_orders(
         let Some(name) = e.name() else {
             return;
         };
-        if let Some((kind, seat)) = parse_order_timer_name(name) {
-            if seat < opts.seats.len() {
-                timers.push((kind, seat, e));
+        let Some((kind, seat, return_to)) = classify_order_timer(name) else {
+            return;
+        };
+        if seat.is_some_and(|s| s >= opts.seats.len()) {
+            return;
+        }
+        hits.push(Hit {
+            kind,
+            seat,
+            return_to,
+            timer: e,
+        });
+    });
+    for hit in &mut hits {
+        if hit.seat.is_some() {
+            continue;
+        }
+        let owners = goto_owner_seats(hit.timer, by_index, entity_to_seat, &opts.seats);
+        if owners.len() == 1 {
+            hit.seat = Some(owners[0]);
+        }
+    }
+    let order_ids: HashSet<i32> = hits.iter().filter_map(|h| h.timer.index).collect();
+    loop {
+        let known: Vec<(usize, Vec<i32>)> = hits
+            .iter()
+            .filter_map(|h| {
+                let seat = h.seat?;
+                let nexts = next_order_timer_ids(h.timer, by_index, &order_ids);
+                Some((seat, nexts))
+            })
+            .collect();
+        let mut changed = false;
+        for (seat, nexts) in known {
+            for next in nexts {
+                if let Some(hit) = hits
+                    .iter_mut()
+                    .find(|h| h.timer.index == Some(next) && h.seat.is_none())
+                {
+                    hit.seat = Some(seat);
+                    changed = true;
+                }
             }
         }
-    });
+        if !changed {
+            break;
+        }
+    }
+    let leads: Vec<usize> = (0..opts.seats.len())
+        .filter(|s| receives_orders(&opts.seats, *s))
+        .collect();
+    if leads.len() == 1 {
+        for hit in &mut hits {
+            if hit.seat.is_none() {
+                hit.seat = Some(leads[0]);
+            }
+        }
+    }
+    for hit in &hits {
+        if hit.seat.is_none() {
+            warnings.push(format!(
+                "Dropped {} (could not tell which unit it belongs to).",
+                hit.timer.name().unwrap_or("order")
+            ));
+        }
+    }
+    let returns: HashMap<i32, u32> = hits
+        .iter()
+        .filter_map(|h| Some((h.timer.index?, h.return_to?)))
+        .collect();
+    let timers: Vec<(OrderKind, usize, &Il2Entity)> = hits
+        .iter()
+        .filter_map(|h| Some((h.kind, h.seat?, h.timer)))
+        .collect();
     let mut ids: HashSet<i32> = HashSet::new();
     for (_, _, t) in &timers {
         if let Some(id) = t.index {
@@ -4566,15 +6269,22 @@ fn read_native_orders(
         }
         let ordered = sort_native_timers(&timers, seat, &ids, by_index, root);
         for (kind, timer) in ordered {
-            let spec = spec_from_native_timer(
+            let mut spec = spec_from_native_timer(
                 kind,
                 timer,
                 by_index,
                 entity_to_seat,
                 seat,
+                opts.waypoint_spacing,
                 consumed,
                 warnings,
             );
+            if let Some(back) = timer.index.and_then(|id| returns.get(&id).copied()) {
+                spec.loop_to = Some(back);
+            }
+            if opts.seats[seat].unit.is_air() && spec.kind == OrderKind::Formation {
+                spec.formation_type = editor_air_formation(spec.formation_type);
+            }
             let oi = opts.seats[seat].orders.len();
             if let Some(id) = timer.index {
                 timer_to_order.insert(id, (seat, oi));
@@ -4619,7 +6329,33 @@ fn sort_native_timers<'a>(
             return;
         }
         let tar = prop_i32(e, "TarId", -1);
+        let tar = go_home_once_timer(by_index, tar).unwrap_or(tar);
         if mine_ids.contains(&tar) {
+            *incoming.entry(tar).or_insert(0) += 1;
+        }
+    });
+    // A report timer is not targeted by the previous order timer. OnReport
+    // names the command it waits on. Without that edge, OnAreaAttacked looks
+    // like a second chain start and its home Goto is ordered before AttackArea.
+    let mut report_next: HashMap<i32, Vec<i32>> = HashMap::new();
+    visit(root, &mut |e| {
+        if e.block_type != "OnReport" {
+            return;
+        }
+        let tar = prop_i32(e, "TarId", -1);
+        let cmd = prop_i32(e, "CmdId", -1);
+        if !mine_ids.contains(&tar) {
+            return;
+        }
+        let Some(pred) = mine
+            .iter()
+            .find_map(|(_, t)| t.index.filter(|_| t.targets.contains(&cmd)))
+        else {
+            return;
+        };
+        let nexts = report_next.entry(pred).or_default();
+        if !nexts.contains(&tar) {
+            nexts.push(tar);
             *incoming.entry(tar).or_insert(0) += 1;
         }
     });
@@ -4650,9 +6386,23 @@ fn sort_native_timers<'a>(
             continue;
         };
         out.push((*kind, *timer));
-        for next in next_order_timer_ids(timer, by_index, order_ids) {
+        let mut nexts = next_order_timer_ids(timer, by_index, order_ids);
+        let reports = report_next.get(&id).cloned().unwrap_or_default();
+        for &n in &reports {
+            if !nexts.contains(&n) {
+                nexts.push(n);
+            }
+        }
+        // A report waits on this command. Emit it before a sibling Time on
+        // Target that the waypoint already queued, so load keeps AttackArea,
+        // OnAreaAttacked, Time on Target.
+        for next in nexts {
             if mine_ids.contains(&next) && !seen.contains(&next) && !frontier.contains(&next) {
-                frontier.push(next);
+                if reports.contains(&next) {
+                    frontier.insert(0, next);
+                } else {
+                    frontier.push(next);
+                }
             }
         }
     }
@@ -4694,6 +6444,7 @@ fn spec_from_native_timer(
     by_index: &HashMap<i32, &Il2Entity>,
     entity_to_seat: &HashMap<i32, usize>,
     owner: usize,
+    spacing_m: f32,
     consumed: &mut HashSet<i32>,
     warnings: &mut Vec<String>,
 ) -> OrderSpec {
@@ -4719,6 +6470,23 @@ fn spec_from_native_timer(
                 if y > 0.0 {
                     spec.altitude = y;
                 }
+                let x = prop_f32(e, "XPos", ORIGIN_X as f32);
+                let z = prop_f32(e, "ZPos", ORIGIN_Z as f32);
+                let line_x = ORIGIN_X as f32 + n as f32 * spacing_m;
+                if (x - line_x).abs() > 1.0 || (z - ORIGIN_Z as f32).abs() > 1.0 {
+                    spec.wp_north_m = Some(x - ORIGIN_X as f32);
+                    spec.wp_east_m = Some(z - ORIGIN_Z as f32);
+                }
+                for &tid in &e.targets {
+                    let Some(other) = by_index.get(&tid) else {
+                        continue;
+                    };
+                    if other.block_type == "MCU_Waypoint" {
+                        if let Some(back) = other.name().and_then(parse_wp_number) {
+                            spec.loop_to = Some(back);
+                        }
+                    }
+                }
             }
         }
     }
@@ -4732,9 +6500,7 @@ fn fill_spec_from_cmd(
     owner: usize,
     warnings: &mut Vec<String>,
 ) {
-    if spec.kind == OrderKind::AttackArea
-        || cmd.block_type == "MCU_CMD_AttackArea"
-    {
+    if spec.kind == OrderKind::AttackArea || cmd.block_type == "MCU_CMD_AttackArea" {
         if spec.kind == OrderKind::AttackArea {
             spec.attack_ground = prop_bool(cmd, "AttackGround", spec.attack_ground);
             spec.attack_air = prop_bool(cmd, "AttackAir", spec.attack_air);
@@ -4867,6 +6633,9 @@ fn read_foreign_orders(
                 owner + 1
             ));
         }
+        if opts.seats[owner].unit.is_air() && spec.kind == OrderKind::Formation {
+            spec.formation_type = editor_air_formation(spec.formation_type);
+        }
         opts.seats[owner].orders.push(spec);
     }
 
@@ -4879,12 +6648,11 @@ fn read_foreign_orders(
             path_wps.push(e);
         }
     });
-    path_wps.sort_by_key(|w| {
-        w.name()
-            .and_then(parse_wp_number)
-            .unwrap_or(u32::MAX)
-    });
-    if path_wps.iter().all(|w| parse_wp_number(w.name().unwrap_or("")).is_none()) {
+    path_wps.sort_by_key(|w| w.name().and_then(parse_wp_number).unwrap_or(u32::MAX));
+    if path_wps
+        .iter()
+        .all(|w| parse_wp_number(w.name().unwrap_or("")).is_none())
+    {
         path_wps.sort_by(|a, b| {
             let ax = a.pos_xz().map(|p| p.0).unwrap_or(0.0);
             let bx = b.pos_xz().map(|p| p.0).unwrap_or(0.0);
@@ -4951,11 +6719,7 @@ fn unique_predecessor_timer<'a>(
             found = Some(e);
         }
     });
-    if count == 1 {
-        found
-    } else {
-        None
-    }
+    if count == 1 { found } else { None }
 }
 
 fn read_foreign_reports(
@@ -4990,10 +6754,7 @@ fn read_foreign_reports(
                     3 => OrderKind::OnTookOff,
                     4 => OrderKind::OnLanded,
                     _ => {
-                        warnings.push(format!(
-                            "Dropped OnReport Type {typ} on seat {}.",
-                            seat + 1
-                        ));
+                        warnings.push(format!("Dropped OnReport Type {typ} on seat {}.", seat + 1));
                         continue;
                     }
                 };
@@ -5056,6 +6817,18 @@ fn read_rtb_orders(
     }
 }
 
+/// `Go Home Once` sits between abort events and the Goto timer. Load treats
+/// an event aimed at that counter as aimed at the timer it pulses.
+fn go_home_once_timer(by_index: &HashMap<i32, &Il2Entity>, tar: i32) -> Option<i32> {
+    let node = by_index.get(&tar)?;
+    let name = node.name()?;
+    if node.block_type == "MCU_Counter" && name.starts_with(GO_HOME_ONCE_PREFIX) {
+        node.targets.first().copied()
+    } else {
+        None
+    }
+}
+
 fn read_events(
     loaded: &[LoadedUnit],
     by_index: &HashMap<i32, &Il2Entity>,
@@ -5068,6 +6841,10 @@ fn read_events(
     let death_id = by_index
         .values()
         .find(|e| e.name() == Some("DeathCount"))
+        .and_then(|e| e.index);
+    let wipe_id = by_index
+        .values()
+        .find(|e| e.name() == Some(ALL_DESTROYED))
         .and_then(|e| e.index);
     let force_id = by_index
         .values()
@@ -5095,15 +6872,18 @@ fn read_events(
                     }
                     continue;
                 }
+                let order_tar = go_home_once_timer(by_index, tar).unwrap_or(tar);
                 let Some(kind) = EntityEvent::from_type_id(typ) else {
                     warnings.push(format!(
                         "Dropped OnEvent Type {typ} on {unit_name} (unknown event)."
                     ));
                     continue;
                 };
-                let then = if force_id == Some(tar) {
+                let then = if wipe_id == Some(tar) {
+                    EventThen::AllDestroyed
+                } else if force_id == Some(tar) {
                     EventThen::ForceComplete
-                } else if let Some(&(chain_si, oi)) = timer_to_order.get(&tar) {
+                } else if let Some(&(chain_si, oi)) = timer_to_order.get(&order_tar) {
                     let _ = chain_si;
                     EventThen::Order(oi)
                 } else if let Some(target) = by_index.get(&tar) {
@@ -5154,12 +6934,12 @@ fn read_waypoints_into_opts(
         }
         let y = prop_f32(e, "YPos", 0.0);
         let plane_alt = first_plane_altitude(&opts.seats) as f32;
-        let hop_alt = if y > 0.0 && (y - plane_alt).abs() > 1.0 && (opts.waypoint_altitude - y).abs() > 1.0
-        {
-            y
-        } else {
-            0.0
-        };
+        let hop_alt =
+            if y > 0.0 && (y - plane_alt).abs() > 1.0 && (opts.waypoint_altitude - y).abs() > 1.0 {
+                y
+            } else {
+                0.0
+            };
         for seat in &mut opts.seats {
             for order in &mut seat.orders {
                 if order.kind == OrderKind::GotoWaypoint && order.waypoint.max(1) == n {
@@ -5176,10 +6956,7 @@ fn read_waypoints_into_opts(
 }
 
 fn infer_layout(loaded: &[LoadedUnit], opts: &mut TemplateOptions, warnings: &mut Vec<String>) {
-    let positions: Vec<(f64, f64)> = loaded
-        .iter()
-        .filter_map(|u| u.object.pos_xz())
-        .collect();
+    let positions: Vec<(f64, f64)> = loaded.iter().filter_map(|u| u.object.pos_xz()).collect();
     if positions.len() < 2 {
         if opts.seats.iter().any(|s| s.unit.is_air()) {
             opts.place_layout = PlaceLayout::InvertedVee;
@@ -5248,7 +7025,10 @@ fn collect_dropped(
         if std::ptr::eq(e, root) {
             return;
         }
-        if e.block_type == "Group" && e.name().is_some_and(|n| n.eq_ignore_ascii_case("NodeGates")) {
+        if e.block_type == "Group"
+            && e.name()
+                .is_some_and(|n| n.eq_ignore_ascii_case("NodeGates"))
+        {
             nodegates = true;
             return;
         }
@@ -5274,15 +7054,18 @@ fn collect_dropped(
                 }
             }
             b if b.starts_with("MCU_CMD_") => {
-                extra_cmds.push(format!(
-                    "{} \"{}\"",
-                    b,
-                    e.name().unwrap_or("command")
-                ));
+                extra_cmds.push(format!("{} \"{}\"", b, e.name().unwrap_or("command")));
             }
-            "MCU_Timer" | "MCU_Counter" | "MCU_Activate" | "MCU_Deactivate"
-            | "MCU_Delete" | "MCU_Spawner" | "MCU_TR_MissionBegin"
-            | "MCU_Waypoint" | "MCU_TR_ComplexTrigger" | "MCU_Random" => {
+            "MCU_Timer"
+            | "MCU_Counter"
+            | "MCU_Activate"
+            | "MCU_Deactivate"
+            | "MCU_Delete"
+            | "MCU_Spawner"
+            | "MCU_TR_MissionBegin"
+            | "MCU_Waypoint"
+            | "MCU_TR_ComplexTrigger"
+            | "MCU_Random" => {
                 if native || distinctive_drop(e) {
                     extra_other.push(format!(
                         "{} \"{}\"",
@@ -5291,8 +7074,8 @@ fn collect_dropped(
                     ));
                 }
             }
-            "Plane" | "Vehicle" | "Train" | "Ship" | "MCU_TR_Entity"
-            | "OnEvents" | "OnEvent" | "OnReports" | "OnReport" | "Carriages" => {}
+            "Plane" | "Vehicle" | "Train" | "Ship" | "MCU_TR_Entity" | "OnEvents" | "OnEvent"
+            | "OnReports" | "OnReport" | "Carriages" => {}
             _ => {
                 if e.index.is_some() && distinctive_drop(e) {
                     extra_other.push(format!(
@@ -5424,6 +7207,85 @@ mod tests {
     use crate::parser::{parse_group_file, parse_il2_document};
     use crate::serialize::serialize_group;
 
+    fn at(block: &str, name: &str, x: f64, z: f64) -> Il2Entity {
+        let mut e = Il2Entity::new(block);
+        if !name.is_empty() {
+            e.set_name(name);
+        }
+        e.set_property("XPos", format!("{x:.3}"));
+        e.set_property("ZPos", format!("{z:.3}"));
+        e
+    }
+
+    /// A plane, an AttackArea, and Mission Complete. No gun, so the army
+    /// classifier would call it artillery.
+    fn strike_fixture(name: &str, country: &str) -> Il2Entity {
+        let mut plane = at("Plane", "Lead", 1000.0, 2000.0);
+        plane.set_property("Country", country);
+        plane.set_property("NumberInFormation", "0");
+        let mut area = at("MCU_CMD_AttackArea", "Attack", 5000.0, 6000.0);
+        area.set_property("AttackGround", "1");
+        let mut g = Il2Entity::new("Group");
+        g.set_name(name);
+        g.children = vec![
+            plane,
+            at("MCU_CheckZone", "Zone IN", 5000.0, 6000.0),
+            at("MCU_Waypoint", "WP 1", 3000.0, 4000.0),
+            area,
+            at("MCU_Timer", "Mission Complete 1", 0.0, 0.0),
+        ];
+        g
+    }
+
+    #[test]
+    fn loaded_strike_is_a_mission_not_artillery() {
+        let strike = strike_fixture("Il-10 Strike", "501");
+        assert_eq!(
+            crate::weapon_range::classify_army_unit(&strike),
+            crate::weapon_range::ArmyUnitKind::Artillery
+        );
+        let taken = take_strike_missions(strike).expect("a strike comes back as a mission");
+        assert!(!taken.packed);
+        let layout = strike_layout(&taken.groups[0], false).unwrap();
+        assert_eq!(layout.name, "Il-10 Strike");
+        assert!(!layout.western);
+        assert_eq!(layout.target, (5000.0, 6000.0));
+        assert_eq!(layout.start, (1000.0, 2000.0));
+        assert_eq!(layout.ip, (3000.0, 4000.0));
+
+        let mut gun = at("Vehicle", "Gun", 10.0, 20.0);
+        gun.set_property("Script", r#"LuaScripts\WorldObjects\fixedobjects\ml20.txt"#);
+        let mut area = at("MCU_CMD_AttackArea", "Attack", 10.0, 20.0);
+        area.set_property("AttackGround", "1");
+        let mut arty = Il2Entity::new("Group");
+        arty.set_name("Battery");
+        arty.children = vec![gun, area];
+        assert!(take_strike_missions(arty).is_err());
+
+        let mut pack = Il2Entity::new("Group");
+        pack.set_name("Exclusive Activation");
+        pack.children = vec![
+            strike_fixture("Il-10 Strike [1]", "501"),
+            strike_fixture("F-80 Strike [2]", "601"),
+            at("Group", "NodeGates", 0.0, 0.0),
+        ];
+        let taken = take_strike_missions(pack).unwrap();
+        assert!(taken.packed);
+        assert_eq!(taken.groups.len(), 2);
+        assert_eq!(
+            strike_layout(&taken.groups[0], true).unwrap().name,
+            "Il-10 Strike"
+        );
+        assert!(strike_layout(&taken.groups[1], true).unwrap().western);
+
+        let f80 = parse_group_file(include_str!(
+            "../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group"
+        ))
+        .unwrap();
+        assert_eq!(strike_side(&f80), Some(true));
+        assert!(take_strike_missions(f80).is_ok());
+    }
+
     fn four_migs() -> TemplateOptions {
         let mig = builtin_plane_catalog()
             .into_iter()
@@ -5442,7 +7304,7 @@ mod tests {
                     seat.orders = vec![
                         OrderSpec {
                             kind: OrderKind::Formation,
-                            formation_type: 23,
+                            formation_type: AIR_COLUMN_PAIRS,
                             ..OrderSpec::default()
                         },
                         OrderSpec {
@@ -5550,8 +7412,7 @@ mod tests {
 
     #[test]
     fn catalog_reads_all_trains_from_model_types() {
-        let root =
-            parse_il2_document(include_str!("../assets/Models.Group")).unwrap();
+        let root = parse_il2_document(include_str!("../assets/Models.Group")).unwrap();
         let cat = load_catalog(&root);
         assert!(cat.iter().any(|u| u.kind == UnitKind::Plane));
         assert!(cat.iter().any(|u| u.kind == UnitKind::Vehicle));
@@ -5566,11 +7427,16 @@ mod tests {
             .expect("train prototype");
         let cars = train.prototype_carriages();
         assert!(
-            cars.iter().any(|s| s.to_ascii_lowercase().contains("carbox")),
+            cars.iter()
+                .any(|s| s.to_ascii_lowercase().contains("carbox")),
             "catalog train should list rail cars, got {cars:?}"
         );
         let tender = train.default_carriages();
-        assert_eq!(tender.len(), 1, "default consist is the tender, got {tender:?}");
+        assert_eq!(
+            tender.len(),
+            1,
+            "default consist is the tender, got {tender:?}"
+        );
         assert!(script_type_id(&tender[0]).contains("tender"));
         assert!(tender.len() < cars.len());
     }
@@ -5578,7 +7444,10 @@ mod tests {
     #[test]
     fn bundled_catalog_splits_infantry_by_country() {
         let cat = bundled_catalog();
-        let infantry: Vec<_> = cat.iter().filter(|u| u.kind == UnitKind::Infantry).collect();
+        let infantry: Vec<_> = cat
+            .iter()
+            .filter(|u| u.kind == UnitKind::Infantry)
+            .collect();
         assert_eq!(infantry.len(), 9, "nine Korea squads");
         assert!(
             !cat.iter().any(|u| u.kind == UnitKind::Vehicle
@@ -5714,10 +7583,30 @@ mod tests {
     }
 
     #[test]
+    fn usa_rifle_squad_catalog_model_is_unsuffixed() {
+        let root = parse_il2_document(include_str!("../assets/Models.Group")).unwrap();
+        let cat = load_catalog(&root);
+        let unit = cat
+            .iter()
+            .find(|u| {
+                u.script
+                    .to_ascii_lowercase()
+                    .contains("squad-rifle-1950-usa")
+            })
+            .expect("USA rifle squad");
+        let model = unit.object.property("Model").unwrap().trim_matches('"');
+        assert_eq!(
+            model,
+            r"graphics\vehicles\infantry\squad-rifle-1950-usa.mgm"
+        );
+    }
+
+    #[test]
     fn bundled_catalog_includes_fixed_and_user_added() {
         let cat = bundled_catalog();
         assert!(
-            cat.iter().any(|u| u.kind == UnitKind::Fixed && u.script.to_ascii_lowercase().contains("fixedobjects")),
+            cat.iter().any(|u| u.kind == UnitKind::Fixed
+                && u.script.to_ascii_lowercase().contains("fixedobjects")),
             "Fixed Objects group should load as Fixed Units"
         );
         assert!(
@@ -5868,8 +7757,8 @@ mod tests {
         assert!(!text.contains('\u{2013}'));
         assert!(!text.contains("NodeGates"));
         let formation = pack.find_by_name("Formation").unwrap();
-        assert_eq!(formation.property("FormationType"), Some("23"));
-        assert_eq!(formation.property("FormationDensity"), Some("1"));
+        assert_eq!(formation.property("FormationType"), Some("4"));
+        assert_eq!(formation.property("FormationDensity"), Some("2"));
         assert_eq!(formation.property("FlightSize"), Some("1"));
     }
 
@@ -5965,6 +7854,7 @@ mod tests {
         let bring = pack.find_by_name("MISSION BEGIN").unwrap();
         assert!(zone_in.targets.contains(&bring.index.unwrap()));
         assert!(bring.targets.contains(&activate.index.unwrap()));
+        assert!(pack.find_by_name("STRIKE END").is_none());
     }
 
     #[test]
@@ -6169,7 +8059,10 @@ mod tests {
         let counter = pack.find_by_name("SpawnCount").unwrap();
         assert_eq!(counter.property("Counter"), Some("1"));
         assert_eq!(counter.property("Dropcount"), Some("0"));
-        assert_eq!(pack.find_by_name("COOLDOWN").unwrap().property("Time"), Some("0"));
+        assert_eq!(
+            pack.find_by_name("COOLDOWN").unwrap().property("Time"),
+            Some("0")
+        );
         assert!(pack.find_by_name("DeathCount").is_none());
         assert!(pack.find_by_name("Reset Counter").is_none());
         assert!(pack.find_by_name("Modifier Set Value").is_none());
@@ -6197,7 +8090,10 @@ mod tests {
         let mut planes = Vec::new();
         pack.for_each(&mut |e| {
             if e.block_type == "Plane" {
-                planes.push((e.property("LinkTrId").unwrap().parse::<i32>().unwrap(), e.name().unwrap().to_string()));
+                planes.push((
+                    e.property("LinkTrId").unwrap().parse::<i32>().unwrap(),
+                    e.name().unwrap().to_string(),
+                ));
             }
         });
         assert_eq!(planes.len(), 4);
@@ -6273,7 +8169,10 @@ mod tests {
         assert_eq!(spawner.objects.len(), 4);
         pack.for_each(&mut |e| {
             if e.block_type == "MCU_TR_Entity" {
-                assert!(e.targets.is_empty(), "independent units are not target-linked");
+                assert!(
+                    e.targets.is_empty(),
+                    "independent units are not target-linked"
+                );
             }
         });
     }
@@ -6298,25 +8197,108 @@ mod tests {
 
     #[test]
     fn air_formation_presets_match_export() {
-        assert_eq!(AIR_FORMATIONS[0].id, 19);
-        assert_eq!(AIR_FORMATIONS[0].label, "Pairs");
-        assert_eq!(formation_label(23, UnitKind::Plane), "Heavy Wedge");
-        assert_eq!(formation_label(4, UnitKind::Vehicle), "Road Column 1 way");
+        assert_eq!(AIR_FORMATIONS[0].id, AIR_V_FORM);
+        assert_eq!(AIR_FORMATIONS[0].label, "V-Form");
+        assert_eq!(
+            formation_label(AIR_COLUMN_PAIRS, UnitKind::Plane),
+            "Column - Pairs"
+        );
+        assert_eq!(
+            formation_label(AIR_FLIGHTS_WEDGE, UnitKind::Plane),
+            "Column - Flights wedge"
+        );
+        assert_eq!(
+            formation_label(AIR_HEAVY_WEDGE, UnitKind::Plane),
+            "Heavy - Wedge"
+        );
+        assert_eq!(editor_air_formation(0), AIR_V_FORM);
+        assert_eq!(editor_air_formation(AIR_COLUMN_PAIRS), AIR_COLUMN_PAIRS);
+        assert_eq!(editor_air_formation(20), AIR_FLIGHTS_WEDGE);
+        assert_eq!(editor_air_formation(23), AIR_HEAVY_WEDGE);
+        assert_eq!(
+            formation_label(4, UnitKind::Vehicle),
+            "On Road Column one-way"
+        );
+        assert_eq!(
+            formation_label(18, UnitKind::Vehicle),
+            "On Road Column two-way"
+        );
+        assert_eq!(formation_density(18, UnitKind::Vehicle), 1);
+        assert_eq!(editor_ground_formation(4), 4);
+        assert_eq!(editor_ground_formation(18), 18);
+        assert_eq!(formation_label(26, UnitKind::Vehicle), "Panic Stop");
+        assert_ne!(
+            formation_label(AIR_COLUMN_PAIRS, UnitKind::Plane),
+            formation_label(4, UnitKind::Vehicle)
+        );
+    }
+
+    #[test]
+    fn korea_role_sets_formation_and_density() {
+        assert_eq!(air_formation_id(r"Planes\f51d.txt"), AIR_COLUMN_PAIRS);
+        assert_eq!(air_formation_id(r"Planes\f84e.txt"), AIR_COLUMN_PAIRS);
+        assert_eq!(air_formation_id(r"Planes\il10.txt"), AIR_FLIGHTS_WEDGE);
+        assert_eq!(air_formation_id(r"Planes\b29.txt"), AIR_HEAVY_WEDGE);
+        assert_eq!(air_formation_id(r"Planes\tu2.txt"), AIR_HEAVY_WEDGE);
+
+        let catalog = bundled_catalog();
+        let il10 = catalog
+            .iter()
+            .find(|u| u.script.to_ascii_lowercase().contains("il10"))
+            .expect("Il-10")
+            .clone();
+        let b29 = catalog
+            .iter()
+            .find(|u| {
+                let script = u.script.to_ascii_lowercase();
+                script.contains("\\b29.txt") || script.contains("/b29.txt")
+            })
+            .expect("B-29")
+            .clone();
+
+        let mut attack = TemplateOptions::default();
+        attack.seats = vec![TemplateSeat::new(il10)];
+        attack.waypoint_count = 0;
+        apply_mission_package(&mut attack.seats, 0, MissionPackage::Strike, 4_000.0).unwrap();
+        assert_eq!(attack.seats[0].orders[0].formation_type, AIR_FLIGHTS_WEDGE);
+        let attack_pack = generate_template(&attack).unwrap();
+        let attack_form = attack_pack.find_by_name("Formation").unwrap();
+        assert_eq!(attack_form.property("FormationType"), Some("5"));
+        assert_eq!(attack_form.property("FormationDensity"), Some("1"));
+        assert!(!attack_form.objects.is_empty());
+
+        let mut heavy = TemplateOptions::default();
+        heavy.waypoint_count = 0;
+        let mut seat = TemplateSeat::new(b29);
+        seat.orders = vec![OrderSpec::for_unit(&seat.unit)];
+        assert_eq!(seat.orders[0].formation_type, AIR_HEAVY_WEDGE);
+        heavy.seats = vec![seat];
+        let heavy_pack = generate_template(&heavy).unwrap();
+        let heavy_form = heavy_pack.find_by_name("Formation").unwrap();
+        assert_eq!(heavy_form.property("FormationType"), Some("8"));
+        // Decision 0019: no aircraft formation flies Dense.
+        assert_eq!(heavy_form.property("FormationDensity"), Some("1"));
     }
 
     #[test]
     fn air_formations_and_unknown_air_ids_use_loose_pairs_and_safe_other_types() {
         const UNKNOWN_FORMATION: i32 = 999;
-        const AIR_DENSITIES: [(i32, i32); 8] = [
-            (19, 2), (20, 1), (21, 1), (22, 1), (23, 1), (24, 1), (26, 1), (27, 1),
+        // The Korea editor list (1 to 19): Column - Pairs (4) and the built-ins'
+        // Pairs (19) fly Loose, every other aircraft formation Safe.
+        const AIR_DENSITIES: [(i32, i32); 19] = [
+            (1, 1), (2, 1), (3, 1), (4, 2), (5, 1), (6, 1), (7, 1), (8, 1), (9, 1), (10, 1),
+            (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (17, 1), (18, 1), (19, 2),
         ];
+        // Great Battles ids (20 to 27) are not on the list and fly Safe.
+        const GREAT_BATTLES_IDS: [(i32, i32); 7] = [(20, 1), (21, 1), (22, 1), (23, 1), (24, 1), (26, 1), (27, 1)];
         assert!(!AIR_FORMATIONS.iter().any(|formation| formation.id == UNKNOWN_FORMATION));
         assert_eq!(SAFE_AIR_FORMATION_DENSITY, 1);
         assert_eq!(LOOSE_AIR_FORMATION_DENSITY, 2);
         assert_eq!(PAIRS_AIR_FORMATION_TYPE, 19);
         assert_eq!(AIR_FORMATIONS.iter().map(|formation| (formation.id, formation.density)).collect::<Vec<_>>(),
             AIR_DENSITIES);
-        for (id, density) in AIR_DENSITIES.into_iter().chain([(UNKNOWN_FORMATION, SAFE_AIR_FORMATION_DENSITY)]) {
+        for (id, density) in AIR_DENSITIES.into_iter().chain(GREAT_BATTLES_IDS)
+            .chain([(UNKNOWN_FORMATION, SAFE_AIR_FORMATION_DENSITY)]) {
             assert_eq!(formation_density(id, UnitKind::Plane), density, "air formation {id}");
             let mut opts = four_migs();
             opts.seats[0].orders[0].formation_type = id;
@@ -6539,7 +8521,13 @@ mod tests {
     fn combat_box_defaults_to_six_per_group() {
         assert_eq!(PlaceLayout::CombatBox.default_per_group(), 6);
         assert_eq!(PlaceLayout::InvertedVee.default_per_group(), 4);
-        assert_eq!(PlaceLayout::ALL.iter().filter(|l| **l == PlaceLayout::CombatBox).count(), 1);
+        assert_eq!(
+            PlaceLayout::ALL
+                .iter()
+                .filter(|l| **l == PlaceLayout::CombatBox)
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -6666,7 +8654,10 @@ mod tests {
             }
         });
         for id in &area.objects {
-            assert!(entities.contains(id), "AttackArea object {id} should be a unit entity");
+            assert!(
+                entities.contains(id),
+                "AttackArea object {id} should be a unit entity"
+            );
         }
     }
 
@@ -6683,7 +8674,7 @@ mod tests {
         assert!(pack.find_by_name("Attack").is_none());
         let wp1 = pack.find_by_name("WP 1").unwrap();
         let wp2 = pack.find_by_name("WP 2").unwrap();
-        let goto = pack.find_by_name("Goto WP 1").unwrap();
+        let goto = pack.find_by_name("Goto WP 2").unwrap();
         assert_eq!(goto.block_type, "MCU_Timer");
         assert!(goto.targets.contains(&wp2.index.unwrap()));
         assert!(!goto.targets.contains(&wp1.index.unwrap()));
@@ -6774,7 +8765,9 @@ mod tests {
         let pack = generate_template(&opts).unwrap();
         let cover = pack.find_by_name("Cover").unwrap();
         assert_eq!(cover.property("Priority"), Some("0"));
-        let force = pack.find_by_name("Force Complete").expect("seat Force Complete MCU");
+        let force = pack
+            .find_by_name("Force Complete")
+            .expect("seat Force Complete MCU");
         assert_eq!(force.property("Priority"), Some("1"));
     }
 
@@ -7183,11 +9176,15 @@ mod tests {
         opts.zone_coalition = ZoneCoalition::Both;
         let pack = generate_template(&opts).unwrap();
         assert_eq!(
-            pack.find_by_name("Zone IN").unwrap().property("PlaneCoalitions"),
+            pack.find_by_name("Zone IN")
+                .unwrap()
+                .property("PlaneCoalitions"),
             Some("[1, 2]")
         );
         assert_eq!(
-            pack.find_by_name("Zone Out").unwrap().property("PlaneCoalitions"),
+            pack.find_by_name("Zone Out")
+                .unwrap()
+                .property("PlaneCoalitions"),
             Some("[1, 2]")
         );
     }
@@ -7198,20 +9195,44 @@ mod tests {
         let zone = pack.find_by_name("Zone IN").unwrap().pos_xz().unwrap();
         assert!((zone.0 - ORIGIN_X).abs() < 0.1);
         assert!((zone.1 - ORIGIN_Z).abs() < 0.1);
-        let begin = pack.find_by_name("Translator Mission Begin").unwrap().pos_xz().unwrap();
+        let begin = pack
+            .find_by_name("Translator Mission Begin")
+            .unwrap()
+            .pos_xz()
+            .unwrap();
         assert!((begin.0 - (ORIGIN_X + 150.0)).abs() < 0.1);
         assert!((begin.1 - ORIGIN_Z).abs() < 0.1);
-        let pulse = pack.find_by_name("ENABLE / PULSE IN").unwrap().pos_xz().unwrap();
+        let pulse = pack
+            .find_by_name("ENABLE / PULSE IN")
+            .unwrap()
+            .pos_xz()
+            .unwrap();
         assert!((pulse.0 - ORIGIN_X).abs() < 0.1);
         assert!((pulse.1 - ORIGIN_Z).abs() < 0.1);
-        let deact = pack.find_by_name("Zone Out ReActivate").unwrap().pos_xz().unwrap();
+        let deact = pack
+            .find_by_name("Zone Out ReActivate")
+            .unwrap()
+            .pos_xz()
+            .unwrap();
         assert!((deact.0 - ORIGIN_X).abs() < 0.1);
         assert!((deact.1 - ORIGIN_Z).abs() < 0.1);
-        let bring = pack.find_by_name("MISSION BEGIN").unwrap().pos_xz().unwrap();
+        let bring = pack
+            .find_by_name("MISSION BEGIN")
+            .unwrap()
+            .pos_xz()
+            .unwrap();
         assert!((bring.1 - (ORIGIN_Z - 150.0)).abs() < 0.1);
-        let activate = pack.find_by_name("Activate Units").unwrap().pos_xz().unwrap();
+        let activate = pack
+            .find_by_name("Activate Units")
+            .unwrap()
+            .pos_xz()
+            .unwrap();
         assert!((activate.1 - (ORIGIN_Z - 300.0)).abs() < 0.1);
-        let force = pack.find_by_name("Force Complete - High").unwrap().pos_xz().unwrap();
+        let force = pack
+            .find_by_name("Force Complete - High")
+            .unwrap()
+            .pos_xz()
+            .unwrap();
         assert!((force.1 - (ORIGIN_Z + 300.0)).abs() < 0.1);
         let deactivate = pack.find_by_name("Deactivate Units").unwrap().pos_xz().unwrap();
         assert!((deactivate.1 - (ORIGIN_Z + 300.0)).abs() < 0.1);
@@ -7289,7 +9310,7 @@ mod tests {
             },
             OrderSpec {
                 kind: OrderKind::Formation,
-                formation_type: 23,
+                formation_type: AIR_COLUMN_PAIRS,
                 ..OrderSpec::default()
             },
         ];
@@ -7385,7 +9406,7 @@ mod tests {
             },
             OrderSpec {
                 kind: OrderKind::Formation,
-                formation_type: 23,
+                formation_type: AIR_COLUMN_PAIRS,
                 ..OrderSpec::default()
             },
         ];
@@ -7460,9 +9481,11 @@ mod tests {
         assert!(ids.contains(&74));
         assert!(ids.contains(&80));
         assert!(ids.contains(&85));
-        assert!(!EntityEvent::available(UnitKind::Plane)
-            .iter()
-            .any(|e| *e == EntityEvent::OnTrailerKilled));
+        assert!(
+            !EntityEvent::available(UnitKind::Plane)
+                .iter()
+                .any(|e| *e == EntityEvent::OnTrailerKilled)
+        );
         assert!(OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::OnSpawned));
         assert!(!OrderKind::available(UnitKind::Vehicle).contains(&OrderKind::OnTookOff));
         assert!(OrderKind::available(UnitKind::Plane).contains(&OrderKind::OnTookOff));
@@ -7702,7 +9725,7 @@ mod tests {
         let attack = pack.find_by_name("AttackArea").unwrap();
         let atk_delay = pack.find_by_name("AttackArea 1").unwrap();
         let tot = pack.find_by_name("Time on Target 1").unwrap();
-        let goto2 = pack.find_by_name("Goto WP 1").unwrap();
+        let goto2 = pack.find_by_name("Goto WP 2").unwrap();
         assert_eq!(tot.property("Time"), Some("180"));
         assert!(wp2.targets.contains(&atk_delay.index.unwrap()));
         assert!(!wp2.targets.contains(&attack.index.unwrap()));
@@ -7810,6 +9833,120 @@ mod tests {
     }
 
     #[test]
+    fn added_time_on_target_joins_the_attack_not_the_end() {
+        let mut orders = vec![
+            kind_order(OrderKind::Formation),
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 1,
+                ..OrderSpec::default()
+            },
+            kind_order(OrderKind::AttackArea),
+            kind_order(OrderKind::OnAreaAttacked),
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 2,
+                priority: 2,
+                ..OrderSpec::default()
+            },
+            kind_order(OrderKind::MissionComplete),
+        ];
+        let mut events = vec![EventHook {
+            kind: EntityEvent::OnPlaneBingoBombs,
+            then: EventThen::Order(4),
+        }];
+        let mut tot = OrderSpec::default();
+        tot.kind = OrderKind::TimeOnTarget;
+        tot.time_s = 120.0;
+        let oi = append_tree_order(&mut orders, &mut events, tot);
+        let oi = normalize_order_chain(&mut orders, &mut events, oi);
+        assert_eq!(orders[oi].kind, OrderKind::TimeOnTarget);
+        assert_eq!(
+            orders.iter().map(|o| o.kind).collect::<Vec<_>>(),
+            vec![
+                OrderKind::Formation,
+                OrderKind::GotoWaypoint,
+                OrderKind::AttackArea,
+                OrderKind::OnAreaAttacked,
+                OrderKind::TimeOnTarget,
+                OrderKind::GotoWaypoint,
+                OrderKind::MissionComplete,
+            ]
+        );
+        assert_eq!(events[0].then, EventThen::Order(5));
+    }
+
+    #[test]
+    fn time_on_target_beside_area_report_still_starts_home() {
+        let mut opts = one_mig();
+        opts.waypoint_count = 2;
+        opts.seats[0].orders = vec![
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 1,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::AttackArea,
+                attack_ground: true,
+                attack_air: false,
+                attack_g_targets: true,
+                time_s: 120.0,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::OnAreaAttacked,
+                delay_s: 0.0,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::TimeOnTarget,
+                time_s: 120.0,
+                ..OrderSpec::default()
+            },
+            OrderSpec {
+                kind: OrderKind::GotoWaypoint,
+                waypoint: 2,
+                priority: 2,
+                ..OrderSpec::default()
+            },
+        ];
+        opts.seats[0].events = vec![EventHook {
+            kind: EntityEvent::OnPlaneBingoBombs,
+            then: EventThen::Order(4),
+        }];
+        let pack = generate_template(&opts).unwrap();
+        let wp1 = pack.find_by_name("WP 1").unwrap();
+        let attack = pack.find_by_name("AttackArea").unwrap();
+        let atk_delay = pack.find_by_name("AttackArea 1").unwrap();
+        let tot = pack.find_by_name("Time on Target 1").unwrap();
+        let report = pack.find_by_name("OnAreaAttacked 1").unwrap();
+        let home_goto = pack.find_by_name("Goto WP 2").unwrap();
+        let home = pack.find_by_name("WP 2").unwrap();
+        let force = pack
+            .find_by_name("Force Complete - High")
+            .unwrap()
+            .index
+            .unwrap();
+        assert!(wp1.targets.contains(&atk_delay.index.unwrap()));
+        assert!(
+            wp1.targets.contains(&tot.index.unwrap()),
+            "OnAreaAttacked between the attack and Time on Target must not leave TOT unpulsed, got {:?}",
+            wp1.targets
+        );
+        assert!(!wp1.targets.contains(&attack.index.unwrap()));
+        assert!(!atk_delay.targets.contains(&tot.index.unwrap()));
+        assert!(report.targets.contains(&home_goto.index.unwrap()));
+        assert!(
+            tot.targets.contains(&home_goto.index.unwrap()),
+            "Time on Target must still start the home Goto when abort events Then it, got {:?}",
+            tot.targets
+        );
+        assert!(home_goto.targets.contains(&force));
+        assert!(home_goto.targets.contains(&home.index.unwrap()));
+    }
+
+    #[test]
     fn mission_complete_after_goto_is_pulsed_from_waypoint() {
         let mut opts = one_mig();
         opts.waypoint_count = 1;
@@ -7904,7 +10041,11 @@ mod tests {
             );
         }
         let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
-        let kinds: Vec<_> = loaded.options.seats[0].orders.iter().map(|o| o.kind).collect();
+        let kinds: Vec<_> = loaded.options.seats[0]
+            .orders
+            .iter()
+            .map(|o| o.kind)
+            .collect();
         assert_eq!(
             kinds,
             vec![
@@ -7913,9 +10054,12 @@ mod tests {
                 OrderKind::MissionComplete,
             ]
         );
-        assert!(loaded.options.seats[0].events.iter().all(|e| {
-            e.then == EventThen::Order(2)
-        }));
+        assert!(
+            loaded.options.seats[0]
+                .events
+                .iter()
+                .all(|e| { e.then == EventThen::Order(2) })
+        );
     }
 
     #[test]
@@ -7962,10 +10106,7 @@ mod tests {
                 ..OrderSpec::default()
             },
         ];
-        assert_eq!(
-            order_tree_columns(&after_attack),
-            vec![vec![0], vec![1, 2]]
-        );
+        assert_eq!(order_tree_columns(&after_attack), vec![vec![0], vec![1, 2]]);
         let events = vec![
             EventHook {
                 kind: EntityEvent::OnPlaneBingoBombs,
@@ -8084,10 +10225,7 @@ mod tests {
         );
         assert_eq!(
             order_tree_layout(&spawned_then_form, &[]),
-            vec![
-                vec![OrderTreeNode::Order(0)],
-                vec![OrderTreeNode::Order(1)],
-            ]
+            vec![vec![OrderTreeNode::Order(0)], vec![OrderTreeNode::Order(1)],]
         );
         let takeoff_report = vec![
             OrderSpec {
@@ -8171,6 +10309,84 @@ mod tests {
         );
     }
 
+    fn kind_order(kind: OrderKind) -> OrderSpec {
+        OrderSpec {
+            kind,
+            ..OrderSpec::default()
+        }
+    }
+
+    #[test]
+    fn shift_report_moves_onto_the_neighbor_column() {
+        let mut orders = vec![
+            kind_order(OrderKind::TakeOff),
+            kind_order(OrderKind::OnTookOff),
+            kind_order(OrderKind::Formation),
+        ];
+        let mut events = vec![EventHook {
+            kind: EntityEvent::OnPilotKilled,
+            then: EventThen::Order(0),
+        }];
+        assert!(tree_order_can_shift(&orders, 1, 1));
+        let moved = shift_tree_order(&mut orders, &mut events, 1, 1).unwrap();
+        assert_eq!(
+            orders.iter().map(|o| o.kind).collect::<Vec<_>>(),
+            vec![
+                OrderKind::TakeOff,
+                OrderKind::Formation,
+                OrderKind::OnTookOff,
+            ]
+        );
+        assert_eq!(moved, 2);
+        assert_eq!(order_tree_columns(&orders), vec![vec![0], vec![1, 2]]);
+        assert_eq!(events[0].then, EventThen::Order(0));
+        let back = shift_tree_order(&mut orders, &mut events, moved, -1).unwrap();
+        assert_eq!(back, 0);
+        assert_eq!(orders[back].kind, OrderKind::OnTookOff);
+        assert_eq!(order_tree_columns(&orders), vec![vec![0, 1], vec![2]]);
+        assert_eq!(events[0].then, EventThen::Order(1));
+    }
+
+    #[test]
+    fn shift_command_carries_the_report_stacked_on_it() {
+        let mut orders = vec![
+            kind_order(OrderKind::TakeOff),
+            kind_order(OrderKind::OnTookOff),
+            kind_order(OrderKind::Formation),
+        ];
+        let mut events = vec![EventHook {
+            kind: EntityEvent::OnPilotKilled,
+            then: EventThen::Order(0),
+        }];
+        let moved = shift_tree_order(&mut orders, &mut events, 0, 1).unwrap();
+        assert_eq!(
+            orders.iter().map(|o| o.kind).collect::<Vec<_>>(),
+            vec![
+                OrderKind::Formation,
+                OrderKind::TakeOff,
+                OrderKind::OnTookOff,
+            ]
+        );
+        assert_eq!(moved, 1);
+        assert_eq!(order_tree_columns(&orders), vec![vec![0], vec![1, 2]]);
+        assert_eq!(events[0].then, EventThen::Order(1));
+        assert!(!tree_order_can_shift(&orders, 2, 1));
+        assert!(shift_tree_order(&mut orders, &mut events, 2, 1).is_none());
+    }
+
+    #[test]
+    fn shift_lone_order_swaps_with_the_next_column() {
+        let mut orders = vec![
+            kind_order(OrderKind::GotoWaypoint),
+            kind_order(OrderKind::AttackArea),
+        ];
+        let moved = shift_tree_order(&mut orders, &mut [], 0, 1).unwrap();
+        assert_eq!(moved, 1);
+        assert_eq!(orders[0].kind, OrderKind::AttackArea);
+        assert_eq!(orders[1].kind, OrderKind::GotoWaypoint);
+        assert!(shift_tree_order(&mut orders, &mut [], 0, -1).is_none());
+    }
+
     #[test]
     fn order_tree_puts_onspawned_left_and_events_on_mission_complete() {
         let orders = vec![
@@ -8187,10 +10403,7 @@ mod tests {
                 ..OrderSpec::default()
             },
         ];
-        assert_eq!(
-            order_tree_columns(&orders),
-            vec![vec![0], vec![1], vec![2]]
-        );
+        assert_eq!(order_tree_columns(&orders), vec![vec![0], vec![1], vec![2]]);
         let events = vec![
             EventHook {
                 kind: EntityEvent::OnPlaneCriticalDamage,
@@ -8467,7 +10680,7 @@ mod tests {
         assert_eq!(opts.per_group, 4);
         let kinds: Vec<_> = opts.seats[0].orders.iter().map(|o| o.kind).collect();
         assert_eq!(kinds, vec![OrderKind::Formation, OrderKind::AttackArea]);
-        assert_eq!(opts.seats[0].orders[0].formation_type, 23);
+        assert_eq!(opts.seats[0].orders[0].formation_type, AIR_COLUMN_PAIRS);
         assert!(opts.seats[1].orders.is_empty());
         assert!(opts.seats[0].unit.script.contains("mig15bis"));
         assert_eq!(opts.seats[0].country, 501);
@@ -8580,7 +10793,13 @@ mod tests {
         let loaded = load_template(&root, &bundled_catalog()).unwrap();
         assert!(!loaded.native_format);
         assert_eq!(loaded.options.seats.len(), 3);
-        assert!(loaded.options.seats.iter().all(|s| s.unit.script.contains("t34-85")));
+        assert!(
+            loaded
+                .options
+                .seats
+                .iter()
+                .all(|s| s.unit.script.contains("t34-85"))
+        );
         assert_eq!(loaded.options.seats[0].country, 503);
         let area = loaded.options.seats[0]
             .orders
@@ -8594,7 +10813,10 @@ mod tests {
         assert_eq!(loaded.options.zone_coalition, ZoneCoalition::Both);
         assert_eq!(loaded.options.bring_up, BringUp::Activate);
         assert!(
-            loaded.warnings.iter().any(|w| w.contains("not in Template Builder format")),
+            loaded
+                .warnings
+                .iter()
+                .any(|w| w.contains("not in Template Builder format")),
             "{:?}",
             loaded.warnings
         );
@@ -8604,7 +10826,10 @@ mod tests {
             loaded.warnings
         );
         assert!(
-            loaded.warnings.iter().any(|w| w.contains("OnKilled") || w.contains("Damaged")),
+            loaded
+                .warnings
+                .iter()
+                .any(|w| w.contains("OnKilled") || w.contains("Damaged")),
             "expected dropped OnKilled → Damaged Counter, got {:?}",
             loaded.warnings
         );
@@ -8619,5 +10844,563 @@ mod tests {
         let mut root = Il2Entity::new("Group");
         root.set_name("Empty");
         assert!(load_template(&root, &[]).is_err());
+    }
+
+    fn targets_of(pack: &Il2Entity, id: i32) -> Vec<i32> {
+        let mut out = None;
+        pack.for_each(&mut |e| {
+            if e.index == Some(id) {
+                out = Some(e.targets.clone());
+            }
+        });
+        out.unwrap_or_default()
+    }
+
+    #[test]
+    fn cap_diamond_loops_at_low_priority_until_abort() {
+        let mut opts = one_mig();
+        let wing = opts.seats[0].clone();
+        opts.seats[0].role = FlightRole::Lead;
+        opts.seats.push(wing);
+        opts.seats[1].role = FlightRole::Follows(0);
+        apply_mission_package(&mut opts.seats, 0, MissionPackage::Cap, 4_000.0).unwrap();
+        assert_eq!(opts.seats[0].orders.len(), 5);
+        assert_eq!(opts.seats[0].orders[0].priority, 0);
+        assert_eq!(opts.seats[0].orders[3].loop_to, Some(1));
+        assert_eq!(opts.seats[0].orders[4].priority, 2);
+        assert_eq!(opts.seats[1].orders.len(), 0);
+        assert_eq!(opts.seats[1].events.len(), 4);
+        assert!(
+            opts.seats[1]
+                .events
+                .iter()
+                .filter(|e| e.then != EventThen::AllDestroyed)
+                .all(|e| e.then == EventThen::Order(4))
+        );
+        assert!(
+            opts.seats[1]
+                .events
+                .iter()
+                .any(|e| { e.kind == EntityEvent::OnKilled && e.then == EventThen::AllDestroyed })
+        );
+
+        let pack = generate_template(&opts).unwrap();
+        let wp1 = pack.find_by_name("WP 1").unwrap();
+        let wp4 = pack.find_by_name("WP 4").unwrap();
+        let wp5 = pack.find_by_name("WP 5").unwrap();
+        assert_eq!(wp1.property("Priority"), Some("0"));
+        assert_eq!(wp5.property("Priority"), Some("2"));
+        assert!(wp4.targets.contains(&wp1.index.unwrap()));
+        assert!(!wp1.targets.contains(&wp5.index.unwrap()));
+        assert!(pack.find_by_name("Goto WP 1").is_some());
+        assert!(pack.find_by_name("Goto WP 2").is_some());
+        assert!(pack.find_by_name("Goto WP 3").is_some());
+        assert!(pack.find_by_name("Return to WP 1").is_some());
+        assert!(pack.find_by_name("Goto WP 5").is_some());
+        assert!(pack.find_by_name("Goto WP 4").is_none());
+        let (north, east) = (
+            opts.seats[0].orders[1].wp_north_m.unwrap(),
+            opts.seats[0].orders[1].wp_east_m.unwrap(),
+        );
+        let wp2 = pack.find_by_name("WP 2").unwrap();
+        let x: f64 = wp2.property("XPos").unwrap().parse().unwrap();
+        let z: f64 = wp2.property("ZPos").unwrap().parse().unwrap();
+        assert!((x - (40_000.0 + f64::from(north))).abs() < 1.0);
+        assert!((z - (40_000.0 + f64::from(east))).abs() < 1.0);
+        assert!((east - 4_000.0).abs() < 1.0, "east point of the diamond");
+
+        let force = pack
+            .find_by_name("Force Complete - High")
+            .unwrap()
+            .index
+            .unwrap();
+        let once = pack.find_by_name("Go Home Once 1").unwrap();
+        assert_eq!(once.block_type, "MCU_Counter");
+        assert_eq!(once.property("Counter"), Some("1"));
+        assert_eq!(once.property("Dropcount"), Some("0"));
+        let home_goto = pack.find_by_name("Goto WP 5").unwrap();
+        assert_eq!(once.targets, vec![home_goto.index.unwrap()]);
+        let abort = entity_events(&pack)
+            .into_iter()
+            .find(|(ty, _)| *ty == 8)
+            .expect("bingo guns")
+            .1;
+        assert_eq!(abort, once.index.unwrap());
+        assert!(home_goto.targets.contains(&force));
+        assert!(home_goto.targets.contains(&wp5.index.unwrap()));
+
+        let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
+        assert!(loaded.native_format);
+        let orders = &loaded.options.seats[0].orders;
+        assert_eq!(orders[0].kind, OrderKind::GotoWaypoint);
+        assert_eq!(orders[0].waypoint, 1);
+        assert_eq!(orders[0].priority, 0);
+        assert_eq!(orders[0].loop_to, None);
+        assert_eq!(orders[1].waypoint, 2);
+        assert_eq!(orders[1].loop_to, None);
+        assert_eq!(orders[2].waypoint, 3);
+        assert_eq!(orders[3].waypoint, 4);
+        assert_eq!(orders[3].loop_to, Some(1));
+        assert_eq!(orders[3].priority, 0);
+        assert_eq!(orders[4].waypoint, 5);
+        assert_eq!(orders[4].priority, 2);
+        assert_eq!(orders[4].loop_to, None);
+        // WP 1 sits on the default north line, so it keeps no explicit offset.
+        // The east and south corners do not, and must come back.
+        assert!((orders[1].wp_east_m.unwrap() - 4_000.0).abs() < 1.0);
+        assert!(orders[2].wp_north_m.unwrap() < -1_000.0);
+        assert!(loaded.options.seats[0].events.iter().any(|e| {
+            e.kind == EntityEvent::OnPlaneBingoMainMG && e.then == EventThen::Order(4)
+        }));
+    }
+
+    #[test]
+    fn strike_attacks_for_two_minutes_then_rtb() {
+        let plane = builtin_plane_catalog()
+            .into_iter()
+            .find(|u| u.script.contains("f51d"))
+            .expect("F-51D");
+        let mut opts = TemplateOptions::default();
+        opts.seats = vec![TemplateSeat::new(plane)];
+        opts.seats[0].country = 601;
+        opts.waypoint_count = 0;
+        let applied =
+            apply_mission_package(&mut opts.seats, 0, MissionPackage::Strike, 4_000.0).unwrap();
+        assert!(applied.disable_zone_out);
+        assert!(applied.detail.contains("Loadout"), "{}", applied.detail);
+        opts.zone_out_enabled = false;
+        assert_ne!(opts.seats[0].payload_id, 0);
+        assert!((opts.seats[0].altitude - AIR_START_ALTITUDE_M).abs() < 0.1);
+        assert_eq!(opts.seats[0].start_type, PlaneStart::Air.as_i32());
+        let orders = &opts.seats[0].orders;
+        assert_eq!(orders[0].kind, OrderKind::Formation);
+        assert_eq!(orders[0].formation_type, AIR_COLUMN_PAIRS);
+        assert_eq!(orders[1].kind, OrderKind::GotoWaypoint);
+        assert_eq!(orders[1].priority, 1);
+        assert_eq!(orders[2].kind, OrderKind::AttackArea);
+        assert_eq!(orders[2].priority, 2);
+        assert!((orders[2].time_s - 120.0).abs() < 0.1);
+        assert!((orders[2].attack_area - 3000.0).abs() < 0.1);
+        assert!(orders[2].attack_ground);
+        assert!(!orders[2].attack_air);
+        assert_eq!(orders[3].kind, OrderKind::OnAreaAttacked);
+        assert_eq!(orders[4].kind, OrderKind::TimeOnTarget);
+        assert!((orders[4].time_s - 120.0).abs() < 0.1);
+        assert_eq!(orders[5].kind, OrderKind::GotoWaypoint);
+        assert_eq!(orders[5].priority, 2);
+        assert_eq!(orders[6].kind, OrderKind::MissionComplete);
+        let geo = strike_geometry(true, STRIKE_START_M);
+        assert!(strike_turn_deg(geo) >= 30.0, "{}", strike_turn_deg(geo));
+        let ip_d = orders[1]
+            .wp_north_m
+            .unwrap()
+            .hypot(orders[1].wp_east_m.unwrap());
+        assert!((ip_d - STRIKE_IP_M).abs() < 1.0, "{ip_d}");
+        assert!((orders[5].wp_north_m.unwrap() - geo.start_north).abs() < 1.0);
+        assert!(
+            opts.seats[0]
+                .events
+                .iter()
+                .filter(|e| e.then != EventThen::AllDestroyed)
+                .all(|e| e.then == EventThen::Order(5))
+        );
+        assert!(
+            opts.seats[0]
+                .events
+                .iter()
+                .any(|e| { e.kind == EntityEvent::OnKilled && e.then == EventThen::AllDestroyed })
+        );
+        let laid = order_tree_layout(orders, &opts.seats[0].events);
+        let attack_col = &laid[2];
+        let labels: Vec<_> = attack_col
+            .iter()
+            .map(|n| match n {
+                OrderTreeNode::Event(ei) => opts.seats[0].events[*ei].kind.label().to_string(),
+                OrderTreeNode::Order(oi) => orders[*oi].kind.label().to_string(),
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "OnPlaneCriticalDamage",
+                "OnPilotWounded",
+                "OnBingoBombs",
+                "OnAreaAttacked",
+                "AttackArea",
+                "Time on Target",
+            ]
+        );
+
+        let pack = generate_template(&opts).unwrap();
+        assert!(pack.find_by_name("STRIKE END").is_none());
+        let hub = pack.find_by_name("MISSION END").unwrap();
+        let wipe = pack.find_by_name(ALL_DESTROYED).unwrap();
+        assert_eq!(wipe.block_type, "MCU_Counter");
+        assert_eq!(wipe.property("Counter"), Some("1"));
+        assert_eq!(wipe.property("Dropcount"), Some("0"));
+        assert_eq!(wipe.targets, vec![hub.index.unwrap()]);
+        let destroyed = entity_events(&pack)
+            .into_iter()
+            .filter(|(t, tar)| *t == 13 && *tar == wipe.index.unwrap())
+            .count();
+        assert_eq!(destroyed, 1);
+        let ip = pack.find_by_name("WP 1").unwrap();
+        let home = pack.find_by_name("WP 2").unwrap();
+        let attack_delay = pack.find_by_name("AttackArea 1").unwrap();
+        let tot = pack.find_by_name("Time on Target 1").unwrap();
+        let home_goto = pack.find_by_name("Goto WP 2").unwrap();
+        assert_eq!(tot.property("Time"), Some("120"));
+        assert!(ip.targets.contains(&attack_delay.index.unwrap()));
+        assert!(
+            ip.targets.contains(&tot.index.unwrap()),
+            "IP must pulse Time on Target beside AttackArea, got {:?}",
+            ip.targets
+        );
+        assert!(
+            !attack_delay.targets.contains(&tot.index.unwrap()),
+            "AttackArea and Time on Target are parallel, not in series"
+        );
+        assert!(
+            tot.targets.contains(&home_goto.index.unwrap()),
+            "Time on Target must start the home Goto, got {:?}",
+            tot.targets
+        );
+        assert!(!tot.targets.is_empty(), "Time on Target must have a target");
+        assert!(!ip.targets.contains(&home.index.unwrap()));
+        let done = pack.find_by_name("Mission Complete 1").unwrap();
+        assert!(home.targets.contains(&done.index.unwrap()));
+        let report = pack.find_by_name("OnAreaAttacked 1").unwrap();
+        let force = pack
+            .find_by_name("Force Complete - High")
+            .unwrap()
+            .index
+            .unwrap();
+        let once = pack.find_by_name("Go Home Once 1").unwrap();
+        assert_eq!(once.property("Counter"), Some("1"));
+        assert_eq!(once.property("Dropcount"), Some("0"));
+        assert_eq!(once.targets, vec![home_goto.index.unwrap()]);
+        let abort = entity_events(&pack)
+            .into_iter()
+            .find(|(ty, _)| *ty == 9)
+            .expect("bingo bombs")
+            .1;
+        assert_eq!(abort, once.index.unwrap());
+        assert!(
+            report.targets.contains(&home_goto.index.unwrap()),
+            "OnAreaAttacked still starts the home Goto directly"
+        );
+        assert!(!report.targets.contains(&once.index.unwrap()));
+        assert!(
+            !home_goto.targets.contains(&force),
+            "home Goto must not pulse Force Complete with the waypoint, got {:?}",
+            home_goto.targets
+        );
+        assert!(home_goto.targets.contains(&home.index.unwrap()));
+        assert!(done.targets.contains(&hub.index.unwrap()));
+        let end_orders = pack.find_by_name("MISSION END ORDERS").unwrap();
+        assert!(
+            end_orders.targets.contains(&force),
+            "Force Complete runs from mission cleanup after arrival"
+        );
+        let (hx, hz) = home.pos_xz().unwrap();
+        let (ix, iz) = ip.pos_xz().unwrap();
+        let mut plane_at_home = false;
+        pack.for_each(&mut |e| {
+            if e.block_type == "Plane" {
+                assert_eq!(e.property("StartType"), Some("0"));
+                assert_eq!(e.property("YPos"), Some("1500.000"));
+                let (px, pz) = e.pos_xz().unwrap();
+                plane_at_home = (px - hx).abs() < 1.0 && (pz - hz).abs() < 1.0;
+                let yori: f64 = e.property("YOri").unwrap().parse().unwrap();
+                let face = heading_toward(px, pz, ix, iz);
+                let gap = (yori - face).rem_euclid(360.0);
+                assert!(
+                    gap < 1.0 || gap > 359.0,
+                    "formation faces the IP, {yori} vs {face}"
+                );
+            }
+        });
+        assert!(plane_at_home, "final waypoint is the aircraft start");
+        let (ix, iz) = ip.pos_xz().unwrap();
+        let ip_world = (ix - ORIGIN_X).hypot(iz - ORIGIN_Z);
+        assert!((ip_world - f64::from(STRIKE_IP_M)).abs() < 1.0);
+        let zone_in = pack.find_by_name("Zone IN").unwrap();
+        let (zx, zz) = zone_in.pos_xz().unwrap();
+        assert!((zx - ORIGIN_X).abs() < 1.0 && (zz - ORIGIN_Z).abs() < 1.0);
+        let end = pack.find_by_name("MISSION END").unwrap().index.unwrap();
+        assert!(
+            !pack
+                .find_by_name("Zone Out")
+                .unwrap()
+                .targets
+                .contains(&end)
+        );
+        let form = pack.find_by_name("Formation").unwrap();
+        assert_eq!(form.property("FormationType"), Some("4"));
+        assert_eq!(form.property("FormationDensity"), Some("2"));
+        assert_eq!(form.property("FlightSize"), Some("1"));
+        assert_eq!(form.property("WaitForWingmen"), Some("1"));
+        assert_eq!(form.objects.len(), 1);
+        let linked = form.objects[0];
+        let mut saw_plane = false;
+        let mut saw_entity = false;
+        pack.for_each(&mut |e| {
+            if e.block_type == "Plane" {
+                let link: i32 = e.property("LinkTrId").unwrap().parse().unwrap();
+                assert_eq!(link, linked);
+                saw_plane = true;
+            }
+            if e.index == Some(linked) {
+                assert_eq!(e.block_type, "MCU_TR_Entity");
+                saw_entity = true;
+            }
+        });
+        assert!(
+            saw_plane && saw_entity,
+            "formation Objects is the plane entity"
+        );
+        let area = pack.find_by_name("AttackArea").unwrap();
+        assert_eq!(area.property("Priority"), Some("2"));
+        assert!(pack.find_by_name("Goto WP 1").is_some());
+        assert!(pack.find_by_name("Goto WP 2").is_some());
+        assert!(pack.find_by_name("Return to WP 1").is_none());
+        let loaded = load_template(&pack, &builtin_plane_catalog()).unwrap();
+        let kinds: Vec<_> = loaded.options.seats[0]
+            .orders
+            .iter()
+            .map(|o| o.kind.label())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                "Formation",
+                "Goto WP",
+                "AttackArea",
+                "OnAreaAttacked",
+                "Time on Target",
+                "Goto WP",
+                "Mission Complete",
+            ],
+            "{kinds:?}"
+        );
+        let loaded_orders = &loaded.options.seats[0].orders;
+        assert_eq!(loaded_orders[1].waypoint, 1);
+        assert_eq!(loaded_orders[1].loop_to, None);
+        assert_eq!(loaded_orders[2].priority, 2);
+        assert_eq!(loaded_orders[4].kind, OrderKind::TimeOnTarget);
+        assert!((loaded_orders[4].time_s - 120.0).abs() < 0.1);
+        assert_eq!(loaded_orders[5].kind, OrderKind::GotoWaypoint);
+        assert_eq!(loaded_orders[5].waypoint, 2);
+        assert_eq!(loaded_orders[5].priority, 2);
+        assert_eq!(loaded_orders[5].loop_to, None);
+        assert!(
+            loaded.options.seats[0]
+                .events
+                .iter()
+                .filter(|e| e.then != EventThen::AllDestroyed)
+                .all(|e| e.then == EventThen::Order(5))
+        );
+        assert!(
+            loaded.options.seats[0]
+                .events
+                .iter()
+                .any(|e| { e.kind == EntityEvent::OnKilled && e.then == EventThen::AllDestroyed })
+        );
+
+        let dprk = strike_geometry(false, STRIKE_START_M);
+        assert!(dprk.start_north > 0.0 && dprk.start_east.abs() < 1.0);
+        assert!(strike_turn_deg(dprk) >= 30.0);
+    }
+
+    #[test]
+    fn all_destroyed_counts_every_attacker_once() {
+        let mut opts = one_mig();
+        let wing = opts.seats[0].clone();
+        opts.seats[0].role = FlightRole::Lead;
+        opts.seats.push(wing);
+        opts.seats[1].role = FlightRole::Follows(0);
+        apply_mission_package(&mut opts.seats, 0, MissionPackage::Strike, 4_000.0).unwrap();
+        let pack = generate_template(&opts).unwrap();
+        let wipe = pack.find_by_name(ALL_DESTROYED).unwrap();
+        let end = pack.find_by_name("MISSION END").unwrap().index.unwrap();
+        assert_eq!(wipe.property("Counter"), Some("2"));
+        assert_eq!(wipe.property("Dropcount"), Some("0"));
+        assert_eq!(wipe.targets, vec![end]);
+        let hits = entity_events(&pack)
+            .into_iter()
+            .filter(|(t, tar)| *t == 13 && *tar == wipe.index.unwrap())
+            .count();
+        assert_eq!(hits, 2);
+        let loaded = load_template(&pack, &[]).unwrap();
+        assert!(loaded.warnings.iter().all(|w| !w.contains(ALL_DESTROYED)));
+        assert!(
+            loaded.warnings.iter().all(|w| !w.contains("Go Home Once")),
+            "{:?}",
+            loaded.warnings
+        );
+        assert!(loaded.options.seats.iter().all(|s| {
+            s.events
+                .iter()
+                .any(|e| e.kind == EntityEvent::OnKilled && e.then == EventThen::AllDestroyed)
+        }));
+    }
+
+    #[test]
+    fn new_aircraft_with_no_height_start_in_the_air() {
+        let mut unit = catalog_plane("f51d");
+        unit.object.set_property("YPos", "0.000");
+        unit.object.set_property("StartType", "1");
+        let seat = TemplateSeat::new(unit);
+        assert_eq!(seat.altitude, AIR_START_ALTITUDE_M);
+        assert_eq!(seat.start_type, PlaneStart::Air.as_i32());
+    }
+
+    #[test]
+    fn two_flights_can_aim_separate_attack_areas() {
+        let root = two_flight_group();
+        let attacks = separable_flight_attacks(&root);
+        assert_eq!(attacks.len(), 1);
+        assert_eq!(attacks[0].ordinal, 1);
+        assert_eq!(attacks[0].lead_name, "Blue");
+        let mut moved = root.clone();
+        place_flight_attack_areas(&mut moved, &[(1, 9_000.0, 1_000.0)]);
+        let mut areas = Vec::new();
+        moved.for_each(&mut |e| {
+            if e.block_type == "MCU_CMD_AttackArea" {
+                areas.push(e.pos_xz().unwrap());
+            }
+        });
+        assert!((areas[0].0 - 0.0).abs() < 0.1 && areas[0].1.abs() < 0.1);
+        assert!((areas[1].0 - 9_000.0).abs() < 0.1 && (areas[1].1 - 1_000.0).abs() < 0.1);
+        let mut one_area = root.clone();
+        one_area
+            .children
+            .retain(|c| c.name() != Some("Attack Blue"));
+        assert!(separable_flight_attacks(&one_area).is_empty());
+        let mut one_flight = root.clone();
+        one_flight
+            .find_by_name_mut("Blue")
+            .unwrap()
+            .set_property("NumberInFormation", "1");
+        assert!(
+            separable_flight_attacks(&one_flight).is_empty(),
+            "one flight keeps a single target"
+        );
+    }
+
+    fn two_flight_group() -> Il2Entity {
+        let mut root = Il2Entity::new("Group");
+        root.set_name("Two flights");
+        root.children = vec![
+            formation_plane(1, 11, "Red", 0, 0.0),
+            formation_plane(2, 21, "Blue", 0, 500.0),
+            attack_area(3, "Attack Red", 0.0, 11),
+            attack_area(4, "Attack Blue", 0.0, 21),
+        ];
+        root
+    }
+
+    fn formation_plane(index: i32, entity: i32, name: &str, formation: i32, z: f64) -> Il2Entity {
+        let mut plane = Il2Entity::new("Plane");
+        plane.index = Some(index);
+        plane.set_property("Index", index.to_string());
+        plane.set_name(name);
+        plane.set_property("NumberInFormation", formation.to_string());
+        plane.set_property("LinkTrId", entity.to_string());
+        plane.set_property("XPos", "0.000");
+        plane.set_property("ZPos", format!("{z:.3}"));
+        plane
+    }
+
+    fn attack_area(index: i32, name: &str, x: f64, object: i32) -> Il2Entity {
+        let mut area = Il2Entity::new("MCU_CMD_AttackArea");
+        area.index = Some(index);
+        area.set_property("Index", index.to_string());
+        area.set_name(name);
+        area.set_property("XPos", format!("{x:.3}"));
+        area.set_property("ZPos", "0.000");
+        area.set_objects(vec![object]);
+        area
+    }
+
+    #[test]
+    fn strike_ip_sits_eight_km_off_the_inbound() {
+        let (ix, iz) = strike_ip_toward(20_000.0, 0.0, 0.0, 0.0);
+        assert!((ix.hypot(iz) - f64::from(STRIKE_IP_M)).abs() < 1.0);
+        let bearing = iz.atan2(ix).to_degrees();
+        assert!(
+            (bearing - f64::from(STRIKE_IP_OFFSET_DEG)).abs() < 0.5,
+            "{bearing}"
+        );
+    }
+
+    #[test]
+    fn strike_target_prefers_the_first_class_inside_the_ao() {
+        let priority = default_strike_priority();
+        let candidates = vec![
+            (StrikeTargetClass::Bridges, 10.0, 10.0),
+            (StrikeTargetClass::Tanks, 100.0, 0.0),
+            (StrikeTargetClass::Ships, 0.0, 50.0),
+        ];
+        let picked = pick_strike_target(&priority, &candidates, (0.0, 0.0), |x, z| {
+            x >= 0.0 && z >= 0.0 && x < 200.0
+        })
+        .unwrap();
+        assert_eq!(picked.0, StrikeTargetClass::Tanks);
+        let bridges_first = [StrikeTargetClass::Bridges, StrikeTargetClass::Tanks];
+        let bridge =
+            pick_strike_target(&bridges_first, &candidates, (0.0, 0.0), |_, _| true).unwrap();
+        assert_eq!(bridge.0, StrikeTargetClass::Bridges);
+        assert!((bridge.1 - 10.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn retarget_puts_zone_in_on_the_target_and_planes_on_the_edge() {
+        let plane = builtin_plane_catalog()
+            .into_iter()
+            .find(|u| u.script.contains("f51d"))
+            .expect("F-51D");
+        let mut opts = TemplateOptions::default();
+        opts.seats = vec![TemplateSeat::new(plane)];
+        opts.seats[0].country = 501;
+        apply_mission_package(&mut opts.seats, 0, MissionPackage::Strike, 4_000.0).unwrap();
+        let mut pack = generate_template(&opts).unwrap();
+        let target = (120_000.0, 80_000.0);
+        let start_m = ao_edge_distance_m(
+            100_000.0, 140_000.0, 70_000.0, 90_000.0, target.0, target.1, false,
+        );
+        assert!(
+            (start_m - 20_000.0).abs() < 1.0,
+            "due north to the AO edge, {start_m}"
+        );
+        assert!(retarget_strike_group(
+            &mut pack, target.0, target.1, false, start_m
+        ));
+        let (zx, zz) = pack.find_by_name("Zone IN").unwrap().pos_xz().unwrap();
+        assert!((zx - target.0).abs() < 1.0 && (zz - target.1).abs() < 1.0);
+        let (hx, hz) = pack.find_by_name("WP 2").unwrap().pos_xz().unwrap();
+        assert!((hx - (target.0 + f64::from(start_m))).abs() < 1.0);
+        assert!((hz - target.1).abs() < 1.0);
+        let mut saw_plane = false;
+        pack.for_each(&mut |e| {
+            if e.block_type == "Plane" {
+                let (px, pz) = e.pos_xz().unwrap();
+                assert!((px - hx).abs() < 1.0 && (pz - hz).abs() < 1.0);
+                saw_plane = true;
+            }
+        });
+        assert!(saw_plane);
+        let (ix, iz) = pack.find_by_name("WP 1").unwrap().pos_xz().unwrap();
+        let ip = (ix - target.0).hypot(iz - target.1);
+        assert!((ip - f64::from(STRIKE_IP_M)).abs() < 1.0);
+    }
+
+    #[test]
+    fn mission_package_refuses_a_vehicle() {
+        let mut opts = TemplateOptions::default();
+        opts.seats = vec![TemplateSeat::new(catalog_vehicle())];
+        let err =
+            apply_mission_package(&mut opts.seats, 0, MissionPackage::Cap, 4_000.0).unwrap_err();
+        assert!(err.contains("aircraft"), "{err}");
     }
 }
