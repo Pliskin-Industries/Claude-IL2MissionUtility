@@ -37,4 +37,10 @@ Replay: `il2_mission_utility replay --group handoff/p14-probes/acceptance-a0/P14
 
 ## Results
 
-(To be filled after the flight.)
+Flown 2026-10-27, session `2026-10-27_17-53-51`, logs `src/testdata/missionlog/real_44/`. **All five predictions held.** Full table and reading: `handoff/P14-probe-results.md`, "Flight A0".
+
+- Loaded on the first attempt; mission time kept pace with wall time; left at about 38:20.
+- Slots opened at 600.16 s (NATO), 960.16 s (DPRK) and 2,160.16 s (both). A NATO jitter step that passed at 780.16 s opened nothing, as the latch should.
+- No `GO`, no sortie, no threshold or zone breadcrumb; no object spawned during the run; no dead links.
+
+Still open for A1: the player air starts and the NATO Fighters Wave 1 question above.
