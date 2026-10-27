@@ -3488,7 +3488,6 @@ fn air_tasking_standalone_matches_public_builder_and_keeps_seed() {
 }
 
 #[test]
-#[ignore = "needs step 7"]
 fn air_tasking_generate_disabled_until_validate_passes() {
     use crate::airtask::{self, IssueSeverity};
     let mut h = Harness::new("air_validate");
@@ -3514,7 +3513,6 @@ fn air_tasking_generate_disabled_until_validate_passes() {
 }
 
 #[test]
-#[ignore = "needs step 7"]
 fn air_tasking_generate_file_writes_air_pack() {
     let mut h = Harness::new("air_file_step7");
     h.tab("Air Tasking");
@@ -3548,7 +3546,6 @@ fn air_tasking_generate_file_writes_air_pack() {
 }
 
 #[test]
-#[ignore = "needs step 7"]
 fn air_tasking_totals_above_limit_are_orange_and_do_not_block_generate() {
     let mut h = Harness::new("air_limits");
     h.tab("Air Tasking");
