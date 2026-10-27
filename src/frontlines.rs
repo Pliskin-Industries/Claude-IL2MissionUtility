@@ -68,6 +68,10 @@ const EAST_B: i32 = 0;
 const BATTLE_RADIUS: f64 = 12_000.0;
 const ARROW_LENGTH: f64 = 32_000.0;
 pub const ARROW_TAIL_WIDTH: f64 = 4_200.0;
+/// Vertex 4 of an attack arrow sits this fraction of the half tail width off the
+/// tip, toward the first tail corner's side (`attack_arrow_points`). Load
+/// moves it back (`arrow_tail_tip`), so arrow tips survive a round trip.
+const ARROW_TIP_INSET: f64 = 0.12;
 /// Include reference groups this far outside the drawn AO.
 pub const PLACE_MARGIN: f64 = 10_000.0;
 /// Clear this much on each side of the front between the two influence areas.
@@ -1778,10 +1782,19 @@ fn attack_arrows_from_group(group: &Il2Entity) -> Vec<((f64, f64), (f64, f64))> 
         .collect()
 }
 
+/// Inverse of `attack_arrow_points`: the tail is the midpoint of the two tail
+/// corners, and the tip is vertex 4 moved back across the arrow by the inset
+/// the writer applied (`ARROW_TIP_INSET` of the half tail width).
 fn arrow_tail_tip(pts: &[(f64, f64)]) -> Option<((f64, f64), (f64, f64))> {
     if pts.len() >= 6 {
         let tail = ((pts[0].0 + pts[1].0) * 0.5, (pts[0].1 + pts[1].1) * 0.5);
-        let tip = pts[4];
+        // pts[1] - pts[0] spans the full tail width across the arrow, so half
+        // of it times the inset is the offset the writer applied.
+        let back = 0.5 * ARROW_TIP_INSET;
+        let tip = (
+            pts[4].0 + (pts[1].0 - pts[0].0) * back,
+            pts[4].1 + (pts[1].1 - pts[0].1) * back,
+        );
         if (tip.0 - tail.0).hypot(tip.1 - tail.1) < 1.0 {
             return None;
         }
@@ -2117,7 +2130,10 @@ pub fn attack_arrow_points(tail: (f64, f64), tip: (f64, f64), tail_width: f64) -
         (tail.0 + px * hw, tail.1 + pz * hw),
         rail(0.33, hw * 0.85),
         rail(0.66, hw * 0.55),
-        (tip.0 - px * hw * 0.12, tip.1 - pz * hw * 0.12),
+        (
+            tip.0 - px * hw * ARROW_TIP_INSET,
+            tip.1 - pz * hw * ARROW_TIP_INSET,
+        ),
         rail(0.82, hw * 1.05),
     ]
 }
@@ -3619,6 +3635,46 @@ mod tests {
         assert_eq!(imported.armies.len(), 1);
         assert!(imported.armies[0].eastern);
         assert!(imported.fighters.is_empty());
+    }
+
+    #[test]
+    fn user_attack_arrows_round_trip_through_load() {
+        // Generate, then Load, then Generate again: each arrow's tail and tip
+        // come back where they were drawn (no sideways offset, no drift).
+        let custom = vec![
+            (130_000.0, 200_000.0),
+            (128_000.0, 240_000.0),
+            (132_000.0, 280_000.0),
+        ];
+        let arrows = vec![
+            ((140_000.0, 220_000.0), (145_000.0, 250_000.0)),
+            ((120_000.0, 210_000.0), (138_000.0, 214_000.0)),
+            ((150_000.0, 270_000.0), (120_000.0, 255_000.0)),
+            ((110_000.0, 260_000.0), (110_000.0, 230_000.0)),
+        ];
+        let mut opts = FrontOptions {
+            aabb: WorldAabb::from_corners(100_000.0, 200_000.0, 160_000.0, 280_000.0),
+            front: true,
+            battles: false,
+            buildups: false,
+            defenses: false,
+            attacks: false,
+            naval: false,
+            custom_front: Some(custom),
+            user_attacks: arrows.clone(),
+            ..FrontOptions::default()
+        };
+        for round in 0..2 {
+            let pack = generate_front(&opts).unwrap();
+            let imported = inspect_base_map(&pack.root).expect("inspect");
+            assert_eq!(imported.attack_arrows.len(), arrows.len(), "round {round}");
+            for (&(tail, tip), &(t, p)) in arrows.iter().zip(&imported.attack_arrows) {
+                let off = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1);
+                assert!(off(tail, t) < 1.0, "round {round}: tail {t:?} for {tail:?}");
+                assert!(off(tip, p) < 1.0, "round {round}: tip {p:?} for {tip:?}");
+            }
+            opts.user_attacks = imported.attack_arrows;
+        }
     }
 
     #[test]

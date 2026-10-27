@@ -608,16 +608,18 @@ pub(crate) mod air_export_tests {
             aabb: opts.aabb,
             date: ctx.date,
         };
-        // The arrow round trip reads the offset vertex as its tip (252 m).
-        // That known Map issue is left for its own change, beyond the 50 m match.
+        // Arrow tips survive the Load round trip, so the arrow entry keeps
+        // its target and the plan stays clean.
         let issues = airtask::validate(plan, &ctx);
-        assert_eq!(issues.len(), 1, "{issues:?}");
-        assert_eq!(issues[0].severity, airtask::IssueSeverity::Warning);
-        assert!(issues[0].text.contains("DPRK Entry 2") && issues[0].text.contains("orphaned target"));
-        assert!(!issues[0].rail_only);
+        assert!(issues.is_empty(), "{issues:?}");
         opts.air_packs = airtask::build_air_packs(plan, &ctx).unwrap();
         let regenerated = frontlines::generate_front(&opts).unwrap().root;
-        assert_eq!(regenerated.children.iter().filter(|g| g.name() == Some("Air Tasking")).count(), 1);
+        let air: Vec<_> = regenerated.children.iter().filter(|g| g.name() == Some("Air Tasking")).collect();
+        assert_eq!(air.len(), 1);
+        for side in ["DPRK", "NATO"] {
+            let sorties = format!("Air Tasking {side} Sorties");
+            assert!(air[0].children.iter().any(|g| g.name() == Some(sorties.as_str())), "missing {sorties}");
+        }
         let reloaded = frontlines::inspect_base_map(&regenerated).unwrap();
         assert_eq!(reloaded.armies.len(), baseline.armies.len());
         assert_eq!(reloaded.fighters.len(), baseline.fighters.len());
