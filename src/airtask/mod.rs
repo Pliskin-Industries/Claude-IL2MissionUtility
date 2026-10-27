@@ -8,6 +8,7 @@ use std::path::PathBuf;
 mod assemble;
 mod budget;
 mod clock;
+mod export;
 mod library;
 mod place;
 #[cfg(test)]
@@ -77,6 +78,12 @@ impl AirSide {
             AirSide::Nato => "NATO",
         }
     } // user-facing text and group names
+    pub fn other(self) -> AirSide {
+        match self {
+            AirSide::Dprk => AirSide::Nato,
+            AirSide::Nato => AirSide::Dprk,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -445,18 +452,22 @@ pub fn weighted_random_pct(weights: &[u32]) -> Vec<u8> {
         })
         .collect()
 }
-pub fn build_air_packs(_plan: &AirPlan, _ctx: &AirContext) -> Result<Vec<MapAirPack>, String> {
-    Ok(vec![])
-} // step 7
-pub fn preview(_plan: &AirPlan, _ctx: &AirContext) -> AirPreview {
-    AirPreview::default()
-} // step 7
-pub fn validate(_plan: &AirPlan, _ctx: &AirContext) -> Vec<AirIssue> {
-    vec![]
-} // step 7; feeds readiness_checks
-pub fn totals(_plan: &AirPlan, _ctx: &AirContext) -> AirTotals {
-    AirTotals::default()
-} // step 7; counted from build_air_packs output
+/// Build the deterministic Air Tasking pack for export.
+pub fn build_air_packs(plan: &AirPlan, ctx: &AirContext) -> Result<Vec<MapAirPack>, String> {
+    export::build_air_packs(plan, ctx)
+}
+/// Preview the plan's geometry and clock slots without building.
+pub fn preview(plan: &AirPlan, ctx: &AirContext) -> AirPreview {
+    export::preview(plan, ctx)
+}
+/// Report readiness errors and warnings for the plan.
+pub fn validate(plan: &AirPlan, ctx: &AirContext) -> Vec<AirIssue> {
+    export::validate(plan, ctx)
+}
+/// Count the generated pack's copies, aircraft, MCUs and check zones.
+pub fn totals(plan: &AirPlan, ctx: &AirContext) -> AirTotals {
+    export::totals(plan, ctx)
+}
 
 #[cfg(test)]
 mod tests {

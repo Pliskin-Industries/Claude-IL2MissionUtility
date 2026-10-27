@@ -7660,6 +7660,7 @@ impl super::GroupGeneratorApp {
             fighter_packs,
             ship_packs,
             ground_packs,
+            air_packs: Vec::new(),
         };
         let mut pack = match generate_front(&opts) {
             Ok(p) => p,

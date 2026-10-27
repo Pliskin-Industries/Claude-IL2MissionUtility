@@ -334,11 +334,12 @@ pub struct MapGroundPack {
 }
 
 /// One air-tasking sortie pack parked on the map.
-#[allow(dead_code)] // P14
 #[derive(Debug, Clone)]
 pub struct MapAirPack {
     pub root: Il2Entity,
 }
+
+pub const AIR_TASKING_GROUP: &str = "Air Tasking";
 
 /// A previously generated Korea base map, split back into Map-mode pieces.
 #[derive(Clone, Debug)]
@@ -349,6 +350,8 @@ pub struct ImportedBaseMap {
     pub attack_arrows: Vec<((f64, f64), (f64, f64))>,
     pub fighters: Vec<ImportedFighterPack>,
     pub armies: Vec<ImportedArmy>,
+    #[allow(dead_code)] // P14: read by the Map Load UI in step 9.
+    pub air_tasking_found: bool,
     pub refs: Vec<MapRefGroup>,
     pub year: Option<u16>,
     pub season: Option<Season>,
@@ -399,6 +402,8 @@ pub struct FrontOptions {
     pub ship_packs: Vec<MapShipPack>,
     /// Randomizer ground packs parked on open terrain (one per coalition).
     pub ground_packs: Vec<MapGroundPack>,
+    /// Air Tasking packs with each side's logic and placed sorties.
+    pub air_packs: Vec<MapAirPack>,
 }
 
 impl Default for FrontOptions {
@@ -423,6 +428,7 @@ impl Default for FrontOptions {
             fighter_packs: Vec::new(),
             ship_packs: Vec::new(),
             ground_packs: Vec::new(),
+            air_packs: Vec::new(),
         }
     }
 }
@@ -1132,6 +1138,7 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
         && opts.fighter_packs.is_empty()
         && opts.ship_packs.is_empty()
         && opts.ground_packs.is_empty()
+        && opts.air_packs.is_empty()
     {
         return Err("enable at least one layer.".into());
     }
@@ -1461,6 +1468,11 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
         children.extend(groups);
     }
 
+    if !opts.air_packs.is_empty() {
+        let groups = stamp_rooted_packs(opts.air_packs.iter().map(|p| &p.root), &mut next_id);
+        children.extend(groups);
+    }
+
     let (border, bn) = aoi_border_group(aabb, &proto, &mut next_id, &mut locale, &mut next_lc);
     icon_count += bn;
     children.push(border);
@@ -1571,11 +1583,16 @@ pub fn inspect_base_map(root: &Il2Entity) -> Result<ImportedBaseMap, String> {
 
     let mut fighters = Vec::new();
     let mut armies = Vec::new();
+    let mut air_tasking_found = false;
     for child in &root.children {
         if child.block_type != "Group" {
             continue;
         }
         let name = child.name().unwrap_or("");
+        if name == AIR_TASKING_GROUP {
+            air_tasking_found = true;
+            continue;
+        }
         if MAP_LAYER_NAMES.iter().any(|n| *n == name) {
             continue;
         }
@@ -1629,6 +1646,7 @@ pub fn inspect_base_map(root: &Il2Entity) -> Result<ImportedBaseMap, String> {
         attack_arrows,
         fighters,
         armies,
+        air_tasking_found,
         refs,
         year,
         season,
