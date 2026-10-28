@@ -76,5 +76,6 @@ What this makes easier, harder or necessary.
 | [0038](0038-used-sortie-copy-goes-quiet.md) | A used sortie copy goes quiet at DONE HUB: DONE HUB OFF switches off its timers, zones and counter | Accepted |
 | [0039](0039-map-undo-keeps-air-plan-only-for-dock-edits.md) | Map undo keeps the Air Tasking plan only for the Air dock's own edits | Accepted |
 | [0040](0040-parked-player-keeps-drawing-sorties.md) | A player parked inside an Air Tasking area keeps drawing sorties | Accepted |
+| [0041](0041-trace-build-traces-the-whole-file.md) | A trace build from the UI traces decision points across the whole file, plus the P14 names on Map and Air Tasking | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
