@@ -1,6 +1,6 @@
 # 2026-10-27 — P14 acceptance, flight A1 (a NATO player parked at K14): run sheet
 
-**Status: built, not flown.** The coordinating session flies it after the user confirms the computer is free. Decision 0036 (acceptance before step 9); A0 (no pilot) is in `2026-10-27-p14-acceptance-a0.md`.
+**Status: flown 2026-10-28 (two sessions; results at the end).** The parked part could not be flown on this PC (no respawn); the rest was flown with the player orbiting K14. Decision 0036 (acceptance before step 9); A0 (no pilot) is in `2026-10-27-p14-acceptance-a0.md`.
 
 **Why this flight.** No flight has tested a player who spawns inside an Air Tasking area, or one who stays still. Plan §3.5 lists "a plane already inside when the mission loads is not seen until it re-enters" as an unflown weakness. In A1 the entry trigger is on from Mission Begin and the player spawns inside it later. A1 is also the first flight with a winner: a sortie start, transit, on-station time, extension, end and deletion, the zone front end and the budget.
 
@@ -114,3 +114,53 @@ T0 = 120 s, both first rolls pass, jitter step 1 in every slot. The real draws d
 
 1. **Is it wanted that a player parked at their own airfield inside an area keeps drawing sorties every slot?** (Design question.) The threshold cannot tell a parked or landed player from one loitering in the air: while the player sits at K14, the area stays HOT, each clock slot can start an Il-10 copy, and each zone entry re-arms 15 min after its copy ends, until each entry's three copies are used. A check zone has no altitude or speed filter, so "airborne only" would need another mechanism. A1 shows how it plays out.
 2. **The Map's own AI aircraft on a player country** (601 / 501) start Air Tasking sorties in real missions. Export puts Air Tasking's own AI on 602 / 503; should it do the same for the Map's AI aircraft? It changes Generate output, so it is the user's call: decision record `docs/decisions/0037-map-ai-off-player-countries.md` (Proposed).
+
+## Results (flown 2026-10-28)
+
+Flown by Claude on this PC (game `261013`), keyboard only. Two log sessions, both from the frozen mission `P14_Acceptance_A1_20261027`:
+
+- **Run 1**, session `2026-10-28_02-46-26`, logs `src/testdata/missionlog/real_45/` (25 files): the parked spawn (P2).
+- **Run 2**, session `2026-10-28_03-00-07`, logs `src/testdata/missionlog/real_46/` (221 files): the fallback air start, then an orbit over K14 instead of parking. Mission end logged at about 2,453 s; mission time kept pace with wall time (0.97×). The game showed "Multiplayer server overload" once, at about 1,900 s.
+- Replay of each: `target/p14/acceptance_a1_report.md` (run 2) and `target/p14/acceptance_a1_run1_report.md` (not committed). **No dead links** in either.
+
+**Change from the run sheet.** After the first flight ended (Finish Mission, run 1) and after the player was shot down (run 2), the briefing screen showed "Waiting for mission results…" and never cleared; **Start stayed disabled**, so the player could not spawn again in that session. Run 2 is the server's reload of the mission (a new session), where the air start was the first spawn. With no respawn at K14, the player was not parked after the pass: it orbited over K14 at 500 m (a held left turn with the level-flight helper, about 380 km/h). The orbit drifted, so some presence checks found the player more than 6 km away.
+
+### Run 1 (parked at K14)
+
+| Id | Flown |
+|---|---|
+| P1 | **yes**: loads; `MFile` names the mission; the spawn menu offered `K-14_Kimpo_AF` (F-80C, ground start) and "P14 A1 NATO air start" |
+| P2 | **Not seen.** Spawn at 57.2 s at (105,934.1; 269,477.0), the area centre, country 601. No `THD01 INNER` and no `THD01 CLOSE DELAY` by 155 s (spawn + 98 s), nor later: the only breadcrumbs were Mission Begin's. A ground spawn inside the switched-on entry trigger does not count as entering it. |
+
+### Run 2 (air start, then an orbit over K14)
+
+Times are mission seconds from the breadcrumbs. Player spawn 63.6 s at (85,968; 269,477), 499 m, heading 0°.
+
+| Id | Flown |
+|---|---|
+| P2 (entry by flying in) | The trigger fired when the player crossed the 6 km ring at speed (about 144.6 s; the player reached 780 km/h). The check at DWELL + 0.1 found the player already 6 km past the centre: `THD01 CLOSE DELAY` 206.74 s (COLD). The trigger re-armed, and each later re-entry gave `THD01 INNER` 60.1 s later: 443.94, 874.28 and 1,898.30 s |
+| P3 | **yes**, while the player stayed within 6 km: `THD01 INNER` every **120.00 s** (443.94 → 563.94; 874.28 → … → 1,594.28, seven in a row). Each time the orbit drifted out, the next check failed: `THD01 CLOSE DELAY` at 685.98, 783.04, 1,716.32, 1,797.92 s, then 2,020.34 s after the player's death |
+| P4 | **yes.** First pass 443.94: both rolls missed, `ZD02 MISS WAIT` 444.94 (+1.00), `ZD01 MISS WAIT` 445.58 (+1.64). `ZD02 COOLDOWN` 1,344.94 and `ZD01 COOLDOWN` 1,345.58 (miss + 900 s). Pass 1,354.28: `ZD02 CHANCE` +0.10, `ZD02 FIRE` and **`SD05 START` +0.14** (Il-10 #2); `ZD01 MISS WAIT` +1.64 (miss); `ZD01 COOLDOWN` again at 2,255.92. No Yak copy started |
+| P5 | **yes.** DPRK tick 1: `CLK D JITTER 1` and `SLOT OPEN` 600.10, **`ED02 GO` and `SD04 START` 600.90** (area HOT since 443.94): Il-10 #1. `JITTER 2` at 780.10 opened nothing (latch). DPRK tick 2 (1,800 s): quiet, no jitter step passed. NATO: `SLOT OPEN` 960.10 (`JITTER 3`) and 1,980.10 (`JITTER 2`), `EN01 RANDOM` after each; never a NATO `GO`, `START`, threshold or zone breadcrumb |
+| P6 | Il-10s seen on the map over K14 from about 830 s; activation lines not counted |
+| P7 | **yes**: `Zone IN` 861.42 (SD04, s + 260.5) and 1,615.28 (SD05, s + 260.9); predicted s + 279 ± 30 |
+| P8 | **yes**: `SD04 ON STATION` 1,461.92 = Zone IN + 600.5; no `SD04 COLD` (the area was HOT) |
+| P9 | **Not tested cleanly**: SD04 had ended early (P11) before its extension was due. `SD04 EXTEND` still logged at 2,061.92 (ON STATION + 600), with no second `DONE HUB` |
+| P10 | **yes**: `SD04 DELETE DELAY` and `SD05 DELETE DELAY` 1,962.46 = DONE HUB + 60.6 |
+| P11 | **`Zone Out` fired**, for both copies, at **1,901.86 s, 3.06 s after the player was shot down** (1,898.80): `SD04 DONE HUB` and `SD05 DONE HUB` in the same tick. No other NATO plane can be placed within 35 km from the text log at that time (no Tacview). Read: the last watched plane leaving by dying fires `Zone Out` |
+| P12 | No `LOSSES`. Five Il-10s were destroyed (834.4, 976.5, 1,053.2, 1,212.2, 1,759.1 s; four of them SD04's), three NATO wave aircraft (834.4, 1,530.1, 1,792.4 s) |
+| P13 | **yes**: `BUD D COUNT` 1,354.70 after `SD05 START` (two DPRK copies flying); no third start. No refusal came up |
+| P14 | **yes**: no exhaustion |
+| P15 | Wave aircraft (blue) over K14 from about 900 s and fighting the raid; country 602 cannot fire `THD01 TRIGGER` |
+| P16 | **The raid killed the player**: an Il-10 (AID 541696, gunfire) shot the orbiting F-80C at 500 m over K14, 1,898.80 s. No Air Tasking logic reacted to the death itself; the next check failed (`THD01 CLOSE DELAY` 2,020.34). No respawn (see above) |
+| P17 | **yes**: no dead links |
+
+### Not predicted
+
+- **A copy's timers keep running after it ends early.** After `Zone Out` → `DONE HUB` (1,901.86) and deletion (1,962.46): `Zone IN` logged again for both copies at 2,035.12 (a NATO plane, not identified, came within 35 km); `SD04 EXTEND` at 2,061.92 (its on-station timer); `SD05 ON STATION` and `SD05 COLD` at 2,215.78 (Zone IN 1,615.28 + 600.5, area COLD). None of them logged a second `DONE HUB` or `DELETE DELAY`, and nothing started. Whether a late `DONE HUB` path could fire for a deleted copy (zone `COOLDOWN`, budget recount) needs a look in the shell's wiring. **Fixed by decision 0038** (2026-10-28, branch `claude/p14-shell-quiet-a24002`, commit `ed4a3a1`, not merged): `DONE HUB OFF` now also switches off the copy's `HARD STOP`, `ON STATION`, `EXTEND`, `LOSSES`, zones and attack timers. A trace found no harmful path before the fix: every late pulse ended at the latched `DONE HUB` or at a breadcrumb.
+- **Presence checks run every 120.00 s, not 120.1 s.**
+
+### Still open
+
+- **The parked player (question 1 below)** was not flown: P2 shows a parked spawn starts nothing, and this PC cannot respawn. A player who lands at K14 after flying in (the user, piloted) is the case still to see.
+- P9 (one extension, then the turn for home) and a budget refusal (P13) were not seen.

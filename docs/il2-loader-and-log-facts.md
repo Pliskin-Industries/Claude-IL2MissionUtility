@@ -143,3 +143,13 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **A switched-off Complex Trigger reports nothing**, and it does not report later what crossed it while it was off (KB). Its country filter holds when it is switched on (KC).
 - **An aircraft activated inside a switched-off trigger is not reported as entering when the trigger is switched on** (KA).
 - A Yak-9P pair with its `Country` changed to 601 or 602 flies a 2 km waypoint octagon at 3050 m and 500 km/h and stays inside a 6 km circle: every control zone and every ZonePulse check found it inside.
+
+## Found on 2026-10-28 (flight A1, game 1.005)
+
+- **A player who spawns inside a switched-on Complex Trigger is not reported as entering.** A ground start at K14, at the centre of a 6 km country-601 trigger that had been on since Mission Begin, fired nothing in 98 s or later. Flying in across the ring fired it. So a player at an airfield inside an Air Tasking area is not seen until they leave the ring and come back (or land there after flying in, not yet flown).
+- **A check zone pulsed by a 120 s timer runs every 120.00 s**, not 120 + 0.1 s.
+- **When the last plane a "Zone Out" check zone watches dies, it fires** (3.06 s after the kill in flight A1), as if the plane had left.
+- **On this PC, the client that hosts cannot spawn twice in one session.** After Finish Mission, or after being shot down, the briefing shows "Waiting for mission results…", which never clears, and Start stays disabled. Leaving to the results screen and letting the server reload the mission starts a new session, where the first spawn works. Plan piloted tests with one spawn per session.
+- **Il-10 rear gunners shoot down a fighter that orbits over their target at their height** (F-80C at 500 m over K14).
+- **Computer use, game display:** the game sometimes stops repainting for screen capture (and drops clicks) for tens of seconds; a mouse-wheel scroll over the page or map makes it repaint. On the briefing map, the second button on the left toolbar is a protractor, not "centre on me": clicking it again turns it off.
+- **Flying an orbit by keyboard:** with the level-flight helper on, holding LAlt+Z gives a steady left turn (about 4°/s at 380 km/h, radius about 1.5 km), but the circle drifts a few km in 3 to 5 minutes; check the minimap every minute. An air start may begin with the helper already on (LShift+A shows "Helper disabled" on the first press).
