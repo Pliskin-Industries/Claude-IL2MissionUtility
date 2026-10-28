@@ -8,7 +8,7 @@ use super::assemble::{
 use super::place::{SortiePlacement, spawn_point};
 use super::shell::group;
 use super::{
-    AirContext, AirIssue, AirLine, AirPlan, AirPoint, AirPreview, AirRing, AirSide, AirTotals,
+    AirCheck, AirContext, AirIssue, AirLine, AirPlan, AirPoint, AirPreview, AirRing, AirSide, AirTotals,
     BudgetImpl, IssueSeverity, SideLogic, SlotMark, SortieSource, TriggerMode, budget, clock,
     threshold, timing, zone,
 };
@@ -261,9 +261,21 @@ fn build_side(
     Ok(SideTrees { logic, sorties })
 }
 
+#[cfg(test)]
+thread_local! {
+    static EVALUATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn evaluations() -> usize {
+    EVALUATIONS.with(|n| n.get())
+}
+
 /// Each public operation evaluates once. Validation reuses the completed tree
 /// for totals, and builders never call back into the public entry points.
 fn evaluate(plan: &AirPlan, ctx: &AirContext<'_>) -> (Vec<MapAirPack>, Vec<AirIssue>) {
+    #[cfg(test)]
+    EVALUATIONS.with(|n| n.set(n.get() + 1));
     let (eligible, mut issues) = entries(plan, ctx);
     issues.extend(locale_issues(plan, &eligible));
     if eligible.is_empty() {
@@ -368,6 +380,7 @@ pub(super) fn build_air_packs(
     }
 }
 
+#[cfg(test)] // `check` serves the UI
 pub(super) fn validate(plan: &AirPlan, ctx: &AirContext<'_>) -> Vec<AirIssue> {
     evaluate(plan, ctx).1
 }
@@ -400,6 +413,23 @@ fn count_totals(packs: &[MapAirPack]) -> AirTotals {
     totals
 }
 
+/// One evaluation for the UI: `validate`'s issues, `totals` (zero when the
+/// plan cannot build, as `totals` gives) and the geometry-only `preview`.
+pub(super) fn check(plan: &AirPlan, ctx: &AirContext<'_>) -> AirCheck {
+    let (packs, issues) = evaluate(plan, ctx);
+    let totals = if blocking(&issues).is_some() {
+        AirTotals::default()
+    } else {
+        count_totals(&packs)
+    };
+    AirCheck {
+        issues,
+        totals,
+        preview: preview(plan, ctx),
+    }
+}
+
+#[cfg(test)] // `check` serves the UI
 pub(super) fn totals(plan: &AirPlan, ctx: &AirContext<'_>) -> AirTotals {
     build_air_packs(plan, ctx)
         .map(|packs| count_totals(&packs))
@@ -1286,6 +1316,27 @@ mod tests {
                 .count() as u32;
         }
         result
+    }
+
+    /// The UI's one call: the same answers as validate, totals and preview,
+    /// for one evaluation instead of three.
+    #[test]
+    fn check_matches_validate_totals_and_preview_in_one_evaluation() {
+        for factory in [export_test_plan as fn() -> _, acceptance_test_plan] {
+            let (plan, input) = factory();
+            let ctx = input.context();
+            let before = super::super::evaluations();
+            let check = super::super::check(&plan, &ctx);
+            assert_eq!(super::super::evaluations(), before + 1);
+            assert_eq!(check.issues, super::super::validate(&plan, &ctx));
+            assert_eq!(check.totals, super::super::totals(&plan, &ctx));
+            assert_eq!(check.preview, super::super::preview(&plan, &ctx));
+        }
+        let (mut plan, input) = export_test_plan();
+        plan.budget.per_side = [0, 0];
+        let check = super::super::check(&plan, &input.context());
+        assert!(check.issues.iter().any(|issue| issue.blocks_build()));
+        assert_eq!(check.totals, AirTotals::default(), "a plan that cannot build counts nothing");
     }
 
     #[test]

@@ -3583,23 +3583,43 @@ fn air_tasking_totals_above_limit_are_orange_and_do_not_block_generate() {
 
 // ── P14 step 9: Air Tasking on the Map tab ──────────────────────────────
 
-/// validate, totals and preview each run a full build: one build per change.
+/// Issues, totals and preview come from one `airtask::check`, cached per plan
+/// and Map inputs: one full evaluation per plan change, none per frame.
 #[test]
 fn air_checks_build_once_per_plan_change() {
     let mut h = Harness::new("air_cache");
     h.tab("Air Tasking");
     fill_air_pool(&mut h);
-    let builds = h.app.air_eval_builds();
-    assert!(builds > 0, "the Air Tasking tab reads the cache");
+    let evaluations = crate::airtask::evaluations();
+    assert!(evaluations > 0, "the Air Tasking tab evaluated the plan");
     for _ in 0..10 {
         h.step(Vec::new());
     }
     h.tab("Map");
     h.tab("Air Tasking");
-    assert_eq!(h.app.air_eval_builds(), builds, "an unchanged plan is not rebuilt");
+    assert_eq!(crate::airtask::evaluations(), evaluations, "an unchanged plan is not evaluated again");
     h.app.air_plan.pool[0].weight = 9;
     h.settle();
-    assert_eq!(h.app.air_eval_builds(), builds + 1, "one change, one build");
+    assert_eq!(crate::airtask::evaluations(), evaluations + 1, "one change, one evaluation");
+}
+
+/// The settings panel reads a draft of the plan while the other panels read
+/// the live plan: the cache keeps both, so going back and forth costs nothing.
+#[test]
+fn air_check_cache_keeps_the_live_plan_and_a_draft() {
+    let mut h = Harness::new("air_cache_draft");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let mut draft = h.app.air_plan.clone();
+    draft.pool[0].weight = 9;
+    let before = crate::airtask::evaluations();
+    h.app.with_air_context(|ctx| {
+        for _ in 0..3 {
+            h.app.air_eval(&h.app.air_plan, ctx);
+            h.app.air_eval(&draft, ctx);
+        }
+    });
+    assert_eq!(crate::airtask::evaluations(), before + 1, "only the draft is new");
 }
 
 /// Map tab, Air dock open, `air_targets` on the map and an empty pool.

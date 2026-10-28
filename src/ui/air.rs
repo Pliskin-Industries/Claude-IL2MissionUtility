@@ -6,8 +6,7 @@ use crate::frontlines::preview_front_xz;
 use crate::mapclip::apply_salients;
 use super::map::{draw_dashed_world_circle, faction_map_color, world_to_pos};
 use crate::airtask::{
-    self, AirContext, AirDrawCounts, AirIssue, AirPlan, AirPreview, AirSide, AirSortie, AirTotals,
-    BudgetImpl,
+    self, AirCheck, AirContext, AirDrawCounts, AirIssue, AirPlan, AirSide, AirSortie, BudgetImpl,
     EntryStatus, IssueSeverity, PoolEntry, SlotMark, SortieSource, TargetChoice, TargetKind,
     TriggerMode, Ymd,
 };
@@ -16,20 +15,15 @@ use std::rc::Rc;
 
 type Edit = Option<(egui::Id, String)>;
 
-/// One Air Tasking evaluation. `validate` and `totals` each run a full build,
-/// so the result is kept for the plan and Map inputs it was made from.
-pub(super) struct AirEval {
-    pub(super) issues: Vec<AirIssue>,
-    pub(super) totals: AirTotals,
-    pub(super) preview: AirPreview,
-}
-
+/// The last two `airtask::check` results, by plan and Map inputs. Two, because
+/// the settings panel reads a draft of the plan while the other panels read
+/// the live plan; one slot would rebuild both every frame they differ.
 #[derive(Default)]
 pub(super) struct AirEvalCache {
-    last: RefCell<Option<(u64, Rc<AirEval>)>>,
-    #[cfg(test)]
-    builds: std::cell::Cell<usize>,
+    slots: RefCell<Vec<(u64, Rc<AirCheck>)>>,
 }
+
+const AIR_EVAL_SLOTS: usize = 2;
 
 /// Which Air Tasking layers the Map draws (the Air dock tab's SHOW section).
 pub(super) struct AirShow {
@@ -160,35 +154,25 @@ impl GroupGeneratorApp {
             .clicked();
     }
 
-    /// The plan's issues, totals and preview for these Map inputs, built once
-    /// per change. `plan` may be a panel's draft of `air_plan`.
-    pub(super) fn air_eval(&self, plan: &AirPlan, ctx: &AirContext) -> Rc<AirEval> {
+    /// The plan's issues, totals and preview for these Map inputs, evaluated
+    /// once per change. `plan` may be a panel's draft of `air_plan`.
+    pub(super) fn air_eval(&self, plan: &AirPlan, ctx: &AirContext) -> Rc<AirCheck> {
         let key = air_eval_key(plan, ctx);
-        if let Some((last, eval)) = &*self.air_eval_cache.last.borrow()
-            && *last == key
-        {
-            return eval.clone();
+        let mut slots = self.air_eval_cache.slots.borrow_mut();
+        if let Some(i) = slots.iter().position(|(k, _)| *k == key) {
+            let hit = slots.remove(i);
+            let check = hit.1.clone();
+            slots.insert(0, hit);
+            return check;
         }
-        let eval = Rc::new(AirEval {
-            issues: airtask::validate(plan, ctx),
-            totals: airtask::totals(plan, ctx),
-            preview: airtask::preview(plan, ctx),
-        });
-        #[cfg(test)]
-        self.air_eval_cache
-            .builds
-            .set(self.air_eval_cache.builds.get() + 1);
-        *self.air_eval_cache.last.borrow_mut() = Some((key, eval.clone()));
-        eval
-    }
-
-    #[cfg(test)]
-    pub(super) fn air_eval_builds(&self) -> usize {
-        self.air_eval_cache.builds.get()
+        let check = Rc::new(airtask::check(plan, ctx));
+        slots.insert(0, (key, check.clone()));
+        slots.truncate(AIR_EVAL_SLOTS);
+        check
     }
 
     /// `air_eval` for the live plan and the current Map inputs.
-    pub(super) fn air_eval_now(&self) -> Rc<AirEval> {
+    pub(super) fn air_eval_now(&self) -> Rc<AirCheck> {
         self.with_air_context(|ctx| self.air_eval(&self.air_plan, ctx))
     }
 

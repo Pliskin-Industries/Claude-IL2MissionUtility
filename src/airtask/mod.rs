@@ -440,6 +440,13 @@ pub struct AirIssue {
     pub text: String,
     pub rail_only: bool, // true only for "no enabled valid entry": an Error on the Air Tasking tab, an orange note on Map (§6.1)
 }
+/// What `check` returns: the same values as `validate`, `totals` and `preview`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AirCheck {
+    pub issues: Vec<AirIssue>,
+    pub totals: AirTotals,
+    pub preview: AirPreview,
+}
 impl AirIssue {
     /// True when the issue stops `build_air_packs`, and so Map's Generate.
     /// The `rail_only` error only leaves the air pack out.
@@ -471,16 +478,29 @@ pub fn build_air_packs(plan: &AirPlan, ctx: &AirContext) -> Result<Vec<MapAirPac
     export::build_air_packs(plan, ctx)
 }
 /// Preview the plan's geometry and clock slots without building.
+#[cfg(test)] // the UI reads it through `check`, one evaluation for all three
 pub fn preview(plan: &AirPlan, ctx: &AirContext) -> AirPreview {
     export::preview(plan, ctx)
 }
 /// Report readiness errors and warnings for the plan.
+#[cfg(test)] // the UI reads it through `check`, one evaluation for all three
 pub fn validate(plan: &AirPlan, ctx: &AirContext) -> Vec<AirIssue> {
     export::validate(plan, ctx)
 }
 /// Count the generated pack's copies, aircraft, MCUs and check zones.
+#[cfg(test)] // the UI reads it through `check`, one evaluation for all three
 pub fn totals(plan: &AirPlan, ctx: &AirContext) -> AirTotals {
     export::totals(plan, ctx)
+}
+/// `validate`, `totals` and `preview` together, from one evaluation of the
+/// plan: what the UI shows and checks, at the cost of one build.
+pub fn check(plan: &AirPlan, ctx: &AirContext) -> AirCheck {
+    export::check(plan, ctx)
+}
+/// How many full evaluations this thread has run (tests of the UI's cache).
+#[cfg(test)]
+pub fn evaluations() -> usize {
+    export::evaluations()
 }
 
 #[cfg(test)]
