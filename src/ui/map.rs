@@ -7854,6 +7854,9 @@ impl super::GroupGeneratorApp {
         let cleared = std::mem::take(&mut self.air_plan.pool).len();
         self.air_selected = None;
         self.air_editing = None;
+        // Load cannot be undone: no Ctrl Z may bring back a state from before it.
+        self.map_undo.clear();
+        self.air_undo.clear();
         if let Some(aabb) = imported.aabb {
             self.front_aabb = aabb;
         }
@@ -8050,7 +8053,7 @@ impl super::GroupGeneratorApp {
             Status::Warn {
                 lead,
                 items: vec![
-                    "Loaded map had Air Tasking; Generate will replace it with the current plan (removed if the plan is empty).".into(),
+                    "The loaded map had Air Tasking. It is not loaded back: Generate writes only the current plan, and its pool is now empty.".into(),
                 ],
             }
         } else {

@@ -3867,7 +3867,7 @@ fn map_undo_is_dropped_by_a_later_air_edit() {
     assert!(h.app.map_undo.peek().is_none(), "the weight edit drops the Auto-fill undo");
 }
 
-const AIR_LOAD_WARNING: &str = "Loaded map had Air Tasking; Generate will replace it with the current plan (removed if the plan is empty).";
+const AIR_LOAD_WARNING: &str = "The loaded map had Air Tasking. It is not loaded back: Generate writes only the current plan, and its pool is now empty.";
 
 #[test]
 fn load_base_map_with_air_tasking_is_not_an_army() {
@@ -3996,4 +3996,37 @@ fn map_unsaved_follows_the_air_plan_only_when_included() {
     h.app.mark_saved(AppMode::Map);
     h.app.air_plan.budget.per_side[0] = 3;
     assert!(h.app.is_dirty(AppMode::Map));
+}
+
+/// Load cannot be undone: Ctrl Z after Load brings back neither the pool
+/// nor the Map state from before it, on the Map tab or the Air Tasking tab.
+#[test]
+fn ctrl_z_after_load_does_not_restore_the_pre_load_state() {
+    let mut h = Harness::new("air_load_undo");
+    h.tab("Map");
+    air_targets(&mut h);
+    h.app.air_plan.pool.clear();
+    h.settle();
+    let out = h.out("base_map_no_air.Group");
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    // An Air Tasking tab edit and a Map dock edit, each with its own undo.
+    h.tab("Air Tasking");
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.app.air_plan.pool.len(), 14);
+    h.tab("Map");
+    h.click("Air");
+    h.click_at(h.find_prefix("Remove entry ").rect.center());
+    assert_eq!(h.app.air_plan.pool.len(), 13);
+    dialog::answer(vec![out]);
+    h.app.load_base_map();
+    assert!(h.app.map_undo.peek().is_none() && h.app.air_undo.peek().is_none(), "Load leaves no undo to a state before it");
+    h.settle();
+    assert!(h.app.air_plan.pool.is_empty() && h.app.east_objectives.is_empty());
+    h.key_with(Key::Z, CTRL);
+    assert!(h.app.air_plan.pool.is_empty(), "Map's Ctrl Z after Load brought back the pool");
+    assert!(h.app.east_objectives.is_empty(), "Map's Ctrl Z after Load brought back the objectives");
+    h.tab("Air Tasking");
+    h.key_with(Key::Z, CTRL);
+    assert!(h.app.air_plan.pool.is_empty(), "Air Tasking's Ctrl Z after Load brought back the pool");
 }
