@@ -494,6 +494,11 @@ mod tests {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
+    // Acceptance flights A1 onward, and the checks of every frozen
+    // acceptance flight (src/airtask/export_acceptance_flights.rs).
+    #[path = "../../export_acceptance_flights.rs"]
+    mod acceptance_flights;
+
     struct TestContext {
         opts: FrontOptions,
         front: Vec<(f64, f64)>,
@@ -1498,7 +1503,15 @@ mod tests {
     }
 
     fn acceptance_mission() -> (frontlines::FrontPack, trace::TraceMap) {
-        let (plan, mut input) = acceptance_test_plan();
+        let (plan, input) = acceptance_test_plan();
+        traced_acceptance_mission(plan, input)
+    }
+
+    /// The Map's Generate with the plan's Air Tasking packs, as a trace build.
+    fn traced_acceptance_mission(
+        plan: AirPlan,
+        mut input: TestContext,
+    ) -> (frontlines::FrontPack, trace::TraceMap) {
         assert!(!plan.debug_subtitles);
         input.opts.air_packs = super::super::build_air_packs(&plan, &input.context()).unwrap();
         let mut mission = frontlines::generate_front(&input.opts).unwrap();
@@ -1768,31 +1781,47 @@ mod tests {
     #[ignore = "writes target/p14/P14_Acceptance_1.Group, locale and trace sidecars"]
     fn write_p14_acceptance_mission() {
         let (mission, map) = acceptance_mission();
-        let dir = Path::new("target/p14");
-        std::fs::create_dir_all(dir).expect("create target/p14");
-        let path = dir.join("P14_Acceptance_1.Group");
+        let written =
+            write_acceptance_files(Path::new("target/p14"), "P14_Acceptance_1", &mission, &map);
+        report_written(&written, &map);
+    }
+
+    /// Writes `<dir>/<stem>.Group`, its locale sidecars and its `.trace.json`,
+    /// and returns the paths in that order.
+    fn write_acceptance_files(
+        dir: &Path,
+        stem: &str,
+        mission: &frontlines::FrontPack,
+        map: &trace::TraceMap,
+    ) -> Vec<PathBuf> {
+        std::fs::create_dir_all(dir).expect("create the acceptance output directory");
+        let path = dir.join(format!("{stem}.Group"));
         std::fs::write(&path, serialize::serialize_group(&mission.root))
             .expect("write acceptance Group");
-        let tables = acceptance_locales(&mission);
+        let tables = acceptance_locales(mission);
         locale::write_sidecars(&path, &tables).expect("write acceptance locales");
         let sidecar = path.with_extension("trace.json");
-        trace::write_trace_sidecar(&sidecar, &map).unwrap_or_else(|error| {
+        trace::write_trace_sidecar(&sidecar, map).unwrap_or_else(|error| {
             panic!("{error}; acceptance Group and locale files were still written")
         });
-        assert_eq!(trace::read_trace_sidecar(&sidecar).unwrap(), map);
+        assert_eq!(trace::read_trace_sidecar(&sidecar).unwrap(), *map);
+        std::iter::once(path.clone())
+            .chain(locale::LANG_EXTS.iter().map(|ext| path.with_extension(ext)))
+            .chain(std::iter::once(sidecar))
+            .collect()
+    }
+
+    fn report_written(written: &[PathBuf], map: &trace::TraceMap) {
         // Direct output, as in probe.rs, keeps the inventory visible even when
         // libtest captures passing-test stdout without --nocapture.
         use std::io::Write;
         let mut report = std::io::stdout().lock();
-        for written in std::iter::once(path.clone())
-            .chain(locale::LANG_EXTS.iter().map(|ext| path.with_extension(ext)))
-            .chain(std::iter::once(sidecar))
-        {
+        for path in written {
             writeln!(
                 report,
                 "WROTE {} ({} bytes)",
-                written.display(),
-                std::fs::metadata(&written).unwrap().len()
+                path.display(),
+                std::fs::metadata(path).unwrap().len()
             )
             .unwrap();
         }

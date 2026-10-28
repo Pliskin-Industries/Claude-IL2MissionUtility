@@ -942,6 +942,50 @@ Consumer polls (every 20 s from 60 to 780 s, both stand-ins pulsed): in all thre
 - **The default becomes `ZonePulse`**, as decision 0023 laid down for this outcome (decision 0024). Its known weakness stands: an enemy-coalition AI plane inside r_in at a check passes like a player; the entry still needs a player-country plane.
 - The trigger's country filter holds on switch-on (KC, THD02), and a switched-off trigger reports nothing (KB).
 
+## Flight A0 (the acceptance mission, no pilot: does the whole Air Tasking logic load and keep quiet?) — 2026-10-27, one run, no Tacview
+
+First stage of the acceptance test, flown before step 9 (decision 0036; run sheet and predictions `handoff/sessions/2026-10-27-p14-acceptance-a0.md`). `P14_Acceptance_1` from `write_p14_acceptance_mission` on `main` @ `b5acb35` (frozen: `handoff/p14-probes/acceptance-a0/`; 84 Air Tasking aircraft, 1,092 MCUs, 40 check zones, 248 traced sources), built as `P14_Acceptance_A0_20261027` without the resaver and without player spawns. Hosted by the game client on this PC (game `261013`), no pilot, Claude on the briefing screen. Session `2026-10-27_17-53-51`, logs `src/testdata/missionlog/real_44/` (77 files). The host left at about 38:20; mission end logged at 2,334 s. Mission time kept pace with wall time. Replay: `target/p14/acceptance_a0_report.md` (not committed).
+
+| Prediction | Flown |
+|---|---|
+| Loads | **yes**, first attempt; `MFile` names the mission; no loader error. The log's date is the Options block's (1953-07-01), not the plan's |
+| Clock: per side, one `SLOT OPEN` per tick at tick + 0.1 / 180.1 / 360.1 s, or none | NATO tick 1: `JITTER 1` and `SLOT OPEN` at 600.16 s; `JITTER 2` passed again at 780.16 s and **opened nothing** (the latch held). DPRK tick 1: `JITTER 3` and `SLOT OPEN` at 960.16 s. Tick 2, both sides: `JITTER 3` and `SLOT OPEN` at 2,160.16 s. No quiet slot in four. Every time is the predicted one + 0.06 s (Mission Begin logged at 0.06 s) |
+| Nothing launches | **no** `GO`, `START`, `ON STATION`, `DONE HUB` or `DELETE DELAY`; no threshold or zone breadcrumb. NATO's draw picked `EN02 RANDOM` / `EN01 RANDOM` in each slot (600.96, 601.46, 608.96, 2,160.96, 2,163.96 s) and found no entry hot. DPRK's only clock entry (`ED02`, Il-10 `Both`) never passed its gate |
+| The Map's NATO Fighters Wave 1 stays parked | **yes**: no object spawned, flew, took off or was hit during the run. The 84 Air Tasking aircraft appear only in the end-of-mission list, at position 0 |
+| Replay: no dead links; only clock nodes fire | **yes**: no dead links; 10 of 248 sources fired, all Mission Begin or clock |
+
+### What this changes (reading)
+
+- **The whole Air Tasking group loads and runs in the game**: both sides, six built-ins, 1,092 MCUs, 40 check zones. It is the first flight of steps 3 to 7 together.
+- **The clock works as built (decision 0029 B):** first slot at 600 s, period 1,200 s, the jitter steps, and the `SLOT OPEN` latch (a later jitter step that passes opens nothing).
+- **With no player, nothing launches over an empty area**, and no breadcrumb outside the clock fires.
+- Not shown by A0: a winner, a sortie start, the shell, the budget, the zone front end. Those need a player (A1 onward).
+
+## Flight A1 (a NATO player at K14 inside the DPRK area: entry, HOT, zone and clock starts, the shell, the budget) — 2026-10-28, two runs, no Tacview
+
+Second stage of the acceptance test (decision 0036; run sheet, predictions P1–P17 and the full table: `handoff/sessions/2026-10-27-p14-acceptance-a1.md`). `P14_Acceptance_A1` (frozen: `handoff/p14-probes/acceptance-a1/`; one DPRK objective on Kimpo K14, both DPRK entries aimed at it, the Map's NATO Fighters Wave 1 on country 602), built as `P14_Acceptance_A1_20261027`. Flown by Claude on this PC (game `261013`), keyboard only. Run 1: session `2026-10-28_02-46-26`, logs `src/testdata/missionlog/real_45/`. Run 2: session `2026-10-28_03-00-07`, logs `src/testdata/missionlog/real_46/`; mission time 0.97× wall time. Replays: `target/p14/acceptance_a1_report.md`, `…_run1_report.md` (not committed); no dead links.
+
+**Not flown as planned:** on this PC a player cannot spawn twice in one session ("Waiting for mission results…" never clears and Start stays disabled), so the player could not respawn parked at K14. In run 2 the player flew in from the air start and orbited K14 at 500 m instead; the orbit drifted, so some presence checks found it outside 6 km.
+
+| Prediction | Flown |
+|---|---|
+| P2: a player who spawns inside the switched-on entry trigger | **not seen** (run 1): a ground spawn at the area centre gave no `THD01 INNER` or `CLOSE DELAY` in 98 s or later |
+| Entry by flying in; HOT re-checks | the trigger fired at the 6 km ring; each re-entry gave `THD01 INNER` 60.1 s later; while the player stayed inside, `INNER` every **120.00 s** (seven in a row); each drift outside gave `THD01 CLOSE DELAY` (COLD) and the trigger re-armed |
+| Zone front end | first pass: both 50 % rolls missed (`MISS WAIT` +1.00 / +1.64 s), `COOLDOWN` 900 s later; pass at 1,354.28 s: `ZD02 CHANCE`, `FIRE` and **`SD05 START`** at +0.10 / +0.14 s; the Yak entry never passed a roll |
+| Clock | DPRK tick 1: `SLOT OPEN` 600.10, **`ED02 GO` and `SD04 START` 600.90** with the area HOT; a later jitter step opened nothing; tick 2 quiet. NATO slots opened and launched nothing |
+| Shell | `Zone IN` at s + 260.5 / 260.9 s; `SD04 ON STATION` at Zone IN + 600.5, HOT; deletion at `DONE HUB` + 60.6 s |
+| Budget | `BUD D COUNT` after the second start (two flying); no third start |
+| P16: the raid against the player | **an Il-10 gunner shot down the orbiting F-80C** (1,898.80 s). **`Zone Out` fired for both copies 3.06 s later** and ended both raids (`DONE HUB`) |
+
+### What this changes (reading)
+
+- **The DPRK cycle works end to end in the game**: a NATO player entering the area makes it HOT, the presence check holds it HOT, the zone front end and the clock each started an Il-10 copy, the copy flew to K14 and held on station, the budget counted two, and the shell deleted the copies.
+- **A parked spawn inside an area starts nothing** (P2). With flight 2J (a switched-on trigger does not report a plane already inside), a player who spawns at an airfield inside an area is not seen until they leave the ring and come back. Question 1 of the run sheet (should a parked player draw sorties?) is answered for a spawn, not for a player who lands there.
+- **The last watched plane dying fires `Zone Out`** and ends the sorties at once.
+- **A copy's timers keep running after an early end** (`Zone IN`, `EXTEND`, `ON STATION`, `COLD` logged after deletion; no second `DONE HUB`). **Fixed by decision 0038** (2026-10-28, branch `claude/p14-shell-quiet-a24002`, commit `ed4a3a1`, not merged): `DONE HUB OFF` now also switches off the copy's `HARD STOP`, `ON STATION`, `EXTEND`, `LOSSES`, zones and attack timers. A trace found no harmful path before the fix: every late pulse ended at the latched `DONE HUB` or at a breadcrumb.
+- **The player is at risk from the raid it calls in**: Il-10 gunners kill a fighter that orbits over their target at their height.
+- Not shown: the single extension and the turn for home (P9), a budget refusal (P13), a Yak copy, exhaustion.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -986,5 +1030,9 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | new | on an AttackArea over an empty target, HVAR, HVAR without rockets, HVAR with an air order after 120 s, and AirAlert all come down from 3,050 m to a few hundred metres above the ground and hold one altitude, set by the target's place. Losses seen with Tacview were all collisions inside a formation, in every phase; the no-rocket cell lost the most | flight 2C, two runs |
 | new | 16 AI aircraft run at 1.0× wall time on this PC with no overload message (48 overloaded it). On a healthy server the as-shipped Dense Wedge still collides; `FormationDensity` sets the spacing: Dense about 100 m, Safe about 140 m, Loose about 500 m. Safe and Loose had no pass under 20 m and no loss in three runs; Pairs at Dense flew closest | flight 2D, three runs |
 | new | AI wingman collisions are the formation, not server load: the Yak raid's shipped Pairs at Safe collided at 1.00× wall time with 8 aircraft, at the same `WP 1` + 12–13 s turn reversal as under 20 aircraft, and every Tacview attitude jump starts at a contact. Of Dense, Safe and Loose in Pairs and Wedge two-ships, only Loose kept every pass above 20 m | flight 2F, three runs |
+| new | the acceptance mission (both sides, six built-ins, 84 aircraft, 1,092 MCUs, 40 check zones) loads and, with no player, opens its clock slots on time and launches nothing; a jitter step that passes after the slot opened opens nothing | flight A0 |
+| new | a player who spawns inside a switched-on entry trigger (ground start at the area centre) is not seen; flying in fires it, and the presence check then holds the area HOT every 120.00 s | flight A1 |
+| new | the DPRK cycle runs end to end in the game: zone roll and clock each start a copy, the copy flies to the area, holds on station while HOT, the budget counts two, the shell deletes it 60.6 s after `DONE HUB`. When the last watched plane dies, `Zone Out` fires within 3.1 s; the copy's other timers keep running after that early end (fixed by decision 0038) | flight A1 |
+| new | on this PC a player cannot spawn twice in one session (the results wait never clears); Il-10 gunners shoot down a fighter orbiting their target at 500 m | flight A1 |
 
 Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.
