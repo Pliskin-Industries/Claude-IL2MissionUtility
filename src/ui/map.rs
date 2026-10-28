@@ -2,7 +2,8 @@
 //!
 //! One mode of [`super::GroupGeneratorApp`]. This file owns the Korea map:
 //! drawing, the Period / Forces / References / Terrain dock, AO lock, fighter
-//! textures, and the height-store controls.
+//! textures, and the height-store controls. The dock's Air tab, its map
+//! drawing and its Map undo live in `air.rs`; this file only calls them.
 //!
 //! `ui.rs` is the anchor. It owns the app struct (the `front_*` / `map_*` /
 //! `terrain_*` fields), the mode rail, and the shortcuts, and it calls the
@@ -1449,7 +1450,7 @@ fn draw_nav_arrow(painter: &egui::Painter, from: Pos2, to: Pos2, color: Color32)
     ));
 }
 
-fn world_to_pos(rect: Rect, x: f64, z: f64) -> Pos2 {
+pub(super) fn world_to_pos(rect: Rect, x: f64, z: f64) -> Pos2 {
     let uv = world_to_uv(x, z);
     Pos2::new(
         rect.left() + uv.x * rect.width(),
@@ -1597,7 +1598,7 @@ const BLOCK_DOT: Color32 = c::NEUTRAL_800;
 
 /// On-screen side colour (tokens). The colours written into the base map
 /// (`RColor` / `GColor` / `BColor` in frontlines.rs) are separate and unchanged.
-fn faction_map_color(eastern: bool) -> Color32 {
+pub(super) fn faction_map_color(eastern: bool) -> Color32 {
     if eastern { c::DPRK } else { c::NATO }
 }
 
@@ -1723,7 +1724,7 @@ fn draw_dashed_world_line(painter: &egui::Painter, rect: Rect, pts: &[(f64, f64)
 }
 
 /// A thin dashed circle in world metres. Dashes stay about 6 px on screen.
-fn draw_dashed_world_circle(
+pub(super) fn draw_dashed_world_circle(
     painter: &egui::Painter,
     rect: Rect,
     x: f64,
@@ -1826,7 +1827,7 @@ fn fighter_layout_summary(layout: &MapFighterLayout) -> String {
 }
 
 impl super::GroupGeneratorApp {
-    fn map_forces(&self) -> MapForces {
+    pub(super) fn map_forces(&self) -> MapForces {
         MapForces {
             ships: self.map_ships.clone(),
             ground_east: self.map_ground_east.clone(),
@@ -1901,18 +1902,10 @@ impl super::GroupGeneratorApp {
         self.record_map_snapshot(label, snapshot);
     }
 
-    fn record_map_snapshot(&mut self, label: String, snapshot: MapForces) {
+    pub(super) fn record_map_snapshot(&mut self, label: String, snapshot: MapForces) {
         self.map_undo.record(label, snapshot);
         self.map_undo_marks = self.drawn_marks.len();
         self.map_last = MapAction::Clear;
-    }
-
-    /// `record_map_undo` that also keeps the Air Tasking plan, for the Air
-    /// dock tab's Auto-fill and ✖. Other Map undos leave the plan alone.
-    pub(super) fn record_map_air_undo(&mut self, label: String) {
-        let mut snapshot = self.map_forces();
-        snapshot.air = Some(self.air_plan.clone());
-        self.record_map_snapshot(label, snapshot);
     }
 
     /// Remember `before` as the AO box Ctrl Z should restore. No-op when the
@@ -6043,67 +6036,6 @@ impl super::GroupGeneratorApp {
                 }
             }
         }
-    }
-
-    /// Air Tasking preview (P14 §6.2): dashed approach lines, solid R and
-    /// dashed inner rings, spawn dots, RTB dots with a thin line to the
-    /// target. Geometry comes from `airtask::preview`; `air_dock.drawn` counts
-    /// what was painted so tests can see the draw path ran.
-    fn draw_map_air(&mut self, painter: &egui::Painter, map_rect: Rect) {
-        let mut drawn = crate::airtask::AirDrawCounts::default();
-        if self.air_plan.pool.is_empty() {
-            self.air_dock.drawn = drawn;
-            return;
-        }
-        let eval = self.air_eval_now();
-        let preview = &eval.preview;
-        let color = |side: crate::airtask::AirSide| {
-            faction_map_color(side == crate::airtask::AirSide::Dprk)
-        };
-        let at = |(x, z): (f64, f64)| world_to_pos(map_rect, x, z);
-        if self.air_dock.show.lines {
-            for line in &preview.lines {
-                painter.extend(egui::Shape::dashed_line(
-                    &[at(line.from), at(line.to)],
-                    Stroke::new(1.5_f32, color(line.side)),
-                    8.0,
-                    5.0,
-                ));
-                drawn.lines += 1;
-            }
-        }
-        if self.air_dock.show.rings {
-            for ring in &preview.rings {
-                let (x, z) = ring.centre;
-                if ring.inner {
-                    draw_dashed_world_circle(painter, map_rect, x, z, ring.radius_m, color(ring.side));
-                } else {
-                    let centre = at(ring.centre);
-                    let r_px = centre.distance(at((x, z + ring.radius_m)));
-                    painter.circle_stroke(centre, r_px, Stroke::new(1.5_f32, color(ring.side)));
-                }
-                drawn.rings += 1;
-            }
-        }
-        if self.air_dock.show.spawns {
-            for point in &preview.spawns {
-                let pos = at(point.at);
-                painter.circle_filled(pos, 4.5, color(point.side));
-                painter.circle_stroke(pos, 4.5, Stroke::new(1.0_f32, Color32::WHITE));
-                drawn.spawns += 1;
-            }
-        }
-        if self.air_dock.show.rtbs {
-            for point in &preview.rtbs {
-                let pos = at(point.at);
-                let side = color(point.side);
-                painter.line_segment([pos, at(point.target)], Stroke::new(1.0_f32, side.gamma_multiply(0.6)));
-                painter.circle_filled(pos, 4.0, Color32::WHITE);
-                painter.circle_stroke(pos, 4.0, Stroke::new(1.5_f32, side));
-                drawn.rtbs += 1;
-            }
-        }
-        self.air_dock.drawn = drawn;
     }
 
     fn draw_map_ground(&self, painter: &egui::Painter, map_rect: Rect) {

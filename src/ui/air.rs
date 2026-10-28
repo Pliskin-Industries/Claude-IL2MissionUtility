@@ -1,8 +1,10 @@
-//! Air Tasking rail tab. Plan decisions belong to the public `airtask` API.
+//! Air Tasking rail tab, and the Map dock's Air tab with its map drawing
+//! and Map undo. Plan decisions belong to the public `airtask` API.
 
 use super::*;
 use crate::frontlines::preview_front_xz;
 use crate::mapclip::apply_salients;
+use super::map::{draw_dashed_world_circle, faction_map_color, world_to_pos};
 use crate::airtask::{
     self, AirContext, AirDrawCounts, AirIssue, AirPlan, AirPreview, AirSide, AirSortie, AirTotals,
     BudgetImpl,
@@ -1669,6 +1671,75 @@ impl GroupGeneratorApp {
             ok,
             "Air Tasking plan is valid (see the Air Tasking tab)",
         )]
+    }
+
+    /// `record_map_undo` that also keeps the Air Tasking plan, for the Air
+    /// dock tab's Auto-fill and ✖. Other Map undos leave the plan alone.
+    pub(super) fn record_map_air_undo(&mut self, label: String) {
+        let mut snapshot = self.map_forces();
+        snapshot.air = Some(self.air_plan.clone());
+        self.record_map_snapshot(label, snapshot);
+    }
+
+    /// Air Tasking preview (P14 §6.2): dashed approach lines, solid R and
+    /// dashed inner rings, spawn dots, RTB dots with a thin line to the
+    /// target. Geometry comes from `airtask::preview`; `air_dock.drawn` counts
+    /// what was painted so tests can see the draw path ran.
+    pub(super) fn draw_map_air(&mut self, painter: &egui::Painter, map_rect: Rect) {
+        let mut drawn = crate::airtask::AirDrawCounts::default();
+        if self.air_plan.pool.is_empty() {
+            self.air_dock.drawn = drawn;
+            return;
+        }
+        let eval = self.air_eval_now();
+        let preview = &eval.preview;
+        let color = |side: crate::airtask::AirSide| {
+            faction_map_color(side == crate::airtask::AirSide::Dprk)
+        };
+        let at = |(x, z): (f64, f64)| world_to_pos(map_rect, x, z);
+        if self.air_dock.show.lines {
+            for line in &preview.lines {
+                painter.extend(egui::Shape::dashed_line(
+                    &[at(line.from), at(line.to)],
+                    Stroke::new(1.5_f32, color(line.side)),
+                    8.0,
+                    5.0,
+                ));
+                drawn.lines += 1;
+            }
+        }
+        if self.air_dock.show.rings {
+            for ring in &preview.rings {
+                let (x, z) = ring.centre;
+                if ring.inner {
+                    draw_dashed_world_circle(painter, map_rect, x, z, ring.radius_m, color(ring.side));
+                } else {
+                    let centre = at(ring.centre);
+                    let r_px = centre.distance(at((x, z + ring.radius_m)));
+                    painter.circle_stroke(centre, r_px, Stroke::new(1.5_f32, color(ring.side)));
+                }
+                drawn.rings += 1;
+            }
+        }
+        if self.air_dock.show.spawns {
+            for point in &preview.spawns {
+                let pos = at(point.at);
+                painter.circle_filled(pos, 4.5, color(point.side));
+                painter.circle_stroke(pos, 4.5, Stroke::new(1.0_f32, Color32::WHITE));
+                drawn.spawns += 1;
+            }
+        }
+        if self.air_dock.show.rtbs {
+            for point in &preview.rtbs {
+                let pos = at(point.at);
+                let side = color(point.side);
+                painter.line_segment([pos, at(point.target)], Stroke::new(1.0_f32, side.gamma_multiply(0.6)));
+                painter.circle_filled(pos, 4.0, Color32::WHITE);
+                painter.circle_stroke(pos, 4.0, Stroke::new(1.5_f32, side));
+                drawn.rtbs += 1;
+            }
+        }
+        self.air_dock.drawn = drawn;
     }
 
     /// Map dock tab "Air" (P14 §6.2): one side's pool entries, the map
