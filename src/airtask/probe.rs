@@ -189,7 +189,9 @@ impl Flight {
         // and every sortie in 2B/2C/2D, even with their original Dense inputs.
         // 0020 and 0022 change the placed Pairs densities in 2E and 2G.
         // 0025 removed the trigger-reactivation cell that KD and KE flew in 2J.
-        matches!(self, Self::OneM | Self::Two | Self::TwoB | Self::TwoC | Self::TwoD | Self::TwoE | Self::TwoG | Self::TwoJ)
+        // 0038 extends every copy's DONE HUB OFF in 2F, 2H and 2I.
+        matches!(self, Self::OneM | Self::Two | Self::TwoB | Self::TwoC | Self::TwoD | Self::TwoE | Self::TwoF
+            | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ)
     }
 
     fn regenerates_flown_files(self) -> bool {
@@ -6061,7 +6063,7 @@ fn serialize_probe(root: &Il2Entity) -> String {
 fn write_probe(flight: Flight, carrier: TraceCarrier) {
     // Decisions 0018/0019/0020/0022/0025: these builders test current code; their flown
     // artifacts must remain the evidence of the old shell/placement.
-    assert!(!flight.is_frozen(), "decisions 0018/0019/0020/0022/0025: {} is frozen; use a new flight name", flight.stem());
+    assert!(!flight.is_frozen(), "decisions 0018/0019/0020/0022/0025/0038: {} is frozen; use a new flight name", flight.stem());
     let dir = Path::new("target/p14");
     std::fs::create_dir_all(dir).expect("create target/p14");
     let probe = build(flight);
@@ -6485,6 +6487,14 @@ fn flight2_frozen_files_parse_and_links_resolve() {
 }
 
 #[test]
+fn shell_frozen_files_parse_and_links_resolve() {
+    for flight in [Flight::TwoF, Flight::TwoH, Flight::TwoI] {
+        assert!(flight.is_frozen(), "{}: the shell changed under 0038", flight.stem());
+        assert_frozen_files_parse_and_links_resolve(flight);
+    }
+}
+
+#[test]
 fn placement_frozen_files_parse_and_links_resolve() {
     for flight in [Flight::OneM, Flight::TwoB, Flight::TwoC, Flight::TwoD, Flight::TwoE, Flight::TwoG] {
         assert!(flight.is_frozen(), "{}: placement changed under 0019/0020/0022", flight.stem());
@@ -6497,39 +6507,10 @@ fn assert_frozen_files_parse_and_links_resolve(flight: Flight) {
     let stem = format!("{}_traced", flight.stem());
     let directory = format!("flight{}", flight.stem().strip_prefix("P14_Probe_").unwrap().to_lowercase());
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes").join(directory).join(&stem);
-    let root = parse_group_file(&std::fs::read_to_string(path.with_extension("Group")).unwrap()).unwrap();
-    super::testkit::assert_links_resolve(&root);
-    let mut indexes = Vec::new();
-    root.collect_indexes(&mut indexes);
-    let unique: BTreeSet<_> = indexes.iter().copied().collect();
-    assert_eq!(unique.len(), indexes.len(), "{stem}: duplicate Index");
-    let english = std::fs::read(path.with_extension("eng")).unwrap();
-    let locale = crate::locale::parse_locale(&crate::locale::decode_locale_bytes(&english).unwrap());
-    root.for_each(&mut |node| {
-        for key in ["LinkTrId", "MisObjID", "TarId", "CmdId"] {
-            if let Some(value) = node.property(key) {
-                assert!(unique.contains(&value.parse::<i32>().unwrap()), "{stem}: unresolved {key}={value}");
-            }
-        }
-        for key in ["LCName", "LCDesc", "LCText"] {
-            if let Some(value) = node.property(key) {
-                let value = value.parse::<i32>().unwrap();
-                assert!(value == 0 || locale.get(value).is_some(), "{stem}: missing locale {value}");
-            }
-        }
-    });
+    let root = super::testkit::assert_frozen_files_resolve(&path);
     assert_eq!(root.count_block_type("Plane"), build(flight).root.count_block_type("Plane"), "{stem}: aircraft count");
     if flight == Flight::Two {
         assert_eq!(root.count_block_type("Plane"), 9);
-    }
-    let map = trace::read_trace_sidecar(&path.with_extension("trace.json")).unwrap();
-    assert!(!map.entries.is_empty());
-    for entry in &map.entries {
-        assert!(unique.contains(&entry.source_index), "{stem}: missing trace source {}", entry.source_index);
-        assert!(unique.contains(&entry.breadcrumb_index), "{stem}: missing breadcrumb {}", entry.breadcrumb_index);
-    }
-    for edge in &map.edges {
-        assert!(unique.contains(&edge.from) && unique.contains(&edge.to), "{stem}: unresolved trace edge");
     }
     assert_eq!(std::fs::read_to_string(path.with_extension("spawns.json")).unwrap(), spawn_json(flight), "{stem}: spawns");
 }
@@ -6544,7 +6525,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
         // 0018 freezes flight 2's shell; 0019 freezes placement in 1M,
         // 2B, 2C and 2D. 0020/0022 freeze 2E and 2G's placed Pairs.
         // 0025 freezes 2J after removing the cell KD and KE flew.
-        // Load is unflown. All other flown files regenerate, including 2F and 2H.
+        // 0038 freezes 2F, 2H and 2I (DONE HUB OFF quiets each copy).
+        // Load is unflown. All other flown files regenerate.
         if !flight.regenerates_flown_files() {
             continue;
         }
@@ -6581,8 +6563,9 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     // 2F (flown 2026-10-17) and 2H (flown 2026-10-18) add four files each.
     // 0020/0022 remove 2E and 2G's eight files from the previous total of 56.
     // 2I (flown 2026-10-18) adds four files. 0025 freezes 2J, removing its
-    // four flown files from the previous total of 56.
-    assert_eq!(compared, 52);
+    // four flown files from the previous total of 56. 0038 freezes 2F, 2H
+    // and 2I, removing their twelve files: 52 - 12 = 40.
+    assert_eq!(compared, 40);
 }
 
 fn flown_formation_probe(flight: Flight) -> Il2Entity {
@@ -6625,8 +6608,20 @@ fn flight2e_and_2g_change_only_the_flown_pairs_density_bytes() {
             ("GA", "Red 11"), ("GA", "Blue 21"),
         ]),
     ] {
-        let flown = flown_formation_probe(flight);
+        let mut flown = flown_formation_probe(flight);
         let (current, _) = build(flight).traced(TraceCarrier::default());
+        // Decision 0038 also extends every copy's DONE HUB OFF (shell tests
+        // check the list). Apply it first, so only densities differ below.
+        let offs: Vec<_> = block_ids(&flown, "MCU_Deactivate").into_iter()
+            .filter(|&index| by_id(&flown, index).name().is_some_and(|name| name.ends_with(" DONE HUB OFF"))).collect();
+        assert!(!offs.is_empty(), "{}: DONE HUB OFF", flight.stem());
+        for index in offs {
+            let quiet = by_id(&current, index).targets.clone();
+            let hub = by_id(&flown, index).targets.clone();
+            assert_eq!(hub.len(), 1, "{}: flown DONE HUB OFF closes only the hub", flight.stem());
+            assert!(quiet.len() > 1 && quiet[0] == hub[0], "{}: 0038 only adds targets", flight.stem());
+            by_id_mut(&mut flown, index).set_targets(quiet);
+        }
         let mut expected = flown.clone();
         for &(cell, lead_name) in &changed_leads {
             let copy = named(&flown, &format!("{cell} sortie"));
@@ -8058,8 +8053,8 @@ fn flight2i_cells_match_table_and_land_path_separation() {
     let root = generate_probe_2i();
     assert_eq!(root.name(), Some("P14_Probe_2I"));
     assert!(Flight::ALL.contains(&Flight::TwoI));
-    assert!(!Flight::TwoI.is_frozen());
-    assert!(Flight::TwoI.regenerates_flown_files(), "2I flew; its frozen files regenerate");
+    assert!(Flight::TwoI.is_frozen(), "0038 changed the shell 2I flew");
+    assert!(!Flight::TwoI.regenerates_flown_files());
     assert!(Flight::TwoI.writes_schedule());
     assert_eq!(RUN_SHEET_2I.len(), 6);
     assert_eq!(TWO_I_SORTIES.len(), 6);
@@ -8398,9 +8393,10 @@ fn flight2i_walks_station_windows_target_reuse_and_sixteen_aircraft() {
         events.push((times(&log, id(copy, &format!("{prefix} START")))[0], 4));
         events.push((times(&log, id(copy, &format!("{prefix} DELETE DELAY")))[0], -4));
     }
+    // Decision 0038: DONE HUB OFF cancels HARD STOP after an earlier DONE.
     for (cell, prefix, hard_stop) in [
-        ("IF1", "SN01", vec![]), ("IF2", "SN02", vec![]), ("IY1", "SN03", vec![1920.0]),
-        ("IY2", "SN04", vec![1950.0]), ("IY3", "SN05", vec![]), ("IY4", "SN06", vec![]),
+        ("IF1", "SN01", vec![]), ("IF2", "SN02", vec![]), ("IY1", "SN03", vec![]),
+        ("IY2", "SN04", vec![]), ("IY3", "SN05", vec![]), ("IY4", "SN06", vec![]),
     ] {
         let copy = named(&root, &format!("{cell} sortie"));
         assert_eq!(times(&log, id(copy, &format!("{prefix} HARD STOP"))),
@@ -8508,8 +8504,8 @@ fn flight2h_cells_match_table_and_land_path_separation() {
     let root = generate_probe_2h();
     assert_eq!(root.name(), Some("P14_Probe_2H"));
     assert!(Flight::ALL.contains(&Flight::TwoH));
-    assert!(!Flight::TwoH.is_frozen());
-    assert!(Flight::TwoH.regenerates_flown_files(), "2H flew; its frozen files regenerate");
+    assert!(Flight::TwoH.is_frozen(), "0038 changed the shell 2H flew");
+    assert!(!Flight::TwoH.regenerates_flown_files());
     assert!(Flight::TwoH.writes_schedule());
     assert_eq!(RUN_SHEET_2H.len(), 3);
     assert_eq!(TWO_H_SORTIES.len(), 3);
@@ -8889,8 +8885,8 @@ fn flight2f_cells_match_table_and_land_path_separation() {
     let root = generate_probe_2f();
     assert_eq!(root.name(), Some("P14_Probe_2F"));
     assert!(Flight::ALL.contains(&Flight::TwoF));
-    assert!(!Flight::TwoF.is_frozen());
-    assert!(Flight::TwoF.regenerates_flown_files());
+    assert!(Flight::TwoF.is_frozen(), "0038 changed the shell 2F flew");
+    assert!(!Flight::TwoF.regenerates_flown_files());
     assert!(Flight::TwoF.writes_schedule());
     assert_eq!(RUN_SHEET_2F.len(), 6);
     assert_eq!(TWO_F_SORTIES.len(), 6);
@@ -9241,10 +9237,11 @@ fn flight2f_walks_station_windows_target_reuse_and_low_load() {
         events.push((times(&log, id(copy, &format!("{prefix} START")))[0], 4));
         events.push((times(&log, id(copy, &format!("{prefix} DELETE DELAY")))[0], -4));
     }
-    // The shipped shell does not cancel HARD STOP at DONE. The DONE latch
-    // prevents a second completion; close cancels the later three timers.
+    // Decision 0038: DONE HUB OFF cancels HARD STOP, so a copy that ended
+    // earlier logs none (it used to fire into the closed hub); close cancels
+    // the later three timers.
     for (cell, prefix, hard_stop) in [
-        ("PD", "SN01", vec![1860.0]), ("PS", "SN02", vec![2190.0]), ("PL", "SN03", vec![2520.0]),
+        ("PD", "SN01", vec![]), ("PS", "SN02", vec![]), ("PL", "SN03", vec![]),
         ("WD", "SN04", vec![]), ("WS", "SN05", vec![]), ("WL", "SN06", vec![]),
     ] {
         let copy = named(&root, &format!("{cell} sortie"));
@@ -9716,10 +9713,11 @@ fn flight2g_walks_station_windows_target_reuse_and_low_load() {
     for index in commands {
         assert_eq!(times(&log, index), [ticks(1314.1)], "GX: Formation {index} fires at WP 1, before attacks at 1314.6");
     }
-    // The shipped shell does not cancel HARD STOP at DONE. The DONE latch
-    // prevents a second completion; close cancels the later three timers.
+    // Decision 0038: DONE HUB OFF cancels HARD STOP, so a copy that ended
+    // earlier logs none (it used to fire into the closed hub); close cancels
+    // the later three timers.
     for (cell, prefix, hard_stop) in [
-        ("GC", "SN01", vec![1860.0]), ("G3", "SN02", vec![2190.0]), ("G4", "SN03", vec![]),
+        ("GC", "SN01", vec![]), ("G3", "SN02", vec![]), ("G4", "SN03", vec![]),
         ("GX", "SN04", vec![]), ("GA", "SN05", vec![]),
     ] {
         let copy = named(&root, &format!("{cell} sortie"));

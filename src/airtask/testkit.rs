@@ -839,6 +839,47 @@ pub(crate) fn assert_links_resolve(root: &Il2Entity) {
     });
 }
 
+/// Checks a frozen flown mission on disk. `path`, without an extension,
+/// names its .Group, .eng and .trace.json. Indexes must be unique, and every
+/// link, locale id and trace index must resolve. Returns the parsed Group.
+pub(crate) fn assert_frozen_files_resolve(path: &std::path::Path) -> Il2Entity {
+    let stem = path.file_name().unwrap().to_string_lossy().into_owned();
+    let text = std::fs::read_to_string(path.with_extension("Group")).unwrap();
+    let root = crate::parser::parse_group_file(&text).unwrap();
+    assert_links_resolve(&root);
+    let mut indexes = Vec::new();
+    root.collect_indexes(&mut indexes);
+    let unique: BTreeSet<_> = indexes.iter().copied().collect();
+    assert_eq!(unique.len(), indexes.len(), "{stem}: duplicate Index");
+    let english = std::fs::read(path.with_extension("eng")).unwrap();
+    let locale = crate::locale::parse_locale(&crate::locale::decode_locale_bytes(&english).unwrap());
+    root.for_each(&mut |node| {
+        // 0 means "no link" (unlinked map objects in a full mission).
+        for key in ["LinkTrId", "MisObjID", "TarId", "CmdId"] {
+            if let Some(value) = node.property(key) {
+                let value = value.parse::<i32>().unwrap();
+                assert!(value == 0 || unique.contains(&value), "{stem}: unresolved {key}={value}");
+            }
+        }
+        for key in ["LCName", "LCDesc", "LCText"] {
+            if let Some(value) = node.property(key) {
+                let value = value.parse::<i32>().unwrap();
+                assert!(value == 0 || locale.get(value).is_some(), "{stem}: missing locale {value}");
+            }
+        }
+    });
+    let map = crate::trace::read_trace_sidecar(&path.with_extension("trace.json")).unwrap();
+    assert!(!map.entries.is_empty(), "{stem}: empty trace sidecar");
+    for entry in &map.entries {
+        assert!(unique.contains(&entry.source_index), "{stem}: missing trace source {}", entry.source_index);
+        assert!(unique.contains(&entry.breadcrumb_index), "{stem}: missing breadcrumb {}", entry.breadcrumb_index);
+    }
+    for edge in &map.edges {
+        assert!(unique.contains(&edge.from) && unique.contains(&edge.to), "{stem}: unresolved trace edge");
+    }
+    root
+}
+
 fn builtin_template() -> Il2Entity {
     crate::parser::parse_group_file(include_str!(
         "../../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group"

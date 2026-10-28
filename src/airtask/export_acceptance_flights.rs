@@ -1,4 +1,4 @@
-//! Acceptance flights after A0 (decision 0036), and the byte check of every
+//! Acceptance flights after A0 (decision 0036), and the checks of every
 //! frozen acceptance flight. Test code only: `acceptance_test_plan()` and
 //! what Generate writes for users do not change.
 //!
@@ -218,37 +218,33 @@ fn a1_mission_watches_k14_for_nato_players_only() {
     });
 }
 
+/// Frozen acceptance flights: directory and file stem. Decision 0038 changed
+/// the shell that A0 and A1 flew (DONE HUB OFF now quiets each used copy), so
+/// their files stay as flown and are no longer regenerated (as 0018 to 0025
+/// did for the probe flights). A flight flown after 0038 gets a byte check.
+const FROZEN: [(&str, &str); 2] = [
+    ("acceptance-a0", "P14_Acceptance_1"),
+    ("acceptance-a1", A1_STEM),
+];
+
 #[test]
-fn acceptance_flights_regenerate_byte_for_byte() {
-    // Flown and frozen acceptance files never change (decision 0036): the
-    // current writers must still produce every frozen byte.
-    let scratch = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/p14/acceptance-byte-check");
-    let a0 = scratch.join("a0");
-    let (mission, map) = acceptance_mission();
-    write_acceptance_files(&a0, "P14_Acceptance_1", &mission, &map);
-    let a1 = scratch.join("a1");
-    write_a1_files(&a1);
+fn frozen_acceptance_files_parse_and_links_resolve() {
     let frozen = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes");
-    let mut compared = 0;
-    for (directory, generated) in [("acceptance-a0", &a0), ("acceptance-a1", &a1)] {
-        for entry in std::fs::read_dir(frozen.join(directory)).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_some_and(|extension| extension == "md") {
-                continue;
+    for (directory, stem) in FROZEN {
+        let root = crate::airtask::testkit::assert_frozen_files_resolve(&frozen.join(directory).join(stem));
+        // As flown, before 0038: DONE HUB OFF closes only its hub.
+        let mut offs = 0;
+        root.for_each(&mut |node| {
+            if node.name().is_some_and(|name| name.ends_with(" DONE HUB OFF")) {
+                assert_eq!(node.targets.len(), 1, "{stem}: flown DONE HUB OFF");
+                offs += 1;
             }
-            let name = path.file_name().unwrap();
-            let expected = std::fs::read(generated.join(name))
-                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-            assert!(
-                std::fs::read(&path).unwrap() == expected,
-                "{} differs from the generated file",
-                path.display()
-            );
-            compared += 1;
-        }
+        });
+        assert!(offs > 0, "{stem}: no sortie copy");
     }
-    // A0: Group, eng, trace.json. A1 adds spawns.json.
-    assert_eq!(compared, 7);
+    // A1's spawn list is still what the A1 writer produces.
+    let spawns = frozen.join("acceptance-a1").join(format!("{A1_STEM}.spawns.json"));
+    assert_eq!(std::fs::read_to_string(spawns).unwrap(), a1_spawns_json());
 }
 
 #[test]

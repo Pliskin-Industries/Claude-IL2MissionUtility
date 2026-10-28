@@ -494,7 +494,7 @@ mod tests {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
-    // Acceptance flights A1 onward, and the byte check of every frozen
+    // Acceptance flights A1 onward, and the checks of every frozen
     // acceptance flight (src/airtask/export_acceptance_flights.rs).
     #[path = "../../export_acceptance_flights.rs"]
     mod acceptance_flights;
