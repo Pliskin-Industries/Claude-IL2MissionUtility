@@ -257,6 +257,18 @@ pub fn wrap_sortie(
         ids.insert(name, node.index.unwrap());
         added.push(node);
     }
+    // Decision 0038: every timer that gives an attack order, not only each
+    // lead's last one (AirAlert's WP 1 starts two "AttackArea 1" timers).
+    let attacks: BTreeSet<i32> = nodes(&copy)
+        .iter()
+        .filter(|node| node.block_type == "MCU_CMD_AttackArea")
+        .filter_map(|node| node.index)
+        .collect();
+    let attack_timers: Vec<i32> = nodes(&copy)
+        .iter()
+        .filter(|node| node.block_type == "MCU_Timer" && node.targets.iter().any(|t| attacks.contains(t)))
+        .filter_map(|node| node.index)
+        .collect();
     let mut targets = BTreeMap::from([
         (
             ids["START"],
@@ -280,7 +292,25 @@ pub fn wrap_sortie(
         (ids["EXTEND"], vec![ids["DONE HUB"]]),
         (ids["LOSSES"], vec![ids["DONE HUB"]]),
         (ids["DONE HUB"], vec![ids["DONE HUB OFF"], shape.end_timer]),
-        (ids["DONE HUB OFF"], vec![ids["DONE HUB"]]),
+        // Decision 0038: one Deactivate closes the hub and quiets the copy.
+        // Flight 0 J1, C4 and E5: it cancels running timers, a waiting zone
+        // and a counter's later inputs. The end chain and budget keep running.
+        (
+            ids["DONE HUB OFF"],
+            [
+                ids["DONE HUB"],
+                ids["HARD STOP"],
+                ids["ON STATION"],
+                ids["EXTEND"],
+                ids["LOSSES"],
+                shape.zone_in,
+                shape.zone_out,
+                shape.zone_out_pulse,
+            ]
+            .into_iter()
+            .chain(attack_timers)
+            .collect(),
+        ),
         (ids["LANDED"], vec![ids["FLYING"]]),
         (ids["DELETE DELAY"], vec![ids["DELETE"], ids["LANDED"]]),
     ]);
@@ -312,7 +342,7 @@ pub fn wrap_sortie(
         ZoneOutImpl::Watchdog => {
             // Reuse Zone Out as an inside check. A 5 s poll refreshes a 10 s
             // watchdog. This variant requires J5 = Restart; it is not selected
-            // automatically. OUT gates stop both the poll and expiry at DONE.
+            // automatically. DONE HUB OFF stops both timers and their OUT gates.
             zone.set_property("Closer", "1");
             let mut watchdog =
                 template::timer(&format!("{prefix} WATCHDOG"), 10.0, &mut alloc, x, z);
@@ -326,28 +356,22 @@ pub fn wrap_sortie(
                 x,
                 z,
             );
-            let mut close = template::mcu(
-                "MCU_Deactivate",
-                &format!("{prefix} WATCHDOG OFF"),
-                &mut alloc,
-                x,
-                z,
-            );
             zone.set_targets(vec![watchdog.index.unwrap()]);
             watchdog.set_targets(vec![out.index.unwrap()]);
             out.set_targets(vec![ids["DONE HUB"]]);
             poll.set_targets(vec![poll_out.index.unwrap()]);
             poll_out.set_targets(vec![shape.zone_out, poll.index.unwrap()]);
-            close.set_targets(vec![out.index.unwrap(), poll_out.index.unwrap()]);
             single_use_outs.extend([out.index.unwrap(), poll_out.index.unwrap()]);
-            targets
-                .get_mut(&ids["DONE HUB"])
-                .unwrap()
-                .push(close.index.unwrap());
+            targets.get_mut(&ids["DONE HUB OFF"]).unwrap().extend([
+                watchdog.index.unwrap(),
+                poll.index.unwrap(),
+                out.index.unwrap(),
+                poll_out.index.unwrap(),
+            ]);
             let wp = by_id_mut(&mut copy, shape.path_waypoints[&shape.navigation_lead]).unwrap();
             wp.append_target(watchdog.index.unwrap());
             wp.append_target(poll.index.unwrap());
-            added.extend([watchdog, out, poll, poll_out, close]);
+            added.extend([watchdog, out, poll, poll_out]);
         }
     }
     // Flight 1G and decisions 0011/0017: one OnKilled (13) per aircraft.
@@ -623,7 +647,9 @@ mod tests {
 
     #[test]
     fn shell_done_hub_inputs() {
-        for f in fixtures() {
+        // Every timer that gives an attack order, per bundled template.
+        let attack_timers: [&[i32]; 6] = [&[37, 39], &[37], &[37], &[37], &[37, 43], &[45, 51]];
+        for (f, attack_timers) in fixtures().into_iter().zip(attack_timers) {
             let expected = [
                 shell_id(&f, "HARD STOP"),
                 f.ids.cold,
@@ -637,7 +663,21 @@ mod tests {
             );
             let off = shell_id(&f, "DONE HUB OFF");
             assert!(by_id(&f.root, f.ids.done_hub).targets.contains(&off));
-            assert_eq!(by_id(&f.root, off).targets, [f.ids.done_hub]);
+            // Decision 0038: the same Deactivate quiets the used copy.
+            let quiet: Vec<i32> = [
+                f.ids.done_hub,
+                shell_id(&f, "HARD STOP"),
+                shell_id(&f, "ON STATION"),
+                shell_id(&f, "EXTEND"),
+                shell_id(&f, "LOSSES"),
+                f.shape.zone_in,
+                f.shape.zone_out,
+                f.shape.zone_out_pulse,
+            ]
+            .into_iter()
+            .chain(attack_timers.iter().copied())
+            .collect();
+            assert_eq!(by_id(&f.root, off).targets, quiet);
         }
     }
 
@@ -712,9 +752,13 @@ mod tests {
             assert_eq!(by_id(&f.root, f.shape.zone_out_pulse).targets, [f.shape.zone_out]);
             assert_eq!(number(by_id(&f.root, f.shape.zone_out_pulse), "Time").unwrap(), 0.1);
             assert!(!f.logic.init_off.contains(&f.shape.zone_in));
+            // The template's self-deactivation is cut (0018); only the used
+            // copy's DONE HUB OFF switches Zone IN off (0038).
             let root = runtime(&f, false);
-            assert!(!nodes(&root).iter().any(|node| node.block_type == "MCU_Deactivate"
-                && (node.targets.contains(&f.shape.zone_in) || node.objects.contains(&f.shape.zone_in))));
+            let off: Vec<i32> = nodes(&root).iter().filter(|node| node.block_type == "MCU_Deactivate"
+                && (node.targets.contains(&f.shape.zone_in) || node.objects.contains(&f.shape.zone_in)))
+                .filter_map(|node| node.index).collect();
+            assert_eq!(off, [shell_id(&f, "DONE HUB OFF")]);
             assert_eq!(f.root.count_block_type("MCU_CheckZone"), 2);
             for (zone, closer) in [(f.shape.zone_in, "1"), (f.shape.zone_out, "0")] {
                 let zone = by_id(&f.root, zone);
@@ -1052,6 +1096,15 @@ mod tests {
             by_id(&f.root, f.shape.zone_out).targets,
             [shell_id(&f, "WATCHDOG")]
         );
+        // Decision 0038: DONE HUB OFF stops both timers and their OUT gates,
+        // so the variant has no WATCHDOG OFF and adds 4 MCUs, not 5.
+        let off = &by_id(&f.root, shell_id(&f, "DONE HUB OFF")).targets;
+        for name in ["WATCHDOG", "WATCHDOG OUT", "WATCHDOG POLL", "WATCHDOG POLL OUT"] {
+            assert!(off.contains(&shell_id(&f, name)), "DONE HUB OFF misses {name}");
+        }
+        let letter = f.shape.side.letter();
+        assert!(f.root.find_by_name(&format!("S{letter}01 WATCHDOG OFF")).is_none());
+        assert_eq!(mcus(&f.root), 43 + 4);
         let runtime = runtime(&f, false);
         testkit::walker_every_deactivated_out_has_a_rearm_or_is_single_use(
             &runtime,
@@ -1084,6 +1137,21 @@ mod tests {
                 shell_id(&f, "WATCHDOG POLL OUT"),
                 ticks(60.0)
             ));
+        }
+        // With the flown J1 (Cancels), neither timer fires after DONE HUB.
+        let mut script = input(&f, 60.0, Some(10.0));
+        script.tracks[0].samples = (0..=30)
+            .map(|s| (ticks(f64::from(s)), TARGET.0 + if s >= 30 { 40000.0 } else { 0.0 }, TARGET.1))
+            .collect();
+        let config = WalkerConfig {
+            deactivate_running_timer: DeactivateRunningTimer::Cancels,
+            ..WalkerConfig::default()
+        };
+        let log = walk(&runtime, config, &script);
+        assert_eq!(times(&log, f.ids.done_hub), [ticks(35.0)]);
+        for name in ["WATCHDOG", "WATCHDOG POLL"] {
+            let late: Vec<_> = times(&log, shell_id(&f, name)).into_iter().filter(|&t| t > ticks(35.0)).collect();
+            assert!(late.is_empty(), "{name} fired after DONE HUB at {late:?}");
         }
     }
 
@@ -1166,13 +1234,14 @@ mod tests {
     fn shell_enemy_present_at_arrival_then_leaves() {
         let f = fixture(builtin(1), Strategies::default());
         let script = enemy_window(&f, 0, 482);
-        for config in configs() {
+        for config in flown_configs() {
             let log = walk(&runtime(&f, false), config, &script);
             assert_eq!(times(&log, f.shape.zone_in), [ticks(302.0)]);
             assert_eq!(times(&log, f.shape.zone_out_pulse), [ticks(302.1)]);
             assert_eq!(times(&log, f.shape.zone_out), [ticks(482.0)]);
             assert_eq!(times(&log, f.ids.done_hub), [ticks(482.0)]);
-            assert_eq!(times(&log, f.ids.cold), [ticks(902.5)]);
+            // 0038: ON STATION is cancelled, so no late COLD at 902.5 s.
+            assert!(times(&log, f.ids.cold).is_empty());
         }
     }
 
@@ -1180,13 +1249,14 @@ mod tests {
     fn shell_enemy_arrives_after_then_leaves() {
         let f = fixture(builtin(1), Strategies::default());
         let script = enemy_window(&f, 422, 602);
-        for config in configs() {
+        for config in flown_configs() {
             let log = walk(&runtime(&f, false), config, &script);
             assert_eq!(times(&log, f.shape.zone_in), [ticks(422.0)]);
             assert_eq!(times(&log, f.shape.zone_out_pulse), [ticks(422.1)]);
             assert_eq!(times(&log, f.shape.zone_out), [ticks(602.0)]);
             assert_eq!(times(&log, f.ids.done_hub), [ticks(602.0)]);
-            assert_eq!(times(&log, f.ids.cold), [ticks(902.5)]);
+            // 0038: ON STATION is cancelled, so no late COLD at 902.5 s.
+            assert!(times(&log, f.ids.cold).is_empty());
         }
     }
 
@@ -1195,7 +1265,7 @@ mod tests {
         let f = fixture(builtin(1), Strategies::default());
         let mut script = input(&f, 2200.0, Some(302.0));
         script.tracks.clear();
-        for config in configs() {
+        for config in flown_configs() {
             let log = walk(&runtime(&f, true), config, &script);
             assert!(times(&log, f.shape.zone_in).is_empty());
             assert!(times(&log, f.shape.zone_out).is_empty());
@@ -1203,19 +1273,21 @@ mod tests {
             assert_eq!(times(&log, f.ids.hot), [ticks(902.5)]);
             assert_eq!(times(&log, shell_id(&f, "EXTEND")), [ticks(1502.5)]);
             assert_eq!(times(&log, f.ids.done_hub), [ticks(1502.5)]);
-            assert_eq!(times(&log, shell_id(&f, "HARD STOP")), [ticks(2102.0)]);
+            // 0038: no late HARD STOP at 2,102 s.
+            assert!(times(&log, shell_id(&f, "HARD STOP")).is_empty());
         }
     }
 
     #[test]
     fn shell_hot_area_extends_once_then_ends() {
         let f = fixture(builtin(1), Strategies::default());
-        for config in configs() {
+        for config in flown_configs() {
             let log = walk(&runtime(&f, true), config, &input(&f, 2200.0, Some(302.0)));
             assert_eq!(times(&log, f.ids.hot), [ticks(902.5)]);
             assert_eq!(times(&log, shell_id(&f, "EXTEND")), [ticks(1502.5)]);
             assert_eq!(times(&log, f.ids.done_hub), [ticks(1502.5)]);
-            assert_eq!(times(&log, shell_id(&f, "HARD STOP")), [ticks(2102.0)]);
+            // 0038: no late HARD STOP at 2,102 s.
+            assert!(times(&log, shell_id(&f, "HARD STOP")).is_empty());
         }
     }
 
@@ -1233,6 +1305,101 @@ mod tests {
                 assert!(times(&log, shell_id(&f, "ON STATION")).is_empty());
                 assert!(times(&log, shell_id(&f, "EXTEND")).is_empty());
             }
+        }
+    }
+
+    /// Flight 0 J1: deactivating a running timer cancels it.
+    fn flown_configs() -> Vec<WalkerConfig> {
+        configs()
+            .into_iter()
+            .map(|config| WalkerConfig {
+                deactivate_running_timer: DeactivateRunningTimer::Cancels,
+                ..config
+            })
+            .collect()
+    }
+
+    /// Flight A1 (2026-10-28), run 2. The enemy is inside at arrival,
+    /// leaves at `leave_s` (Zone Out ends the copy early) and comes back at
+    /// `back_s`. After DONE HUB, WP 1 fires again at Force Complete and at
+    /// the deletion (the log cannot tell which one A1 saw), and every plane
+    /// is killed so that LOSSES gets late inputs too.
+    fn a1_replay(f: &Fixture, leave_s: u32, back_s: u32) -> WalkerInput {
+        let mut script = input(f, 2200.0, Some(302.0));
+        script.tracks[0].samples = (0..=back_s)
+            .map(|second| {
+                let away = (leave_s..back_s).contains(&second);
+                (ticks(f64::from(second)), TARGET.0 + if away { 40_000.0 } else { 0.0 }, TARGET.1)
+            })
+            .collect();
+        let wp = f.shape.path_waypoints[&f.shape.navigation_lead];
+        for late_s in [0.15, 60.6] {
+            script.arrivals.push((ticks(f64::from(leave_s) + late_s), wp.into()));
+        }
+        script.kills = f
+            .shape
+            .planes
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (ticks(f64::from(leave_s) + 10.0 + i as f64), id.into()))
+            .collect();
+        script
+    }
+
+    #[test]
+    fn shell_used_copy_is_quiet_after_done_hub() {
+        // The Il-10 copy A1 flew (SD04: ON STATION 902.5 while HOT, EXTEND
+        // running, Zone Out at 1,000; SD05: Zone Out at 600, before ON
+        // STATION, in a COLD area), and AirAlert, whose WP 1 starts two
+        // attack timers.
+        for (template, hot_leave_s) in [(5, 1000), (0, 1500)] {
+            let f = fixture(builtin(template), Strategies::default());
+            // The end chain and the budget census are the only copy timers,
+            // zones or counters that may still fire after DONE HUB.
+            let allowed: BTreeSet<i32> = [
+                f.shape.end_timer,
+                f.shape.end_orders_timer,
+                f.shape.delayed_end_timer,
+                f.ids.delete_timer,
+                f.ids.flying,
+            ]
+            .into_iter()
+            .chain(f.shape.rtb_timer)
+            .collect();
+            let watched: BTreeSet<i32> = nodes(&f.root)
+                .into_iter()
+                .filter(|node| matches!(node.block_type.as_str(), "MCU_Timer" | "MCU_CheckZone" | "MCU_Counter"))
+                .filter_map(|node| node.index)
+                .collect();
+            for (hot, leave_s) in [(true, hot_leave_s), (false, 600)] {
+                let script = a1_replay(&f, leave_s, leave_s + 100);
+                for config in flown_configs() {
+                    let log = walk(&runtime(&f, hot), config, &script);
+                    let done = ticks(f64::from(leave_s));
+                    assert_eq!(times(&log, f.shape.zone_out), [done], "builtin {template}");
+                    assert_eq!(times(&log, f.ids.done_hub), [done], "builtin {template}");
+                    assert_eq!(times(&log, f.ids.delete_timer), [ticks(f64::from(leave_s) + 60.6)]);
+                    let late: Vec<_> = log
+                        .pulses
+                        .iter()
+                        .filter(|p| p.t > done && watched.contains(&p.index) && !allowed.contains(&p.index))
+                        .map(|p| format!("{} ({}) at {} s", p.name, p.index, p.t as f64 / 20.0))
+                        .collect();
+                    assert!(late.is_empty(), "builtin {template}, hot {hot}: fired after DONE HUB: {late:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shell_done_hub_off_stops_every_attack_timer() {
+        // AirAlert's WP 1 starts two "AttackArea 1" timers (37 and 39); only
+        // 39 is the lead's last attack timer.
+        let f = fixture(builtin(0), Strategies::default());
+        let off = &by_id(&f.root, shell_id(&f, "DONE HUB OFF")).targets;
+        for id in [37, 39] {
+            assert_eq!(by_id(&f.root, id).block_type, "MCU_Timer");
+            assert!(off.contains(&id), "DONE HUB OFF misses attack timer {id}");
         }
     }
 
