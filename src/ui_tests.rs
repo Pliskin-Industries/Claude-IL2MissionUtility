@@ -3651,6 +3651,11 @@ fn air_dock_auto_fill_adds_entries_for_objectives() {
     h.click("Auto-fill from objectives");
     assert_eq!(h.status(), "Added 6 DPRK entries");
     assert_eq!(h.app.air_plan.pool.len(), 6);
+    // Plan 6.2: each new entry has the default weight (5, D15) and mode Clock.
+    for entry in &h.app.air_plan.pool {
+        assert_eq!((entry.weight, entry.mode), (5, crate::airtask::TriggerMode::Clock), "{entry:?}");
+        assert!(entry.enabled);
+    }
     for xz in [(190_000.0, 200_000.0), (180_000.0, 250_000.0)] {
         assert_eq!(entries_at(&h, TargetRef::Objective { side: AirSide::Dprk, xz }), 2, "{xz:?}");
     }
