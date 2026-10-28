@@ -587,3 +587,37 @@ Fighter Pack and Exclusive Activation already contain NodeGates. Army Generator 
 **Airfield still has a player** — load from `_gen.mission` Freeflight, not a hand-built group that never marked a player plane.
 
 **Front line empty** — the box does not intersect that snapshot, or the layer sits off-map (Pusan). Draw a larger box or pick another season.
+
+### Trace build and Replay
+
+Use these to find out what a mission's logic did in a flown session.
+
+**Trace build** (header checkbox, every tab, beside Generate):
+- When it is ticked, Generate adds a small silent Mission Objective (a *breadcrumb*) to each decision point:
+  - every check zone, counter, spawner and Mission Begin;
+  - every timer with Random below 100;
+  - on the Map and Air Tasking tabs, also the Air Tasking sortie steps (START, GO, DONE HUB and the others).
+- Each breadcrumb writes one line to the server's text log when its MCU fires.
+- Generate also writes `<file>.trace.json` next to the `.Group`, and the status bar says "Trace build: N breadcrumbs."
+- The box is off at every start. With it off, Generate writes exactly what it wrote before.
+
+**Server log.** Set `mission_text_log = 1` under `[KEY = system]` in the server's `startup.cfg`. The `missionReport*.txt` files land in `data\logs\txt\`.
+
+**Replay…** (header button, every tab) opens a window:
+1. **Pick .Group…**: the mission file the logs are from. The `.trace.json` next to it is read. Use **Trace file…** only when the trace file sits somewhere else.
+2. **Log folder…**: the folder with that session's `missionReport*.txt` files.
+3. **Run replay**: it needs a `.Group` and at least one log file. A trace file that does not match the `.Group` (for example, left from an earlier build) is refused.
+
+The report's sections are tabs:
+- **Dead links**: faults. A traced MCU fired, and the next traced MCU on a path with no gate, random roll or counter never logged, though the log ran at least 5 s past when it was due.
+- **Unobserved**: a traced MCU never fired although one before it did. These are observations, not faults: a closed gate, a failed random roll or a counter below its value can explain them.
+- **Never fired**: traced MCUs the log never saw.
+- **Fired**: traced MCUs the log saw, with each time.
+- **Never spawned**: names that spawned fewer times than there are objects with that name. The count is per name, because the log does not carry a group.
+- **Timeline**: spawns, kills, takeoffs, landings and breadcrumbs in time order. Filter it by group. Objects whose name repeats in the file have no group.
+
+Without a trace file, the report has only Never spawned and Timeline (an orange note says so).
+
+After Run replay, the Map's legend shows a **Replay** layer: a dot where each object spawned, a cross where each one was killed, in DPRK or NATO colour (grey when the log gives no country). Untick it to hide it. A new pick in the Replay window clears the layer.
+
+The same report can be written from the command line: `IL2MissionUtility.exe replay --group <file.Group> [--trace <file.trace.json>] --logs <folder> [--out <report.md>]`.

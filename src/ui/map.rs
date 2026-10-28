@@ -29,6 +29,7 @@ use eframe::egui::{
     Sense, Stroke, TextureHandle, Vec2,
 };
 
+use crate::missionlog::MarkerKind;
 use crate::airstart::{self, PlacedAirStart};
 use crate::bombers::{BomberInput, inspect_plan, link_bomber_plans_with};
 use crate::duplicate::apply_overrides;
@@ -4079,6 +4080,21 @@ impl super::GroupGeneratorApp {
                     legend_side(ui, shell::Side::Dprk, "DPRK");
                     legend_side(ui, shell::Side::Nato, "NATO");
                     legend_line(ui, c::ACCENT_800, true, "AO");
+                    if self.replay.loaded.is_some() {
+                        ui.checkbox(&mut self.replay.layer, "Replay").on_hover_text(
+                            "Spawn and kill positions from the loaded replay, in the side's colour",
+                        );
+                        if self.replay.layer {
+                            for (kind, label) in [
+                                (MarkerKind::Spawn, "Spawn"),
+                                (MarkerKind::Kill, "Kill"),
+                            ] {
+                                legend_entry(ui, label, |p, r| {
+                                    super::replay::paint_marker(p, r.center(), kind, c::TEXT)
+                                });
+                            }
+                        }
+                    }
                     ui.menu_button("All layers ▾", |ui| self.draw_map_legend(ui))
                         .response
                         .on_hover_text("Every map layer and its color");
@@ -5211,6 +5227,7 @@ impl super::GroupGeneratorApp {
         self.draw_map_ground(&painter, map_rect);
         self.draw_map_objectives(&painter, map_rect);
         self.draw_map_air(&painter, map_rect);
+        self.draw_map_replay(&painter, map_rect);
         self.draw_air_starts(&painter, map_rect);
         self.draw_missions(&painter, map_rect);
 
@@ -7713,6 +7730,7 @@ impl super::GroupGeneratorApp {
         self.stamp_air_starts(&mut pack.root);
         let strike_notes = self.stamp_missions(&mut pack.root);
         let terrain_note = self.apply_terrain(&mut pack.root);
+        let trace = self.trace_generated(&mut pack.root);
         let text = serialize_group(&pack.root);
         let suggested = format!("Korea_BaseMap_{}.Group", self.current_mark().date_label());
         let Some(save_path) = dialog::FileDialog::new()
@@ -7726,6 +7744,13 @@ impl super::GroupGeneratorApp {
             self.status = Status::Error(format!("Could not write file: {err}"));
             return;
         }
+        let trace_note = match super::write_trace(&save_path, trace.as_ref()) {
+            Ok(note) => note,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
         let mut paths: Vec<PathBuf> = self.map_refs.iter().map(|g| g.path.clone()).collect();
         paths.extend(self.recon_slots.iter().map(|s| s.path.clone()));
         paths.extend(self.map_armies.iter().map(|a| a.path.clone()));
@@ -7749,7 +7774,7 @@ impl super::GroupGeneratorApp {
                     format!(" {}", pack.notes.join(" "))
                 };
                 self.status = Status::Info(format!(
-                    "Wrote base map ({} objects, {}) plus {} to {file}.{extra} {} Aircraft: {}. {}",
+                    "Wrote base map ({} objects, {}) plus {} to {file}.{extra} {} Aircraft: {}. {}{trace_note}",
                     pack.icon_count,
                     pack.period_label,
                     if exts.is_empty() {
@@ -7775,8 +7800,9 @@ impl super::GroupGeneratorApp {
                 }
             }
             Err(err) => {
-                self.status =
-                    Status::Error(format!("Wrote the group, but language files failed: {err}"));
+                self.status = Status::Error(format!(
+                    "Wrote the group, but language files failed: {err}{trace_note}"
+                ));
             }
         }
         self.add_terrain_note(terrain_note);

@@ -2449,6 +2449,7 @@ fn every_ui_glyph_is_in_a_loaded_font() {
         include_str!("ui.rs"),
         include_str!("ui/air.rs"),
         include_str!("ui/map.rs"),
+        include_str!("ui/replay.rs"),
         include_str!("airtask/mod.rs"),
         include_str!("airtask/library.rs"),
         include_str!("airtask/pool.rs"),
@@ -2701,6 +2702,85 @@ fn map_generate_without_air_matches_baseline() {
     assert_eq!(dialog::pending(), 0);
     assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
     crate::baseline_tests::assert_fixture_matches(&out);
+}
+
+// ── Trace build and Replay (step 9T) ─────────────────────────────────────
+
+/// The Template tab set to the inputs of the `template.Group` baseline.
+fn baseline_template_inputs(h: &mut Harness) {
+    let opts = crate::baseline_tests::template_options();
+    h.app.set_mode(AppMode::Template);
+    // Generate names the template after this file's stem.
+    h.app.tpl_path = Some(h.dir.join(format!("{}.Group", opts.name)));
+    h.app.tpl_loaded_path = None;
+    h.app.tpl_seats = opts.seats;
+    h.app.tpl_zone_in = opts.zone_in;
+    h.app.tpl_zone_out = opts.zone_out;
+    h.app.tpl_place_layout = opts.place_layout;
+    h.app.tpl_per_group = opts.per_group;
+    h.app.tpl_bring_up = opts.bring_up;
+    h.app.tpl_spawn_reset = opts.allow_multiple_spawns;
+    h.app.tpl_spawn_cooldown_min = opts.spawn_cooldown_min;
+    h.app.tpl_wp_speed = opts.waypoint_speed;
+    h.app.tpl_wp_altitude = opts.waypoint_altitude;
+    h.app.tpl_wp_priority = opts.waypoint_priority;
+    h.app.tpl_zone_coalition = opts.zone_coalition;
+    h.app.tpl_zone_out_enabled = opts.zone_out_enabled;
+    h.app.terrain_apply = false;
+    h.settle();
+}
+
+fn count_blocks(root: &crate::ast::Il2Entity, block_type: &str) -> usize {
+    let mut n = 0;
+    root.for_each(&mut |e| n += usize::from(e.block_type == block_type));
+    n
+}
+
+#[test]
+fn trace_checkbox_off_output_matches_baseline() {
+    let mut h = Harness::new("trace_checkbox_off");
+    baseline_template_inputs(&mut h);
+    // Off on a fresh start: nothing remembers it between runs.
+    assert_eq!(h.find("Trace build").toggled, Some(false));
+    let out = h.out("template.Group");
+    dialog::answer(vec![out.clone()]);
+    h.click("Generate File");
+    assert_eq!(dialog::pending(), 0);
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    assert!(!h.status().contains("Trace build"), "{}", h.status());
+    crate::baseline_tests::assert_fixture_matches(&out);
+    assert!(!out.with_extension("trace.json").exists());
+}
+
+#[test]
+fn trace_checkbox_on_writes_sidecar() {
+    let mut h = Harness::new("trace_checkbox_on");
+    baseline_template_inputs(&mut h);
+    h.click("Trace build");
+    assert_eq!(h.find("Trace build").toggled, Some(true));
+    let out = h.out("template.Group");
+    dialog::answer(vec![out.clone()]);
+    h.click("Generate File");
+    assert_eq!(dialog::pending(), 0);
+    let map = crate::trace::read_trace_sidecar(&out).expect("sidecar next to the .Group");
+    let n = map.entries.len();
+    assert!(n > 0, "the template has decision points");
+    assert!(h.status().contains(&format!("Trace build: {n} breadcrumbs")), "{}", h.status());
+    let written = load_group(&out).unwrap();
+    let baseline = load_group(&crate::baseline_tests::baseline_dir().join("template.Group")).unwrap();
+    assert_eq!(
+        count_blocks(&written, "MCU_TR_MissionObjective"),
+        count_blocks(&baseline, "MCU_TR_MissionObjective") + n
+    );
+    // Each breadcrumb hangs on its source.
+    for entry in &map.entries {
+        let mut hooked = false;
+        written.for_each(&mut |e| {
+            hooked |= e.index == Some(entry.source_index)
+                && e.targets.contains(&entry.breadcrumb_index);
+        });
+        assert!(hooked, "{}", entry.source_name);
+    }
 }
 
 // ── Air Tasking ──────────────────────────────────────────────────────────
@@ -3832,6 +3912,292 @@ fn map_generate_with_air_includes_air_tasking_group() {
         air += usize::from(node.block_type == "Group" && node.name() == Some("Air Tasking"));
     });
     assert_eq!(air, 1, "one Air Tasking group in the base map");
+}
+
+/// `replay.Group` traced at A, B and C, with its sidecar, in the harness dir.
+/// With the `chain` logs, A fires; B (3 s on, unconditional) and C never do.
+fn replay_chain_group(h: &Harness) -> PathBuf {
+    use crate::trace::{ObjectiveStyle, TraceCarrier, TraceMap, TraceSelect};
+    let mut group = load_group(&repo("src/testdata/missionlog/replay.Group")).unwrap();
+    let mut map = TraceMap::default();
+    crate::trace::instrument(
+        &mut group,
+        &TraceSelect { indexes: vec![1, 3, 4], ..TraceSelect::default() },
+        &mut 100,
+        TraceCarrier::Objective(ObjectiveStyle::default()),
+        &mut map,
+    );
+    let path = h.out("chain.Group");
+    std::fs::write(&path, serialize_group(&group)).unwrap();
+    crate::trace::write_trace_sidecar(&path, &map).unwrap();
+    path
+}
+
+fn a1_group() -> PathBuf {
+    repo("handoff/p14-probes/acceptance-a1/P14_Acceptance_A1.Group")
+}
+
+/// Open Replay…, pick the .Group and the log folder, and run it.
+fn run_replay(h: &mut Harness, group: &Path, logs: &Path) {
+    h.click("Replay…");
+    assert!(h.find("Run replay").disabled, "needs a .Group and a log file");
+    dialog::answer(vec![group.to_path_buf()]);
+    h.click("Pick .Group…");
+    dialog::answer(vec![logs.to_path_buf()]);
+    h.click("Log folder…");
+    h.click("Run replay");
+    assert_eq!(dialog::pending(), 0);
+    assert!(h.app.replay.loaded.is_some(), "{:?}", h.app.replay.error);
+}
+
+const NO_SIDECAR: &str = "No .trace.json next to this .Group: the report has no breadcrumb sections.";
+
+#[test]
+fn replay_panel_shows_dead_links_and_unobserved_successors() {
+    let mut h = Harness::new("replay_chain");
+    let group = replay_chain_group(&h);
+    run_replay(&mut h, &group, &repo("src/testdata/missionlog/chain"));
+    let a = "Replay synthetic / A (MCU_Timer #1)";
+    let b = "Replay synthetic / B (MCU_Timer #3)";
+    let c = "Replay synthetic / C (MCU_Timer #4)";
+    // Dead links is the first section: A -> B, fired at 10 s, 3 s delay.
+    assert!(h.has("Dead links 1") && h.has(a) && h.has(b), "{:?}", h.labels());
+    h.click("Unobserved 1");
+    assert!(h.has(crate::missionlog::UNOBSERVED_NOTE), "the observations note shows");
+    assert!(h.has(b) && h.has(a) && h.has(c), "successor, upstream and downstream: {:?}", h.labels());
+    assert!(!h.has(NO_SIDECAR));
+}
+
+#[test]
+fn replay_panel_without_sidecar_has_no_breadcrumb_sections() {
+    let mut h = Harness::new("replay_no_sidecar");
+    let group = h.out("plain.Group");
+    std::fs::copy(repo("src/testdata/missionlog/replay.Group"), &group).unwrap();
+    run_replay(&mut h, &group, &repo("src/testdata/missionlog/synthetic"));
+    assert!(h.has(NO_SIDECAR));
+    for section in ["Dead links", "Unobserved", "Never fired"] {
+        assert!(!h.labels().iter().any(|l| l.starts_with(section)), "{section} shown");
+    }
+    // Never spawned is the first section without a trace.
+    assert!(h.has("F-80C") && h.has("Never spawned 4"), "{:?}", h.labels());
+    h.click("Timeline 10");
+    assert!(h.has("Spawn: F-80C / f80c10 (id 101, country Some(601), parent 0)"), "{:?}", h.labels());
+}
+
+/// The A1 acceptance flight (real logs) through the panel: the counts on the
+/// section tabs equal the report the `replay` command line writes.
+#[test]
+fn replay_panel_reads_the_a1_logs() {
+    let mut h = Harness::new("replay_a1");
+    let logs = repo("src/testdata/missionlog/real_46");
+    run_replay(&mut h, &a1_group(), &logs);
+    let parsed = crate::missionlog::parse_log_dir(&logs).unwrap();
+    let group = load_group(&a1_group()).unwrap();
+    let trace = crate::trace::read_trace_sidecar(&a1_group()).unwrap();
+    let replay = crate::missionlog::replay(&parsed, &group, Some(&trace));
+    let rows = crate::missionlog::report_rows(&replay);
+    assert!(rows.dead_links.is_empty(), "A1 had no dead links");
+    for label in [
+        "Dead links 0".to_string(),
+        format!("Unobserved {}", rows.unobserved.len()),
+        format!("Never fired {}", rows.never_fired_total),
+        format!("Never spawned {}", rows.never_spawned.len()),
+        format!("Timeline {}", replay.timeline.len()),
+    ] {
+        assert!(h.has(&label), "{label}: {:?}", h.labels());
+    }
+    h.click(&format!("Unobserved {}", rows.unobserved.len()));
+    assert!(h.has(&rows.unobserved[0].successor), "{}", rows.unobserved[0].successor);
+}
+
+#[test]
+fn replay_panel_filters_the_timeline_by_group() {
+    let mut h = Harness::new("replay_filter");
+    let group = h.out("plain.Group");
+    std::fs::copy(repo("src/testdata/missionlog/replay.Group"), &group).unwrap();
+    let logs = h.out("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    let lines = [
+        "T:100 AType:12 ID:500 TYPE:GAZ-AA COUNTRY:601 NAME:Only truck PID:-1 POS(110000.0,10.0,210000.0)",
+        "T:110 AType:12 ID:501 TYPE:Ship COUNTRY:601 NAME:Only ship PID:-1 POS(120000.0,0.0,220000.0)",
+    ];
+    std::fs::write(logs.join("missionReport(filter)[0].txt"), lines.join("\n")).unwrap();
+    run_replay(&mut h, &group, &logs);
+    h.click("Timeline 2");
+    let truck = "Spawn: Only truck / GAZ-AA (id 500, country Some(601), parent -1)";
+    let ship = "Spawn: Only ship / Ship (id 501, country Some(601), parent -1)";
+    assert!(h.has(truck) && h.has(ship), "{:?}", h.labels());
+    h.app.replay.group_filter = Some(vec!["Replay synthetic".into(), "Copy 1".into()]);
+    h.settle();
+    assert!(h.has(truck) && !h.has(ship), "the other copy's ship is filtered out");
+}
+
+#[test]
+fn replay_panel_widgets_are_28_px() {
+    let mut h = Harness::new("replay_sizes");
+    h.click("Replay…");
+    let mut small = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let check = |h: &Harness, small: &mut Vec<String>, seen: &mut std::collections::BTreeSet<String>| {
+        for n in &h.nodes {
+            let control = matches!(n.role, Role::Button | Role::CheckBox | Role::ComboBox | Role::Slider | Role::SpinButton);
+            if !control || n.rect.width() <= 0.0 || n.rect.top() < shell::HEADER_H {
+                continue;
+            }
+            seen.insert(n.label.clone());
+            if n.rect.height() < 27.5 {
+                small.push(format!("{:?} {:?}: {} px", n.label, n.role, n.rect.height()));
+            }
+        }
+    };
+    // Run replay is disabled before anything is picked; it is checked too.
+    check(&h, &mut small, &mut seen);
+    dialog::answer(vec![a1_group()]);
+    h.click("Pick .Group…");
+    dialog::answer(vec![repo("src/testdata/missionlog/real_46")]);
+    h.click("Log folder…");
+    h.click("Run replay");
+    for prefix in ["Dead links", "Unobserved", "Never fired", "Fired", "Never spawned", "Timeline"] {
+        let tab = h.find_prefix(prefix);
+        h.click_at(tab.rect.center());
+        h.settle();
+        check(&h, &mut small, &mut seen);
+    }
+    for label in ["Pick .Group…", "Trace file…", "Log folder…", "Run replay", "Close", "Timeline group"] {
+        assert!(seen.contains(label), "not checked: {label}; {seen:?}");
+    }
+    small.sort();
+    small.dedup();
+    assert!(small.is_empty(), "Replay panel targets under 28 px: {small:?}");
+}
+
+/// A .trace.json left beside a file regenerated without trace no longer
+/// matches it: Run replay refuses it and says why.
+#[test]
+fn replay_refuses_a_sidecar_from_another_build() {
+    let mut h = Harness::new("replay_stale_sidecar");
+    let group = replay_chain_group(&h);
+    std::fs::copy(repo("src/testdata/missionlog/replay.Group"), &group).unwrap();
+    h.click("Replay…");
+    dialog::answer(vec![group.clone()]);
+    h.click("Pick .Group…");
+    dialog::answer(vec![repo("src/testdata/missionlog/chain")]);
+    h.click("Log folder…");
+    h.click("Run replay");
+    assert!(h.app.replay.loaded.is_none());
+    let err = h.app.replay.error.clone().expect("an error shows");
+    assert!(err.contains("chain.trace.json") && err.contains("from another build"), "{err}");
+    h.settle();
+    assert!(h.has(&err));
+}
+
+/// A new pick makes the shown report stale: it and the Map layer go.
+#[test]
+fn replay_new_pick_clears_the_report_and_map_layer() {
+    let mut h = Harness::new("replay_new_pick");
+    let group = replay_chain_group(&h);
+    run_replay(&mut h, &group, &repo("src/testdata/missionlog/chain"));
+    assert!(h.app.replay.layer);
+    dialog::answer(vec![a1_group()]);
+    h.click("Pick .Group…");
+    assert!(h.app.replay.loaded.is_none() && !h.app.replay.layer);
+    assert!(!h.labels().iter().any(|l| l.starts_with("Dead links")));
+}
+
+/// Drawn inside the app, the Replay window takes Esc: it closes, and an
+/// active Map tool stays active.
+#[test]
+fn esc_closes_an_embedded_replay_and_nothing_else() {
+    let mut h = Harness::new("replay_esc");
+    h.tab("Map");
+    h.app.pick_map_tool(MapDrawingMode::PlaceEastObjective);
+    h.click("Replay…");
+    assert!(h.app.replay.open && h.app.replay.embedded);
+    h.key(Key::Escape);
+    h.settle();
+    assert!(!h.app.replay.open);
+    assert!(h.app.map_drawing_mode == MapDrawingMode::PlaceEastObjective);
+}
+
+#[test]
+fn map_replay_layer_draws_spawns() {
+    let mut h = Harness::new("replay_map_layer");
+    h.tab("Map");
+    h.settle();
+    assert!(!h.has("Replay"), "no Replay layer until a replay is loaded");
+    assert_eq!(h.app.replay.drawn, [0, 0]);
+    run_replay(&mut h, &a1_group(), &repo("src/testdata/missionlog/real_46"));
+    h.click("Close");
+    h.settle();
+    let markers = &h.app.replay.loaded.as_ref().unwrap().replay.markers;
+    let spawns = markers.iter().filter(|m| m.kind == crate::missionlog::MarkerKind::Spawn).count();
+    let kills = markers.len() - spawns;
+    assert!(spawns > 0 && kills > 0, "A1 has spawns and kills");
+    assert_eq!(h.find("Replay").toggled, Some(true), "on once loaded");
+    assert_eq!(h.app.replay.drawn, [spawns, kills]);
+    h.click("Replay");
+    h.settle();
+    assert_eq!(h.app.replay.drawn, [0, 0], "the layer turns off");
+}
+
+/// The Air Tasking tab's Generate File: P14 names get breadcrumbs too.
+#[test]
+fn air_tasking_trace_build_includes_role_names() {
+    let mut h = Harness::new("air_tab_trace");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    h.app.trace_build = true;
+    let out = h.out("air_trace.Group");
+    dialog::answer(vec![out.clone()]);
+    h.key_with(Key::G, CTRL);
+    assert_eq!(dialog::pending(), 0);
+    let map = crate::trace::read_trace_sidecar(&out).unwrap();
+    assert!(h.status().contains(&format!("Trace build: {} breadcrumbs.", map.entries.len())), "{}", h.status());
+    let starts = map.entries.iter().filter(|e| e.source_name.ends_with(" START")).count();
+    assert!(starts > 0, "sortie START timers traced");
+}
+
+/// The .Group was written though its language files failed: the trace
+/// sidecar is still written, and the status says both.
+#[test]
+fn trace_sidecar_is_written_when_language_files_fail() {
+    let mut h = Harness::new("trace_lang_fail");
+    h.tab("Map");
+    fill_air_pool(&mut h);
+    h.app.terrain_apply = false;
+    h.app.trace_build = true;
+    let out = h.out("lang_fail.Group");
+    std::fs::create_dir_all(out.with_extension("eng")).unwrap();
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    assert!(matches!(h.app.status, Status::Error(_)), "{}", h.status());
+    assert!(h.status().contains("language files failed") && h.status().contains("Trace build:"), "{}", h.status());
+    assert!(crate::trace::read_trace_sidecar(&out).is_ok());
+}
+
+/// On the Map tab a trace build follows decision points across the file and
+/// the P14 names: the sorties' START and DONE HUB timers get breadcrumbs.
+#[test]
+fn map_trace_build_includes_air_tasking_roles() {
+    let mut h = Harness::new("air_map_trace");
+    h.tab("Map");
+    fill_air_pool(&mut h);
+    h.app.terrain_apply = false;
+    h.app.trace_build = true;
+    let out = h.out("base_map_air_trace.Group");
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    let map = crate::trace::read_trace_sidecar(&out).unwrap();
+    assert!(h.status().ends_with(&format!("Trace build: {} breadcrumbs.", map.entries.len())));
+    let roles = |suffix: &str| {
+        map.entries
+            .iter()
+            .filter(|e| e.source_type == "MCU_Timer" && e.source_name.ends_with(suffix))
+            .count()
+    };
+    assert!(roles(" START") > 0 && roles(" DONE HUB") > 0, "P14 names traced");
+    assert!(map.entries.iter().any(|e| e.source_type == "MCU_CheckZone"));
 }
 
 #[test]

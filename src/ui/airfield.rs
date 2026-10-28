@@ -314,6 +314,7 @@ impl super::GroupGeneratorApp {
             &serialize_group(&group),
             &[],
             "Wrote the air start group",
+            None,
         );
     }
 
@@ -762,7 +763,7 @@ impl super::GroupGeneratorApp {
             "Field spawn at {:.0}, {:.0}, heading {:.0}°",
             spot.x, spot.z, spot.heading_deg
         );
-        self.status = save_with_sidecars(&save_path, &serialize_group(&root), &locale, &summary);
+        self.status = save_with_sidecars(&save_path, &serialize_group(&root), &locale, &summary, None);
     }
 
     pub(super) fn export_airfield(&mut self) {
@@ -795,6 +796,7 @@ impl super::GroupGeneratorApp {
                 }
             }
         }
+        let trace = self.trace_generated(&mut cleaned);
         let text = serialize_group(&cleaned);
         let suggested = self
             .airfield_path
@@ -819,7 +821,7 @@ impl super::GroupGeneratorApp {
             "Exported airfield (stripped {} objects, unlinked {} checkzones to {})",
             report.stripped, report.unlinked_checkzones, report.plane_coalitions
         );
-        self.status = save_with_sidecars(&save_path, &text, &locale, &summary);
+        self.status = save_with_sidecars(&save_path, &text, &locale, &summary, trace.as_ref());
     }
 }
 

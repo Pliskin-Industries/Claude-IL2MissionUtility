@@ -1335,7 +1335,7 @@ impl GroupGeneratorApp {
     }
 
     pub(super) fn generate_air_file(&mut self) {
-        let root = match self.with_air_context(|ctx| airtask::build_air_group(&self.air_plan, ctx))
+        let mut root = match self.with_air_context(|ctx| airtask::build_air_group(&self.air_plan, ctx))
         {
             Ok(root) => root,
             Err(error) => {
@@ -1343,6 +1343,7 @@ impl GroupGeneratorApp {
                 return;
             }
         };
+        let trace = self.trace_generated(&mut root);
         let text = serialize_group(&root);
         let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])
@@ -1352,7 +1353,7 @@ impl GroupGeneratorApp {
             return;
         };
         let paths = airtask::sidecar_paths(&self.air_plan);
-        self.status = save_with_sidecars(&path, &text, &paths, "Wrote Air Tasking");
+        self.status = save_with_sidecars(&path, &text, &paths, "Wrote Air Tasking", trace.as_ref());
     }
 }
 
