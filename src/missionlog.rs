@@ -318,6 +318,11 @@ fn file_number(path: &Path) -> Result<u64, String> {
 }
 
 pub fn parse_log_dir(dir: &Path) -> Result<MissionLog, String> {
+    parse_log_files(&find_log_files(dir)?)
+}
+
+/// The `missionReport*.txt` files in `dir` (not sorted; `parse_log_files` orders them).
+pub fn find_log_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files = Vec::new();
     for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -332,7 +337,7 @@ pub fn parse_log_dir(dir: &Path) -> Result<MissionLog, String> {
             files.push(path);
         }
     }
-    parse_log_files(&files)
+    Ok(files)
 }
 
 pub fn parse_log_files(files: &[PathBuf]) -> Result<MissionLog, String> {
@@ -405,6 +410,10 @@ pub struct TimelineEvent {
     pub seconds: f64,
     pub description: String,
     pub pos: Option<Position>,
+    /// The `.Group` path this event belongs to: a breadcrumb's source group,
+    /// or the group of an object whose mission Name is unique in the file
+    /// (spawns by name; kills, takeoffs, landings and removals by object id).
+    pub group_path: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -437,6 +446,32 @@ pub struct SpawnCount {
     pub group_path: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkerKind {
+    Spawn,
+    Kill,
+}
+
+/// A spawn or kill position for the Map's Replay layer (game X and Z).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MapMarker {
+    pub kind: MarkerKind,
+    pub x: f64,
+    pub z: f64,
+    /// From the object's spawn record; None when the log never spawned it.
+    pub country: Option<i32>,
+}
+
+/// A `.Group` path as the report and the Replay window show it.
+pub fn group_label(path: &[String]) -> String {
+    path.join(" / ")
+}
+
+/// True when `path` is `group` or lies inside it.
+pub fn within_group(path: Option<&Vec<String>>, group: &[String]) -> bool {
+    path.is_some_and(|p| p.starts_with(group))
+}
+
 #[derive(Debug, Clone)]
 pub struct Replay {
     pub files: Vec<PathBuf>,
@@ -452,6 +487,7 @@ pub struct Replay {
     pub unobserved_successors: Vec<UnobservedSuccessor>,
     pub dead_links: Vec<DeadLink>,
     pub spawn_counts: Vec<SpawnCount>,
+    pub markers: Vec<MapMarker>,
 }
 
 fn breadcrumb_match(record: &Record, trace: &TraceMap) -> Option<usize> {
@@ -514,16 +550,37 @@ pub fn replay(log: &MissionLog, group: &Il2Entity, trace: Option<&TraceMap>) -> 
         })
         .collect();
     let tick_rate = fit_tick_rate(&pairs);
+    let names = object_names(group);
+    let ids = spawned_names(log);
+    let unique_path = |name: Option<&str>| {
+        names
+            .get(name?)
+            .filter(|paths| paths.len() == 1)
+            .map(|paths| paths[0].clone())
+    };
+    let by_id = |id: Option<i64>| unique_path(ids.get(&id?).map(String::as_str));
     let mut timeline = Vec::new();
     for record in &log.records {
         let breadcrumb =
             trace.and_then(|map| breadcrumb_match(record, map).map(|i| &map.entries[i]));
-        if let Some((description, pos)) = describe_record(record.typed(), breadcrumb) {
+        let typed = record.typed();
+        let group_path = match (breadcrumb, typed) {
+            (Some(entry), _) => Some(entry.group_path.clone()),
+            (None, TypedRecord::Spawn(s)) => unique_path(s.name),
+            (None, TypedRecord::Kill { target_id, .. }) => by_id(target_id),
+            (
+                None,
+                TypedRecord::Takeoff(e) | TypedRecord::Landing(e) | TypedRecord::Removed(e),
+            ) => by_id(e.id),
+            _ => None,
+        };
+        if let Some((description, pos)) = describe_record(typed, breadcrumb) {
             timeline.push(TimelineEvent {
                 t_ticks: record.t_ticks,
                 seconds: tick_rate.seconds(record.t_ticks),
                 description,
                 pos,
+                group_path,
             });
         }
     }
@@ -537,6 +594,7 @@ pub fn replay(log: &MissionLog, group: &Il2Entity, trace: Option<&TraceMap>) -> 
                 seconds: tick_rate.seconds(tick),
                 description: format!("Breadcrumb: {}", entry_label(&entry)),
                 pos: None,
+                group_path: Some(entry.group_path.clone()),
             });
         }
         firings.push(Firing { entry, times_s });
@@ -562,7 +620,59 @@ pub fn replay(log: &MissionLog, group: &Il2Entity, trace: Option<&TraceMap>) -> 
         unobserved_successors,
         dead_links,
         spawn_counts: spawn_counts(log, group),
+        markers: markers(log, trace),
     }
+}
+
+/// Spawn markers: the first record of each top-level object (no parent) that
+/// has a real position; the end-of-mission dump writes 0,0,0. Kill markers:
+/// each kill of a top-level object. Breadcrumb spawns are left out.
+fn markers(log: &MissionLog, trace: Option<&TraceMap>) -> Vec<MapMarker> {
+    let mut spawns = HashMap::<i64, (Option<i32>, bool)>::new();
+    for record in &log.records {
+        if let TypedRecord::Spawn(s) = record.typed()
+            && let Some(id) = s.id
+        {
+            let child = s.parent_id.is_some_and(|p| p > 0);
+            spawns.entry(id).or_insert((s.country, child));
+        }
+    }
+    let real = |pos: Option<Position>| {
+        pos.filter(|(x, y, z)| [x, y, z].iter().any(|v| **v != 0.0))
+    };
+    let mut placed = HashSet::new();
+    let mut out = Vec::new();
+    for record in &log.records {
+        let marker = |kind, id: Option<i64>, (x, _, z): Position| MapMarker {
+            kind,
+            x,
+            z,
+            country: id.and_then(|id| spawns.get(&id)).and_then(|s| s.0),
+        };
+        match record.typed() {
+            TypedRecord::Spawn(s) => {
+                let top = s.parent_id.is_none_or(|p| p <= 0);
+                let breadcrumb = trace.is_some_and(|t| breadcrumb_match(record, t).is_some());
+                if let (Some(id), Some(pos)) = (s.id, real(s.pos))
+                    && top
+                    && !breadcrumb
+                    && placed.insert(id)
+                {
+                    out.push(marker(MarkerKind::Spawn, Some(id), pos));
+                }
+            }
+            TypedRecord::Kill { target_id, pos, .. } => {
+                let child = target_id.and_then(|id| spawns.get(&id)).is_some_and(|s| s.1);
+                if let Some(pos) = real(pos)
+                    && !child
+                {
+                    out.push(marker(MarkerKind::Kill, target_id, pos));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn successors(
@@ -652,7 +762,22 @@ fn successors(
     (gaps, dead_links)
 }
 
-fn spawn_counts(log: &MissionLog, group: &Il2Entity) -> Vec<SpawnCount> {
+/// Each object's log name, by object id (the first spawn record that names it).
+fn spawned_names(log: &MissionLog) -> HashMap<i64, String> {
+    let mut ids = HashMap::new();
+    for record in &log.records {
+        if let TypedRecord::Spawn(s) = record.typed()
+            && let (Some(id), Some(name)) = (s.id, s.name)
+        {
+            ids.entry(id).or_insert_with(|| name.to_string());
+        }
+    }
+    ids
+}
+
+/// Every plane, vehicle, ship and train Name in the `.Group`, with the group
+/// path of each object that carries it.
+fn object_names(group: &Il2Entity) -> BTreeMap<String, Vec<Vec<String>>> {
     fn walk(
         node: &Il2Entity,
         path: &mut Vec<String>,
@@ -678,6 +803,11 @@ fn spawn_counts(log: &MissionLog, group: &Il2Entity) -> Vec<SpawnCount> {
     }
     let mut names = BTreeMap::new();
     walk(group, &mut Vec::new(), &mut names);
+    names
+}
+
+fn spawn_counts(log: &MissionLog, group: &Il2Entity) -> Vec<SpawnCount> {
+    let names = object_names(group);
     let mut spawned = HashMap::<String, usize>::new();
     for record in &log.records {
         if let TypedRecord::Spawn(s) = record.typed()
@@ -703,7 +833,7 @@ fn entry_label(entry: &TraceEntry) -> String {
         .map_or_else(String::new, |e| format!(", event {e}"));
     format!(
         "{} / {} ({} #{}{event})",
-        entry.group_path.join(" / "),
+        group_label(&entry.group_path),
         entry.source_name,
         entry.source_type,
         entry.source_index
@@ -817,6 +947,114 @@ fn markdown(text: &str) -> String {
         .replace(['\n', '\r'], " ")
 }
 
+/// Shown under the Unobserved successors heading, in the report and the UI.
+pub const UNOBSERVED_NOTE: &str = "These are observations, not faults: a closed gate, failed random roll or counter below its threshold may explain them. Downstream missing nodes are grouped under the first missing successor.";
+
+/// Shown under the Never spawned heading, in the report and the UI.
+pub const NEVER_SPAWNED_NOTE: &str = "Counts are per mission Name (UNVERIFIED mapping from log NAME). AType:12 records appear on object events or in the end-of-mission dump; absence does not prove an object never spawned. Repeated records count again; shared names cannot identify which copy spawned. Group paths are shown only for unique names.";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeadLinkRow {
+    pub from: String,
+    pub to: String,
+    pub fired_s: f64,
+    pub delay_s: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnobservedRow {
+    pub successor: String,
+    pub upstream: Vec<String>,
+    pub downstream: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiredRow {
+    pub source: String,
+    pub times_s: Vec<f64>,
+}
+
+/// The report's sections as rows: what `report_markdown` writes and the
+/// Replay panel shows. Labels are plain text (not Markdown-escaped).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReportRows {
+    pub dead_links: Vec<DeadLinkRow>,
+    pub unobserved: Vec<UnobservedRow>,
+    /// Never-fired sources that are not already grouped under an unobserved successor.
+    pub never_fired: Vec<String>,
+    pub never_fired_total: usize,
+    /// How many never-fired sources the unobserved successors already list.
+    pub never_fired_grouped: usize,
+    /// Names with fewer spawn records than objects in the mission.
+    pub never_spawned: Vec<SpawnCount>,
+    /// Traced sources that fired, with their firing times.
+    pub fired: Vec<FiredRow>,
+}
+
+pub fn report_rows(replay: &Replay) -> ReportRows {
+    let label = |id: i32| {
+        replay
+            .firings
+            .iter()
+            .find(|f| f.entry.breadcrumb_index == id)
+            .map_or_else(|| format!("breadcrumb #{id}"), |f| entry_label(&f.entry))
+    };
+    let labels = |ids: &[i32]| ids.iter().map(|&id| label(id)).collect::<Vec<_>>();
+    let mut grouped = HashSet::new();
+    for gap in &replay.unobserved_successors {
+        grouped.insert(gap.breadcrumb_index);
+        grouped.extend(&gap.downstream);
+    }
+    let never: Vec<_> = replay
+        .firings
+        .iter()
+        .filter(|f| f.times_s.is_empty())
+        .collect();
+    ReportRows {
+        dead_links: replay
+            .dead_links
+            .iter()
+            .map(|d| DeadLinkRow {
+                from: label(d.from),
+                to: label(d.to),
+                fired_s: d.fired_s,
+                delay_s: d.delay_s,
+            })
+            .collect(),
+        unobserved: replay
+            .unobserved_successors
+            .iter()
+            .map(|gap| UnobservedRow {
+                successor: label(gap.breadcrumb_index),
+                upstream: labels(&gap.upstream),
+                downstream: labels(&gap.downstream),
+            })
+            .collect(),
+        never_fired: never
+            .iter()
+            .filter(|f| !grouped.contains(&f.entry.breadcrumb_index))
+            .map(|f| label(f.entry.breadcrumb_index))
+            .collect(),
+        never_fired_total: never.len(),
+        never_fired_grouped: grouped.len(),
+        never_spawned: replay
+            .spawn_counts
+            .iter()
+            .filter(|s| s.spawned_count < s.mission_count)
+            .cloned()
+            .collect(),
+        fired: replay
+            .firings
+            .iter()
+            .filter(|f| !f.times_s.is_empty())
+            .map(|f| FiredRow {
+                source: label(f.entry.breadcrumb_index),
+                times_s: f.times_s.clone(),
+            })
+            .collect(),
+    }
+}
+
 pub fn report_markdown(replay: &Replay) -> String {
     let mut out = String::from("# Mission replay\n\n");
     writeln!(
@@ -873,84 +1111,54 @@ pub fn report_markdown(replay: &Replay) -> String {
         )
         .unwrap();
     }
-    let label = |id| {
-        replay
-            .firings
-            .iter()
-            .find(|f| f.entry.breadcrumb_index == id)
-            .map_or_else(
-                || format!("breadcrumb #{id}"),
-                |f| markdown(&entry_label(&f.entry)),
-            )
-    };
+    let rows = report_rows(replay);
     out.push_str("\n## Dead links\n\n");
-    if replay.dead_links.is_empty() {
+    if rows.dead_links.is_empty() {
         out.push_str("None.\n");
     }
-    for dead in &replay.dead_links {
-        writeln!(out, "- {} -> {}: fault on an unconditional path (fired at {:.3} s, delay {:.3} s, at least 5 s grace elapsed).", label(dead.from), label(dead.to), dead.fired_s, dead.delay_s).unwrap();
+    for dead in &rows.dead_links {
+        writeln!(out, "- {} -> {}: fault on an unconditional path (fired at {:.3} s, delay {:.3} s, at least 5 s grace elapsed).", markdown(&dead.from), markdown(&dead.to), dead.fired_s, dead.delay_s).unwrap();
     }
-    out.push_str("\n## Unobserved successors\n\nThese are observations, not faults: a closed gate, failed random roll or counter below its threshold may explain them. Downstream missing nodes are grouped under the first missing successor.\n\n");
-    if replay.unobserved_successors.is_empty() {
+    write!(out, "\n## Unobserved successors\n\n{UNOBSERVED_NOTE}\n\n").unwrap();
+    if rows.unobserved.is_empty() {
         out.push_str("None.\n");
     }
-    let mut grouped = HashSet::new();
-    for gap in &replay.unobserved_successors {
-        grouped.insert(gap.breadcrumb_index);
-        grouped.extend(&gap.downstream);
+    let joined = |labels: &[String]| {
+        labels
+            .iter()
+            .map(|l| markdown(l))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    for gap in &rows.unobserved {
         writeln!(
             out,
             "- {} (upstream fired: {}).{}",
-            label(gap.breadcrumb_index),
-            gap.upstream
-                .iter()
-                .map(|&id| label(id))
-                .collect::<Vec<_>>()
-                .join("; "),
+            markdown(&gap.successor),
+            joined(&gap.upstream),
             if gap.downstream.is_empty() {
                 String::new()
             } else {
-                format!(
-                    " Downstream: {}.",
-                    gap.downstream
-                        .iter()
-                        .map(|&id| label(id))
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                )
+                format!(" Downstream: {}.", joined(&gap.downstream))
             }
         )
         .unwrap();
     }
     out.push_str("\n## Never fired\n\n");
-    let never: Vec<_> = replay
-        .firings
-        .iter()
-        .filter(|f| f.times_s.is_empty())
-        .collect();
     writeln!(
         out,
         "{} traced sources/events never observed; {} already grouped above.\n",
-        never.len(),
-        grouped.len()
+        rows.never_fired_total, rows.never_fired_grouped
     )
     .unwrap();
-    for firing in never
-        .iter()
-        .filter(|f| !grouped.contains(&f.entry.breadcrumb_index))
-    {
-        writeln!(out, "- {}", label(firing.entry.breadcrumb_index)).unwrap();
+    for label in &rows.never_fired {
+        writeln!(out, "- {}", markdown(label)).unwrap();
     }
-    out.push_str("\n## Never spawned\n\nCounts are per mission Name (UNVERIFIED mapping from log NAME). AType:12 records appear on object events or in the end-of-mission dump; absence does not prove an object never spawned. Repeated records count again; shared names cannot identify which copy spawned. Group paths are shown only for unique names.\n\n");
-    let shortfalls: Vec<_> = replay
-        .spawn_counts
-        .iter()
-        .filter(|s| s.spawned_count < s.mission_count)
-        .collect();
-    if shortfalls.is_empty() {
+    write!(out, "\n## Never spawned\n\n{NEVER_SPAWNED_NOTE}\n\n").unwrap();
+    if rows.never_spawned.is_empty() {
         out.push_str("None.\n");
     }
-    for count in shortfalls {
+    for count in &rows.never_spawned {
         writeln!(
             out,
             "- {}: {} spawned, {} in the mission{}.",
@@ -968,11 +1176,11 @@ pub fn report_markdown(replay: &Replay) -> String {
         .unwrap();
     }
     out.push_str("\n## Timeline\n\n");
-    for f in replay.firings.iter().filter(|f| !f.times_s.is_empty()) {
+    for f in &rows.fired {
         writeln!(
             out,
             "- {}: {} observed firing(s), at {} s.",
-            label(f.entry.breadcrumb_index),
+            markdown(&f.source),
             f.times_s.len(),
             f.times_s
                 .iter()
@@ -1824,5 +2032,126 @@ mod tests {
         assert!(!report.contains("No trace sidecar"));
         drop(out);
         assert!(!out_path.exists(), "CLI report cleaned up");
+    }
+
+    /// Spawns of unique names, kills of those objects (by id) and breadcrumb
+    /// firings carry a group path; shared names and unknown ids carry none.
+    #[test]
+    fn replay_timeline_events_carry_group_paths() {
+        let mut g = group();
+        let map = trace_group(&mut g);
+        let logs = log(concat!(
+            "T:0 AType:0 GDate:1950.06.25 GTime:12:00:00 MFile:replay.Group\n",
+            "T:100 AType:12 ID:500 TYPE:GAZ-AA COUNTRY:601 NAME:Only truck PID:-1 POS(110000.0,10.0,210000.0)\n",
+            "T:110 AType:12 ID:501 TYPE:f80c10 COUNTRY:601 NAME:F-80C PID:-1 POS(120000.0,900.0,220000.0)\n",
+            "T:150 AType:3 AID:501 TID:500 POS(110000.0,10.0,210000.0)\n",
+            "T:160 AType:3 AID:500 TID:777 POS(110000.0,10.0,210000.0)\n",
+            "T:500 AType:8 OBJID:100 POS(5000.0,0.0,5000.0)\n",
+        ));
+        let result = replay(&logs, &g, Some(&map));
+        let group_of = |prefix: &str| {
+            let hits: Vec<_> = result
+                .timeline
+                .iter()
+                .filter(|e| e.description.starts_with(prefix))
+                .collect();
+            assert_eq!(hits.len(), 1, "{prefix}: {:?}", result.timeline);
+            hits[0].group_path.clone()
+        };
+        let copy_1 = Some(vec!["Replay synthetic".to_string(), "Copy 1".to_string()]);
+        let root = Some(vec!["Replay synthetic".to_string()]);
+        assert_eq!(group_of("Spawn: Only truck"), copy_1);
+        assert_eq!(group_of("Spawn: F-80C"), None);
+        assert_eq!(group_of("Kill: 501 -> 500"), copy_1);
+        assert_eq!(group_of("Kill: 500 -> 777"), None);
+        assert_eq!(group_of("Mission start"), None);
+        assert_eq!(group_of("Objective: A"), root);
+        assert_eq!(group_of("Breadcrumb: Replay synthetic / A"), root);
+    }
+
+    /// A sidecar left over from another build of the file is refused, by
+    /// name: each breadcrumb must be an objective and each source must be
+    /// the same MCU (index, type and name) as when it was traced.
+    #[test]
+    fn trace_sidecar_must_match_its_group() {
+        let mut g = group();
+        let map = trace_group(&mut g);
+        assert_eq!(crate::trace::check_sidecar(&g, &map), Ok(()));
+        let plain = group();
+        let err = crate::trace::check_sidecar(&plain, &map).unwrap_err();
+        assert!(err.contains("breadcrumb #100"), "{err}");
+        let mut renamed = g.clone();
+        renamed.for_each_mut(&mut |e| {
+            if e.index == Some(3) {
+                e.set_name("Not B");
+            }
+        });
+        let err = crate::trace::check_sidecar(&renamed, &map).unwrap_err();
+        assert!(err.contains("#3") && err.contains("\"B\""), "{err}");
+    }
+
+    #[test]
+    fn group_paths_match_the_group_and_its_subgroups_only() {
+        let path = |p: &[&str]| p.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let filter = path(&["Root", "Copy 1"]);
+        assert!(within_group(Some(&path(&["Root", "Copy 1"])), &filter));
+        assert!(within_group(Some(&path(&["Root", "Copy 1", "Logic"])), &filter));
+        assert!(!within_group(Some(&path(&["Root", "Copy 10"])), &filter));
+        assert!(!within_group(Some(&path(&["Root"])), &filter));
+        assert!(!within_group(None, &filter));
+        assert_eq!(group_label(&filter), "Root / Copy 1");
+    }
+
+    /// The report's sections as table rows, with plain (unescaped) labels.
+    #[test]
+    fn report_rows_hold_each_section() {
+        let mut g = group();
+        let map = trace_group(&mut g);
+        let logs = parse_log_dir(&fixture("chain")).unwrap();
+        let rows = report_rows(&replay(&logs, &g, Some(&map)));
+        let a = "Replay synthetic / A (MCU_Timer #1)";
+        let b = "Replay synthetic / B (MCU_Timer #3)";
+        let c = "Replay synthetic / C (MCU_Timer #4)";
+        assert_eq!(
+            rows.dead_links,
+            [DeadLinkRow { from: a.into(), to: b.into(), fired_s: 10.0, delay_s: 3.0 }]
+        );
+        assert_eq!(
+            rows.unobserved,
+            [UnobservedRow { successor: b.into(), upstream: vec![a.into()], downstream: vec![c.into()] }]
+        );
+        assert_eq!((rows.never_fired_total, rows.never_fired_grouped), (2, 2));
+        assert!(rows.never_fired.is_empty(), "B and C are grouped above");
+        assert_eq!(rows.fired, [FiredRow { source: a.into(), times_s: vec![10.0] }]);
+        let spawned: Vec<_> = rows.never_spawned.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(spawned, ["F-80C", "Only ship", "Only train", "Only truck"]);
+    }
+
+    /// One spawn marker per top-level object (its first record with a real
+    /// position) and one kill marker per killed top-level object, each with
+    /// the country of the object's spawn record.
+    #[test]
+    fn replay_markers_are_spawns_and_kills_of_top_level_objects() {
+        let g = group();
+        let logs = log(concat!(
+            "T:100 AType:12 ID:500 TYPE:GAZ-AA COUNTRY:601 NAME:Only truck PID:-1 POS(110000.0,10.0,210000.0)\n",
+            "T:110 AType:12 ID:501 TYPE:IL-10 COUNTRY:503 NAME:Red 1 PID:-1 POS(120000.0,900.0,220000.0)\n",
+            "T:111 AType:12 ID:502 TYPE:BotPilot COUNTRY:503 NAME:BotPilot PID:501 POS(120000.0,900.0,220000.0)\n",
+            "T:120 AType:12 ID:503 TYPE:Yak-9P COUNTRY:503 NAME:Red 2 PID:-1 POS(0.0000,0.0000,0.0000)\n",
+            "T:150 AType:3 AID:501 TID:500 POS(110001.0,10.0,210001.0)\n",
+            "T:151 AType:12 ID:500 TYPE:GAZ-AA COUNTRY:601 NAME:Only truck PID:-1 POS(110001.0,10.0,210001.0)\n",
+            "T:152 AType:3 AID:-1 TID:502 POS(120000.0,900.0,220000.0)\n",
+            "T:160 AType:3 AID:500 TID:777 POS(130000.0,0.0,230000.0)\n",
+        ));
+        let result = replay(&logs, &g, None);
+        assert_eq!(
+            result.markers,
+            [
+                MapMarker { kind: MarkerKind::Spawn, x: 110000.0, z: 210000.0, country: Some(601) },
+                MapMarker { kind: MarkerKind::Spawn, x: 120000.0, z: 220000.0, country: Some(503) },
+                MapMarker { kind: MarkerKind::Kill, x: 110001.0, z: 210001.0, country: Some(601) },
+                MapMarker { kind: MarkerKind::Kill, x: 130000.0, z: 230000.0, country: None },
+            ]
+        );
     }
 }

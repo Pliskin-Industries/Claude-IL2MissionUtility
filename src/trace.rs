@@ -1,4 +1,3 @@
-#![allow(dead_code)] // P14: removed in step 9T
 //! Opt-in mission breadcrumbs. Success 0 objectives log without ending the
 //! dogfight round; repeated and same-tick logging remain UNVERIFIED.
 
@@ -530,7 +529,8 @@ pub fn rebuild_edges(root: &Il2Entity, map: &mut TraceMap) {
         .collect();
 }
 
-fn sidecar_path(path: &Path) -> PathBuf {
+/// Where the sidecar of a `.Group` lives (`<mission>.trace.json`); any other path is kept.
+pub fn sidecar_path(path: &Path) -> PathBuf {
     if path
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("Group"))
@@ -552,6 +552,37 @@ pub fn read_trace_sidecar(path: &Path) -> Result<TraceMap, String> {
     let path = sidecar_path(path);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     decode_map(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// A sidecar belongs to its `.Group` when every breadcrumb is still an
+/// objective there and every source is the same MCU (index, type, name) it
+/// was traced from. A sidecar left beside a file regenerated without trace,
+/// or from another build, fails with the first mismatch.
+pub fn check_sidecar(root: &Il2Entity, map: &TraceMap) -> Result<(), String> {
+    let mut nodes = HashMap::new();
+    index_nodes(root, &mut nodes);
+    for e in &map.entries {
+        match (e.carrier, nodes.get(&e.breadcrumb_index)) {
+            (TraceCarrier::Objective(_), Some(n)) if n.block_type == "MCU_TR_MissionObjective" => {}
+            (TraceCarrier::Spawn, Some(n)) if n.block_type == "MCU_Spawner" => {}
+            _ => {
+                return Err(format!(
+                    "breadcrumb #{} is not in this .Group: the .trace.json is from another build",
+                    e.breadcrumb_index
+                ));
+            }
+        }
+        let same = nodes.get(&e.source_index).is_some_and(|n| {
+            n.block_type == e.source_type && n.name().unwrap_or("") == e.source_name
+        });
+        if !same {
+            return Err(format!(
+                "source #{} {} {:?} is not in this .Group: the .trace.json is from another build",
+                e.source_index, e.source_type, e.source_name
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_map(map: &TraceMap) -> Result<(), String> {
