@@ -1,4 +1,3 @@
-#![allow(dead_code)] // P14: removed in step 9
 //! Aircraft availability for P14, keyed by model_spec's plane ids.
 //!
 //! Dates/citations come from korea-1950-53-unit-reference.md sections 2.2, 3
@@ -6,7 +5,7 @@
 //! other rows retain the mandated, permissive war-span fallback. A dated sortie
 //! or a unit's base move alone does not establish a model's first theatre date.
 
-use crate::airtask::{AirSide, DateRange, Ymd};
+use crate::airtask::{AirSide, DateRange};
 use crate::model_spec;
 
 pub const WAR_SPAN: DateRange = DateRange {
@@ -77,7 +76,8 @@ pub fn for_model(model: &str) -> Option<&'static TheatreEntry> {
 }
 
 /// Inclusive range check; an unknown model has no availability claim.
-pub fn valid_on(model: &str, date: Ymd) -> bool {
+#[cfg(test)] // the theatre table tests; sorties use `AirSortie::valid_on`
+pub fn valid_on(model: &str, date: crate::airtask::Ymd) -> bool {
     for_model(model).is_some_and(|row| row.valid.from <= date && date <= row.valid.to)
 }
 

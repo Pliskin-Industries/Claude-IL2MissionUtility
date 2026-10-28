@@ -207,7 +207,6 @@ fn rotate_visual_walk(
 
 /// Rotate all positioned nodes around an X/Z pivot, including mission logic.
 /// Only the visual bodies used by `apply_group_heading` receive a yaw change.
-#[allow(dead_code)] // P14
 pub(crate) fn rotate_tree(root: &mut Il2Entity, pivot: (f64, f64), theta_deg: f64) {
     if theta_deg.rem_euclid(360.0).abs() < 1e-9 {
         return;

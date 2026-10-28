@@ -12,6 +12,7 @@ pub(crate) const BUDGET_RANGE: std::ops::RangeInclusive<u8> = 1..=6;
 pub(crate) fn census_delay(census: CensusImpl, order: usize) -> f64 {
     match census {
         CensusImpl::Spaced => order as f64 / 20.0, // Flight 0: E7 confirmed; Spaced remains the census default.
+        #[cfg(test)]
         CensusImpl::SameTick => 0.0,
     }
 }
@@ -19,6 +20,7 @@ pub(crate) fn census_delay(census: CensusImpl, order: usize) -> f64 {
 pub(crate) fn recount_time(census: CensusImpl, copies: usize) -> f64 {
     match census {
         CensusImpl::Spaced => (copies as f64 + 3.0) / 20.0,
+        #[cfg(test)]
         CensusImpl::SameTick => 0.2,
     }
 }

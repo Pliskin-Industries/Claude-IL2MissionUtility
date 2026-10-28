@@ -78,6 +78,7 @@ pub enum TestedShape {
 }
 
 /// S7 adds RTB to a supported Activate route (decision 0017).
+#[cfg(test)] // the shape table test checks the classifier against it
 pub const ACCEPTED_SHAPES: [(TestedShape, &str); 5] = [
     (TestedShape::S1, "Activate: one lead, one AttackArea"),
     (
