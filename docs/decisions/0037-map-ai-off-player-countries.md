@@ -1,8 +1,8 @@
 # 0037. Move the Map's own AI aircraft off the player countries when Air Tasking is in the mission
 
-- **Status:** Proposed
+- **Status:** Accepted (option A)
 - **Date:** 2026-10-27
-- **Decided by:** open, for the user. Raised while building acceptance flight A1 (`handoff/sessions/2026-10-27-p14-acceptance-a1.md`).
+- **Decided by:** the user, 2026-10-28 ("Yes. Player countries should be different from the spawned"), choosing option A, Claude's recommendation. Raised while building acceptance flight A1 (`handoff/sessions/2026-10-27-p14-acceptance-a1.md`).
 
 ## Context
 
@@ -25,7 +25,7 @@ The other checks filter by **coalition** (the presence check `THsaa INNER`, each
 
 **A.** It removes the false starts where they can happen and changes nothing for a mission without Air Tasking. Step 9 wires Air Tasking into Map Generate, so A would be built there. B is the fallback if the user wants the Map's countries left as the mission maker set them.
 
-## Consequences (if A)
+## Consequences
 
-- Step 9's Generate path applies the change after the Map packs are built, only when `air_packs` is not empty, and a test pins it.
+- Not built yet: step 9 merged without it. Map Generate applies the change after the Map packs are built, only when `air_packs` is not empty, and a test pins it. Generate output changes only for missions with Air Tasking.
 - Flight A1's result for the wave (it may keep an area HOT or hold a Zone Out) applies to A as well, because those checks filter by coalition.
