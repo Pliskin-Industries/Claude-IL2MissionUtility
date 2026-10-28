@@ -553,7 +553,7 @@ enum Status {
 }
 
 /// Fingerprint of an edit text (undo settling, the Air Tasking check cache).
-fn hash(text: String) -> u64 {
+fn fingerprint(text: String) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut h);
@@ -1278,16 +1278,16 @@ impl GroupGeneratorApp {
     fn settle_undo(&mut self) {
         match self.mode {
             AppMode::Template => {
-                let fp = hash(self.tpl_fingerprint());
+                let fp = fingerprint(self.tpl_fingerprint());
                 self.tpl_undo.settle(fp);
             }
-            AppMode::AirTasking => self.air_undo.settle(hash(self.air_fingerprint())),
+            AppMode::AirTasking => self.air_undo.settle(fingerprint(self.air_fingerprint())),
             AppMode::Recon => {
                 let slots = match self.recon_submode {
                     ReconSubmode::New => &self.recon_slots,
                     ReconSubmode::Rework => &self.recon_rework,
                 };
-                let fp = hash(format!(
+                let fp = fingerprint(format!(
                     "{}{:?}",
                     self.recon_submode == ReconSubmode::New,
                     slots
@@ -1304,7 +1304,7 @@ impl GroupGeneratorApp {
                 self.recon_undo.settle(fp);
             }
             AppMode::Exclusive => {
-                let fp = hash(format!(
+                let fp = fingerprint(format!(
                     "{:?}",
                     self.bomber_slots
                         .iter()
@@ -1323,7 +1323,7 @@ impl GroupGeneratorApp {
                 // dock Auto-fill or ✖), so an Air Tasking edit keeps a Clear undo.
                 let air = self.map_undo.peek().is_some_and(|f| f.air.is_some());
                 let ao = self.front_aabb;
-                let fp = hash(format!(
+                let fp = fingerprint(format!(
                     "{:?}",
                     (
                         (

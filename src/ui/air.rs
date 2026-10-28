@@ -76,7 +76,7 @@ fn air_eval_key(plan: &AirPlan, ctx: &AirContext) -> u64 {
             SortieSource::BuiltIn(_) => None,
         })
         .collect();
-    hash(format!(
+    fingerprint(format!(
         "{plan:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{files:?}",
         ctx.east_objectives, ctx.nato_objectives, ctx.arrows, ctx.front, ctx.aabb, ctx.date
     ))
@@ -838,7 +838,7 @@ impl GroupGeneratorApp {
             (width - 358.0).max(42.0),
             86.0,
             46.0,
-            72.0,
+            MODE_CELL_W,
             40.0,
             28.0,
             28.0,
@@ -900,7 +900,7 @@ impl GroupGeneratorApp {
                 });
                 air_cell(ui, widths[4], |ui| {
                     let before = entry.mode;
-                    let response = mode_combo(ui, &mut entry.mode, ("air_mode", index), index);
+                    let response = mode_combo(ui, &mut entry.mode, index);
                     if entry.mode != before { edit = Some((response.id, "Changed mode".into())); }
                 });
                 air_cell(ui, widths[5], |ui| {
@@ -915,7 +915,7 @@ impl GroupGeneratorApp {
                         .on_hover_text(status_text(status));
                 });
                 air_cell(ui, widths[7], |ui| {
-                    if ui.add_sized([28.0, 28.0], egui::Button::new("✖")).on_hover_text("Remove entry").clicked() { remove = Some(index); }
+                    if remove_entry_button(ui, index) { remove = Some(index); }
                 });
             });
             if row.clicked() && !popup_open && !egui::Popup::is_any_open(ui.ctx()) {
@@ -1497,15 +1497,14 @@ fn weight_input(ui: &mut egui::Ui, weight: &mut u8, index: usize) -> egui::Respo
     r
 }
 
-/// A pool entry's trigger mode, named "Entry n mode".
-fn mode_combo(
-    ui: &mut egui::Ui,
-    mode: &mut TriggerMode,
-    salt: impl std::hash::Hash,
-    index: usize,
-) -> egui::Response {
-    let response = egui::ComboBox::from_id_salt(salt)
-        .width(68.0)
+/// Width of a pool entry's mode cell, in both tables.
+const MODE_CELL_W: f32 = 72.0;
+
+/// A pool entry's trigger mode, named "Entry n mode". It fills its
+/// `MODE_CELL_W` cell less the 4 px cell spacing.
+fn mode_combo(ui: &mut egui::Ui, mode: &mut TriggerMode, index: usize) -> egui::Response {
+    let response = egui::ComboBox::from_id_salt(("entry_mode", index))
+        .width(MODE_CELL_W - 4.0)
         .selected_text(mode_text(*mode))
         .show_ui(ui, |ui| {
             for choice in [TriggerMode::Clock, TriggerMode::Zone, TriggerMode::Both] {
@@ -1517,6 +1516,17 @@ fn mode_combo(
         egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("Entry {} mode", index + 1))
     });
     response
+}
+
+/// A pool entry's ✖, a 28 px square named "Remove entry n". True when clicked.
+fn remove_entry_button(ui: &mut egui::Ui, index: usize) -> bool {
+    let r = ui
+        .add_sized([28.0, 28.0], egui::Button::new("✖"))
+        .on_hover_text("Remove entry");
+    r.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Remove entry {}", index + 1))
+    });
+    r.clicked()
 }
 
 fn entry_word(n: usize) -> &'static str {
@@ -1812,7 +1822,8 @@ impl GroupGeneratorApp {
         }
         let mut plan = self.air_plan.clone();
         let mut remove = None;
-        let widths = [0.0, 44.0, 72.0, 28.0];
+        // Name and target, then weight, mode and ✖ cells, 4 px apart.
+        let widths = [44.0, MODE_CELL_W, 28.0];
         let name_w = (ui.available_width() - widths.iter().sum::<f32>() - 3.0 * 4.0).max(60.0);
         self.with_air_context(|ctx| {
             for index in rows {
@@ -1828,43 +1839,32 @@ impl GroupGeneratorApp {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     ui.spacing_mut().button_padding.x = 4.0;
                     ui.allocate_ui_with_layout(
-                        Vec2::new(name_w, 34.0),
+                        Vec2::new(name_w, shell::ROW_H),
                         Layout::top_down(Align::Min),
                         |ui| {
                             ui.set_width(name_w);
                             ui.spacing_mut().item_spacing.y = 0.0;
-                            ui.add(egui::Label::new(RichText::new(name).size(13.0)).truncate())
-                                .on_hover_text(name);
+                            ui.add(egui::Label::new(name).truncate()).on_hover_text(name);
                             let color = if status == EntryStatus::Ok {
                                 c::NEUTRAL_700
                             } else {
                                 c::WARN_TEXT
                             };
                             ui.add(
-                                egui::Label::new(RichText::new(&target_text).size(12.0).color(color))
+                                egui::Label::new(RichText::new(&target_text).small().color(color))
                                     .truncate(),
                             )
                             .on_hover_text(status_text(status));
                         },
                     );
-                    air_cell(ui, widths[1], |ui| {
+                    air_cell(ui, widths[0], |ui| {
                         weight_input(ui, &mut entry.weight, index);
                     });
-                    air_cell(ui, widths[2], |ui| {
-                        mode_combo(ui, &mut entry.mode, ("map_air_mode", index), index);
+                    air_cell(ui, widths[1], |ui| {
+                        mode_combo(ui, &mut entry.mode, index);
                     });
-                    air_cell(ui, widths[3], |ui| {
-                        let r = ui
-                            .add_sized([28.0, 28.0], egui::Button::new("✖"))
-                            .on_hover_text("Remove entry");
-                        r.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Button,
-                                true,
-                                format!("Remove entry {}", index + 1),
-                            )
-                        });
-                        if r.clicked() {
+                    air_cell(ui, widths[2], |ui| {
+                        if remove_entry_button(ui, index) {
                             remove = Some(index);
                         }
                     });
