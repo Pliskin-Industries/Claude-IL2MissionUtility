@@ -4080,27 +4080,38 @@ impl super::GroupGeneratorApp {
                     legend_side(ui, shell::Side::Dprk, "DPRK");
                     legend_side(ui, shell::Side::Nato, "NATO");
                     legend_line(ui, c::ACCENT_800, true, "AO");
-                    if self.replay.loaded.is_some() {
-                        ui.checkbox(&mut self.replay.layer, "Replay").on_hover_text(
-                            "Spawn and kill positions from the loaded replay, in the side's colour",
-                        );
-                        if self.replay.layer {
-                            for (kind, label) in [
-                                (MarkerKind::Spawn, "Spawn"),
-                                (MarkerKind::Kill, "Kill"),
-                            ] {
-                                legend_entry(ui, label, |p, r| {
-                                    super::replay::paint_marker(p, r.center(), kind, c::TEXT)
-                                });
-                            }
-                        }
-                    }
                     ui.menu_button("All layers ▾", |ui| self.draw_map_legend(ui))
                         .response
                         .on_hover_text("Every map layer and its color");
                 });
             },
         );
+        // The Replay layer's own chip, just above the legend: the legend chip
+        // is full at the app's minimum width.
+        if self.replay.loaded.is_some() {
+            let replay_rect = Rect::from_min_max(
+                legend_rect.left_top() - Vec2::new(0.0, 44.0),
+                legend_rect.right_top() - Vec2::new(0.0, 4.0),
+            );
+            ui.scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(replay_rect)
+                    .layout(Layout::left_to_right(Align::Max)),
+                |ui| {
+                    chip(ui, &mut |ui| {
+                        ui.spacing_mut().item_spacing.x = 12.0;
+                        ui.checkbox(&mut self.replay.layer, "Replay").on_hover_text(
+                            "Spawn and kill positions from the loaded replay, in the side's colour",
+                        );
+                        for (kind, label) in [(MarkerKind::Spawn, "Spawn"), (MarkerKind::Kill, "Kill")] {
+                            legend_entry(ui, label, |p, r| {
+                                super::replay::paint_marker(p, r.center(), kind, c::TEXT)
+                            });
+                        }
+                    });
+                },
+            );
+        }
         let zoom_rect = Rect::from_min_max(
             area.right_bottom() - Vec2::new(12.0 + zoom_w, 46.0),
             area.right_bottom() - Vec2::new(12.0, 10.0),

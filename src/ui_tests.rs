@@ -3959,7 +3959,8 @@ fn replay_panel_shows_dead_links_and_unobserved_successors() {
     run_replay(&mut h, &group, &repo("src/testdata/missionlog/chain"));
     let a = "Replay synthetic / A (MCU_Timer #1)";
     let b = "Replay synthetic / B (MCU_Timer #3)";
-    let c = "Replay synthetic / C (MCU_Timer #4)";
+    // Downstream cells name the MCU without its group path.
+    let c = "C (MCU_Timer #4)";
     // Dead links is the first section: A -> B, fired at 10 s, 3 s delay.
     assert!(h.has("Dead links 1") && h.has(a) && h.has(b), "{:?}", h.labels());
     h.click("Unobserved 1");
@@ -4119,11 +4120,73 @@ fn esc_closes_an_embedded_replay_and_nothing_else() {
     assert!(h.app.map_drawing_mode == MapDrawingMode::PlaceEastObjective);
 }
 
+/// Long MCU paths wrap inside their column: no table text runs past the
+/// window's right edge (the live run of 2026-10-28 found the upstream and
+/// downstream columns pushed out of view).
+#[test]
+fn replay_tables_stay_inside_the_window() {
+    let mut h = Harness::new("replay_table_width");
+    run_replay(&mut h, &a1_group(), &repo("src/testdata/missionlog/real_46"));
+    let right = h.find("Close").rect.right();
+    for prefix in ["Unobserved", "Never spawned", "Timeline"] {
+        let tab = h.find_prefix(prefix);
+        h.click_at(tab.rect.center());
+        h.settle();
+        let tabs_bottom = tab.rect.bottom();
+        let outside: Vec<_> = h
+            .nodes
+            .iter()
+            // Table text only: the app's own panels sit behind the embedded window.
+            .filter(|n| {
+                ["Korea Base Map", "Breadcrumb:", "Spawn:", "Kill:", "Upstream fired", "Downstream", "Group"]
+                    .iter()
+                    .any(|p| n.label.starts_with(p))
+            })
+            .filter(|n| n.rect.top() > tabs_bottom && n.rect.width() > 0.0 && n.rect.right() > right + 1.0)
+            .map(|n| format!("{:?} ends at {}", n.label, n.rect.right()))
+            .collect();
+        assert!(outside.is_empty(), "{prefix}: past the window edge {right}: {outside:?}");
+        // No cell taller than a few lines: a row must fit the window.
+        let tall: Vec<_> = h
+            .nodes
+            .iter()
+            .filter(|n| n.label.starts_with("Korea Base Map") && n.rect.top() > tabs_bottom)
+            .filter(|n| n.rect.height() > 160.0)
+            .map(|n| format!("{} px: {:.60}", n.rect.height(), n.label))
+            .collect();
+        assert!(tall.is_empty(), "{prefix}: cells too tall: {tall:?}");
+        assert!(h.labels().iter().any(|l| l.starts_with("Korea Base Map")), "{prefix}: table text checked");
+        if prefix == "Unobserved" {
+            assert!(h.has("Upstream fired"), "the column header is in view");
+        }
+    }
+}
+
+/// At the app's minimum window, a loaded replay keeps the legend usable:
+/// "All layers" and the Replay toggle stay clear of the zoom chip (the live
+/// run of 2026-10-28 found them pushed under it).
+#[test]
+fn map_legend_fits_with_a_replay_at_minimum_width() {
+    let mut h = Harness::new("replay_legend_width");
+    h.screen = Vec2::new(1280.0, 800.0);
+    h.tab("Map");
+    h.wait_for_map();
+    run_replay(&mut h, &a1_group(), &repo("src/testdata/missionlog/real_46"));
+    h.click("Close");
+    h.settle();
+    let zoom_left = h.find("−").rect.left();
+    for label in ["All layers ▾", "Replay"] {
+        let n = h.find(label);
+        assert!(n.rect.right() < zoom_left, "{label} ends at {} under the zoom chip at {zoom_left}", n.rect.right());
+    }
+}
+
 #[test]
 fn map_replay_layer_draws_spawns() {
     let mut h = Harness::new("replay_map_layer");
     h.tab("Map");
-    h.settle();
+    // The legend and the layer draw once the map texture has loaded.
+    h.wait_for_map();
     assert!(!h.has("Replay"), "no Replay layer until a replay is loaded");
     assert_eq!(h.app.replay.drawn, [0, 0]);
     run_replay(&mut h, &a1_group(), &repo("src/testdata/missionlog/real_46"));
@@ -4401,3 +4464,4 @@ fn ctrl_z_after_load_does_not_restore_the_pre_load_state() {
     h.key_with(Key::Z, CTRL);
     assert!(h.app.air_plan.pool.is_empty(), "Air Tasking's Ctrl Z after Load brought back the pool");
 }
+

@@ -229,7 +229,10 @@ impl GroupGeneratorApp {
             ViewportId::from_hash_of("replay"),
             ViewportBuilder::default()
                 .with_title("IL-2 Group Generator — Replay")
-                .with_inner_size([960.0, 720.0])
+                // Fits a 1920 x 1080 screen at 150 %, title bar and taskbar
+                // included, when it opens near the top left.
+                .with_position([60.0, 40.0])
+                .with_inner_size([900.0, 600.0])
                 .with_min_inner_size([640.0, 420.0])
                 .with_decorations(true),
             |ctx, class| {
@@ -465,24 +468,68 @@ pub(super) fn paint_marker(
     }
 }
 
-/// A striped table in its own scroll area: a header row, then the rows.
-fn table(ui: &mut egui::Ui, id: &str, header: &[&str], rows: impl FnOnce(&mut egui::Ui)) {
-    egui::ScrollArea::both()
+/// A striped table in a vertical scroll area. Each column gets its share of
+/// the width (`cols`: header and weight); long text wraps inside its column,
+/// so the MCU paths never push the other columns out of view. `hover` gives
+/// one column a full text on hover, per row.
+fn table(
+    ui: &mut egui::Ui,
+    id: &str,
+    cols: &[(&str, f32)],
+    rows: Vec<Vec<String>>,
+    hover: Option<(usize, Vec<String>)>,
+) {
+    const GAP: f32 = 16.0;
+    let total: f32 = cols.iter().map(|c| c.1).sum();
+    let free = (ui.available_width() - GAP * cols.len() as f32).max(120.0);
+    let widths: Vec<f32> = cols
+        .iter()
+        .map(|c| (free * c.1 / total).max(48.0))
+        .collect();
+    let cell = |ui: &mut egui::Ui, w: f32, text: RichText, tip: Option<&String>| {
+        // Sized by its content, so the row (and its stripe) is as tall as
+        // the wrapped text.
+        ui.vertical(|ui| {
+            ui.set_width(w);
+            let label = ui.add(egui::Label::new(text).wrap());
+            if let Some(tip) = tip.filter(|t| !t.is_empty()) {
+                label.on_hover_text(tip);
+            }
+        });
+    };
+    egui::ScrollArea::vertical()
         .id_salt(id)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             egui::Grid::new(id)
                 .striped(true)
-                .spacing([16.0, 6.0])
-                .num_columns(header.len())
+                .spacing([GAP, 6.0])
+                .num_columns(cols.len())
                 .show(ui, |ui| {
-                    for h in header {
-                        ui.label(RichText::new(*h).strong());
+                    for (c, w) in cols.iter().zip(&widths) {
+                        cell(ui, *w, RichText::new(c.0).strong(), None);
                     }
                     ui.end_row();
-                    rows(ui);
+                    for (r, row) in rows.into_iter().enumerate() {
+                        for (col, (text, w)) in row.into_iter().zip(&widths).enumerate() {
+                            let tip = hover
+                                .as_ref()
+                                .filter(|(c, _)| *c == col)
+                                .and_then(|(_, tips)| tips.get(r));
+                            cell(ui, *w, RichText::new(text), tip);
+                        }
+                        ui.end_row();
+                    }
                 });
         });
+}
+
+/// At most three names, then how many more: one successor can have dozens.
+fn short_list(names: &[String]) -> String {
+    match names.len() {
+        0..=3 => names.join("; "),
+        n => format!("{}; +{} more", names[..3].join("; "), n - 3),
+    }
 }
 
 fn none(ui: &mut egui::Ui) {
@@ -494,20 +541,25 @@ fn dead_links(ui: &mut egui::Ui, rows: &ReportRows) {
     if rows.dead_links.is_empty() {
         return none(ui);
     }
-    table(
-        ui,
-        "replay_dead",
-        &["From (fired)", "To (never fired)", "Fired (s)", "Delay (s)"],
-        |ui| {
-            for d in &rows.dead_links {
-                ui.label(&d.from);
-                ui.label(&d.to);
-                ui.label(format!("{:.1}", d.fired_s));
-                ui.label(format!("{:.1}", d.delay_s));
-                ui.end_row();
-            }
-        },
-    );
+    let cols = [
+        ("From (fired)", 4.0),
+        ("To (never fired)", 4.0),
+        ("Fired (s)", 1.0),
+        ("Delay (s)", 1.0),
+    ];
+    let body = rows
+        .dead_links
+        .iter()
+        .map(|d| {
+            vec![
+                d.from.clone(),
+                d.to.clone(),
+                format!("{:.1}", d.fired_s),
+                format!("{:.1}", d.delay_s),
+            ]
+        })
+        .collect();
+    table(ui, "replay_dead", &cols, body, None);
 }
 
 fn unobserved(ui: &mut egui::Ui, rows: &ReportRows) {
@@ -515,23 +567,25 @@ fn unobserved(ui: &mut egui::Ui, rows: &ReportRows) {
     if rows.unobserved.is_empty() {
         return none(ui);
     }
-    table(
-        ui,
-        "replay_unobserved",
-        &[
-            "Never fired",
-            "Upstream fired",
-            "Downstream (also never fired)",
-        ],
-        |ui| {
-            for gap in &rows.unobserved {
-                ui.label(&gap.successor);
-                ui.label(gap.upstream.join("; "));
-                ui.label(gap.downstream.join("; "));
-                ui.end_row();
-            }
-        },
-    );
+    let cols = [
+        ("Never fired", 1.0),
+        ("Upstream fired", 1.0),
+        ("Downstream (also never fired)", 1.0),
+    ];
+    let body = rows
+        .unobserved
+        .iter()
+        .map(|gap| {
+            vec![
+                gap.successor.clone(),
+                gap.upstream.join("; "),
+                short_list(&gap.downstream_short),
+            ]
+        })
+        .collect();
+    let full = rows.unobserved.iter().map(|gap| gap.downstream.join("
+")).collect();
+    table(ui, "replay_unobserved", &cols, body, Some((2, full)));
 }
 
 fn never_fired(ui: &mut egui::Ui, rows: &ReportRows) {
@@ -542,12 +596,8 @@ fn never_fired(ui: &mut egui::Ui, rows: &ReportRows) {
     if rows.never_fired.is_empty() {
         return none(ui);
     }
-    table(ui, "replay_never_fired", &["Source"], |ui| {
-        for label in &rows.never_fired {
-            ui.label(label);
-            ui.end_row();
-        }
-    });
+    let body = rows.never_fired.iter().map(|l| vec![l.clone()]).collect();
+    table(ui, "replay_never_fired", &[("Source", 1.0)], body, None);
 }
 
 fn fired(ui: &mut egui::Ui, rows: &ReportRows) {
@@ -555,15 +605,25 @@ fn fired(ui: &mut egui::Ui, rows: &ReportRows) {
     if rows.fired.is_empty() {
         return none(ui);
     }
-    table(ui, "replay_fired", &["Source", "Firings", "At (s)"], |ui| {
-        for f in &rows.fired {
-            ui.label(&f.source);
-            ui.label(f.times_s.len().to_string());
+    let body = rows
+        .fired
+        .iter()
+        .map(|f| {
             let times: Vec<_> = f.times_s.iter().map(|s| format!("{s:.1}")).collect();
-            ui.label(times.join(", "));
-            ui.end_row();
-        }
-    });
+            vec![
+                f.source.clone(),
+                f.times_s.len().to_string(),
+                times.join(", "),
+            ]
+        })
+        .collect();
+    table(
+        ui,
+        "replay_fired",
+        &[("Source", 5.0), ("Firings", 1.0), ("At (s)", 3.0)],
+        body,
+        None,
+    );
 }
 
 fn never_spawned(ui: &mut egui::Ui, rows: &ReportRows) {
@@ -571,20 +631,25 @@ fn never_spawned(ui: &mut egui::Ui, rows: &ReportRows) {
     if rows.never_spawned.is_empty() {
         return none(ui);
     }
-    table(
-        ui,
-        "replay_never_spawned",
-        &["Name", "Spawned", "In the mission", "Group"],
-        |ui| {
-            for s in &rows.never_spawned {
-                ui.label(&s.name);
-                ui.label(s.spawned_count.to_string());
-                ui.label(s.mission_count.to_string());
-                ui.label(s.group_path.as_deref().map(group_label).unwrap_or_default());
-                ui.end_row();
-            }
-        },
-    );
+    let cols = [
+        ("Name", 2.0),
+        ("Spawned", 1.0),
+        ("In the mission", 1.0),
+        ("Group", 5.0),
+    ];
+    let body = rows
+        .never_spawned
+        .iter()
+        .map(|s| {
+            vec![
+                s.name.clone(),
+                s.spawned_count.to_string(),
+                s.mission_count.to_string(),
+                s.group_path.as_deref().map(group_label).unwrap_or_default(),
+            ]
+        })
+        .collect();
+    table(ui, "replay_never_spawned", &cols, body, None);
 }
 
 fn timeline(ui: &mut egui::Ui, loaded: &LoadedReplay, filter: &mut Option<Vec<String>>) {
@@ -631,23 +696,26 @@ fn timeline(ui: &mut egui::Ui, loaded: &LoadedReplay, filter: &mut Option<Vec<St
     if shown.is_empty() {
         return none(ui);
     }
-    table(
-        ui,
-        "replay_timeline",
-        &["Seconds", "T", "Event", "Position X, Y, Z", "Group"],
-        |ui| {
-            for e in shown {
-                ui.label(format!("{:.1}", e.seconds));
-                ui.label(e.t_ticks.to_string());
-                ui.label(&e.description);
-                ui.label(
-                    e.pos
-                        .map(|(x, y, z)| format!("{x:.0}, {y:.0}, {z:.0}"))
-                        .unwrap_or_default(),
-                );
-                ui.label(e.group_path.as_deref().map(group_label).unwrap_or_default());
-                ui.end_row();
-            }
-        },
-    );
+    let cols = [
+        ("Seconds", 1.0),
+        ("T", 1.0),
+        ("Event", 5.0),
+        ("Position X, Y, Z", 2.0),
+        ("Group", 4.0),
+    ];
+    let body = shown
+        .into_iter()
+        .map(|e| {
+            vec![
+                format!("{:.1}", e.seconds),
+                e.t_ticks.to_string(),
+                e.description.clone(),
+                e.pos
+                    .map(|(x, y, z)| format!("{x:.0}, {y:.0}, {z:.0}"))
+                    .unwrap_or_default(),
+                e.group_path.as_deref().map(group_label).unwrap_or_default(),
+            ]
+        })
+        .collect();
+    table(ui, "replay_timeline", &cols, body, None);
 }

@@ -966,6 +966,8 @@ pub struct UnobservedRow {
     pub successor: String,
     pub upstream: Vec<String>,
     pub downstream: Vec<String>,
+    /// The same MCUs without their group path; one successor can have dozens.
+    pub downstream_short: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1000,6 +1002,20 @@ pub fn report_rows(replay: &Replay) -> ReportRows {
             .map_or_else(|| format!("breadcrumb #{id}"), |f| entry_label(&f.entry))
     };
     let labels = |ids: &[i32]| ids.iter().map(|&id| label(id)).collect::<Vec<_>>();
+    let short = |id: i32| {
+        replay
+            .firings
+            .iter()
+            .find(|f| f.entry.breadcrumb_index == id)
+            .map_or_else(
+                || format!("breadcrumb #{id}"),
+                |f| {
+                    let e = &f.entry;
+                    let event = e.event_type.map_or_else(String::new, |t| format!(", event {t}"));
+                    format!("{} ({} #{}{event})", e.source_name, e.source_type, e.source_index)
+                },
+            )
+    };
     let mut grouped = HashSet::new();
     for gap in &replay.unobserved_successors {
         grouped.insert(gap.breadcrumb_index);
@@ -1028,6 +1044,7 @@ pub fn report_rows(replay: &Replay) -> ReportRows {
                 successor: label(gap.breadcrumb_index),
                 upstream: labels(&gap.upstream),
                 downstream: labels(&gap.downstream),
+                downstream_short: gap.downstream.iter().map(|&id| short(id)).collect(),
             })
             .collect(),
         never_fired: never
@@ -2118,7 +2135,12 @@ mod tests {
         );
         assert_eq!(
             rows.unobserved,
-            [UnobservedRow { successor: b.into(), upstream: vec![a.into()], downstream: vec![c.into()] }]
+            [UnobservedRow {
+                successor: b.into(),
+                upstream: vec![a.into()],
+                downstream: vec![c.into()],
+                downstream_short: vec!["C (MCU_Timer #4)".into()],
+            }]
         );
         assert_eq!((rows.never_fired_total, rows.never_fired_grouped), (2, 2));
         assert!(rows.never_fired.is_empty(), "B and C are grouped above");
