@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-28: step 9 (Map dock Air tab, Map Generate writes Air Tasking; decision 0039) merged to `main` (PR #35).
+> Last updated: 2026-10-28: step 9 (Map dock Air tab, Map Generate writes Air Tasking; decision 0039) merged to `main` (PR #35); decisions 0037 (accepted, A) and 0040 (parked player) recorded.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -17,7 +17,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 
 | Branch | Holds | State |
 |---|---|---|
-| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 8 (PRs #31 to #33); acceptance flights A0 and A1, decision 0038 (PR #34); step 9 (PR #35); decisions 0001 to 0039 (0026, 0037 Proposed) | equal to `origin/main` |
+| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 8 (PRs #31 to #33); acceptance flights A0 and A1, decision 0038 (PR #34); step 9 (PR #35); decisions 0001 to 0040 (0026 Proposed) | equal to `origin/main` |
 
 The merged branches (`claude/p14-acceptance-early`, `claude/p14-acceptance-a1-545b0f`, `claude/p14-shell-quiet-a24002`, `claude/sad-cannon-eba4b4`) can be deleted once their idle sessions are archived; their worktrees are under `.claude/worktrees/`.
 
@@ -37,20 +37,20 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Waiting on the user
 
-1. **Parked player (A1 run sheet, question 1):** should a player parked at their own airfield inside an area keep drawing sorties? A spawn there is not seen (A1); a player who lands there would be. And **decision 0037 (Proposed):** move the Map's own AI aircraft off player countries.
-2. **Decision 0026 (Proposed):** Air Tasking schedules upstream's strikes and CAPs instead of placing its own. 0028 (accepted) points the same way; whether 0028 supersedes 0026 is yours.
-3. **Three game bug reports are drafted, not posted** (`handoff/il2-bug-report-drafts.md`).
-4. **The six built-in sorties** still carry the old Delete list in their files; Air Tasking replaces it on the copies it places (0017).
+1. **Decision 0026 (Proposed):** Air Tasking schedules upstream's strikes and CAPs instead of placing its own. 0028 (accepted) points the same way; whether 0028 supersedes 0026 is yours.
+2. **Three game bug reports are drafted, not posted** (`handoff/il2-bug-report-drafts.md`).
+3. **The six built-in sorties** still carry the old Delete list in their files; Air Tasking replaces it on the copies it places (0017).
 
 ## Next steps
 
-1. Step 9T: trace and replay in the UI (plan §8 "Step 9T").
-2. A piloted session by the user (one spawn per session on this PC; start a Tacview track with LCtrl+R), on a mission made by the app itself: fly in, land or loiter, see P9 and a budget refusal, and check decision 0038; a NATO-side flight (A2). Then step 10.
+1. Step 9T: trace and replay in the UI (plan §8 "Step 9T"), building now.
+2. Build decision 0037 A: when the mission has Air Tasking, Map Generate moves the Map's own AI aircraft from 601 to 602 and from 501 to 503. After 9T merges (both touch Map Generate), and before A2, so the Map's own fighters cannot start sorties.
+3. A piloted session by the user (one spawn per session on this PC; start a Tacview track with LCtrl+R), on a mission made by the app itself: fly in, land or loiter, see P9 and a budget refusal, and check decision 0038; a NATO-side flight (A2). Then step 10.
 
 ## Traps
 
 - **Send nothing to the upstream author** (`eszyman/IL2MissionUtility`: issues, comments, files, load tests, patches) until Air Tasking has a working concept and UI (user, 2026-10-18). Pulling and merging his commits is fine.
-- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0039. Next free: **0040**.
+- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0040. Next free: **0041**.
 - Before generating any probe or mission file, read `docs/il2-loader-and-log-facts.md`. Each item there cost a flight attempt.
 - `.gitattributes` is `* -text` because `.Group` fixtures are line-ending sensitive. Do not remove it.
 - Do not push `v*` tags casually: they start the release build.

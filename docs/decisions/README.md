@@ -72,7 +72,9 @@ What this makes easier, harder or necessary.
 | [0034](0034-acceptance-mission-is-a-trace-build.md) | The step 11 acceptance mission is observed by a trace build, not debug subtitles | Accepted |
 | [0035](0035-one-air-pack-rooted-at-air-tasking.md) | `build_air_packs` returns one pack rooted at the `Air Tasking` group | Accepted |
 | [0036](0036-acceptance-test-before-step-9.md) | Fly the Air Tasking acceptance test before step 9 | Accepted |
-| [0037](0037-map-ai-off-player-countries.md) | Move the Map's own AI aircraft off the player countries when Air Tasking is in the mission | Proposed |
+| [0037](0037-map-ai-off-player-countries.md) | Move the Map's own AI aircraft off the player countries when Air Tasking is in the mission | Accepted (A) |
 | [0038](0038-used-sortie-copy-goes-quiet.md) | A used sortie copy goes quiet at DONE HUB: DONE HUB OFF switches off its timers, zones and counter | Accepted |
+| [0039](0039-map-undo-keeps-air-plan-only-for-dock-edits.md) | Map undo keeps the Air Tasking plan only for the Air dock's own edits | Accepted |
+| [0040](0040-parked-player-keeps-drawing-sorties.md) | A player parked inside an Air Tasking area keeps drawing sorties | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
