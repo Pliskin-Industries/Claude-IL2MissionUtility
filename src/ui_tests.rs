@@ -1770,6 +1770,7 @@ fn map_dock_tabs_all_render() {
         ("References 0", "Add reference groups…"),
         ("Terrain", "HEIGHT STORE"),
         ("Period", "DRAWN MARKS"),
+        ("Air", "SORTIES"),
     ] {
         h.click(tab);
         assert!(h.has(marker), "{tab}: {:?}", h.labels());
@@ -2382,7 +2383,7 @@ fn map_dock_tabs_fit_a_three_digit_reference_count() {
     };
     h.app.map_refs = vec![group; 123];
     h.settle();
-    let tabs: Vec<Node> = ["Period", "Forces", "References 123", "Terrain"]
+    let tabs: Vec<Node> = ["Period", "Forces", "References 123", "Terrain", "Air"]
         .iter()
         .map(|l| h.find(l))
         .collect();
@@ -2400,7 +2401,7 @@ fn map_dock_tabs_fit_a_three_digit_reference_count() {
             pair[0].label
         );
     }
-    let span = tabs[3].rect.right() - tabs[0].rect.left();
+    let span = tabs[4].rect.right() - tabs[0].rect.left();
     assert!(
         (287.0..=288.5).contains(&span),
         "tabs span {span} px, not the 288 px dock"
@@ -2447,6 +2448,7 @@ fn every_ui_glyph_is_in_a_loaded_font() {
     let sources = [
         include_str!("ui.rs"),
         include_str!("ui/air.rs"),
+        include_str!("ui/map.rs"),
         include_str!("airtask/mod.rs"),
         include_str!("airtask/library.rs"),
         include_str!("airtask/pool.rs"),
@@ -2536,6 +2538,10 @@ fn button_labels_stay_on_one_line() {
                 h.click_prefix_if_present(dock);
                 collect_tall_buttons(&h, &format!("Map › {dock}"), &mut tall);
             }
+            // "Air" is also the start of the rail's "Air Tasking": click it exactly.
+            h.click("Air");
+            fill_air_pool(&mut h);
+            collect_tall_buttons(&h, "Map › Air", &mut tall);
         }
         collect_tall_buttons(&h, label, &mut tall);
         if label == "Air Tasking" {
@@ -2559,9 +2565,10 @@ fn collect_tall_buttons(h: &Harness, tab: &str, out: &mut Vec<String>) {
         // Tree chips are 36 px by design; the Map dock tabs (40 px, top row
         // of the dock) are skipped. A wrapped label makes a button 40 px.
         let dock_tab = n.rect.top() < 100.0
-            && ["Period", "Forces", "References", "Terrain"]
-                .iter()
-                .any(|t| n.label.starts_with(t));
+            && (n.label == "Air"
+                || ["Period", "Forces", "References", "Terrain"]
+                    .iter()
+                    .any(|t| n.label.starts_with(t)));
         if n.role == Role::Button
             && !dock_tab
             && n.rect.height() > 36.5
@@ -3572,4 +3579,401 @@ fn air_tasking_totals_above_limit_are_orange_and_do_not_block_generate() {
         let node = h.find(&format!("{label} All: {all}"));
         assert!(out.shapes.iter().any(|s| orange_at(&s.shape, &all.to_string(), node.rect)), "{label} total is not orange");
     }
+}
+
+// ── P14 step 9: Air Tasking on the Map tab ──────────────────────────────
+
+/// validate, totals and preview each run a full build: one build per change.
+#[test]
+fn air_checks_build_once_per_plan_change() {
+    let mut h = Harness::new("air_cache");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    let builds = h.app.air_eval_builds();
+    assert!(builds > 0, "the Air Tasking tab reads the cache");
+    for _ in 0..10 {
+        h.step(Vec::new());
+    }
+    h.tab("Map");
+    h.tab("Air Tasking");
+    assert_eq!(h.app.air_eval_builds(), builds, "an unchanged plan is not rebuilt");
+    h.app.air_plan.pool[0].weight = 9;
+    h.settle();
+    assert_eq!(h.app.air_eval_builds(), builds + 1, "one change, one build");
+}
+
+/// Map tab, Air dock open, `air_targets` on the map and an empty pool.
+/// DPRK has 2 date-valid built-ins and 3 targets (2 objectives, 1 arrow);
+/// NATO has 4 and 2 (1 objective, 1 arrow): 6 and 8 entries.
+fn open_map_air_dock(h: &mut Harness) {
+    h.tab("Map");
+    air_targets(h);
+    h.app.air_plan.pool.clear();
+    h.settle();
+    h.click("Air");
+}
+
+/// The dock's DPRK / NATO toggle; the map legend has labels with the same text.
+fn click_side(h: &mut Harness, side: &str) {
+    let toggle = h.all(side).into_iter().find(|n| n.role == Role::Button).unwrap();
+    h.click_at(toggle.rect.center());
+}
+
+fn entries_at(h: &Harness, target: crate::airtask::TargetRef) -> usize {
+    h.app.air_plan.pool.iter().filter(|e| e.target == target).count()
+}
+
+#[test]
+fn air_dock_auto_fill_adds_entries_for_objectives() {
+    use crate::airtask::{AirSide, TargetRef};
+    let mut h = Harness::new("air_dock_objectives");
+    open_map_air_dock(&mut h);
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.status(), "Added 6 DPRK entries");
+    assert_eq!(h.app.air_plan.pool.len(), 6);
+    for xz in [(190_000.0, 200_000.0), (180_000.0, 250_000.0)] {
+        assert_eq!(entries_at(&h, TargetRef::Objective { side: AirSide::Dprk, xz }), 2, "{xz:?}");
+    }
+    let nato = TargetRef::Objective { side: AirSide::Nato, xz: (210_000.0, 200_000.0) };
+    assert_eq!(entries_at(&h, nato), 0, "the NATO toggle is off");
+    assert!(h.has("Entry 6 weight") && h.has("Entry 6 mode") && h.has("Remove entry 6"));
+    click_side(&mut h, "NATO");
+    assert!(!h.has("Entry 1 weight"), "the list shows one side");
+    h.click("Auto-fill from objectives");
+    assert_eq!(entries_at(&h, nato), 4);
+}
+
+#[test]
+fn air_dock_auto_fill_includes_arrows() {
+    use crate::airtask::TargetRef;
+    let mut h = Harness::new("air_dock_arrows");
+    open_map_air_dock(&mut h);
+    // An arrow belongs to the side its tail is on: DPRK north of x = 200 km.
+    let dprk_arrow = TargetRef::Arrow { tail: (220_000.0, 300_000.0), tip: (180_000.0, 300_000.0) };
+    let nato_arrow = TargetRef::Arrow { tail: (180_000.0, 350_000.0), tip: (220_000.0, 350_000.0) };
+    h.click("Auto-fill from objectives");
+    assert_eq!((entries_at(&h, dprk_arrow), entries_at(&h, nato_arrow)), (2, 0));
+    click_side(&mut h, "NATO");
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.status(), "Added 8 NATO entries");
+    assert_eq!((entries_at(&h, dprk_arrow), entries_at(&h, nato_arrow)), (2, 4));
+}
+
+#[test]
+fn air_dock_auto_fill_twice_is_idempotent() {
+    let mut h = Harness::new("air_dock_twice");
+    open_map_air_dock(&mut h);
+    h.click("Auto-fill from objectives");
+    let before = h.app.air_plan.clone();
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.app.air_plan, before);
+    assert_eq!(h.status(), "Added 0 DPRK entries");
+}
+
+#[test]
+fn air_dock_draws_preview() {
+    let mut h = Harness::new("air_dock_draw");
+    open_map_air_dock(&mut h);
+    h.wait_for_map();
+    h.click("Auto-fill from objectives");
+    click_side(&mut h, "NATO");
+    h.click("Auto-fill from objectives");
+    let preview = h.app.with_air_context(|ctx| crate::airtask::preview(&h.app.air_plan, ctx));
+    assert_eq!(h.app.air_dock.drawn, preview.counts());
+    assert!(preview.counts().lines > 0 && preview.counts().rings > 0, "{:?}", preview.counts());
+    h.click("Approach lines");
+    assert_eq!(h.app.air_dock.drawn.lines, 0, "SHOW hides the approach lines");
+    assert_eq!(h.app.air_dock.drawn.rings, preview.counts().rings);
+}
+
+#[test]
+fn map_undo_restores_air_pool_after_auto_fill() {
+    let mut h = Harness::new("air_dock_undo_fill");
+    open_map_air_dock(&mut h);
+    h.click("Auto-fill from objectives");
+    assert_eq!(h.app.air_plan.pool.len(), 6);
+    h.key_with(Key::Z, CTRL);
+    assert!(h.app.air_plan.pool.is_empty(), "Map's Ctrl Z undoes the dock's Auto-fill");
+}
+
+#[test]
+fn map_undo_restores_air_entry_after_remove() {
+    let mut h = Harness::new("air_dock_undo_remove");
+    open_map_air_dock(&mut h);
+    h.click("Auto-fill from objectives");
+    h.key_with(Key::Z, CTRL);
+    h.click("Auto-fill from objectives");
+    let before = h.app.air_plan.clone();
+    h.click("Remove entry 2");
+    assert_eq!(h.app.air_plan.pool.len(), 5);
+    assert_eq!(h.app.air_plan.pool[1], before.pool[2]);
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan, before);
+}
+
+/// Only the dock's edits put the plan in a Map undo: an Air Tasking edit
+/// after a Map Clear keeps that undo, and Ctrl Z keeps the edit.
+#[test]
+fn map_undo_of_a_clear_keeps_later_air_settings() {
+    let mut h = Harness::new("air_dock_undo_clear");
+    open_map_air_dock(&mut h);
+    h.click("Forces");
+    // With no fighters or units placed, only the objectives' Clear DPRK is enabled.
+    let clear = h.all("Clear DPRK").into_iter().find(|n| !n.disabled).unwrap();
+    h.click_at(clear.rect.center());
+    assert!(h.app.east_objectives.is_empty());
+    h.app.air_plan.budget.per_side[0] = 2;
+    h.settle();
+    let edited = h.app.air_plan.clone();
+    assert!(h.app.map_undo.peek().is_some(), "the Clear undo does not hold the plan, so it stays");
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.east_objectives.len(), 2);
+    assert_eq!(h.app.air_plan, edited);
+}
+
+/// The inputs `map_generate_without_air_matches_baseline` uses.
+fn baseline_map_inputs(h: &mut Harness) {
+    h.app.east_objectives = vec![(180_000.0, 240_000.0), (190_000.0, 260_000.0)];
+    h.app.nato_objectives = vec![(140_000.0, 220_000.0), (150_000.0, 250_000.0)];
+    h.app.attack_arrows = vec![((140_000.0, 220_000.0), (130_000.0, 240_000.0))];
+    h.app.front_t = 8.0;
+    h.app.terrain_apply = false;
+}
+
+fn map_air_check(h: &Harness) -> Option<shell::Check> {
+    h.app
+        .readiness_checks()
+        .into_iter()
+        .find(|c| c.text == "Air Tasking plan is valid (see the Air Tasking tab)")
+}
+
+#[test]
+fn map_readiness_includes_air_check_when_included() {
+    let mut h = Harness::new("air_map_ready");
+    h.tab("Map");
+    assert!(map_air_check(&h).is_none(), "an empty pool adds no check");
+    fill_air_pool(&mut h);
+    assert!(h.app.air_plan.include_in_base_map);
+    assert!(map_air_check(&h).is_some_and(|c| c.ok));
+    assert!(!h.find("Generate Base Map").disabled);
+    h.app.air_plan.budget.per_side[0] = 0;
+    h.settle();
+    assert!(map_air_check(&h).is_some_and(|c| !c.ok), "budget 0 blocks Map like build_air_packs does");
+    assert!(h.find("Generate Base Map").disabled);
+    h.app.air_plan.include_in_base_map = false;
+    h.settle();
+    assert!(map_air_check(&h).is_none(), "an unticked plan does not touch the base map");
+    assert!(!h.find("Generate Base Map").disabled);
+}
+
+#[test]
+fn map_readiness_orphaned_only_air_pool_warns_but_allows_generate() {
+    use crate::airtask::{self, AirSide, PoolEntry, TargetRef};
+    let mut h = Harness::new("air_map_orphaned");
+    h.tab("Map");
+    baseline_map_inputs(&mut h);
+    let gone = TargetRef::Objective { side: AirSide::Dprk, xz: (10_000.0, 10_000.0) };
+    let id = h.app.air_plan.library.iter().find(|s| s.side == AirSide::Dprk).unwrap().id.clone();
+    airtask::add_entry(&mut h.app.air_plan, PoolEntry::new(id, gone));
+    h.app.air_plan.include_in_base_map = true;
+    h.settle();
+    // The note sits under the dock tabs, so every dock tab shows it.
+    for tab in ["Air", "Forces"] {
+        h.click(tab);
+        assert!(h.has("Air Tasking has no valid entries and will be left out"), "{tab}");
+    }
+    assert!(map_air_check(&h).is_some_and(|c| c.ok));
+    assert!(!h.find("Generate Base Map").disabled);
+    let out = h.out("base_map_ui.Group");
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    crate::baseline_tests::assert_fixture_matches(&out);
+}
+
+#[test]
+fn map_generate_with_air_includes_air_tasking_group() {
+    let mut h = Harness::new("air_map_generate");
+    h.tab("Map");
+    fill_air_pool(&mut h);
+    h.app.terrain_apply = false;
+    let out = h.out("base_map_air.Group");
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    let root = crate::parser::parse_group_file(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    let mut air = 0;
+    root.for_each(&mut |node| {
+        air += usize::from(node.block_type == "Group" && node.name() == Some("Air Tasking"));
+    });
+    assert_eq!(air, 1, "one Air Tasking group in the base map");
+}
+
+#[test]
+fn map_generate_with_include_unticked_matches_baseline() {
+    use crate::airtask::{self, PoolEntry};
+    let mut h = Harness::new("air_map_unticked");
+    h.tab("Map");
+    baseline_map_inputs(&mut h);
+    let entries = h.app.with_air_context(|ctx| {
+        h.app.air_plan.library.iter().map(|sortie| {
+            PoolEntry::new(sortie.id.clone(), airtask::target_choices(ctx, sortie.side)[0].target)
+        }).collect::<Vec<_>>()
+    });
+    for entry in entries {
+        airtask::add_entry(&mut h.app.air_plan, entry);
+    }
+    h.app.air_plan.include_in_base_map = false;
+    h.settle();
+    let out = h.out("base_map_ui.Group");
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    crate::baseline_tests::assert_fixture_matches(&out);
+}
+
+/// The Map fingerprints cover the air plan: a later edit drops the dock's
+/// undo instead of letting Ctrl Z throw it away, and marks Map unsaved.
+#[test]
+fn map_undo_is_dropped_by_a_later_air_edit() {
+    let mut h = Harness::new("air_dock_settle");
+    open_map_air_dock(&mut h);
+    h.app.mark_saved(AppMode::Map);
+    h.click("Auto-fill from objectives");
+    assert!(h.app.map_undo.peek().is_some());
+    assert!(h.app.is_dirty(AppMode::Map), "an air edit is an unsaved Map change");
+    h.app.air_plan.pool[0].weight = 9;
+    h.settle();
+    assert!(h.app.map_undo.peek().is_none(), "the weight edit drops the Auto-fill undo");
+}
+
+const AIR_LOAD_WARNING: &str = "Loaded map had Air Tasking; Generate will replace it with the current plan (removed if the plan is empty).";
+
+#[test]
+fn load_base_map_with_air_tasking_is_not_an_army() {
+    let mut h = Harness::new("air_map_load_found");
+    h.tab("Map");
+    fill_air_pool(&mut h);
+    h.app.terrain_apply = false;
+    let out = h.out("base_map_air.Group");
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    let entries = h.app.air_plan.pool.len();
+    dialog::answer(vec![out]);
+    h.app.load_base_map();
+    assert!(h.app.map_armies.is_empty(), "the Air Tasking group is not loaded as an army");
+    assert!(h.app.air_plan.pool.is_empty());
+    match &h.app.status {
+        Status::Warn { lead, items } => {
+            assert!(lead.contains(&format!("Cleared {entries} Air Tasking entries")), "{lead}");
+            assert_eq!(items, &[AIR_LOAD_WARNING.to_string()]);
+        }
+        _ => panic!("expected the orange Air Tasking warning: {}", h.status()),
+    }
+}
+
+#[test]
+fn load_base_map_keeps_air_library_and_settings() {
+    let mut h = Harness::new("air_map_load_keeps");
+    h.tab("Map");
+    baseline_map_inputs(&mut h);
+    let out = h.out("base_map_plain.Group");
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    fill_air_pool(&mut h);
+    h.app.air_plan.budget.per_side = [2, 4];
+    h.app.air_plan.categories.push("Night".into());
+    let mut expected = h.app.air_plan.clone();
+    expected.pool.clear();
+    dialog::answer(vec![out]);
+    h.app.load_base_map();
+    assert_eq!(h.app.air_plan, expected, "library, categories, settings and seed stay");
+    assert!(matches!(h.app.status, Status::Info(_)), "no Air Tasking in the file: {}", h.status());
+    assert!(h.status().contains("Cleared 6 Air Tasking entries"), "{}", h.status());
+}
+
+/// Every Air dock control is a 28 px target inside the 304 px Map dock,
+/// with both sides' lists filled; disabled controls count too.
+#[test]
+fn map_air_dock_widgets_are_28_px_with_entries() {
+    let mut h = Harness::new("air_dock_sizes");
+    open_map_air_dock(&mut h);
+    h.click("Auto-fill from objectives");
+    click_side(&mut h, "NATO");
+    h.click("Auto-fill from objectives");
+    let dock = (SCREEN.x - 304.0, SCREEN.x);
+    let mut small = Vec::new();
+    let mut outside = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for side in ["NATO", "DPRK"] {
+        air_scroll(&mut h, SCREEN.x - 150.0, 10000.0);
+        click_side(&mut h, side);
+        for _ in 0..8 {
+            for n in &h.nodes {
+                let control = matches!(n.role, Role::Button | Role::CheckBox | Role::ComboBox | Role::Slider | Role::SpinButton);
+                if !control || n.rect.width() <= 0.0 || n.rect.left() < dock.0 - 0.5 || n.rect.top() < shell::HEADER_H {
+                    continue;
+                }
+                seen.insert(n.label.clone());
+                if n.rect.height() < 27.5 {
+                    small.push(format!("{side} {:?} {:?}: {} px", n.label, n.role, n.rect.height()));
+                }
+                if n.rect.right() > dock.1 + 0.5 {
+                    outside.push(format!("{side} {:?} ends at {}", n.label, n.rect.right()));
+                }
+            }
+            air_scroll(&mut h, SCREEN.x - 150.0, -240.0);
+        }
+    }
+    for label in ["DPRK", "NATO", "Auto-fill from objectives", "Entry 1 weight", "Entry 1 mode", "Remove entry 1",
+        "Entry 14 weight", "Entry 14 mode", "Remove entry 14", "Approach lines", "Threshold rings", "Spawn points", "RTB points"] {
+        assert!(seen.contains(label), "not checked: {label}; {seen:?}");
+    }
+    small.sort();
+    small.dedup();
+    outside.sort();
+    outside.dedup();
+    assert!(small.is_empty(), "Air dock targets under 28 px: {small:?}");
+    assert!(outside.is_empty(), "Air dock controls overflow the dock: {outside:?}");
+}
+
+/// The build re-reads user templates from disk, so the cached checks follow
+/// the file: a template deleted after it was added is an error at once.
+#[test]
+fn air_checks_follow_a_user_template_file() {
+    use crate::airtask::{self, IssueSeverity, PoolEntry};
+    let mut h = Harness::new("air_cache_file");
+    h.tab("Map");
+    air_targets(&mut h);
+    let path = h.out("Strike.Group");
+    std::fs::copy(repo("TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group"), &path).unwrap();
+    let sortie = airtask::load_user_sortie(&path).unwrap();
+    let target = h.app.with_air_context(|ctx| airtask::target_choices(ctx, sortie.side)[0].target);
+    let entry = PoolEntry::new(sortie.id.clone(), target);
+    airtask::add_library_item(&mut h.app.air_plan, sortie);
+    airtask::add_entry(&mut h.app.air_plan, entry);
+    h.settle();
+    let errors = |h: &Harness| h.app.air_eval_now().issues.iter().filter(|i| i.severity == IssueSeverity::Error).count();
+    assert_eq!(errors(&h), 0);
+    std::fs::remove_file(&path).unwrap();
+    h.settle();
+    assert!(errors(&h) > 0, "a missing template file blocks Generate");
+}
+
+/// Map counts as unsaved after an Air Tasking edit only when the plan goes
+/// into the base map; an unticked plan does not change the file.
+#[test]
+fn map_unsaved_follows_the_air_plan_only_when_included() {
+    let mut h = Harness::new("air_map_dirty");
+    h.tab("Map");
+    h.app.air_plan.include_in_base_map = false;
+    h.app.mark_saved(AppMode::Map);
+    h.app.air_plan.budget.per_side[0] = 2;
+    assert!(!h.app.is_dirty(AppMode::Map), "an unticked plan is not in the base map");
+    h.app.air_plan.include_in_base_map = true;
+    assert!(h.app.is_dirty(AppMode::Map));
+    h.app.mark_saved(AppMode::Map);
+    h.app.air_plan.budget.per_side[0] = 3;
+    assert!(h.app.is_dirty(AppMode::Map));
 }

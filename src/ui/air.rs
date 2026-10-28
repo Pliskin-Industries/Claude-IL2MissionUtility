@@ -4,11 +4,87 @@ use super::*;
 use crate::frontlines::preview_front_xz;
 use crate::mapclip::apply_salients;
 use crate::airtask::{
-    self, AirContext, AirPlan, AirSide, AirSortie, BudgetImpl, EntryStatus, IssueSeverity,
-    PoolEntry, SlotMark, SortieSource, TargetChoice, TargetKind, TriggerMode, Ymd,
+    self, AirContext, AirDrawCounts, AirIssue, AirPlan, AirPreview, AirSide, AirSortie, AirTotals,
+    BudgetImpl,
+    EntryStatus, IssueSeverity, PoolEntry, SlotMark, SortieSource, TargetChoice, TargetKind,
+    TriggerMode, Ymd,
 };
+use std::cell::RefCell;
+use std::rc::Rc;
 
 type Edit = Option<(egui::Id, String)>;
+
+/// One Air Tasking evaluation. `validate` and `totals` each run a full build,
+/// so the result is kept for the plan and Map inputs it was made from.
+pub(super) struct AirEval {
+    pub(super) issues: Vec<AirIssue>,
+    pub(super) totals: AirTotals,
+    pub(super) preview: AirPreview,
+}
+
+#[derive(Default)]
+pub(super) struct AirEvalCache {
+    last: RefCell<Option<(u64, Rc<AirEval>)>>,
+    #[cfg(test)]
+    builds: std::cell::Cell<usize>,
+}
+
+/// Which Air Tasking layers the Map draws (the Air dock tab's SHOW section).
+pub(super) struct AirShow {
+    pub(super) lines: bool,
+    pub(super) rings: bool,
+    pub(super) spawns: bool,
+    pub(super) rtbs: bool,
+}
+
+impl Default for AirShow {
+    fn default() -> Self {
+        Self {
+            lines: true,
+            rings: true,
+            spawns: true,
+            rtbs: true,
+        }
+    }
+}
+
+/// Map dock tab "Air": the side its list shows, the layers the map draws,
+/// and what the last frame painted (`draw_map_air`; tests read it).
+pub(super) struct AirDock {
+    pub(super) side: AirSide,
+    pub(super) show: AirShow,
+    pub(super) drawn: AirDrawCounts,
+}
+
+impl Default for AirDock {
+    fn default() -> Self {
+        Self {
+            side: AirSide::Dprk,
+            show: AirShow::default(),
+            drawn: AirDrawCounts::default(),
+        }
+    }
+}
+
+/// Map's orange note when every pool entry is orphaned, off or out of date.
+pub(super) const AIR_LEFT_OUT: &str = "Air Tasking has no valid entries and will be left out";
+
+/// Everything the build reads: the plan, the Map inputs, and the user
+/// template files it re-reads from disk (their modified time, or none).
+fn air_eval_key(plan: &AirPlan, ctx: &AirContext) -> u64 {
+    let files: Vec<_> = plan
+        .library
+        .iter()
+        .filter_map(|sortie| match &sortie.source {
+            SortieSource::File(path) => Some(std::fs::metadata(path).and_then(|m| m.modified()).ok()),
+            SortieSource::BuiltIn(_) => None,
+        })
+        .collect();
+    hash(format!(
+        "{plan:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{files:?}",
+        ctx.east_objectives, ctx.nato_objectives, ctx.arrows, ctx.front, ctx.aabb, ctx.date
+    ))
+}
 
 #[derive(Default)]
 pub(super) struct CategoryUi {
@@ -82,14 +158,47 @@ impl GroupGeneratorApp {
             .clicked();
     }
 
+    /// The plan's issues, totals and preview for these Map inputs, built once
+    /// per change. `plan` may be a panel's draft of `air_plan`.
+    pub(super) fn air_eval(&self, plan: &AirPlan, ctx: &AirContext) -> Rc<AirEval> {
+        let key = air_eval_key(plan, ctx);
+        if let Some((last, eval)) = &*self.air_eval_cache.last.borrow()
+            && *last == key
+        {
+            return eval.clone();
+        }
+        let eval = Rc::new(AirEval {
+            issues: airtask::validate(plan, ctx),
+            totals: airtask::totals(plan, ctx),
+            preview: airtask::preview(plan, ctx),
+        });
+        #[cfg(test)]
+        self.air_eval_cache
+            .builds
+            .set(self.air_eval_cache.builds.get() + 1);
+        *self.air_eval_cache.last.borrow_mut() = Some((key, eval.clone()));
+        eval
+    }
+
+    #[cfg(test)]
+    pub(super) fn air_eval_builds(&self) -> usize {
+        self.air_eval_cache.builds.get()
+    }
+
+    /// `air_eval` for the live plan and the current Map inputs.
+    pub(super) fn air_eval_now(&self) -> Rc<AirEval> {
+        self.with_air_context(|ctx| self.air_eval(&self.air_plan, ctx))
+    }
+
     pub(super) fn air_readiness(&self) -> Vec<shell::Check> {
         self.with_air_context(|ctx| {
             let mut checks = vec![shell::Check::new(ctx.front.len() >= 2, "A front is loaded")];
             checks.extend(
-                airtask::validate(&self.air_plan, ctx)
-                    .into_iter()
+                self.air_eval(&self.air_plan, ctx)
+                    .issues
+                    .iter()
                     .filter(|issue| issue.severity == IssueSeverity::Error)
-                    .map(|issue| shell::Check::new(false, issue.text)),
+                    .map(|issue| shell::Check::new(false, issue.text.clone())),
             );
             checks
         })
@@ -331,16 +440,16 @@ impl GroupGeneratorApp {
                 ui.add_space(10.0);
                 air_sheet(ui, |ui| {
                     shell::section_title(ui, "Slot timeline", Some("0–3 h · one row per side"));
-                    let marks = airtask::preview(&self.air_plan, &air_ctx).slot_times;
-                    draw_slot_strip(ui, &marks);
+                    let eval = self.air_eval(&self.air_plan, &air_ctx);
+                    draw_slot_strip(ui, &eval.preview.slot_times);
                     shell::hint(ui, "Ticks: slot times · shading: jitter span · fainter tick: higher quiet chance.", false);
                 });
                 ui.add_space(10.0);
                 air_sheet(ui, |ui| {
                     shell::section_title(ui, "Plan check", Some("errors block Generate · warnings do not"));
-                    let issues = airtask::validate(&self.air_plan, &air_ctx);
-                    if issues.is_empty() { shell::hint(ui, "No issues reported.", false); }
-                    for issue in issues {
+                    let eval = self.air_eval(&self.air_plan, &air_ctx);
+                    if eval.issues.is_empty() { shell::hint(ui, "No issues reported.", false); }
+                    for issue in &eval.issues {
                         let glyph = if issue.severity == IssueSeverity::Error { "✖" } else { "⚠" };
                         let text = RichText::new(format!("{glyph} {}", issue.text)).color(c::WARN_TEXT);
                         ui.label(if issue.severity == IssueSeverity::Error { text.strong() } else { text });
@@ -800,19 +909,12 @@ impl GroupGeneratorApp {
                     ui.add(egui::Label::new(RichText::new(text).color(color)).truncate());
                 });
                 air_cell(ui, widths[3], |ui| {
-                    let r = ui.add(egui::DragValue::new(&mut entry.weight).range(1..=10).speed(0.1));
-                    name_number(&r, &format!("Entry {} weight", index + 1), entry.weight as f64);
+                    let r = weight_input(ui, &mut entry.weight, index);
                     note_edit(&mut edit, &r, "Changed weight");
                 });
                 air_cell(ui, widths[4], |ui| {
                     let before = entry.mode;
-                    let response = egui::ComboBox::from_id_salt(("air_mode", index)).width(68.0)
-                        .selected_text(mode_text(entry.mode)).show_ui(ui, |ui| {
-                            for mode in [TriggerMode::Clock, TriggerMode::Zone, TriggerMode::Both] {
-                                ui.selectable_value(&mut entry.mode, mode, mode_text(mode));
-                            }
-                        }).response;
-                    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("Entry {} mode", index + 1)));
+                    let response = mode_combo(ui, &mut entry.mode, ("air_mode", index), index);
                     if entry.mode != before { edit = Some((response.id, "Changed mode".into())); }
                 });
                 air_cell(ui, widths[5], |ui| {
@@ -1190,7 +1292,7 @@ impl GroupGeneratorApp {
             |ui| {
                 let r = ui.checkbox(&mut plan.include_in_base_map, "Include in base map");
                 note_edit(&mut edit, &r, "Changed base map inclusion");
-                let totals = airtask::totals(&plan, ctx);
+                let totals = self.air_eval(&plan, ctx).totals;
                 egui::Grid::new("air_totals")
                     .min_col_width(34.0)
                     .show(ui, |ui| {
@@ -1402,6 +1504,35 @@ fn percent_row(ui: &mut egui::Ui, label: &str, value: &mut u8, edit: &mut Edit) 
     });
 }
 
+/// A pool entry's weight, 1 to 10, named "Entry n weight" for tests and screen readers.
+fn weight_input(ui: &mut egui::Ui, weight: &mut u8, index: usize) -> egui::Response {
+    let r = ui.add(egui::DragValue::new(weight).range(1..=10).speed(0.1));
+    name_number(&r, &format!("Entry {} weight", index + 1), *weight as f64);
+    r
+}
+
+/// A pool entry's trigger mode, named "Entry n mode".
+fn mode_combo(
+    ui: &mut egui::Ui,
+    mode: &mut TriggerMode,
+    salt: impl std::hash::Hash,
+    index: usize,
+) -> egui::Response {
+    let response = egui::ComboBox::from_id_salt(salt)
+        .width(68.0)
+        .selected_text(mode_text(*mode))
+        .show_ui(ui, |ui| {
+            for choice in [TriggerMode::Clock, TriggerMode::Zone, TriggerMode::Both] {
+                ui.selectable_value(mode, choice, mode_text(choice));
+            }
+        })
+        .response;
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("Entry {} mode", index + 1))
+    });
+    response
+}
+
 fn entry_word(n: usize) -> &'static str {
     if n == 1 { "entry" } else { "entries" }
 }
@@ -1522,6 +1653,178 @@ fn minutes(seconds: f64) -> String {
         format!("{value:.0}")
     } else {
         format!("{value:.1}")
+    }
+}
+
+impl GroupGeneratorApp {
+    /// Map's one Air Tasking check (P14 §6.1), only when the plan goes into
+    /// the base map. It passes when `build_air_packs` would not fail: the
+    /// "no valid entry" issue only leaves the air pack out (an orange note).
+    pub(super) fn map_air_readiness(&self) -> Vec<shell::Check> {
+        if !self.air_plan.include_in_base_map || self.air_plan.pool.is_empty() {
+            return Vec::new();
+        }
+        let ok = !self.air_eval_now().issues.iter().any(AirIssue::blocks_build);
+        vec![shell::Check::new(
+            ok,
+            "Air Tasking plan is valid (see the Air Tasking tab)",
+        )]
+    }
+
+    /// Map dock tab "Air" (P14 §6.2): one side's pool entries, the map
+    /// layers, and the slot timeline. Every other setting is on the Air
+    /// Tasking tab.
+    pub(super) fn map_air_tab(&mut self, ui: &mut egui::Ui) {
+        let eval = self.air_eval_now();
+        ui.add_space(4.0);
+        shell::section_title(ui, "Sorties", Some("settings: Air Tasking tab"));
+        let mut side = self.air_dock.side;
+        shell::segmented(ui, &mut side, &AirSide::ALL.map(|s| (s, s.label())));
+        self.air_dock.side = side;
+        if ui
+            .button("Auto-fill from objectives")
+            .on_hover_text(
+                "Add each date-valid sortie of this side for each of its objectives and arrows that has none yet",
+            )
+            .clicked()
+        {
+            self.dock_auto_fill_air_pool();
+        }
+        self.map_air_entries(ui);
+        if !self.air_plan.pool.is_empty() && !self.air_plan.include_in_base_map {
+            shell::hint(
+                ui,
+                "Not in the base map: tick Include in base map on the Air Tasking tab.",
+                false,
+            );
+        }
+        ui.add_space(8.0);
+        shell::section_title(ui, "Show", None);
+        ui.checkbox(&mut self.air_dock.show.lines, "Approach lines");
+        ui.checkbox(&mut self.air_dock.show.rings, "Threshold rings");
+        ui.checkbox(&mut self.air_dock.show.spawns, "Spawn points");
+        ui.checkbox(&mut self.air_dock.show.rtbs, "RTB points");
+        ui.add_space(8.0);
+        shell::section_title(ui, "Timeline", Some("0–3 h · one row per side"));
+        draw_slot_strip(ui, &eval.preview.slot_times);
+    }
+
+    /// Map's orange note (P14 §6.1). It sits under the dock tabs, so every
+    /// tab shows it; Generate still writes the base map, without Air Tasking.
+    pub(super) fn map_air_note(&self, ui: &mut egui::Ui) {
+        if self.air_plan.include_in_base_map
+            && !self.air_plan.pool.is_empty()
+            && self.air_eval_now().issues.iter().any(|issue| issue.rail_only)
+        {
+            shell::warning(ui, AIR_LEFT_OUT);
+        }
+    }
+
+    /// "Auto-fill from objectives" for the dock's side. Map's Ctrl Z undoes it.
+    fn dock_auto_fill_air_pool(&mut self) {
+        let side = self.air_dock.side;
+        let mut plan = self.air_plan.clone();
+        let count = self.with_air_context(|ctx| airtask::auto_fill(&mut plan, ctx, side, None));
+        let label = format!("Added {count} {} {}", side.label(), entry_word(count));
+        if count > 0 {
+            self.record_map_air_undo(label.clone());
+            self.air_plan = plan;
+            self.air_editing = None;
+        }
+        self.status = Status::Info(label);
+    }
+
+    /// The dock's compact list: name and target, weight, mode and ✖.
+    fn map_air_entries(&mut self, ui: &mut egui::Ui) {
+        let side = self.air_dock.side;
+        let rows: Vec<usize> = (0..self.air_plan.pool.len())
+            .filter(|&i| {
+                self.air_plan
+                    .sortie(&self.air_plan.pool[i].sortie_id)
+                    .is_some_and(|s| s.side == side)
+            })
+            .collect();
+        if rows.is_empty() {
+            shell::hint(
+                ui,
+                &format!(
+                    "No {} entries. Auto-fill adds one per sortie for each target.",
+                    side.label()
+                ),
+                false,
+            );
+            return;
+        }
+        let mut plan = self.air_plan.clone();
+        let mut remove = None;
+        let widths = [0.0, 44.0, 72.0, 28.0];
+        let name_w = (ui.available_width() - widths.iter().sum::<f32>() - 3.0 * 4.0).max(60.0);
+        self.with_air_context(|ctx| {
+            for index in rows {
+                let status = airtask::entry_status(&self.air_plan, index, ctx);
+                let target = airtask::resolve_target(&self.air_plan.pool[index].target, ctx);
+                let entry = &mut plan.pool[index];
+                let name = self
+                    .air_plan
+                    .sortie(&entry.sortie_id)
+                    .map_or("Missing sortie", |s| s.name.as_str());
+                let target_text = entry_target_text(status, target);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.spacing_mut().button_padding.x = 4.0;
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(name_w, 34.0),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            ui.set_width(name_w);
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            ui.add(egui::Label::new(RichText::new(name).size(13.0)).truncate())
+                                .on_hover_text(name);
+                            let color = if status == EntryStatus::Ok {
+                                c::NEUTRAL_700
+                            } else {
+                                c::WARN_TEXT
+                            };
+                            ui.add(
+                                egui::Label::new(RichText::new(&target_text).size(12.0).color(color))
+                                    .truncate(),
+                            )
+                            .on_hover_text(status_text(status));
+                        },
+                    );
+                    air_cell(ui, widths[1], |ui| {
+                        weight_input(ui, &mut entry.weight, index);
+                    });
+                    air_cell(ui, widths[2], |ui| {
+                        mode_combo(ui, &mut entry.mode, ("map_air_mode", index), index);
+                    });
+                    air_cell(ui, widths[3], |ui| {
+                        let r = ui
+                            .add_sized([28.0, 28.0], egui::Button::new("✖"))
+                            .on_hover_text("Remove entry");
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                format!("Remove entry {}", index + 1),
+                            )
+                        });
+                        if r.clicked() {
+                            remove = Some(index);
+                        }
+                    });
+                });
+            }
+        });
+        if let Some(index) = remove {
+            self.record_map_air_undo(format!("Removed pool entry {}", index + 1));
+            self.air_plan.pool.remove(index);
+            self.air_selected = None;
+            self.air_editing = None;
+        } else if plan != self.air_plan {
+            // Weight and mode are ordinary edits: they settle Map's undo.
+            self.air_plan = plan;
+        }
     }
 }
 

@@ -36,7 +36,7 @@ fn issue(severity: IssueSeverity, text: String) -> AirIssue {
 fn blocking(issues: &[AirIssue]) -> Option<&AirIssue> {
     issues
         .iter()
-        .find(|issue| issue.severity == IssueSeverity::Error && !issue.rail_only)
+        .find(|issue| issue.blocks_build())
 }
 
 /// Eligibility follows assembly: disabled, out-of-date and orphaned entries

@@ -439,6 +439,13 @@ pub struct AirIssue {
     pub text: String,
     pub rail_only: bool, // true only for "no enabled valid entry": an Error on the Air Tasking tab, an orange note on Map (§6.1)
 }
+impl AirIssue {
+    /// True when the issue stops `build_air_packs`, and so Map's Generate.
+    /// The `rail_only` error only leaves the air pack out.
+    pub fn blocks_build(&self) -> bool {
+        self.severity == IssueSeverity::Error && !self.rail_only
+    }
+}
 
 pub fn weighted_random_pct(weights: &[u32]) -> Vec<u8> {
     let mut remaining: u64 = weights.iter().map(|&weight| u64::from(weight)).sum();
