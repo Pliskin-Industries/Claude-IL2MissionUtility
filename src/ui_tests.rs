@@ -3982,7 +3982,7 @@ fn replay_panel_without_sidecar_has_no_breadcrumb_sections() {
     // Never spawned is the first section without a trace.
     assert!(h.has("F-80C") && h.has("Never spawned 4"), "{:?}", h.labels());
     h.click("Timeline 10");
-    assert!(h.has("Spawn: F-80C / f80c10 (id 101, country Some(601), parent 0)"), "{:?}", h.labels());
+    assert!(h.has("Spawn: F-80C / f80c10 (id 101, country 601, parent 0)"), "{:?}", h.labels());
 }
 
 /// The A1 acceptance flight (real logs) through the panel: the counts on the
@@ -4025,8 +4025,8 @@ fn replay_panel_filters_the_timeline_by_group() {
     std::fs::write(logs.join("missionReport(filter)[0].txt"), lines.join("\n")).unwrap();
     run_replay(&mut h, &group, &logs);
     h.click("Timeline 2");
-    let truck = "Spawn: Only truck / GAZ-AA (id 500, country Some(601), parent -1)";
-    let ship = "Spawn: Only ship / Ship (id 501, country Some(601), parent -1)";
+    let truck = "Spawn: Only truck / GAZ-AA (id 500, country 601, parent -1)";
+    let ship = "Spawn: Only ship / Ship (id 501, country 601, parent -1)";
     assert!(h.has(truck) && h.has(ship), "{:?}", h.labels());
     h.app.replay.group_filter = Some(vec!["Replay synthetic".into(), "Copy 1".into()]);
     h.settle();

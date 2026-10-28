@@ -845,6 +845,8 @@ fn describe_record(
     breadcrumb: Option<&TraceEntry>,
 ) -> Option<(String, Option<Position>)> {
     let id = |n: Option<i64>| n.map_or_else(|| "?".into(), |n| n.to_string());
+    // A value the log line did not carry shows as "?", like a missing id.
+    let num = |n: Option<i32>| n.map_or_else(|| "?".into(), |n| n.to_string());
     let (description, pos) = match record {
         TypedRecord::MissionStart {
             date,
@@ -873,25 +875,25 @@ fn describe_record(
         TypedRecord::Removed(e) => (format!("Removed: {}", id(e.id)), e.pos),
         TypedRecord::MissionObjective(e) => (
             format!(
-                "Objective: {} (coalition {:?}, type {:?}, result {:?}, icon {:?})",
+                "Objective: {} (coalition {}, type {}, result {}, icon {})",
                 breadcrumb.map_or_else(
                     || id(e.id),
                     |entry| format!("{} (OBJID {})", entry.source_name, id(e.id))
                 ),
-                e.coalition,
-                e.task_type,
-                e.result,
-                e.icon_type
+                num(e.coalition),
+                num(e.task_type),
+                num(e.result),
+                num(e.icon_type)
             ),
             e.pos,
         ),
         TypedRecord::Spawn(e) => (
             format!(
-                "Spawn: {} / {} (id {}, country {:?}, parent {})",
+                "Spawn: {} / {} (id {}, country {}, parent {})",
                 e.name.unwrap_or("?"),
                 e.object_type.unwrap_or("?"),
                 id(e.id),
-                e.country,
+                num(e.country),
                 id(e.parent_id)
             ),
             e.pos,
@@ -904,12 +906,12 @@ fn describe_record(
             country,
         } => (
             format!(
-                "Player plane: {} / {} (plane {}, player {}, country {:?})",
+                "Player plane: {} / {} (plane {}, player {}, country {})",
                 name.unwrap_or("?"),
                 object_type.unwrap_or("?"),
                 id(plane_id),
                 id(player_id),
-                country
+                num(country)
             ),
             None,
         ),
@@ -1653,7 +1655,7 @@ mod tests {
             assert_eq!(
                 event.description,
                 format!(
-                    "Objective: {name} (OBJID {objid}) (coalition Some({coalition}), type Some(0), result Some({success}), icon Some(0))"
+                    "Objective: {name} (OBJID {objid}) (coalition {coalition}, type 0, result {success}, icon 0)"
                 )
             );
             assert!(report.contains(&format!(
@@ -2147,6 +2149,31 @@ mod tests {
         assert_eq!(rows.fired, [FiredRow { source: a.into(), times_s: vec![10.0] }]);
         let spawned: Vec<_> = rows.never_spawned.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(spawned, ["F-80C", "Only ship", "Only train", "Only truck"]);
+    }
+
+    /// Event text shows numbers, or "?" when the log line has none; never
+    /// Rust's Some(...) / None.
+    #[test]
+    fn replay_event_text_is_plain() {
+        let logs = log(concat!(
+            "T:100 AType:8 OBJID:100 POS(5000.0,0.0,5000.0) COAL:1 TYPE:0 RES:1 ICTYPE:0\n",
+            "T:110 AType:8 OBJID:101 POS(5010.0,0.0,5000.0)\n",
+            "T:120 AType:12 ID:500 TYPE:GAZ-AA COUNTRY:601 NAME:Only truck PID:-1 POS(110000.0,10.0,210000.0)\n",
+            "T:130 AType:12 ID:501 TYPE:GAZ-AA NAME:Unknown PID:-1 POS(110000.0,10.0,210000.0)\n",
+            "T:140 AType:10 PLID:502 PID:7 NAME:Test Pilot TYPE:f80c10 COUNTRY:601\n",
+        ));
+        let result = replay(&logs, &group(), None);
+        let text: Vec<_> = result.timeline.iter().map(|e| e.description.as_str()).collect();
+        assert_eq!(
+            text,
+            [
+                "Objective: 100 (coalition 1, type 0, result 1, icon 0)",
+                "Objective: 101 (coalition ?, type ?, result ?, icon ?)",
+                "Spawn: Only truck / GAZ-AA (id 500, country 601, parent -1)",
+                "Spawn: Unknown / GAZ-AA (id 501, country ?, parent -1)",
+                "Player plane: Test Pilot / f80c10 (plane 502, player 7, country 601)",
+            ]
+        );
     }
 
     /// One spawn marker per top-level object (its first record with a real
