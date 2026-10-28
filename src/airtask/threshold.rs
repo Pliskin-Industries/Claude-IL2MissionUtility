@@ -23,6 +23,7 @@ pub(crate) fn ai_country(side: AirSide) -> i32 {
 /// Object Entered, confirmed in flights 1N and 1D. See docs/il2-loader-and-log-facts.md.
 pub(crate) const OBJECT_ENTERED: i32 = 58;
 /// Object Left, confirmed in flights 1N and 1D. See docs/il2-loader-and-log-facts.md.
+#[cfg(test)] // read by the test kit only
 pub(crate) const OBJECT_LEFT: i32 = 60;
 
 /// Build the 19-MCU cell: country-filtered Complex Trigger entry, then a pulsed

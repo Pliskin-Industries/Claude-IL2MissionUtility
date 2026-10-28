@@ -153,3 +153,9 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **Il-10 rear gunners shoot down a fighter that orbits over their target at their height** (F-80C at 500 m over K14).
 - **Computer use, game display:** the game sometimes stops repainting for screen capture (and drops clicks) for tens of seconds; a mouse-wheel scroll over the page or map makes it repaint. On the briefing map, the second button on the left toolbar is a protractor, not "centre on me": clicking it again turns it off.
 - **Flying an orbit by keyboard:** with the level-flight helper on, holding LAlt+Z gives a steady left turn (about 4°/s at 380 km/h, radius about 1.5 km), but the circle drifts a few km in 3 to 5 minutes; check the minimap every minute. An air start may begin with the helper already on (LShift+A shows "Helper disabled" on the first press).
+
+## Found on 2026-10-28 (P14 step 9 load check, game 1.005)
+
+- **`MissionResaver.exe` still crashes** (exit 0xC0000005) on a mission built with `build_probe_mission.py`. Use `--no-resave`.
+- **The Mission Editor opens a `.Mission` from any folder.** File › Open shows a standard Windows dialog, so a load check needs no copy into `game\data`. The editor rejects a bad file with an empty error box at once; a good one goes on to "Loading landscape" and "Updating models", which takes about 2 minutes on this PC. The mission tree's root expands on a double-click, not a single one.
+- **Computer use:** `open_application` on a running Mission Editor starts a second copy, which asks whether to continue. End that copy's process (`STEditor` window) and bring the first copy forward with `AppActivate`.

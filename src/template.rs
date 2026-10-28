@@ -5382,7 +5382,6 @@ pub(crate) fn timer(name: &str, time: f64, next_id: &mut i32, x: f64, z: f64) ->
 }
 
 /// A timer with the given Random percentage.
-#[allow(dead_code)] // P14
 pub(crate) fn timer_random(
     name: &str,
     time: f64,

@@ -444,6 +444,8 @@ struct GroupGeneratorApp {
     air_picked_target: Option<crate::airtask::TargetChoice>,
     air_editing: Option<egui::Id>,
     air_categories: air::CategoryUi,
+    air_eval_cache: air::AirEvalCache,
+    air_dock: air::AirDock,
     /// Status text last seen, and the tab's edit fingerprint when it appeared (`age_status`).
     status_seen: String,
     status_fp: u64,
@@ -548,6 +550,14 @@ enum Status {
         items: Vec<String>,
     },
     Error(String),
+}
+
+/// Fingerprint of an edit text (undo settling, the Air Tasking check cache).
+fn fingerprint(text: String) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish()
 }
 
 impl Default for GroupGeneratorApp {
@@ -707,6 +717,8 @@ impl Default for GroupGeneratorApp {
             air_picked_target: None,
             air_editing: None,
             air_categories: air::CategoryUi::default(),
+            air_eval_cache: air::AirEvalCache::default(),
+            air_dock: air::AirDock::default(),
             status_seen: String::new(),
             status_fp: 0,
             tpl_path: None,
@@ -886,7 +898,9 @@ impl GroupGeneratorApp {
 
     /// The smallest output each tab allows (README §10). These mirror the
     /// errors the generate functions already return; Generate stays disabled
-    /// until all pass. Map has none: any period makes a valid base map.
+    /// until all pass. Any period makes a valid base map; Map's one check is
+    /// the Air Tasking plan's, when it goes into the base map
+    /// (`map_air_readiness`, in step with `build_air_packs`).
     fn readiness_checks(&self) -> Vec<shell::Check> {
         use shell::Check;
         match self.mode {
@@ -962,7 +976,7 @@ impl GroupGeneratorApp {
                 self.airfield_info.is_some(),
                 "An airfield file loaded",
             )],
-            AppMode::Map => Vec::new(),
+            AppMode::Map => self.map_air_readiness(),
             AppMode::AirTasking => self.air_readiness(),
         }
     }
@@ -1262,24 +1276,18 @@ impl GroupGeneratorApp {
     /// Drop the current tab's undo snapshot once the tab is edited after it
     /// (shell::Undo::settle). Only cheap fields go into the fingerprint.
     fn settle_undo(&mut self) {
-        use std::hash::{Hash, Hasher};
-        fn hash(text: String) -> u64 {
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            text.hash(&mut h);
-            h.finish()
-        }
         match self.mode {
             AppMode::Template => {
-                let fp = hash(self.tpl_fingerprint());
+                let fp = fingerprint(self.tpl_fingerprint());
                 self.tpl_undo.settle(fp);
             }
-            AppMode::AirTasking => self.air_undo.settle(hash(self.air_fingerprint())),
+            AppMode::AirTasking => self.air_undo.settle(fingerprint(self.air_fingerprint())),
             AppMode::Recon => {
                 let slots = match self.recon_submode {
                     ReconSubmode::New => &self.recon_slots,
                     ReconSubmode::Rework => &self.recon_rework,
                 };
-                let fp = hash(format!(
+                let fp = fingerprint(format!(
                     "{}{:?}",
                     self.recon_submode == ReconSubmode::New,
                     slots
@@ -1296,7 +1304,7 @@ impl GroupGeneratorApp {
                 self.recon_undo.settle(fp);
             }
             AppMode::Exclusive => {
-                let fp = hash(format!(
+                let fp = fingerprint(format!(
                     "{:?}",
                     self.bomber_slots
                         .iter()
@@ -1311,8 +1319,11 @@ impl GroupGeneratorApp {
                 // The AO box counts so a resize replaces the previous undo, and a
                 // later edit drops a resize undo instead of restoring a stale box.
                 let lines = self.map_undo.peek().is_some_and(|f| f.lines.is_some());
+                // The air plan counts only when the snapshot holds it (an Air
+                // dock Auto-fill or ✖), so an Air Tasking edit keeps a Clear undo.
+                let air = self.map_undo.peek().is_some_and(|f| f.air.is_some());
                 let ao = self.front_aabb;
-                let fp = hash(format!(
+                let fp = fingerprint(format!(
                     "{:?}",
                     (
                         (
@@ -1335,6 +1346,7 @@ impl GroupGeneratorApp {
                             &self.attack_arrows
                         )),
                         (ao.x_min, ao.x_max, ao.z_min, ao.z_max),
+                        air.then_some(&self.air_plan),
                     )
                 ));
                 self.map_undo.settle(fp);

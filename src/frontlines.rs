@@ -354,7 +354,6 @@ pub struct ImportedBaseMap {
     pub attack_arrows: Vec<((f64, f64), (f64, f64))>,
     pub fighters: Vec<ImportedFighterPack>,
     pub armies: Vec<ImportedArmy>,
-    #[allow(dead_code)] // P14: read by the Map Load UI in step 9.
     pub air_tasking_found: bool,
     pub refs: Vec<MapRefGroup>,
     pub year: Option<u16>,

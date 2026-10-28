@@ -2,7 +2,8 @@
 //!
 //! One mode of [`super::GroupGeneratorApp`]. This file owns the Korea map:
 //! drawing, the Period / Forces / References / Terrain dock, AO lock, fighter
-//! textures, and the height-store controls.
+//! textures, and the height-store controls. The dock's Air tab, its map
+//! drawing and its Map undo live in `air.rs`; this file only calls them.
 //!
 //! `ui.rs` is the anchor. It owns the app struct (the `front_*` / `map_*` /
 //! `terrain_*` fields), the mode rail, and the shortcuts, and it calls the
@@ -319,6 +320,9 @@ pub(super) struct MapForces {
     pub(super) lines: Option<MapLines>,
     /// Previous AO box, set when that box was resized or reset.
     ao: Option<WorldAabb>,
+    /// Air Tasking plan, only for the Air dock tab's edits; restored only when set.
+    /// `ui.rs` reads this while settling undo, like `lines`.
+    pub(super) air: Option<crate::airtask::AirPlan>,
 }
 
 /// What Clear lines / salients / arrows can take away.
@@ -341,16 +345,18 @@ pub(super) enum MapDock {
     Forces,
     References,
     Terrain,
+    Air,
 }
 
 impl MapDock {
     /// The dock's tab strip; References carries its count.
-    pub(super) fn tabs(refs: usize) -> [(MapDock, &'static str, Option<usize>); 4] {
+    pub(super) fn tabs(refs: usize) -> [(MapDock, &'static str, Option<usize>); 5] {
         [
             (MapDock::Period, "Period", None),
             (MapDock::Forces, "Forces", None),
             (MapDock::References, "References", Some(refs)),
             (MapDock::Terrain, "Terrain", None),
+            (MapDock::Air, "Air", None),
         ]
     }
 }
@@ -1444,7 +1450,7 @@ fn draw_nav_arrow(painter: &egui::Painter, from: Pos2, to: Pos2, color: Color32)
     ));
 }
 
-fn world_to_pos(rect: Rect, x: f64, z: f64) -> Pos2 {
+pub(super) fn world_to_pos(rect: Rect, x: f64, z: f64) -> Pos2 {
     let uv = world_to_uv(x, z);
     Pos2::new(
         rect.left() + uv.x * rect.width(),
@@ -1592,7 +1598,7 @@ const BLOCK_DOT: Color32 = c::NEUTRAL_800;
 
 /// On-screen side colour (tokens). The colours written into the base map
 /// (`RColor` / `GColor` / `BColor` in frontlines.rs) are separate and unchanged.
-fn faction_map_color(eastern: bool) -> Color32 {
+pub(super) fn faction_map_color(eastern: bool) -> Color32 {
     if eastern { c::DPRK } else { c::NATO }
 }
 
@@ -1718,7 +1724,7 @@ fn draw_dashed_world_line(painter: &egui::Painter, rect: Rect, pts: &[(f64, f64)
 }
 
 /// A thin dashed circle in world metres. Dashes stay about 6 px on screen.
-fn draw_dashed_world_circle(
+pub(super) fn draw_dashed_world_circle(
     painter: &egui::Painter,
     rect: Rect,
     x: f64,
@@ -1821,7 +1827,7 @@ fn fighter_layout_summary(layout: &MapFighterLayout) -> String {
 }
 
 impl super::GroupGeneratorApp {
-    fn map_forces(&self) -> MapForces {
+    pub(super) fn map_forces(&self) -> MapForces {
         MapForces {
             ships: self.map_ships.clone(),
             ground_east: self.map_ground_east.clone(),
@@ -1837,6 +1843,7 @@ impl super::GroupGeneratorApp {
             missions: self.map_missions.clone(),
             lines: None,
             ao: None,
+            air: None,
         }
     }
 
@@ -1855,6 +1862,11 @@ impl super::GroupGeneratorApp {
             self.front_aabb = ao;
             self.map_drag_uv = None;
             self.ao_drag_before = None;
+        }
+        if let Some(plan) = f.air {
+            self.air_plan = plan;
+            self.air_selected = None;
+            self.air_editing = None;
         }
         self.map_ships = f.ships;
         self.map_ground_east = f.ground_east;
@@ -1886,7 +1898,12 @@ impl super::GroupGeneratorApp {
 
     /// Call before a Map Clear / Remove so Ctrl Z can bring the forces back.
     fn record_map_undo(&mut self, label: String) {
-        self.map_undo.record(label, self.map_forces());
+        let snapshot = self.map_forces();
+        self.record_map_snapshot(label, snapshot);
+    }
+
+    pub(super) fn record_map_snapshot(&mut self, label: String, snapshot: MapForces) {
+        self.map_undo.record(label, snapshot);
         self.map_undo_marks = self.drawn_marks.len();
         self.map_last = MapAction::Clear;
     }
@@ -2016,6 +2033,10 @@ impl super::GroupGeneratorApp {
                     .collect::<Vec<_>>(),
                 (&self.custom_front_xz, &self.salients, &self.attack_arrows),
                 (a.x_min, a.x_max, a.z_min, a.z_max, self.front_t),
+                // Air Tasking changes the base map only when it is included.
+                self.air_plan
+                    .include_in_base_map
+                    .then_some(&self.air_plan),
             )
         )
     }
@@ -2715,6 +2736,7 @@ impl super::GroupGeneratorApp {
     fn map_dock_panel(&mut self, ui: &mut egui::Ui) {
         shell::dock_tabs(ui, &mut self.map_dock, &MapDock::tabs(self.map_refs.len()));
         ui.add_space(4.0);
+        self.map_air_note(ui);
         egui::ScrollArea::vertical()
             .id_salt("map_dock_scroll")
             .auto_shrink([false, false])
@@ -2725,6 +2747,7 @@ impl super::GroupGeneratorApp {
                     MapDock::Forces => self.map_forces_tab(ui),
                     MapDock::References => self.map_references_tab(ui),
                     MapDock::Terrain => self.map_terrain_tab(ui),
+                    MapDock::Air => self.map_air_tab(ui),
                 }
             });
     }
@@ -5187,6 +5210,7 @@ impl super::GroupGeneratorApp {
         self.draw_map_ships(&painter, map_rect);
         self.draw_map_ground(&painter, map_rect);
         self.draw_map_objectives(&painter, map_rect);
+        self.draw_map_air(&painter, map_rect);
         self.draw_air_starts(&painter, map_rect);
         self.draw_missions(&painter, map_rect);
 
@@ -7636,6 +7660,23 @@ impl super::GroupGeneratorApp {
                 return;
             }
         };
+        // Air Tasking (P14): the same build and error as its readiness check.
+        let air_packs = if self.air_plan.include_in_base_map {
+            match self.with_air_context(|ctx| crate::airtask::build_air_packs(&self.air_plan, ctx)) {
+                Ok(p) => p,
+                Err(err) => {
+                    self.status = Status::Error(err);
+                    return;
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        let air_sidecars = if air_packs.is_empty() {
+            Vec::new()
+        } else {
+            crate::airtask::sidecar_paths(&self.air_plan)
+        };
         let opts = FrontOptions {
             year: self.front_year,
             season: self.front_season,
@@ -7660,7 +7701,7 @@ impl super::GroupGeneratorApp {
             fighter_packs,
             ship_packs,
             ground_packs,
-            air_packs: Vec::new(),
+            air_packs,
         };
         let mut pack = match generate_front(&opts) {
             Ok(p) => p,
@@ -7688,6 +7729,7 @@ impl super::GroupGeneratorApp {
         let mut paths: Vec<PathBuf> = self.map_refs.iter().map(|g| g.path.clone()).collect();
         paths.extend(self.recon_slots.iter().map(|s| s.path.clone()));
         paths.extend(self.map_armies.iter().map(|a| a.path.clone()));
+        paths.extend(air_sidecars);
         let mut tables = merge_template_sidecars(&paths);
         for ext in LANG_EXTS {
             tables
@@ -7807,6 +7849,14 @@ impl super::GroupGeneratorApp {
                 return;
             }
         };
+        // A base map does not keep the Air Tasking pool (its objectives are
+        // preview-only), so the pool goes; the library and settings stay (P14 §6.2).
+        let cleared = std::mem::take(&mut self.air_plan.pool).len();
+        self.air_selected = None;
+        self.air_editing = None;
+        // Load cannot be undone: no Ctrl Z may bring back a state from before it.
+        self.map_undo.clear();
+        self.air_undo.clear();
         if let Some(aabb) = imported.aabb {
             self.front_aabb = aabb;
         }
@@ -7986,14 +8036,29 @@ impl super::GroupGeneratorApp {
         } else {
             format!(" {}", imported.notes.join(" "))
         };
-        self.status = Status::Info(format!(
-            "Loaded base map ({}). Objectives are preview-only and were not in the file.{extra}",
+        let air = match cleared {
+            0 => String::new(),
+            1 => " Cleared 1 Air Tasking entry: a base map does not keep the pool.".into(),
+            n => format!(" Cleared {n} Air Tasking entries: a base map does not keep the pool."),
+        };
+        let lead = format!(
+            "Loaded base map ({}). Objectives are preview-only and were not in the file.{air}{extra}",
             if parts.is_empty() {
                 "no layers".into()
             } else {
                 parts.join(", ")
             }
-        ));
+        );
+        self.status = if imported.air_tasking_found {
+            Status::Warn {
+                lead,
+                items: vec![
+                    "The loaded map had Air Tasking. It is not loaded back: Generate writes only the current plan, and its pool is now empty.".into(),
+                ],
+            }
+        } else {
+            Status::Info(lead)
+        };
     }
 
     fn add_map_refs(&mut self) {

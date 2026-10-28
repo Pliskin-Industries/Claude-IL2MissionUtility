@@ -281,7 +281,6 @@ pub fn snap_ground_attack_areas(entity: &mut Il2Entity, x: f64, z: f64) {
 }
 
 /// Move air AttackArea MCUs onto `xz`, preserving their altitude and settings.
-#[allow(dead_code)] // P14
 pub fn snap_air_attack_areas(entity: &mut Il2Entity, x: f64, z: f64) {
     entity.for_each_mut(&mut |e| {
         if e.block_type == "MCU_CMD_AttackArea"

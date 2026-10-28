@@ -1,4 +1,3 @@
-#![allow(dead_code)] // P14: removed in step 9
 //! Air Tasking (P14): historical air sorties against Map objectives. See handoff/P14-air-tasking.md.
 use crate::frontlines::MapAirPack;
 use crate::mapclip::WorldAabb;
@@ -24,10 +23,8 @@ mod zone;
 
 // What `ui.rs` may call besides the functions at the bottom. The submodules stay private.
 // library.rs / timing.rs get these signatures with stub bodies in the 1a skeleton (§5 table).
-#[allow(unused_imports)] // P14: removed in step 9
 pub use library::{builtin_library, default_category, load_user_sortie, DEFAULT_CATEGORIES}; // fn builtin_library() -> Vec<AirSortie>; fn default_category(sortie: &AirSortie) -> String; fn load_user_sortie(path: &std::path::Path) -> Result<AirSortie, String>; const DEFAULT_CATEGORIES: [&str; 5]
-#[allow(unused_imports)] // P14: removed in step 9
-pub use timing::{derived_timing, f80_cruise_kmh, f80_transit_s, hard_stop, F80Cruise}; // fn derived_timing(t: &ThresholdSpec) -> DerivedTiming; fn f80_cruise_kmh() -> F80Cruise; fn f80_transit_s(radius_m: f64) -> f64; fn hard_stop(sortie: &AirSortie, plan: &AirPlan, mode: TriggerMode) -> Option<f64>; struct F80Cruise { kmh: f64, measured: bool }
+pub use timing::{derived_timing, f80_cruise_kmh, hard_stop}; // fn derived_timing(t: &ThresholdSpec) -> DerivedTiming; fn f80_cruise_kmh() -> F80Cruise; fn hard_stop(sortie: &AirSortie, plan: &AirPlan, mode: TriggerMode) -> Option<f64>; F80Cruise and f80_transit_s stay in timing.rs
 pub use pool::{add_category, add_entry, add_library_item, auto_fill, category_counts, default_categories, entry_status, pool_counts, remove_category, remove_library_item, rename_category, resolve_target, set_category, target_choices, EntryStatus, TargetChoice, TargetKind}; // fn add_category(plan: &mut AirPlan, name: &str) -> Result<(), String>; fn add_entry(plan: &mut AirPlan, entry: PoolEntry); fn add_library_item(plan: &mut AirPlan, sortie: AirSortie); fn auto_fill(plan: &mut AirPlan, ctx: &AirContext, side: AirSide, category: Option<&str>) -> usize; fn category_counts(plan: &AirPlan) -> Vec<(String, usize)>; fn default_categories() -> Vec<String>; fn entry_status(plan: &AirPlan, index: usize, ctx: &AirContext) -> EntryStatus; fn pool_counts(plan: &AirPlan) -> [usize; 2]; fn remove_category(plan: &mut AirPlan, name: &str) -> usize; fn remove_library_item(plan: &mut AirPlan, index: usize) -> Result<usize, String>; fn rename_category(plan: &mut AirPlan, old: &str, new: &str) -> Result<(), String>; fn resolve_target(target: &TargetRef, ctx: &AirContext) -> Option<TargetChoice>; fn set_category(plan: &mut AirPlan, sortie_index: usize, name: &str); fn target_choices(ctx: &AirContext, side: AirSide) -> Vec<TargetChoice>; enum EntryStatus { Ok, Orphaned, SideChanged, OutOfDate, MissingSortie }; struct TargetChoice { kind: TargetKind, number: usize, side: AirSide, target: TargetRef }; enum TargetKind { Objective, Arrow }
 pub use standalone::{build_air_group, sidecar_paths}; // fn build_air_group(plan: &AirPlan, ctx: &AirContext) -> Result<crate::ast::Il2Entity, String>; fn sidecar_paths(plan: &AirPlan) -> Vec<std::path::PathBuf>
 
@@ -37,6 +34,7 @@ pub const NATO: usize = 1;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AiRtbDecision {
+    #[cfg(test)] // only probe missions fly with AI RTB on
     Enabled,
     Disabled,
 }
@@ -44,6 +42,7 @@ pub(crate) enum AiRtbDecision {
 impl AiRtbDecision {
     pub(crate) fn property(self) -> &'static str {
         match self {
+            #[cfg(test)]
             Self::Enabled => "1",
             Self::Disabled => "0",
         }
@@ -310,6 +309,7 @@ pub enum BudgetImpl {
 pub enum CensusImpl {
     #[default]
     Spaced,
+    #[cfg(test)] // §3.3 alternative; only tests select it
     SameTick,
 } // §3.3, probe E7
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -409,6 +409,7 @@ pub struct AirDrawCounts {
     pub rtbs: usize,
 }
 impl AirPreview {
+    #[cfg(test)] // the Map draw tests compare `AirDock::drawn` with it
     pub fn counts(&self) -> AirDrawCounts {
         AirDrawCounts {
             lines: self.lines.len(),
@@ -439,6 +440,20 @@ pub struct AirIssue {
     pub text: String,
     pub rail_only: bool, // true only for "no enabled valid entry": an Error on the Air Tasking tab, an orange note on Map (§6.1)
 }
+/// What `check` returns: the same values as `validate`, `totals` and `preview`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AirCheck {
+    pub issues: Vec<AirIssue>,
+    pub totals: AirTotals,
+    pub preview: AirPreview,
+}
+impl AirIssue {
+    /// True when the issue stops `build_air_packs`, and so Map's Generate.
+    /// The `rail_only` error only leaves the air pack out.
+    pub fn blocks_build(&self) -> bool {
+        self.severity == IssueSeverity::Error && !self.rail_only
+    }
+}
 
 pub fn weighted_random_pct(weights: &[u32]) -> Vec<u8> {
     let mut remaining: u64 = weights.iter().map(|&weight| u64::from(weight)).sum();
@@ -463,16 +478,29 @@ pub fn build_air_packs(plan: &AirPlan, ctx: &AirContext) -> Result<Vec<MapAirPac
     export::build_air_packs(plan, ctx)
 }
 /// Preview the plan's geometry and clock slots without building.
+#[cfg(test)] // the UI reads it through `check`, one evaluation for all three
 pub fn preview(plan: &AirPlan, ctx: &AirContext) -> AirPreview {
     export::preview(plan, ctx)
 }
 /// Report readiness errors and warnings for the plan.
+#[cfg(test)] // the UI reads it through `check`, one evaluation for all three
 pub fn validate(plan: &AirPlan, ctx: &AirContext) -> Vec<AirIssue> {
     export::validate(plan, ctx)
 }
 /// Count the generated pack's copies, aircraft, MCUs and check zones.
+#[cfg(test)] // the UI reads it through `check`, one evaluation for all three
 pub fn totals(plan: &AirPlan, ctx: &AirContext) -> AirTotals {
     export::totals(plan, ctx)
+}
+/// `validate`, `totals` and `preview` together, from one evaluation of the
+/// plan: what the UI shows and checks, at the cost of one build.
+pub fn check(plan: &AirPlan, ctx: &AirContext) -> AirCheck {
+    export::check(plan, ctx)
+}
+/// How many full evaluations this thread has run (tests of the UI's cache).
+#[cfg(test)]
+pub fn evaluations() -> usize {
+    export::evaluations()
 }
 
 #[cfg(test)]
