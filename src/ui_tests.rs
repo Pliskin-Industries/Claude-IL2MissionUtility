@@ -4018,14 +4018,8 @@ fn country_of<'a>(root: &'a crate::ast::Il2Entity, name: &str) -> Option<&'a str
     root.find_by_name(name).and_then(|n| n.property("Country"))
 }
 
-/// Decision 0037 A: with Air Tasking in the base map, the Map's own AI aircraft
-/// are written on 602 / 503. Player spawns and ground units keep their countries.
-#[test]
-fn map_generate_with_air_moves_map_ai_off_player_countries() {
-    let mut h = Harness::new("air_map_0037");
-    h.tab("Map");
-    h.wait_for_map();
-    fill_air_pool(&mut h);
+/// Forces › Fighters › Place NATO: the Map's own NATO fighter pack.
+fn place_nato_fighters(h: &mut Harness) {
     h.click("Forces");
     // The Fighters section's Place NATO (Units has one too, further down).
     let place = h
@@ -4035,6 +4029,17 @@ fn map_generate_with_air_moves_map_ai_off_player_countries() {
         .expect("Place NATO");
     h.click_at(place.rect.center());
     assert!(h.app.map_fighters.as_ref().is_some_and(|l| !l.eastern), "{}", h.status());
+}
+
+/// Decision 0037 A: with Air Tasking in the base map, the Map's own AI aircraft
+/// are written on 602 / 503. Player spawns and ground units keep their countries.
+#[test]
+fn map_generate_with_air_moves_map_ai_off_player_countries() {
+    let mut h = Harness::new("air_map_0037");
+    h.tab("Map");
+    h.wait_for_map();
+    fill_air_pool(&mut h);
+    place_nato_fighters(&mut h);
     h.app.placed_air_starts.push(crate::airstart::PlacedAirStart {
         field: crate::airstart::default_field("NATO start", true),
         x: 215_000.0,
@@ -4659,3 +4664,260 @@ fn ctrl_z_after_load_does_not_restore_the_pre_load_state() {
     assert!(h.app.air_plan.pool.is_empty(), "Air Tasking's Ctrl Z after Load brought back the pool");
 }
 
+// ---- P14 acceptance flight A2 (run sheet: handoff/sessions/2026-10-28-p14-acceptance-a2.md) ----
+
+/// A DPRK player flies east on autopilot through three NATO areas 15 km
+/// apart, so each goes HOT in turn and the third asks while two NATO copies
+/// fly (the first budget refusal). Built by Map Generate (`generate_front_file`).
+const A2_STEM: &str = "P14_Acceptance_A2";
+/// A, B and C: NATO objectives on one east-west line (x = 190 km), 17 to
+/// 27 km north of the 1951-04-22 front (the Map's default date).
+const A2_AREAS: [(f64, f64); 3] = [
+    (190_000.0, 280_000.0),
+    (190_000.0, 295_000.0),
+    (190_000.0, 310_000.0),
+];
+/// The `--spawns` air start: 22 km west of A on the line, heading east
+/// (YOri 90 is +Z), outside every area's 16 km R.
+const A2_SPAWN: (f64, f64) = (190_000.0, 258_000.0);
+const A2_HEADING: f64 = 90.0;
+const A2_ALTITUDE: f64 = 2_000.0;
+/// The run sheet's Air Tasking settings: R 16 km, zone chance 100 %,
+/// cooldown 5 min (the defaults are 12 km, 50 % and 15 min).
+const A2_RADIUS_M: f64 = 16_000.0;
+const A2_CHANCE: u8 = 100;
+const A2_COOLDOWN_MIN: f64 = 5.0;
+const A2_SORTIES: [&str; 3] = [
+    "1950_US_F80_HVAR_Strike_4ship.Group",
+    "1950_US_F51_CloseSupport_4ship.Group",
+    "1950_US_F80_HVAR_Strike_4ship.Group",
+];
+
+/// The A2 spawn list for `build_probe_mission.py --spawns`. Country 501, the
+/// DPRK player country the NATO areas watch: the Map's own DPRK air start
+/// writes 502 (decision 0042, Proposed), so A2 cannot use it.
+fn a2_spawns_json() -> String {
+    let (x, z) = A2_SPAWN;
+    format!(
+        "[{{\"name\":\"P14 A2 DPRK air start\",\"country\":501,\"x\":{x},\"z\":{z},\
+         \"heading_deg\":{A2_HEADING},\"altitude_m\":{A2_ALTITUDE},\"script\":\"yak9p\"}}]\n"
+    )
+}
+
+/// The A2 base map. Map tab at its default date. The Map's own NATO fighter
+/// pack is placed by a click (Place NATO). The inputs a user enters on the
+/// map or in the Air Tasking panels are set on the app directly, as the other
+/// Map tests do: the three NATO objectives, one Zone entry per area, and the
+/// settings above. Then Trace build on and Generate Base Map through
+/// `generate_front_file`, the Generate button's own call. Returns the written
+/// `.Group` and every (block, Country) outside Air Tasking (`map_countries`).
+fn build_a2(h: &mut Harness) -> (PathBuf, crate::ast::Il2Entity, Vec<(String, String)>) {
+    use crate::airtask::{self, AirSide, PoolEntry, TargetRef, TriggerMode};
+    h.tab("Map");
+    h.wait_for_map();
+    h.app.terrain_use_builtin = true;
+    h.app.east_objectives.clear();
+    h.app.nato_objectives = A2_AREAS.to_vec();
+    h.app.attack_arrows.clear();
+    h.app.air_plan.seed = 7;
+    h.settle();
+    place_nato_fighters(h);
+    h.app.air_plan.pool.clear();
+    for (file, xz) in A2_SORTIES.into_iter().zip(A2_AREAS) {
+        let mut entry = PoolEntry::new(
+            format!("builtin:{file}"),
+            TargetRef::Objective {
+                side: AirSide::Nato,
+                xz,
+            },
+        );
+        entry.mode = TriggerMode::Zone;
+        airtask::add_entry(&mut h.app.air_plan, entry);
+    }
+    assert_eq!(h.app.air_plan.pool.len(), 3, "one entry per area");
+    h.app.air_plan.threshold.radius_m = A2_RADIUS_M;
+    h.app.air_plan.zone.chance_pct = A2_CHANCE;
+    h.app.air_plan.zone.cooldown_min = A2_COOLDOWN_MIN;
+    assert_eq!(h.app.air_plan.budget.per_side, [2, 2], "the default budget");
+    assert!(h.app.air_plan.include_in_base_map);
+    h.app.trace_build = true;
+    h.settle();
+    assert!(
+        map_air_check(h).is_some_and(|c| c.ok),
+        "the Air Tasking check fails"
+    );
+    assert!(!h.find("Generate Base Map").disabled);
+    let file = format!("{A2_STEM}.Group");
+    let (root, countries) = generate_map(h, &file);
+    (h.out(&file), root, countries)
+}
+
+#[test]
+#[ignore = "writes target/p14/P14_Acceptance_A2.Group, locale, trace and spawn sidecars"]
+fn write_p14_acceptance_a2() {
+    let mut h = Harness::new("p14_acceptance_a2_write");
+    build_a2(&mut h);
+    let dest = repo("target/p14");
+    std::fs::create_dir_all(&dest).unwrap();
+    for file in std::fs::read_dir(&h.dir).unwrap() {
+        let path = file.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if name.starts_with(&format!("{A2_STEM}.")) {
+            std::fs::copy(&path, dest.join(&name)).unwrap();
+            println!("{name}: {} bytes", std::fs::metadata(&path).unwrap().len());
+        }
+    }
+    std::fs::write(
+        dest.join(format!("{A2_STEM}.spawns.json")),
+        a2_spawns_json(),
+    )
+    .unwrap();
+    println!("{}", h.status());
+}
+
+/// The A2 build, as the run sheet describes it, and still byte-identical to
+/// the frozen files copied into the game (`handoff/p14-probes/acceptance-a2/`).
+#[test]
+fn a2_map_build_matches_the_frozen_files_and_the_run_sheet() {
+    let mut h = Harness::new("p14_acceptance_a2");
+    let (out, root, countries) = build_a2(&mut h);
+    let frozen = repo("handoff/p14-probes/acceptance-a2");
+    for ext in ["Group", "eng", "trace.json"] {
+        let built = std::fs::read(out.with_extension(ext)).unwrap();
+        let kept = std::fs::read(frozen.join(format!("{A2_STEM}.{ext}"))).unwrap();
+        assert!(
+            built == kept,
+            "{ext}: the build no longer matches the frozen A2 file"
+        );
+    }
+    let spawns = std::fs::read_to_string(frozen.join(format!("{A2_STEM}.spawns.json"))).unwrap();
+    assert_eq!(spawns, a2_spawns_json());
+
+    let air = root.find_by_name("Air Tasking").expect("Air Tasking group");
+    let trees: Vec<_> = air.children.iter().filter_map(|c| c.name()).collect();
+    assert_eq!(
+        trees,
+        ["Air Tasking NATO Logic", "Air Tasking NATO Sorties"],
+        "NATO side only"
+    );
+    let named = |name: &str| air.find_by_name(name).unwrap_or_else(|| panic!("{name}"));
+    let mut clock = 0;
+    air.for_each(&mut |node| {
+        clock += usize::from(node.name().is_some_and(|n| n.starts_with("CLK ")))
+    });
+    assert_eq!(clock, 0, "Zone-only entries: no clock");
+
+    // Three areas on the line, 16 km R: each watches DPRK players (501) at
+    // 8 km. The spawn is on the same line, west of every area (heading 090
+    // reaches them) and outside every area's R.
+    for (i, &xz) in A2_AREAS.iter().enumerate() {
+        let n = i + 1;
+        let trigger = named(&format!("THN0{n} TRIGGER"));
+        assert_eq!(trigger.pos_xz(), Some(xz));
+        assert_eq!(
+            (trigger.property("Radius"), trigger.property("Country")),
+            (Some("8000"), Some("501"))
+        );
+        assert_eq!(xz.0, A2_SPAWN.0, "THN0{n}: on the spawn's line");
+        assert!(
+            xz.1 - A2_SPAWN.1 > A2_RADIUS_M,
+            "THN0{n}: east of the spawn, beyond R"
+        );
+        let inner = named(&format!("THN0{n} INNER"));
+        assert_eq!(
+            (inner.pos_xz(), inner.property("Zone")),
+            (Some(xz), Some("8000"))
+        );
+        assert_eq!(
+            named(&format!("THN0{n} DWELL")).property("Time"),
+            Some("80")
+        );
+        assert_eq!(
+            named(&format!("THN0{n} HOLD")).property("Time"),
+            Some("160")
+        );
+        assert_eq!(
+            named(&format!("ZN0{n} CHANCE")).property("Random"),
+            Some("100")
+        );
+        assert_eq!(
+            named(&format!("ZN0{n} COOLDOWN")).property("Time"),
+            Some("300")
+        );
+    }
+    assert!(
+        air.find_by_name("THN04 TRIGGER").is_none() && air.find_by_name("THD01 TRIGGER").is_none()
+    );
+    assert_eq!(
+        named("BUD N COUNT").property("Counter"),
+        Some("2"),
+        "NATO budget 2"
+    );
+
+    // Nine copies, three per entry, all AI on 602; each copy's Zone IN and
+    // Zone Out are at its area, and (decision 0038) its DONE HUB OFF quiets
+    // more than the hub.
+    let sorties = named("Air Tasking NATO Sorties");
+    assert_eq!(sorties.children.len(), 9);
+    for (j, copy) in sorties.children.iter().enumerate() {
+        let name = copy.name().unwrap();
+        let script = if j / 3 == 1 { "f51d" } else { "f80c10" };
+        let mut planes = 0;
+        copy.for_each(&mut |node| {
+            if node.block_type == "Plane" {
+                planes += 1;
+                assert!(node.property("Script").unwrap().contains(script), "{name}");
+                assert_eq!(node.property("Country"), Some("602"), "{name}");
+            }
+            if node.block_type == "MCU_CheckZone" {
+                assert_eq!(node.pos_xz(), Some(A2_AREAS[j / 3]), "{name}");
+            }
+        });
+        assert_eq!(planes, 4, "{name}");
+        let off = copy
+            .find_by_name(&format!("SN0{} DONE HUB OFF", j + 1))
+            .unwrap();
+        assert!(
+            off.targets.len() > 1,
+            "{name}: DONE HUB OFF closes its timers and zones too"
+        );
+    }
+
+    // Decision 0037: outside Air Tasking the Map's planes are on 602 only,
+    // and its NATO fighter pack launches only for planes far from the line.
+    let planes: Vec<_> = countries
+        .iter()
+        .filter(|(block, _)| block == "Plane")
+        .collect();
+    assert!(
+        !planes.is_empty() && planes.iter().all(|(_, c)| c == "602"),
+        "{planes:?}"
+    );
+    // The line runs along x = 190 km, from the spawn to 8 km past C.
+    let line_x = A2_SPAWN.0;
+    let line_z = (A2_SPAWN.1, A2_AREAS[2].1 + 8_000.0);
+    let mut launch_zones = 0;
+    for pack in std::iter::once(&root)
+        .chain(&root.children)
+        .flat_map(|c| c.children.iter())
+        .filter(|g| g.name().is_some_and(|n| n.starts_with("NATO Fighters")))
+    {
+        pack.for_each(&mut |node| {
+            if node.block_type == "MCU_CheckZone" && node.property("Closer") == Some("1") {
+                let (x, z) = node.pos_xz().unwrap();
+                let radius: f64 = node.property("Zone").unwrap().parse().unwrap();
+                let gap = (x - line_x).hypot(z - z.clamp(line_z.0, line_z.1)) - radius;
+                assert!(
+                    gap > 50_000.0,
+                    "{:?} launches {gap:.0} m from the line",
+                    pack.name()
+                );
+                launch_zones += 1;
+            }
+        });
+    }
+    assert!(
+        launch_zones > 0,
+        "the Map's own fighter pack and its launch zones are in the file"
+    );
+}
