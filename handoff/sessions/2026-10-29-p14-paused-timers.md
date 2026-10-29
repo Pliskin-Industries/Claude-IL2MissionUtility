@@ -1,6 +1,8 @@
 # 2026-10-29 — P14 paused timers: the fix plan (hand-over)
 
-**Status:** probe flight 2K flown and recorded; the fix is designed, not built. Branch `claude/p14-paused-timers` (worktree `.claude/worktrees/p14-acceptance-a2`), cut from `claude/p14-acceptance-a2` at `51228f2`. Not pushed. `STATE.md` is left to the coordinating session.
+**Status (end of the fix session, 2026-10-29):** done. The fix is built (`bb5a6f1`, decision 0044, with the user's Q10 "drop the links" and a revised Q9 that adds a `PASS IN` gate), the walker's check-zone model is in (`02916f9`, decision 0045), and probe flight 2L confirmed both in the game (`handoff/sessions/2026-10-29-p14-flight-2l.md`). The text below is the plan as it stood before that session.
+
+**Earlier status:** probe flight 2K flown and recorded; the fix is designed, not built. Branch `claude/p14-paused-timers` (worktree `.claude/worktrees/p14-acceptance-a2`), cut from `claude/p14-acceptance-a2` at `51228f2`. Not pushed. `STATE.md` is left to the coordinating session.
 
 ## How we got here
 

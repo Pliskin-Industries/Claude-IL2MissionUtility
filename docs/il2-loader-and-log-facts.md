@@ -184,3 +184,8 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
   - a further pulse into an armed zone whose condition still holds does nothing.
 - **Decision 0043's switch breadcrumbs log in the game** (all 18 at their times).
 
+## Found on 2026-10-29 (flight 2L, game 1.005)
+
+- **The D11 relay works as a cancel.** A running timer that runs out into a switched-off zero-second relay timer is dropped there: `ZNii MISS WAIT` into `MISS WAIT OUT` (6 times) and `CLK N ATTEMPT END` into `REROLL` (6 times). Nothing fired later.
+- **The real threshold passes exactly `HOLD` apart** while a plane stays inside (120.00 s, five in a row): `CHECK ON` switching the armed `INNER` on is the check.
+- **AI on 501 triggers a NATO Air Tasking area** with the exported logic, as in flight 2J.

@@ -1046,6 +1046,29 @@ Times are to 0.02 s (one tick); the resumed timers fired one tick early (85.98, 
 - **A check zone, once pulsed, stays armed, and switching it on is a check.** The threshold's presence check works because of this, not because of its 0.1 s pulse.
 - **Decision 0043's switch breadcrumbs log.**
 
+## Flight 2L (the paused-timer fix in the game: a zone rolls again after one cooldown, clock slots in a row) — 2026-10-29, one run, no pilot, Tacview recorded
+
+Checks decisions 0044 and 0045 with the real exported Air Tasking logic: one NATO area, two Zone and two Clock entries, budget 1, an AI pair on 501 as the only trigger. Run sheet and predictions: `handoff/sessions/2026-10-29-p14-flight-2l.md`. Frozen: `handoff/p14-probes/flight2l/`. Logs: `real_50`. Load: the pair and one 4-ship copy. Replay: no dead links; every unobserved successor is a closed relay, a refused request or a copy still on station.
+
+| Check | Flown | Reading |
+|---|---|---|
+| Passes (`THN01 INNER`) | **162.12, 282.12, 402.12, 522.12, 642.12** | exactly `HOLD` (120.00 s) apart: the armed `INNER` passes at `CHECK ON` (0045) |
+| ZN01 | CHANCE 162.22, FIRE and `SN01 START` 162.26 | won; SN01 flew (`Zone IN` 328.82) and kept the budget full |
+| ZN02 rolls | **162.76, 282.76, 402.76, 522.76, 642.76** | **at every pass, one cooldown apart.** The old wiring would have rolled at every second pass |
+| ZN02 refusal and cooldown | DENY WAIT at each roll + 1.04; COOLDOWN and ARM at **253.80, 373.80, 493.80, 613.80, 733.80** | one cooldown per refusal; nothing 0.9 s after `ARM` |
+| `MISS WAIT` / `MISS WAIT OUT` | MISS WAIT at each roll + 0.90 (ZN01 163.12; ZN02 163.66, 283.66, …); **MISS WAIT OUT never** | after a won roll, `MISS WAIT` runs out into the closed relay (0044) |
+| Clock slot 1 (COLD) | rerolls every 2 s from 62.40 to 80.40; a last `ATTEMPT END` at 82.40 with **no** `REROLL` | after `SLOT CLOSE`, `ATTEMPT END` runs out into the switched-off `REROLL` |
+| Clock slots 2–6 (HOT) | WIN 181.40, 300.90, 420.90, 541.40, 661.40; `ATTEMPT END` **182.40, 302.40, 422.40, 542.40, 662.40**; no `REROLL`; `Randomizer:INPUT` only at `DRAW` | five won slots in a row, one attempt each; `ATTEMPT END` runs out 2.0 s after `DRAW` (0044, Q10) |
+| `SN02`–`SN04 START` | never | refused by the budget, as planned |
+
+The walker's predictions held to the tick, with P = 162.12 instead of the walker's 171.1 (the pair entered r_in at 102.02).
+
+### What this changes (reading)
+
+- **The A2 fault is fixed in the game.** A refused zone roll is followed by one cooldown, and the zone rolls at the next pass.
+- **Nothing is left paused in the clock.** Every `ATTEMPT END` runs out, and none passes the switched-off `REROLL`.
+- **Decision 0045's check-zone model matches the game** on the real threshold: passes come exactly `HOLD` apart.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
