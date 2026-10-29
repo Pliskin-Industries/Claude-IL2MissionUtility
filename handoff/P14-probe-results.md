@@ -986,6 +986,39 @@ Second stage of the acceptance test (decision 0036; run sheet, predictions P1–
 - **The player is at risk from the raid it calls in**: Il-10 gunners kill a fighter that orbits over their target at their height.
 - Not shown: the single extension and the turn for home (P9), a budget refusal (P13), a Yak copy, exhaustion.
 
+## Flight A2 (a DPRK player through three NATO areas: refusal, COLD end, the single extension; the first app-made mission) — 2026-10-29, two runs, Tacview recorded
+
+Third stage of the acceptance test (decision 0036; run sheet, predictions P1–P17 and the full table: `handoff/sessions/2026-10-28-p14-acceptance-a2.md`). The mission is `P14_Acceptance_A2`, frozen in `handoff/p14-probes/acceptance-a2/`:
+- built by Map Generate with Trace build on;
+- three NATO areas 15 km apart, R 16 km, zone chance 100 %, cooldown 5 min, NATO budget 2;
+- a Yak-9P air start on 501.
+
+Run 1 (`real_48`) crashed 2 min after the spawn, before any area: the first LShift+A switched off the air start's helper. Run 2 (`real_47`, session `2026-10-29_09-42-07`) is the flight below.
+
+| Prediction | Flown |
+|---|---|
+| HOT and COLD on the straight leg | `THN01/02/03 INNER` 217.54, 312.76, 414.12; `THN01/02 CLOSE DELAY` at INNER + 162.04 each |
+| **Budget refusal** (first in the game) | `ZN03 FIRE` 414.26 with no START, `ZN03 DENY WAIT` + 1.00 s, while SN01 and SN04 flew |
+| **COLD end** (first in the game) | `SN04 ON STATION` = Zone IN + 900.50 with `COLD` and `DONE HUB` in one tick, no EXTEND; SN01 ended by `Zone Out` (431.64) when the orbit's start took the player over 35 km from A |
+| Grant after a deletion | `SN07 START` 1,305.66 at C's pass, after SN01's deletion |
+| **The single extension** (first in the game) | `SN07 ON STATION` 2,072.22 (C HOT), `SN07 EXTEND` + `DONE HUB` 2,672.22 (+ 600.00), deleted + 60.60 |
+| Decision 0038 | nothing from a copy after its DONE HUB but `DELETE DELAY`; no HARD STOP and no Zone Out when the player left |
+| Decision 0037 | every AI aircraft on 602; only the player on 501; the Map's fighter pack never spawned |
+| Replay | no dead links |
+
+### What this changes (reading)
+
+- **The NATO cycle works end to end in a mission made by the app**:
+  - HOT and COLD by area;
+  - zone starts;
+  - the budget refusing a third copy;
+  - the on-station decision both ways (COLD → home at once; HOT → one extension → home);
+  - deletion;
+  - the used copies kept quiet.
+- **A deactivated running timer resumes when activated again** (paused, not cancelled; four zone `MISS WAIT`s fired 0.88 s after their `ARM`). The zone front end loses one extra cooldown after every FIRE. Every place that deactivates a running timer and later re-activates it needs a review (`docs/il2-loader-and-log-facts.md`, 2026-10-29).
+- Presence checks held for 25 minutes at 160.00 s intervals once the orbit was centred; a drifting orbit costs a COLD and a full re-entry (re-armed with the player inside: not reported).
+- Not shown: a second refusal (SN01 had ended early), a player who lands inside an area, a Yak copy.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.

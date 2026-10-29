@@ -1,6 +1,6 @@
 # 2026-10-28 — P14 acceptance, flight A2 (a DPRK player through three NATO areas): run sheet
 
-**Status: built, in the game's Dogfight folder, not flown.** Branch `claude/p14-acceptance-a2`, cut from `main` at `7e095f2`. The user approved the design and the copy into the game (2026-10-28: "Approved. Build A2 as planned: 15 km spacing, R 16 km, zone chance 100 %, cooldown 5 min, Zone-only entries, --spawns air start on 501, and decision 0042 recorded as Proposed.").
+**Status: flown 2026-10-29 by Claude (two runs; results at the end).** Branch `claude/p14-acceptance-a2`, cut from `main` at `7e095f2`. The user approved the design and the copy into the game (2026-10-28: "Approved. Build A2 as planned: 15 km spacing, R 16 km, zone chance 100 %, cooldown 5 min, Zone-only entries, --spawns air start on 501, and decision 0042 recorded as Proposed.").
 
 **Why this flight.**
 - It is the first piloted flight of a mission made by the app itself (Map Generate with Air Tasking, Trace build on), and the first NATO-side flight.
@@ -233,6 +233,53 @@ S is the player's spawn time (the `AType:10` line), s a copy's `START` time. Tim
   - Kept: the A2 facts are checked in both the UI build test and the frozen-file test, as for A1 (one checks what the app builds, the other what was frozen).
 - No game fact was learned (nothing was flown), so `docs/il2-loader-and-log-facts.md` is unchanged.
 
-## Results
+## Results (flown 2026-10-29)
 
-Not flown yet.
+Flown by Claude on this PC (game `261013`), keyboard only, Tacview on, from the frozen mission `P14_Acceptance_A2_20261028` in the Dogfight folder.
+
+- **Run 1**, session `2026-10-29_09-36-50`, logs `src/testdata/missionlog/real_48/` (9 files), Tacview `handoff/tacview/P14_Acceptance_A2_run1.zip.acmi`.
+  - The air start began with the level-flight helper on.
+  - The first LShift+A, meant as a check, switched it off. The Yak rolled right into a climbing turn and then a spiral dive, which the arrow keys could not stop. It hit the ground at 176.8 s, 3.5 km from the spawn.
+  - No Air Tasking breadcrumb fired: the player never reached A's ring.
+  - Leave Server took the game to the results screen, and the server reloaded the mission into a new session.
+- **Run 2**, session `2026-10-29_09-42-07`, logs `src/testdata/missionlog/real_47/` (109 files), Tacview `handoff/tacview/P14_Acceptance_A2_run2.zip.acmi` (the raw `.acmi` is also in `C:\Machine Intelligence\P14 Flight A2\tracks\`).
+  - Spawn S = 43.32 s.
+  - The helper was left alone; LCtrl+R started Tacview.
+  - The throttle went from 85 % down to 42 %, at about 450–500 km/h indicated, 2,000 m, heading 089.
+  - Then the orbit at C, a return to it, and the exit north. Left at about 3,050 s.
+  - Mission time kept pace with wall time.
+- **Replay** (`replay` command on `real_47`, report `target/p14/acceptance_a2_report.md`, not committed): **no dead links**.
+
+### Run 2, prediction by prediction
+
+| Id | Flown |
+|---|---|
+| P1 | **yes**: loads; `MFile` names the mission; the DPRK spawn list offered "P14 A2 DPRK air start" (Yak-9P, air start); the player is country 501 at (190,000; 258,037), 1,999 m |
+| P2 | **yes**: `THN01 INNER` 217.54 (S + 174.2), `THN02 INNER` 312.76 (+ 95.2 s), `THN03 INNER` 414.12 (+ 101.4 s). The plane flew faster than planned (about 520–580 km/h true), hence S + 174 not S + 192 |
+| P3 | **yes, to the hundredth**: `THN01 CLOSE DELAY` 379.58 = INNER + 162.04; `THN02 CLOSE DELAY` 474.80 = INNER + 162.04 |
+| P4 | **yes**: `ZNaa CHANCE` + 0.10, `ZNaa FIRE` and `SNjj START` + 0.14 (`SN01` at A, `SN04` at B); `BUD N COUNT` 313.14, 0.24 s after `SN04 START` |
+| P5 | **yes: the first budget refusal in the game.** `ZN03 FIRE` 414.26 with no START; `ZN03 DENY WAIT` 415.26 (+ 1.00) |
+| P6 | **yes**: `Zone IN` SN01 384.18 (s + 166.5), SN04 532.94 (s + 220.0), SN07 1,471.72 (s + 166.1) |
+| P7 | **Not as planned.** The orbit started about 3 km east of C and went round on its east side. The 574 s check found the player more than 8 km out: `THN03 CLOSE DELAY` 576.16, and the trigger re-armed. Two later entries failed their checks (685.56, 957.54): one was made while turning away; for the other, the player was already inside when the trigger re-armed (flight 2J: not reported). After flying 16 km out and back in, `THN03 INNER` 1,305.52, then **every 160.00 s, ten in a row**, to 2,745.52 |
+| P8 | **Not seen.** SN01 had ended early (P9), so the budget had room. C was COLD when `ZN03` re-armed, and `ZN03` was disarmed again 0.88 s after re-arming (see "Not predicted") |
+| P9 | **SN04: yes, the first clean COLD end.** `SN04 ON STATION` 1,433.44 = Zone IN + 900.50, with `SN04 COLD` and `SN04 DONE HUB` in the same tick and no EXTEND. **SN01 ended by `Zone Out` at 431.64**: the start of the orbit took the player more than 35 km from A (the risk the run sheet lists) |
+| P10 | **yes**: `DELETE DELAY` at DONE HUB + 60.60 for all three (SN01 492.24, SN04 1,494.04, SN07 2,732.82); `ZN01 COOLDOWN` 731.64 and `ZN02 COOLDOWN` 1,733.44, each at its copy's DONE HUB + 300.00 |
+| P11 | **yes**, at the first C pass after `ZN03` was armed (1,305.52, after the return to C): `ZN03 FIRE` and **`SN07 START` 1,305.66**, no DENY WAIT; `BUD N COUNT` 1,306.04 (SN04 and SN07) |
+| P12 | **yes: the single extension, then home, first seen in the game.** `SN07 ON STATION` 2,072.22 = Zone IN + 600.50, no `SN07 COLD`; **`SN07 EXTEND` and `SN07 DONE HUB` 2,672.22**, 600.00 s later; no second extension |
+| P13 | **yes (decision 0038).** After each copy's DONE HUB only its `DELETE DELAY` logged. Not logged, though each was due without 0038: `SN01 ON STATION` (984.7), `SN01 HARD STOP` (2,181.3), `SN04 HARD STOP` (2,620.6), and every `Zone Out` of SN01, SN04 and SN07 when the player flew north out of their 35 km (by about 3,000 s). Replay lists them as unobserved successors |
+| P14 | **yes**: last `THN03 INNER` 2,745.52, `THN03 CLOSE DELAY` 2,907.56 (+ 162.04); `ZN03 COOLDOWN` 2,972.22 (SN07 DONE HUB + 300.00); no `SN08 START` |
+| P15 | **yes**: at most two NATO copies at once (SN01 + SN04, then SN04 + SN07); SN02, 03, 05, 06, 08, 09 never started; no `LOSSES`, no `HARD STOP`; no AI aircraft was lost |
+| P16 | **yes (decision 0037)**: every AI aircraft in the log is 602 (F-80C-10, F-51D); the only 501 objects are the player's Yak and pilot. The Map's NATO fighter pack never spawned (its flights show 0 in Never spawned) |
+| P17 | **yes**: no dead links |
+
+### Not predicted
+
+- **A deactivated running timer is paused, not cancelled: activating it again resumes it.**
+  - At each successful roll, `ZNaa CHANCE` deactivates `ZNaa MISS WAIT` (1 s) about 0.1 s after the pass started it.
+  - When the zone re-arms (`ZNaa ARM`, 300 s later), `MISS WAIT` fires **0.88 s after ARM**: the rest of its 1 s. Seen four times: `ZN03` 716.14, `ZN01` 732.52, `ZN02` 1,734.32, `ZN03` 2,973.10.
+  - `MISS WAIT` then disarms the zone and starts another cooldown (`ZN03 COOLDOWN` 1,016.14, `ZN01` 1,032.52, `ZN02` 2,034.32). So after every FIRE, granted or refused, a zone entry stays shut for **two cooldowns, not one**.
+  - The zone front end (decision 0030, "direct cancels (J1)") assumed a cancel. Flight 0's J1 saw only that a deactivated timer never fired; it was never re-activated.
+  - Any design that deactivates a running timer and later re-activates it needs a check. Candidates: `ZNaa GRANTED` → `DENY WAIT` (re-armed by `FIRE ARM`), and the clock's `WIN` → `ATTEMPT END` (re-armed by `REROLL ON`).
+  - Not fixed in this branch: a follow-up for the user.
+- **`ZNaa ARM` (an `MCU_Activate`) never logs its breadcrumb**, while `COOLDOWN` does. The trace build seems to *activate* the objective that an Activate targets, rather than trigger it. Replay lists `ZNaa ARM` as unobserved. A trace limitation, not a logic fault.
+- **Orbiting by helper turns at about 450 km/h indicated:** LAlt+X / LAlt+Z about 3°/s, radius about 2.7 km. The orbit held C for 25 minutes once it was centred on the area; the F-80s' target circle on the minimap showed where C was.

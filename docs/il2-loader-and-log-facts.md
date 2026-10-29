@@ -29,7 +29,7 @@ Facts about the game that are not obvious from this repo's code. Each one cost a
 - **AI aircraft trigger check zones.** The coalition filter still works. See `docs/decisions/0008-ai-aircraft-trigger-check-zones.md`.
 - An empty "Closer 0" zone does not fire on Activate plus a pulse.
 - A pulse into an inactive relay is dropped, not replayed when the relay is activated.
-- Deactivating a running timer cancels it. Re-triggering a running timer restarts it.
+- Deactivating a running timer stops it. **It is paused, not cancelled: activating it again resumes the countdown** (flight A2, 2026-10-29, below). Re-triggering a running timer restarts it.
 - Inputs to an inactive counter are not counted; the count survives Deactivate and Activate.
 
 - **An aircraft that dies raises OnEvent 13, then 0, then 2; it does not raise 4.** Seen for a gun kill and for a Damage command (flight 1G, 2026-10-12). 13 and 0 come within 0.1 s of the kill, 2 some seconds later when the wreck hits the ground, and not always.
@@ -159,3 +159,13 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **`MissionResaver.exe` still crashes** (exit 0xC0000005) on a mission built with `build_probe_mission.py`. Use `--no-resave`.
 - **The Mission Editor opens a `.Mission` from any folder.** File › Open shows a standard Windows dialog, so a load check needs no copy into `game\data`. The editor rejects a bad file with an empty error box at once; a good one goes on to "Loading landscape" and "Updating models", which takes about 2 minutes on this PC. The mission tree's root expands on a double-click, not a single one.
 - **Computer use:** `open_application` on a running Mission Editor starts a second copy, which asks whether to continue. End that copy's process (`STEditor` window) and bring the first copy forward with `AppActivate`.
+
+## Found on 2026-10-29 (flight A2, game 1.005)
+
+- **A deactivated running timer is paused, not cancelled.** An `MCU_Activate` later resumes it, and it fires after the rest of its time. Each zone's `MISS WAIT` (1 s) was switched off about 0.1 s after the pass started it. It fired 0.88 s after the zone's `ARM` re-activated it, 300 s later, four times out of four. Flight 0's J1 ("never fires") only covered a timer that was never activated again.
+- **An `MCU_Activate` traced as a source never logs its breadcrumb** (`ZNaa ARM`), while timers in the same chain do. Replay lists it as unobserved.
+- **Yak-9P air start:** the level-flight helper is on at the spawn. One LShift+A switches it off, and with no stick input the Yak rolls right into a climbing turn, then a spiral dive. The arrow keys did not recover it in time. Leave LShift+A alone after an air start; read the helper icon (the first icon in the right-hand column) instead.
+- **A Yak-9P at 85 % throttle and 2,000 m accelerates past 520 km/h indicated** on the helper. 42 % held about 450 km/h. The `-` key works with the helper on; each 1 s hold takes about 17 %.
+- **Helper turns:** with the level-flight helper on, holding LAlt+X or LAlt+Z gives about 3°/s at 450 km/h indicated (radius about 2.7 km), height held to ±2 m. It held a 16 km area's 8 km presence check for 25 minutes once centred. On the minimap, the target circle of AI attack aircraft marks their target.
+- **Tacview's `.acmi` is locked exclusively while recording.** It cannot be read, even with shared read access, until the mission ends. For a live position, use the minimap grid: squares are 10 km, labelled row (north to south) then column (west to east); the column 23/24 line is at z ≈ 258 km and the row 28/29 line at x ≈ 190 km.
+- **One spawn per session, again:** after the crash, Leave Server then Accept (Enter held 1 s, twice) went to the results screen. The server reloaded the mission into a new session, where the spawn worked.
