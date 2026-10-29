@@ -632,6 +632,6 @@ These words describe how the game treats MCUs. They help when you read a trace l
 - **Resumes**: a paused timer that is switched on fires after the time it had left, not its full time. A pulse into it then restarts it with its full time. A pulse while it is off is dropped.
 - **Switching a running timer off does not stop it**, and no MCU does. To **cancel** one, let it run out into a zero-second relay timer, and switch that relay off. The relay drops the pulse. Air Tasking does this, for example `ZNii MISS WAIT` runs out into `ZNii MISS WAIT OUT`.
 - **A failed random roll** on a running timer does not leave it running. This is the one thing that stops a running timer, and you cannot choose when it happens.
-- **Armed** (check zones): a pulsed check zone keeps watching until its condition holds, then fires. Switching an armed zone on is a check: it fires at once if the condition holds. A check zone that was never pulsed does nothing, even when switched on.
+- **Armed** (check zones): a pulsed check zone keeps watching, also after it fires and while it is switched off. It fires when its condition becomes true. A further pulse does nothing. Switching an armed zone on is a check: it fires at once if the condition holds. A check zone that was never pulsed does nothing, even when switched on.
 
 If a timer in your own logic fires at an odd time some while after an Activate, it was probably paused and has resumed.

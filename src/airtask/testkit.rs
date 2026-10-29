@@ -74,6 +74,12 @@ pub(crate) enum CheckZoneMode {
     #[default]
     Once,
     Repeat,
+    /// Flight 2K (K5): a pulse arms a zone and it stays armed, also after it
+    /// fires and while it is off. An armed zone fires when its condition
+    /// becomes true, and switching it on is a check. A pulse into an armed
+    /// zone does nothing. Not flown: that a zone fires again when a plane
+    /// leaves and comes back (here it does, as the condition becomes true).
+    Armed,
 }
 
 /// Configurable hypotheses; use flown settings explicitly in builder tests.
@@ -91,12 +97,13 @@ pub(crate) struct WalkerConfig {
 }
 
 impl WalkerConfig {
-    /// The timer facts flown in flight 2K: switch-off pauses a running timer,
-    /// and a failed roll does not leave one running.
+    /// The facts flown in flight 2K: switch-off pauses a running timer, a
+    /// failed roll does not leave one running, and check zones stay armed.
     pub(crate) fn flown(self) -> Self {
         Self {
             deactivate_running_timer: DeactivateRunningTimer::Pauses,
             failed_roll: FailedRoll::Stops,
+            check_zone: CheckZoneMode::Armed,
             ..self
         }
     }
@@ -179,6 +186,10 @@ struct NodeState {
     fired: bool,
     last_count: Option<Tick>,
     zone_armed: bool,
+    /// Armed: whether the condition held at the zone's last check while it
+    /// was on. A pulse that arms it and a switch-on clear it, so the next
+    /// check fires if the condition holds.
+    zone_held: bool,
     last_zone_fire: Option<Tick>,
     trigger_inside: BTreeSet<usize>,
 }
@@ -351,13 +362,21 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
                 walker.snapshot_trigger_inside(id);
             }
         }
-        while let Some(event) = walker.pending.pop_front() {
-            processed += 1;
-            assert!(processed <= 1_000_000, "walker event limit at tick {t}");
-            walker.deliver(event);
-        }
-        for (id, active) in std::mem::take(&mut walker.switches) {
-            walker.switch(id, active);
+        // Batched switches commit at tick end. Under Armed, a zone switched on
+        // then checks, and what it fires is delivered in this same tick.
+        loop {
+            while let Some(event) = walker.pending.pop_front() {
+                processed += 1;
+                assert!(processed <= 1_000_000, "walker event limit at tick {t}");
+                walker.deliver(event);
+            }
+            let switches = std::mem::take(&mut walker.switches);
+            if switches.is_empty() {
+                break;
+            }
+            for (id, active) in switches {
+                walker.switch(id, active);
+            }
         }
         walker.log.snapshots.push(WalkerSnapshot {
             t,
@@ -455,8 +474,11 @@ impl Walker<'_> {
         let now = self.now;
         let state = self.states.get_mut(&id).expect("state link resolves");
         let was_active = std::mem::replace(&mut state.active, active);
+        let armed_model = self.config.check_zone == CheckZoneMode::Armed;
         if !active {
-            state.zone_armed = false;
+            if !armed_model {
+                state.zone_armed = false;
+            }
             match self.config.deactivate_running_timer {
                 DeactivateRunningTimer::RunsOn => {}
                 DeactivateRunningTimer::Cancels => state.running.clear(),
@@ -473,9 +495,16 @@ impl Walker<'_> {
             for left in std::mem::take(&mut state.paused) {
                 self.start_timer(id, now + left.max(1));
             }
+            // Armed: switching an armed zone on is a check (flight 2K, K5A
+            // and K5D), even if it fired before it was switched off.
+            if armed_model && self.nodes[&id].block_type == "MCU_CheckZone" {
+                self.states.get_mut(&id).unwrap().zone_held = false;
+                self.check_zone(id);
+            }
         }
-        // Activation neither replays a dropped pulse nor pulses a check zone.
-        // A Complex Trigger evaluates at its next sample, without a pulse.
+        // Activation never replays a dropped pulse. Under Once and Repeat it
+        // does not check a zone either. A Complex Trigger evaluates at its
+        // next sample, without a pulse.
     }
 
     /// Run timer `id` until `due`, under a fresh serial.
@@ -599,7 +628,15 @@ impl Walker<'_> {
             "MCU_CheckZone" => {
                 // Re-pulsing a waiting zone replaces its watch. Once consumes
                 // the watch when it fires; Repeat keeps it until deactivation.
-                self.states.get_mut(&id).unwrap().zone_armed = true;
+                // Armed ignores a pulse into an armed zone (flight 2K, K5A).
+                let state = self.states.get_mut(&id).unwrap();
+                if self.config.check_zone == CheckZoneMode::Armed {
+                    if state.zone_armed {
+                        return;
+                    }
+                    state.zone_held = false;
+                }
+                state.zone_armed = true;
                 self.check_zone(id);
             }
             "MCU_Counter" => self.count(id),
@@ -685,7 +722,19 @@ impl Walker<'_> {
                         (px - x).powi(2) + (pz - z).powi(2) <= radius.powi(2)
                     })
             });
-        if inside == (value(node, "Closer", 1) != 0) {
+        let holds = inside == (value(node, "Closer", 1) != 0);
+        if self.config.check_zone == CheckZoneMode::Armed {
+            // Fire when the condition becomes true; stay armed.
+            let state = self.states.get_mut(&id).unwrap();
+            let becomes_true = holds && !state.zone_held;
+            state.zone_held = holds;
+            if becomes_true {
+                state.last_zone_fire = Some(self.now);
+                self.fire(id);
+            }
+            return;
+        }
+        if holds {
             let state = self.states.get_mut(&id).unwrap();
             state.zone_armed = self.config.check_zone == CheckZoneMode::Repeat;
             state.last_zone_fire = Some(self.now);
@@ -1416,6 +1465,48 @@ mod walker_tests {
         assert_eq!(times(&repeat, 1), vec![60, 80]);
         assert_eq!(times(&repeat, 2), vec![100, 120]);
         println!("CheckZone: IN at 3 s; OUT at 5 s after the last watched track leaves");
+    }
+
+    /// Flight 2K's K5 cells on a 1 s scale. The plane is outside until 5 s,
+    /// then stays inside.
+    #[test]
+    fn walker_armed_zones_follow_flight_2k() {
+        let mut nodes = Vec::new();
+        for (id, name) in [(1, "K5A"), (2, "K5B"), (3, "K5C"), (4, "K5D"), (5, "K5E")] {
+            nodes.push(zone(id, name, true));
+            nodes.push(node("MCU_Deactivate", 10 * id, &format!("{name} OFF"), &[id]));
+            nodes.push(node("MCU_Activate", 10 * id + 1, &format!("{name} ON"), &[id]));
+        }
+        let root = tree(nodes);
+        let s = |seconds: u64| seconds * TICKS_PER_SECOND;
+        let mut points = vec![(200.0, 0.0); 5];
+        points.push((0.0, 0.0));
+        let input = WalkerInput {
+            until: s(12),
+            tracks: vec![track(2, &points)],
+            pulses: [
+                (1, 1), (2, 10), (7, 11), (9, 1), // K5A
+                (1, 2),                           // K5B
+                (8, 3),                           // K5C
+                (6, 4), (7, 40), (9, 41),         // K5D
+                (2, 50), (7, 51),                 // K5E
+            ]
+            .map(|(t, id)| (s(t), id.into()))
+            .to_vec(),
+            ..WalkerInput::default()
+        };
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            let config = WalkerConfig {
+                same_tick_delivery,
+                ..WalkerConfig::default()
+            }
+            .flown();
+            let log = walk(&root, config, &input);
+            for (id, fired) in [(1, vec![7]), (2, vec![5]), (3, vec![8]), (4, vec![6, 9]), (5, vec![])] {
+                let fired: Vec<_> = fired.into_iter().map(s).collect();
+                assert_eq!(times(&log, id), fired, "zone {id}, {config:?}");
+            }
+        }
     }
 
     #[test]

@@ -1140,18 +1140,29 @@ mod tests {
                 ticks(60.0)
             ));
         }
-        // With the flown timer facts, neither timer fires after DONE HUB.
+        // With the flown timer facts, neither timer fires after DONE HUB. The
+        // check-zone model stays Once: this variant re-pulses an armed zone,
+        // which the game ignores (flight 2K, K5A), so with the flown Armed
+        // model it ends the copy 10 s after the first poll. It is unused
+        // (step 12); plan section 3.9, risk b, records the redesign it needs.
         let mut script = input(&f, 60.0, Some(10.0));
         script.tracks[0].samples = (0..=30)
             .map(|s| (ticks(f64::from(s)), TARGET.0 + if s >= 30 { 40000.0 } else { 0.0 }, TARGET.1))
             .collect();
-        let config = WalkerConfig::default().flown();
+        let config = WalkerConfig {
+            check_zone: CheckZoneMode::Once,
+            ..WalkerConfig::default().flown()
+        };
         let log = walk(&runtime, config, &script);
         assert_eq!(times(&log, f.ids.done_hub), [ticks(35.0)]);
         for name in ["WATCHDOG", "WATCHDOG POLL"] {
             let late: Vec<_> = times(&log, shell_id(&f, name)).into_iter().filter(|&t| t > ticks(35.0)).collect();
             assert!(late.is_empty(), "{name} fired after DONE HUB at {late:?}");
         }
+        // The finding itself: under the flown check-zone model the copy ends
+        // about 10 s after its first watch, with the plane still inside.
+        let log = walk(&runtime, WalkerConfig::default().flown(), &script);
+        assert!(times(&log, f.ids.done_hub)[0] < ticks(25.0));
     }
 
     #[test]

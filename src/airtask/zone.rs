@@ -200,6 +200,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     const PASS: f64 = 61.1; // Entry at 1 s, default dwell 60 s, INNER PULSE 0.1 s.
+    // Later passes come exactly HOLD apart: CHECK ON switches the armed INNER
+    // on, and that is a check (flight 2K, K5A).
+    const HOLD: f64 = 120.0;
     const COOLDOWN: f64 = 900.0;
 
     fn zone_plan(n: usize, mode: TriggerMode) -> AirPlan {
@@ -768,13 +771,12 @@ mod tests {
             let log = run(&h, config, 0, 1050.0, &[(2.0, entry_id(&h, 1, "GO"))]);
             let passes = times(&log, id(&h, "THN01 INNER"));
             assert_eq!(passes[0], ticks(PASS));
-            // HOLD's 120 s includes a further 0.1 s INNER PULSE before PASS.
             assert!(
                 passes
                     .windows(2)
-                    .all(|pair| pair[1] - pair[0] == ticks(120.1))
+                    .all(|pair| pair[1] - pair[0] == ticks(HOLD))
             );
-            let next_pass = PASS + 8.0 * 120.1;
+            let next_pass = PASS + 8.0 * HOLD;
             assert_zone_times(&h, &log, 2, "CHANCE", &[PASS + 0.1, next_pass + 0.1]);
             assert_zone_times(&h, &log, 2, "FIRE", &[PASS + 0.15, next_pass + 0.15]);
             assert_zone_times(&h, &log, 2, "DENY WAIT", &[PASS + 1.15]);
@@ -822,7 +824,7 @@ mod tests {
                 &h,
                 &log,
                 "THN01 INNER",
-                &(0..=7).map(|i| PASS + i as f64 * 120.1).collect::<Vec<_>>(),
+                &(0..=7).map(|i| PASS + i as f64 * HOLD).collect::<Vec<_>>(),
             );
             assert_times(&h, &log, &go_name, &[PASS + 0.05]);
             assert_eq!(times(&log, copy.shell.start), [ticks(PASS + 0.05)]);
@@ -1008,7 +1010,8 @@ mod tests {
         for config in configs() {
             let log = run(&h, config, 0, 5000.0, &[]);
             let launches: Vec<_> = (0..3)
-                .map(|i| PASS + i as f64 * 8.0 * 120.1 + 0.15)
+                // ARM (launch + 60 s + C) is 0.15 s after the eighth pass.
+                .map(|i| PASS + i as f64 * 9.0 * HOLD + 0.15)
                 .collect();
             let chances: Vec<_> = launches.iter().map(|t| t - 0.05).collect();
             assert_zone_times(&h, &log, 1, "CHANCE", &chances);
@@ -1031,7 +1034,7 @@ mod tests {
         let h = harness(&zone_plan(1, TriggerMode::Zone), 60.0);
         // SplitMix64 seed 14 rolls 38 then 94: a success, then a miss at 50%.
         for config in configs() {
-            let second_pass = PASS + 8.0 * 120.1;
+            let second_pass = PASS + 9.0 * HOLD; // The eighth is 0.15 s before ARM.
             let log = run(&h, config, 14, second_pass + 1.0 + COOLDOWN, &[]);
             assert_zone_times(&h, &log, 1, "CHANCE", &[PASS + 0.1]);
             assert_zone_times(&h, &log, 1, "FIRE", &[PASS + 0.15]);
@@ -1082,7 +1085,7 @@ mod tests {
         let h = harness(&certain_plan(1, TriggerMode::Zone), 60.0);
         for config in configs() {
             let log = run(&h, config, 0, 1000.0, &[]);
-            let passes: Vec<_> = (0..8).map(|i| PASS + i as f64 * 120.1).collect();
+            let passes: Vec<_> = (0..8).map(|i| PASS + i as f64 * HOLD).collect();
             assert_times(&h, &log, "THN01 INNER", &passes);
             assert_zone_times(&h, &log, 1, "CHANCE", &[PASS + 0.1]);
             assert_zone_times(&h, &log, 1, "FIRE", &[PASS + 0.15]);
@@ -1098,7 +1101,7 @@ mod tests {
         for config in configs() {
             // SplitMix64 seed 1 first rolls 65: a miss at the default 50%.
             let log = run(&h, config, 1, 1000.0, &[]);
-            let passes: Vec<_> = (0..8).map(|i| PASS + i as f64 * 120.1).collect();
+            let passes: Vec<_> = (0..8).map(|i| PASS + i as f64 * HOLD).collect();
             assert_times(&h, &log, "THN01 INNER", &passes);
             for role in ["CHANCE", "FIRE", "DENY WAIT", "WAITING"] {
                 assert_zone_times(&h, &log, 1, role, &[]);
