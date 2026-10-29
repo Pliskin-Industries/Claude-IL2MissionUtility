@@ -144,7 +144,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::airtask::assemble::emit_side_logic;
     use crate::airtask::library::{by_id, nodes, number};
-    use crate::airtask::shell::test_support::{active, configs, mcus, named, ticks, times};
+    use crate::airtask::shell::test_support::{
+        active, flown_configs, mcus, named, ticks, times,
+    };
     use crate::airtask::testkit::*;
 
     pub(crate) struct Harness {
@@ -407,7 +409,7 @@ pub(crate) mod tests {
             number(by_id(&h.root, budget_id(&h, "END")), "Time").unwrap(),
             0.2
         );
-        for config in configs() {
+        for config in flown_configs() {
             let log = run(
                 &h,
                 config,
@@ -427,7 +429,7 @@ pub(crate) mod tests {
     #[test]
     fn budget_grants_2_refuses_3rd_then_grants_after_deletion() {
         let h = harness(AirSide::Nato, 2, 3, Strategies::default());
-        for config in configs() {
+        for config in flown_configs() {
             let log = run(
                 &h,
                 config,
@@ -451,7 +453,7 @@ pub(crate) mod tests {
 
     fn two_deletions(gap: f64) {
         let h = harness(AirSide::Nato, 2, 4, Strategies::default());
-        for config in configs() {
+        for config in flown_configs() {
             let log = run(
                 &h,
                 config,
@@ -485,7 +487,7 @@ pub(crate) mod tests {
     #[test]
     fn budget_deletion_during_recount_runs_a_second_recount() {
         let h = harness(AirSide::Nato, 2, 3, Strategies::default());
-        for config in configs() {
+        for config in flown_configs() {
             let log = run(
                 &h,
                 config,
@@ -503,7 +505,7 @@ pub(crate) mod tests {
     #[test]
     fn budget_request_during_recount_is_dropped() {
         let h = harness(AirSide::Nato, 2, 3, Strategies::default());
-        for config in configs() {
+        for config in flown_configs() {
             let log = run(
                 &h,
                 config,
@@ -557,7 +559,7 @@ pub(crate) mod tests {
                     pulses.push((centiseconds.div_ceil(5) + 20, id.into()));
                 }
                 let until = centiseconds.div_ceil(5) + ticks(67.0);
-                for mut config in configs() {
+                for mut config in flown_configs() {
                     for delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
                         config.same_tick_delivery = delivery;
                         let log = walk(
@@ -607,7 +609,7 @@ pub(crate) mod tests {
     #[test]
     fn budget_requests_in_one_tick_overshoot_then_heal() {
         let h = harness(AirSide::Nato, 1, 3, Strategies::default());
-        for mut config in configs() {
+        for mut config in flown_configs() {
             for delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
                 config.same_tick_delivery = delivery;
                 let log = run(
@@ -677,7 +679,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         f.root.children.extend(init);
-        for mut config in configs() {
+        for mut config in flown_configs() {
             config.same_tick_delivery = SameTickDelivery::Batched;
             let log = walk(&f.root, config, &input);
             assert_eq!(times(&log, f.ids.start), [ticks(2.0), ticks(2.0)]);
@@ -714,7 +716,7 @@ pub(crate) mod tests {
                     ..Strategies::default()
                 },
             );
-            for config in configs() {
+            for config in flown_configs() {
                 let log = run(
                     &h,
                     config,

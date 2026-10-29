@@ -110,8 +110,10 @@ pub(crate) fn build_side(
     for (entry, stagger) in entries.iter().zip(staggers) {
         let mut ids = BTreeMap::new();
         for (role, kind, time) in [
+            ("PASS IN", "MCU_Timer", 0.0),
             ("CHANCE", "MCU_Timer", CHANCE_BASE_S + stagger),
             ("MISS WAIT", "MCU_Timer", MISS_WAIT_BASE_S + stagger),
+            ("MISS WAIT OUT", "MCU_Timer", 0.0),
             ("DISARM", "MCU_Deactivate", 0.0),
             ("FIRE ARM", "MCU_Activate", 0.0),
             ("FIRE", "MCU_Timer", FIRE_DELAY_S),
@@ -133,14 +135,23 @@ pub(crate) fn build_side(
             ids.insert(role, node.index.unwrap());
             root.children.push(node);
         }
-        // Start the refusal timer before requesting; START cancels it (J1).
+        // Start the refusal timer before requesting; START's GRANTED switches
+        // it off, which pauses it. The next FIRE ARM resumes it, and FIRE
+        // restarts it 0.05 s later, long before the paused second runs out.
         // Last-first pointers cannot consume the next run activated by START.
         let mut fire = vec![ids["DENY WAIT"]];
         fire.extend(entry.copies.iter().rev().map(|copy| copy.pointer));
+        // Switching a running timer off only pauses it (flight 2K), so CHANCE
+        // and MISS WAIT are never switched. PASS IN drops passes while the zone
+        // is disarmed; MISS WAIT runs out into MISS WAIT OUT, which is off
+        // after a won roll (the D11 relay, decision 0044).
+        let gates = vec![ids["PASS IN"], ids["MISS WAIT OUT"]];
         for (from, to) in [
+            ("PASS IN", vec![ids["CHANCE"], ids["MISS WAIT"]]),
             ("CHANCE", vec![ids["FIRE ARM"], ids["DISARM"], ids["FIRE"]]),
-            ("MISS WAIT", vec![ids["COOLDOWN"], ids["DISARM"]]),
-            ("DISARM", vec![ids["CHANCE"], ids["MISS WAIT"]]),
+            ("MISS WAIT", vec![ids["MISS WAIT OUT"]]),
+            ("MISS WAIT OUT", vec![ids["COOLDOWN"], ids["DISARM"]]),
+            ("DISARM", gates.clone()),
             ("FIRE ARM", vec![ids["WAITING"], ids["DENY WAIT"]]),
             ("FIRE", fire),
             ("DENY WAIT", vec![ids["WAITING"]]),
@@ -148,7 +159,7 @@ pub(crate) fn build_side(
             ("WAITING", vec![ids["WAITING OFF"], ids["COOLDOWN"]]),
             ("WAITING OFF", vec![ids["WAITING"]]),
             ("COOLDOWN", vec![ids["ARM"]]),
-            ("ARM", vec![ids["CHANCE"], ids["MISS WAIT"]]),
+            ("ARM", gates),
         ] {
             by_id_mut(&mut root, ids[from]).unwrap().set_targets(to);
         }
@@ -156,7 +167,7 @@ pub(crate) fn build_side(
             .pass_subscribers
             .entry(entry.area)
             .or_default()
-            .extend([ids["CHANCE"], ids["MISS WAIT"]]);
+            .push(ids["PASS IN"]);
         registry.init_off.push(ids["WAITING"]);
         for copy in &entry.copies {
             registry.links.extend([
@@ -164,9 +175,9 @@ pub(crate) fn build_side(
                 (copy.shell.done_hub, ids["WAITING"]),
             ]);
         }
-        registry
-            .links
-            .extend(["CHANCE", "MISS WAIT", "COOLDOWN"].map(|role| (entry.exhausted, ids[role])));
+        registry.links.extend(
+            ["PASS IN", "MISS WAIT OUT", "COOLDOWN"].map(|role| (entry.exhausted, ids[role])),
+        );
     }
     *logic = registry;
     *next_id = alloc;
@@ -273,8 +284,10 @@ mod tests {
         assert_eq!(root.name(), Some("Zone"));
         let zid = |role: &str| named(&root, &format!("ZN01 {role}")).index.unwrap();
         for (role, time, random) in [
+            ("PASS IN", 0.0, 100.0),
             ("CHANCE", 0.1, 50.0),
             ("MISS WAIT", 1.0, 100.0),
+            ("MISS WAIT OUT", 0.0, 100.0),
             ("FIRE", 0.05, 100.0),
             ("DENY WAIT", 1.0, 100.0),
             ("WAITING", 0.0, 100.0),
@@ -293,22 +306,25 @@ mod tests {
                 .rev()
                 .map(|copy| copy.pointer),
         );
+        let gates = vec![zid("PASS IN"), zid("MISS WAIT OUT")];
         for (role, kind, targets) in [
+            (
+                "PASS IN",
+                "MCU_Timer",
+                vec![zid("CHANCE"), zid("MISS WAIT")],
+            ),
             (
                 "CHANCE",
                 "MCU_Timer",
                 vec![zid("FIRE ARM"), zid("DISARM"), zid("FIRE")],
             ),
+            ("MISS WAIT", "MCU_Timer", vec![zid("MISS WAIT OUT")]),
             (
-                "MISS WAIT",
+                "MISS WAIT OUT",
                 "MCU_Timer",
                 vec![zid("COOLDOWN"), zid("DISARM")],
             ),
-            (
-                "DISARM",
-                "MCU_Deactivate",
-                vec![zid("CHANCE"), zid("MISS WAIT")],
-            ),
+            ("DISARM", "MCU_Deactivate", gates.clone()),
             (
                 "FIRE ARM",
                 "MCU_Activate",
@@ -324,7 +340,7 @@ mod tests {
             ),
             ("WAITING OFF", "MCU_Deactivate", vec![zid("WAITING")]),
             ("COOLDOWN", "MCU_Timer", vec![zid("ARM")]),
-            ("ARM", "MCU_Activate", vec![zid("CHANCE"), zid("MISS WAIT")]),
+            ("ARM", "MCU_Activate", gates),
         ] {
             let node = by_id(&root, zid(role));
             assert_eq!(node.block_type, kind, "{role}");
@@ -332,14 +348,12 @@ mod tests {
             assert!(node.objects.is_empty());
             assert_eq!(node.pos_xz(), Some((0.0, 0.0)));
         }
-        assert_eq!(
-            logic.pass_subscribers[&1],
-            [zid("CHANCE"), zid("MISS WAIT")]
-        );
+        assert_eq!(logic.pass_subscribers[&1], [zid("PASS IN")]);
         assert_eq!(&logic.init_off[before.init_off.len()..], [zid("WAITING")]);
         assert_eq!(logic.mission_begin, before.mission_begin);
-        assert!(!logic.init_off.contains(&zid("CHANCE")));
-        assert!(!logic.init_off.contains(&zid("MISS WAIT")));
+        for role in ["PASS IN", "CHANCE", "MISS WAIT", "MISS WAIT OUT"] {
+            assert!(!logic.init_off.contains(&zid(role)), "{role}");
+        }
         let cells = threshold::build_side(
             AirSide::Nato,
             &copies.areas,
@@ -353,11 +367,11 @@ mod tests {
             .iter()
             .find(|node| node.name() == Some("THN01 INNER"))
             .unwrap();
-        assert_eq!(&pass.targets[4..], [zid("CHANCE"), zid("MISS WAIT")]);
+        assert_eq!(&pass.targets[4..], [zid("PASS IN")]);
     }
 
     #[test]
-    fn zone_has_11_mcus_per_entry() {
+    fn zone_has_13_mcus_per_entry() {
         for side in [AirSide::Nato, AirSide::Dprk] {
             for n in 1..=4 {
                 let mut plan = zone_plan(n, TriggerMode::Both);
@@ -380,9 +394,9 @@ mod tests {
                     let output = build_side(side, &plan, &copies, &mut logic, &mut next).unwrap();
                     assert_eq!(output.len(), 1);
                     let root = &output[0];
-                    assert_eq!(mcus(root), 11 * n); // No additional per-side MCU.
-                    assert_eq!(root.children.len(), 11 * n);
-                    assert_eq!(next - start, 1 + 11 * n as i32); // One group ID.
+                    assert_eq!(mcus(root), 13 * n); // No additional per-side MCU.
+                    assert_eq!(root.children.len(), 13 * n);
+                    assert_eq!(next - start, 1 + 13 * n as i32); // One group ID.
                     for entry in &copies.entries {
                         let prefix = format!("Z{}{:02} ", side.letter(), entry.number);
                         assert_eq!(
@@ -390,7 +404,7 @@ mod tests {
                                 .iter()
                                 .filter(|node| node.name().unwrap().starts_with(&prefix))
                                 .count(),
-                            11
+                            13
                         );
                     }
                     assert!(root.children.iter().all(|node| matches!(
@@ -484,10 +498,10 @@ mod tests {
     }
 
     #[test]
-    fn zone_last_copy_deactivates_chance_miss_wait_and_cooldown() {
+    fn zone_last_copy_deactivates_its_gates_and_cooldown() {
         let h = harness(&zone_plan(2, TriggerMode::Both), 60.0);
         for entry in &h.copies.entries {
-            for role in ["CHANCE", "MISS WAIT", "COOLDOWN"] {
+            for role in ["PASS IN", "MISS WAIT OUT", "COOLDOWN"] {
                 let target = zone_id(&h, entry.number, role);
                 assert!(h.logic.links.contains(&(entry.exhausted, target)));
                 assert!(by_id(&h.root, entry.exhausted).targets.contains(&target));
@@ -512,15 +526,10 @@ mod tests {
         plan.pool[2].mode = TriggerMode::Both;
         let h = harness(&plan, 60.0);
         assert!(h.root.find_by_name("ZN01 CHANCE").is_none());
-        assert_eq!(mcus(named(&h.root, "Zone")), 22);
+        assert_eq!(mcus(named(&h.root, "Zone")), 26);
         assert_eq!(
             h.logic.pass_subscribers[&1],
-            [
-                zone_id(&h, 2, "CHANCE"),
-                zone_id(&h, 2, "MISS WAIT"),
-                zone_id(&h, 3, "CHANCE"),
-                zone_id(&h, 3, "MISS WAIT")
-            ]
+            [zone_id(&h, 2, "PASS IN"), zone_id(&h, 3, "PASS IN")]
         );
     }
 
@@ -735,8 +744,8 @@ mod tests {
             assert_eq!(
                 named(&h.root, &format!("ZN{:02} ARM", entry.number)).targets,
                 [
-                    zone_id(&h, entry.number, "CHANCE"),
-                    zone_id(&h, entry.number, "MISS WAIT")
+                    zone_id(&h, entry.number, "PASS IN"),
+                    zone_id(&h, entry.number, "MISS WAIT OUT")
                 ]
             );
             assert_eq!(
@@ -927,7 +936,7 @@ mod tests {
                 assert_times(&h, &log, "SN01 START", &[clock_start]);
                 assert_times(&h, &log, "EN01 EXHAUSTED", &[clock_start]);
                 assert_eq!(starts(&log, &h).len(), 1);
-                for role in ["CHANCE", "MISS WAIT", "COOLDOWN"] {
+                for role in ["PASS IN", "MISS WAIT OUT", "COOLDOWN"] {
                     assert!(!active(&log, zone_id(&h, 1, role), ticks(1200.0)));
                 }
             }
@@ -981,7 +990,7 @@ mod tests {
             assert_zone_times(&h, &log, 1, "FIRE", &[PASS + 0.15]);
             assert_zone_times(&h, &log, 1, "GRANTED", &[PASS + 0.15]);
             assert_zone_times(&h, &log, 1, "DENY WAIT", &[]);
-            assert_zone_times(&h, &log, 1, "MISS WAIT", &[]);
+            assert_zone_times(&h, &log, 1, "MISS WAIT OUT", &[]);
             assert_times(&h, &log, "SN01 START", &[PASS + 0.15]);
             assert_times(&h, &log, "SN01 DONE HUB", &[PASS + 60.15]);
             assert_zone_times(&h, &log, 1, "WAITING", &[PASS + 60.15]);
@@ -1027,7 +1036,7 @@ mod tests {
             assert_zone_times(&h, &log, 1, "CHANCE", &[PASS + 0.1]);
             assert_zone_times(&h, &log, 1, "FIRE", &[PASS + 0.15]);
             assert_zone_times(&h, &log, 1, "DENY WAIT", &[]);
-            assert_zone_times(&h, &log, 1, "MISS WAIT", &[second_pass + 1.0]);
+            assert_zone_times(&h, &log, 1, "MISS WAIT OUT", &[second_pass + 1.0]);
             assert_zone_times(
                 &h,
                 &log,
@@ -1078,7 +1087,7 @@ mod tests {
             assert_zone_times(&h, &log, 1, "CHANCE", &[PASS + 0.1]);
             assert_zone_times(&h, &log, 1, "FIRE", &[PASS + 0.15]);
             assert_zone_times(&h, &log, 1, "DENY WAIT", &[]);
-            assert_zone_times(&h, &log, 1, "MISS WAIT", &[]);
+            assert_zone_times(&h, &log, 1, "MISS WAIT OUT", &[]);
             assert_zone_times(&h, &log, 1, "COOLDOWN", &[]);
             assert_zone_times(&h, &log, 1, "ARM", &[]);
             assert_times(&h, &log, "SN01 START", &[PASS + 0.15]);
@@ -1094,10 +1103,57 @@ mod tests {
             for role in ["CHANCE", "FIRE", "DENY WAIT", "WAITING"] {
                 assert_zone_times(&h, &log, 1, role, &[]);
             }
-            assert_zone_times(&h, &log, 1, "MISS WAIT", &[PASS + 1.0]);
+            assert_zone_times(&h, &log, 1, "MISS WAIT OUT", &[PASS + 1.0]);
             assert_zone_times(&h, &log, 1, "DISARM", &[PASS + 1.0]);
             assert_zone_times(&h, &log, 1, "COOLDOWN", &[PASS + 1.0 + COOLDOWN]);
             assert_zone_times(&h, &log, 1, "ARM", &[PASS + 1.0 + COOLDOWN]);
+            assert!(starts(&log, &h).is_empty());
+        }
+    }
+
+    #[test]
+    fn zone_rolls_again_at_the_first_pass_after_one_cooldown() {
+        // Flight A2's fault: a won roll left MISS WAIT running, and switching it
+        // off only paused it (flight 2K). ARM resumed it, and it shut the zone
+        // for a second cooldown 0.9 s later.
+        let mut plan = certain_plan(1, TriggerMode::Zone);
+        plan.pool[0].runs = 2;
+        plan.zone.cooldown_min = 14.0;
+        let h = harness(&plan, 60.0);
+        for config in configs() {
+            let log = run(&h, config, 0, 1200.0, &[]);
+            let rearm = PASS + 60.15 + 840.0;
+            assert_zone_times(&h, &log, 1, "ARM", &[rearm]);
+            let passes = times(&log, id(&h, "THN01 INNER"));
+            let next = *passes.iter().find(|&&t| t > ticks(rearm)).unwrap();
+            let chances = [ticks(PASS + 0.1), next + ticks(0.1)];
+            assert_eq!(times(&log, zone_id(&h, 1, "CHANCE")), chances, "{config:?}");
+            let launches = [ticks(PASS + 0.15), next + ticks(0.15)];
+            for (copy, &t) in h.copies.entries[0].copies.iter().zip(&launches) {
+                assert_eq!(times(&log, copy.shell.start), [t], "{config:?}");
+            }
+            assert_eq!(times(&log, zone_id(&h, 1, "COOLDOWN")), [ticks(rearm)]);
+        }
+    }
+
+    #[test]
+    fn zone_pass_in_the_last_second_of_a_cooldown_is_dropped() {
+        // The threshold passes every HOLD while a plane stays. A pass shortly
+        // before ARM must not run a miss timer that ARM then lets through:
+        // that would be a miss nobody rolled, and a second cooldown.
+        let mut plan = zone_plan(1, TriggerMode::Zone);
+        plan.zone.cooldown_min = 2.0;
+        let h = harness(&plan, 60.0);
+        for config in configs() {
+            // SplitMix64 seed 1 first rolls 65: a miss at the default 50%.
+            let log = run(&h, config, 1, PASS + 200.0, &[]);
+            let passes = times(&log, id(&h, "THN01 INNER"));
+            assert_eq!(passes.len(), 2);
+            assert!((ticks(PASS + 120.0)..ticks(PASS + 121.0)).contains(&passes[1]));
+            assert_zone_times(&h, &log, 1, "CHANCE", &[]);
+            assert_zone_times(&h, &log, 1, "DISARM", &[PASS + 1.0]);
+            assert_zone_times(&h, &log, 1, "COOLDOWN", &[PASS + 121.0]);
+            assert_zone_times(&h, &log, 1, "ARM", &[PASS + 121.0]);
             assert!(starts(&log, &h).is_empty());
         }
     }
@@ -1114,12 +1170,12 @@ mod tests {
                 fired += 1;
                 assert_zone_times(&h, &log, 1, "CHANCE", &[PASS + 0.1]);
                 assert_zone_times(&h, &log, 1, "FIRE", &[PASS + 0.15]);
-                assert_zone_times(&h, &log, 1, "MISS WAIT", &[]);
+                assert_zone_times(&h, &log, 1, "MISS WAIT OUT", &[]);
                 assert_times(&h, &log, "SN01 START", &[PASS + 0.15]);
             } else {
                 assert_zone_times(&h, &log, 1, "CHANCE", &[]);
                 assert_zone_times(&h, &log, 1, "FIRE", &[]);
-                assert_zone_times(&h, &log, 1, "MISS WAIT", &[PASS + 1.0]);
+                assert_zone_times(&h, &log, 1, "MISS WAIT OUT", &[PASS + 1.0]);
                 assert!(starts(&log, &h).is_empty());
             }
             for role in ["DENY WAIT", "COOLDOWN", "ARM"] {

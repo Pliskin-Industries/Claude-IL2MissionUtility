@@ -79,5 +79,6 @@ What this makes easier, harder or necessary.
 | [0041](0041-trace-build-traces-the-whole-file.md) | A trace build from the UI traces decision points across the whole file, plus the P14 names on Map and Air Tasking | Accepted |
 | [0042](0042-dprk-air-start-country.md) | The app's DPRK air start is country 502, but Air Tasking watches DPRK players on 501 | Proposed |
 | [0043](0043-switch-breadcrumbs-from-inputs.md) | A switch's breadcrumb is pulsed by the switch's own inputs | Accepted |
+| [0044](0044-paused-timers-d11-relays.md) | A switched-off timer is paused: the zone and the clock end their timers through D11 relays (supersedes parts of 0029 and 0030) | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

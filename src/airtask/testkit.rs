@@ -25,6 +25,20 @@ pub(crate) enum DeactivateRunningTimer {
     #[default]
     RunsOn,
     Cancels,
+    /// Flown (flight 2K): switch-off pauses a running timer and switch-on
+    /// resumes it with the time it had left. Builder tests use this.
+    Pauses,
+}
+
+/// What a failed random roll does to a timer that is already running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FailedRoll {
+    #[default]
+    LeavesRunning,
+    /// Flown (flight 2K, K4): none of 20 re-rolled timers fired on its
+    /// first run. Either the failed roll stops the timer, or the roll is
+    /// made when it ends; both look the same here.
+    Stops,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -66,13 +80,26 @@ pub(crate) enum CheckZoneMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct WalkerConfig {
     pub timer_retrigger: TimerRetrigger,                  // risk p
-    pub deactivate_running_timer: DeactivateRunningTimer, // risk j (J1)
+    pub deactivate_running_timer: DeactivateRunningTimer, // risk j (J1, 2K)
+    pub failed_roll: FailedRoll,                          // flight 2K (K4)
     pub dropcount_meaning: DropcountMeaning,              // risk e
     pub set_val_refires: SetValRefires,                   // risk e (E6)
     pub same_tick_counts: SameTickCounts,                 // risk r
     pub same_tick_delivery: SameTickDelivery,             // risk q
     pub reverse_targets: bool,                            // risk q
     pub check_zone: CheckZoneMode,                        // risks b, c, o
+}
+
+impl WalkerConfig {
+    /// The timer facts flown in flight 2K: switch-off pauses a running timer,
+    /// and a failed roll does not leave one running.
+    pub(crate) fn flown(self) -> Self {
+        Self {
+            deactivate_running_timer: DeactivateRunningTimer::Pauses,
+            failed_roll: FailedRoll::Stops,
+            ..self
+        }
+    }
 }
 
 /// Names must be unique among indexed nodes. Use Index for repeated pack names.
@@ -144,7 +171,10 @@ pub(crate) struct WalkerLog {
 #[derive(Default)]
 struct NodeState {
     active: bool,
-    running: BTreeSet<u64>,
+    /// Serial of each running timer and the tick it is due.
+    running: BTreeMap<u64, Tick>,
+    /// Ticks left on each timer paused by a switch-off (Pauses).
+    paused: Vec<Tick>,
     count: u32,
     fired: bool,
     last_count: Option<Tick>,
@@ -422,16 +452,44 @@ impl Walker<'_> {
         if active && !self.states[&id].active && self.is_trigger(id) {
             self.snapshot_trigger_inside(id);
         }
+        let now = self.now;
         let state = self.states.get_mut(&id).expect("state link resolves");
-        state.active = active;
+        let was_active = std::mem::replace(&mut state.active, active);
         if !active {
             state.zone_armed = false;
-            if self.config.deactivate_running_timer == DeactivateRunningTimer::Cancels {
-                state.running.clear();
+            match self.config.deactivate_running_timer {
+                DeactivateRunningTimer::RunsOn => {}
+                DeactivateRunningTimer::Cancels => state.running.clear(),
+                DeactivateRunningTimer::Pauses => {
+                    let left = std::mem::take(&mut state.running)
+                        .into_values()
+                        .map(|due| due - now);
+                    state.paused.extend(left);
+                }
+            }
+        } else if !was_active {
+            // A remainder of zero (switched off on its due tick, before it
+            // fired) resumes one tick later: the queue for this tick is fixed.
+            for left in std::mem::take(&mut state.paused) {
+                self.start_timer(id, now + left.max(1));
             }
         }
         // Activation neither replays a dropped pulse nor pulses a check zone.
         // A Complex Trigger evaluates at its next sample, without a pulse.
+    }
+
+    /// Run timer `id` until `due`, under a fresh serial.
+    fn start_timer(&mut self, id: i32, due: Tick) {
+        self.serial += 1;
+        self.states
+            .get_mut(&id)
+            .expect("state link resolves")
+            .running
+            .insert(self.serial, due);
+        self.scheduled
+            .entry(due)
+            .or_default()
+            .push_back(WalkEvent::TimerExpired(id, self.serial));
     }
 
     fn roll(&mut self, percent: u32) -> bool {
@@ -453,7 +511,14 @@ impl Walker<'_> {
             WalkEvent::Pulse(id) => self.pulse(id),
             WalkEvent::MissionBegin(id) => self.fire(id), // Enabled is irrelevant.
             WalkEvent::TimerExpired(id, token) => {
-                if self.states.get_mut(&id).unwrap().running.remove(&token) {
+                if self
+                    .states
+                    .get_mut(&id)
+                    .unwrap()
+                    .running
+                    .remove(&token)
+                    .is_some()
+                {
                     self.fire(id); // RunsOn deliberately ignores current active.
                 }
             }
@@ -493,8 +558,11 @@ impl Walker<'_> {
         match node.block_type.as_str() {
             "MCU_Timer" => {
                 // Every active trigger draws, even if Ignore subsequently drops
-                // a successful roll. A failed roll leaves a running timer alone.
+                // a successful roll.
                 if !self.roll(value(node, "Random", 100)) {
+                    if self.config.failed_roll == FailedRoll::Stops {
+                        self.states.get_mut(&id).unwrap().running.clear();
+                    }
                     return;
                 }
                 let delay = timer_ticks(node);
@@ -510,13 +578,8 @@ impl Walker<'_> {
                         TimerRetrigger::Twice => {}
                     }
                 }
-                self.serial += 1;
-                state.running.insert(self.serial);
                 let due = self.now.checked_add(delay).expect("timer tick overflow");
-                self.scheduled
-                    .entry(due)
-                    .or_default()
-                    .push_back(WalkEvent::TimerExpired(id, self.serial));
+                self.start_timer(id, due);
             }
             "MCU_Activate" | "MCU_Deactivate" => {
                 self.record(id);
@@ -1491,6 +1554,70 @@ mod walker_tests {
             times(&walk(&root, WalkerConfig::default(), &input), 2),
             vec![1]
         );
+    }
+
+    /// Flight 2K's K1A, K1C, K2A and K3A, each with a 10 s timer pulsed at 60 s.
+    #[test]
+    fn walker_pauses_a_switched_off_timer_and_resumes_its_time_left() {
+        let root = tree(vec![
+            timer(1, "Delay", "10", &[2]),
+            timer(2, "Hit", "0", &[]),
+            node("MCU_Deactivate", 3, "Off", &[1]),
+            node("MCU_Activate", 4, "On", &[1]),
+        ]);
+        let s = |seconds: u64| seconds * TICKS_PER_SECOND;
+        let cells = [
+            ("K1A", vec![(60, 1), (64, 3), (80, 4)], 86),
+            ("K1C", vec![(60, 1), (63, 3), (71, 4), (73, 3), (90, 4)], 95),
+            ("K2A", vec![(60, 1), (64, 3), (80, 4), (82, 1)], 92),
+            ("K3A", vec![(60, 1), (64, 3), (67, 1), (80, 4)], 86),
+        ];
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            let config = WalkerConfig {
+                deactivate_running_timer: DeactivateRunningTimer::Pauses,
+                same_tick_delivery,
+                ..WalkerConfig::default()
+            };
+            for (cell, script, fired) in &cells {
+                let input = WalkerInput {
+                    until: s(120),
+                    pulses: script.iter().map(|&(t, id)| (s(t), id.into())).collect(),
+                    ..WalkerInput::default()
+                };
+                assert_eq!(
+                    times(&walk(&root, config, &input), 2),
+                    vec![s(*fired)],
+                    "{cell} {config:?}"
+                );
+            }
+        }
+    }
+
+    /// Flight 2K's K4: a 10 s timer at Random 50 %, pulsed at 60 s and 65 s.
+    #[test]
+    fn walker_failed_roll_stops_a_running_timer_when_flown() {
+        let mut roll = timer(1, "Roll", "10", &[2]);
+        roll.set_property("Random", "50");
+        let root = tree(vec![roll, timer(2, "Hit", "0", &[])]);
+        let s = |seconds: u64| seconds * TICKS_PER_SECOND;
+        let fired_at = |config: WalkerConfig| -> Vec<Vec<Tick>> {
+            (0..40)
+                .map(|seed| {
+                    let input = WalkerInput {
+                        seed,
+                        until: s(90),
+                        pulses: vec![(s(60), 1.into()), (s(65), 1.into())],
+                        ..WalkerInput::default()
+                    };
+                    times(&walk(&root, config, &input), 2)
+                })
+                .collect()
+        };
+        let flown = fired_at(WalkerConfig::default().flown());
+        assert!(flown.iter().all(|run| !run.contains(&s(70))));
+        assert!(flown.iter().any(|run| run == &[s(75)]));
+        let unflown = fired_at(WalkerConfig::default());
+        assert!(unflown.iter().any(|run| run == &[s(70)]));
     }
 
     #[test]

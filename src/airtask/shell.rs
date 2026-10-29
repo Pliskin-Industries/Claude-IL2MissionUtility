@@ -422,7 +422,9 @@ pub fn wrap_sortie(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    pub(crate) use super::tests::{active, configs, fixture, mcus, named, ticks, times};
+    pub(crate) use super::tests::{
+        active, configs, fixture, flown_configs, mcus, named, ticks, times,
+    };
 }
 
 #[cfg(test)]
@@ -1138,15 +1140,12 @@ mod tests {
                 ticks(60.0)
             ));
         }
-        // With the flown J1 (Cancels), neither timer fires after DONE HUB.
+        // With the flown timer facts, neither timer fires after DONE HUB.
         let mut script = input(&f, 60.0, Some(10.0));
         script.tracks[0].samples = (0..=30)
             .map(|s| (ticks(f64::from(s)), TARGET.0 + if s >= 30 { 40000.0 } else { 0.0 }, TARGET.1))
             .collect();
-        let config = WalkerConfig {
-            deactivate_running_timer: DeactivateRunningTimer::Cancels,
-            ..WalkerConfig::default()
-        };
+        let config = WalkerConfig::default().flown();
         let log = walk(&runtime, config, &script);
         assert_eq!(times(&log, f.ids.done_hub), [ticks(35.0)]);
         for name in ["WATCHDOG", "WATCHDOG POLL"] {
@@ -1308,15 +1307,9 @@ mod tests {
         }
     }
 
-    /// Flight 0 J1: deactivating a running timer cancels it.
-    fn flown_configs() -> Vec<WalkerConfig> {
-        configs()
-            .into_iter()
-            .map(|config| WalkerConfig {
-                deactivate_running_timer: DeactivateRunningTimer::Cancels,
-                ..config
-            })
-            .collect()
+    /// The flown timer facts (flight 2K): see `WalkerConfig::flown`.
+    pub(crate) fn flown_configs() -> Vec<WalkerConfig> {
+        configs().into_iter().map(WalkerConfig::flown).collect()
     }
 
     /// Flight A1 (2026-10-28), run 2. The enemy is inside at arrival,

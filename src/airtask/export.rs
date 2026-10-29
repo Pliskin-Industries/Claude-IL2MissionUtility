@@ -303,10 +303,12 @@ pub(super) fn trace_role_indexes(root: &Il2Entity) -> Vec<i32> {
                     | Some(("ED" | "EN", "GO"))
                     | Some((
                         "ZD" | "ZN",
-                        "CHANCE" | "MISS WAIT" | "FIRE" | "DENY WAIT" | "COOLDOWN" | "ARM"
+                        "CHANCE" | "MISS WAIT OUT" | "FIRE" | "DENY WAIT" | "COOLDOWN" | "ARM"
                     ))
-                    // INNER is PASS. PASS OFF cancels CLOSE DELAY on success;
-                    // CLOSE still fires then, so only CLOSE DELAY means COLD.
+                    // MISS WAIT runs out after every pass that PASS IN lets
+                    // through; only MISS WAIT OUT means a miss (0044). INNER is PASS. PASS OFF switches
+                    // CLOSE DELAY off on success, so CLOSE's pulse is dropped
+                    // and only CLOSE DELAY means COLD.
                     | Some(("THD" | "THN", "INNER" | "CLOSE DELAY"))
                     | Some((
                         "SD" | "SN",
@@ -1410,7 +1412,7 @@ mod tests {
                 AirTotals {
                     copies: [3, 3],
                     aircraft: [24, 12],
-                    mcus: [240, 199],
+                    mcus: [242, 199],
                     check_zones: [7, 7],
                 },
             ),
@@ -1420,7 +1422,7 @@ mod tests {
                 AirTotals {
                     copies: [6, 12],
                     aircraft: [36, 48],
-                    mcus: [418, 674],
+                    mcus: [422, 678],
                     check_zones: [14, 26],
                 },
             ),
@@ -1801,7 +1803,7 @@ mod tests {
             for entry in zone_entries {
                 for role in [
                     "CHANCE",
-                    "MISS WAIT",
+                    "MISS WAIT OUT",
                     "FIRE",
                     "DENY WAIT",
                     "COOLDOWN",

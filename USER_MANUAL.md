@@ -622,3 +622,16 @@ Without a trace file, the report has only Never spawned and Timeline (an orange 
 After Run replay, the Map's legend shows a **Replay** layer: a dot where each object spawned, a cross where each one was killed, in DPRK or NATO colour (grey when the log gives no country). Untick it to hide it. A new pick in the Replay window clears the layer.
 
 The same report can be written from the command line: `IL2MissionUtility.exe replay --group <file.Group> [--trace <file.trace.json>] --logs <folder> [--out <report.md>]`.
+
+### IL-2 timer and check-zone terms
+
+These words describe how the game treats MCUs. They help when you read a trace log or edit generated logic by hand. They were measured in the game (probe flight 2K, 2026-10-29).
+
+- **Switch off / switch on**: what a Deactivate / an Activate MCU does to its targets.
+- **Paused**: a running timer that is switched off. It does not fire, and it keeps the time it had left.
+- **Resumes**: a paused timer that is switched on fires after the time it had left, not its full time. A pulse into it then restarts it with its full time. A pulse while it is off is dropped.
+- **Switching a running timer off does not stop it**, and no MCU does. To **cancel** one, let it run out into a zero-second relay timer, and switch that relay off. The relay drops the pulse. Air Tasking does this, for example `ZNii MISS WAIT` runs out into `ZNii MISS WAIT OUT`.
+- **A failed random roll** on a running timer does not leave it running. This is the one thing that stops a running timer, and you cannot choose when it happens.
+- **Armed** (check zones): a pulsed check zone keeps watching until its condition holds, then fires. Switching an armed zone on is a check: it fires at once if the condition holds. A check zone that was never pulsed does nothing, even when switched on.
+
+If a timer in your own logic fires at an odd time some while after an Activate, it was probably paused and has resumed.
