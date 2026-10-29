@@ -1870,7 +1870,25 @@ mod tests {
             let source = by_id(air, entry.source_index);
             assert_eq!(source.name(), Some(entry.source_name.as_str()));
             assert_eq!(source.block_type, entry.source_type);
-            assert!(source.targets.contains(&entry.breadcrumb_index));
+            if trace::is_switch(&source.block_type) {
+                // A switch's Targets are switched, not pulsed: its inputs pulse
+                // the breadcrumb (flight A2: `ZNii ARM` never logged).
+                assert!(!source.targets.contains(&entry.breadcrumb_index), "{:?}", source.name());
+                let mut fed = false;
+                root.for_each(&mut |node| {
+                    let hooks: Vec<_> = node
+                        .children
+                        .iter()
+                        .flat_map(|wrapper| &wrapper.children)
+                        .filter_map(|hook| hook.property("TarId"))
+                        .collect();
+                    let pulses = |id: i32| node.targets.contains(&id) || hooks.contains(&id.to_string().as_str());
+                    fed |= pulses(entry.source_index) && pulses(entry.breadcrumb_index);
+                });
+                assert!(fed, "{:?}: no input pulses its breadcrumb", source.name());
+            } else {
+                assert!(source.targets.contains(&entry.breadcrumb_index));
+            }
             assert_eq!(entry.carrier, trace::TraceCarrier::default());
             assert_eq!(entry.event_type, None);
             let breadcrumb = by_id(root, entry.breadcrumb_index);

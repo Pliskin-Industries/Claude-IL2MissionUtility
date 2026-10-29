@@ -78,5 +78,6 @@ What this makes easier, harder or necessary.
 | [0040](0040-parked-player-keeps-drawing-sorties.md) | A player parked inside an Air Tasking area keeps drawing sorties | Accepted |
 | [0041](0041-trace-build-traces-the-whole-file.md) | A trace build from the UI traces decision points across the whole file, plus the P14 names on Map and Air Tasking | Accepted |
 | [0042](0042-dprk-air-start-country.md) | The app's DPRK air start is country 502, but Air Tasking watches DPRK players on 501 | Proposed |
+| [0043](0043-switch-breadcrumbs-from-inputs.md) | A switch's breadcrumb is pulsed by the switch's own inputs | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

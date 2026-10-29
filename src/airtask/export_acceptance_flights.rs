@@ -249,9 +249,10 @@ fn frozen_acceptance_files_parse_and_links_resolve() {
     assert_eq!(std::fs::read_to_string(spawns).unwrap(), a1_spawns_json());
 }
 
-/// Flight A2: built by the Map tab after decision 0038. Its writer and its
-/// byte check are UI tests (`ui_tests::write_p14_acceptance_a2`,
-/// `a2_map_build_matches_the_frozen_files_and_the_run_sheet`).
+/// Flight A2: built by the Map tab after decision 0038 and flown on
+/// 2026-10-29, so frozen as flown. Its writer and its build-facts check are UI
+/// tests (`ui_tests::write_p14_acceptance_a2`,
+/// `a2_map_build_watches_three_nato_areas_for_dprk_players`).
 #[test]
 fn frozen_a2_files_parse_and_links_resolve() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/acceptance-a2");

@@ -16,7 +16,7 @@
   - `src/ui_tests.rs`:
     - `build_a2` builds the base map on the Map tab and generates it through `generate_front_file`, the Generate button's own call. Place NATO is clicked. The objectives, the pool entries and the settings are set on the app directly, as the other Map tests do, with the values a user would enter.
     - The ignored writer `write_p14_acceptance_a2`.
-    - The check `a2_map_build_matches_the_frozen_files_and_the_run_sheet`: a byte check against the frozen files, plus the facts below.
+    - The check `a2_map_build_watches_three_nato_areas_for_dprk_players`: the build facts below. Until A2 was flown it was also a byte check against the frozen files; since the switch-breadcrumb fix (branch `claude/p14-paused-timers`) A2 is frozen as flown, checked by parse and links.
   - `src/airtask/export_acceptance_flights.rs`: `frozen_a2_files_parse_and_links_resolve` (parse and links, as for A0 and A1).
   - No product code changed.
 - **What `build_a2` does in the app:**

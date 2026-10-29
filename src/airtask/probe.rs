@@ -3171,6 +3171,10 @@ impl Probe {
             for source in sources {
                 let node = source.index;
                 let event_type = source.event_type;
+                // A switch's Targets are switched, so a breadcrumb linked there
+                // would never log: switches go through observe_command.
+                assert!(!trace::is_switch(&source.block_type),
+                    "{}: observe a switch with observe_command", source.name);
                 let blocks = trace::breadcrumb(carrier, &mut self.map, &mut self.next_id, source);
                 let breadcrumb = self.map.entries.last()
                     .expect("trace::breadcrumb must register a trace map entry")

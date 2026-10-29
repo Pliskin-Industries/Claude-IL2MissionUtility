@@ -148,13 +148,25 @@ pub fn instrument(
             .max(root.max_index() + 1)
             .max(breadcrumbs.iter().max().copied().unwrap_or(0) + 1);
     }
+    // Breadcrumbs never pulse a switch, so the inputs can be read once.
+    let mut pulsed = HashSet::new();
+    root.for_each(&mut |e| pulsed.extend(pulse_targets(e, None)));
     for source in sources {
         let source_id = source.index;
         let event_type = source.event_type;
+        // A switch's Targets are switched, not pulsed: a breadcrumb there would
+        // never fire. Its inputs pulse the breadcrumb in the same tick instead
+        // (decision 0043).
+        let switch = is_switch(&source.block_type);
+        if switch && !pulsed.contains(&source_id) {
+            continue; // Nothing pulses it, so it can never fire.
+        }
         let blocks = breadcrumb(carrier, map, next_id, source);
         let id = map.entries.last().unwrap().breadcrumb_index;
         root.for_each_mut(&mut |e| {
-            if e.index == Some(source_id) {
+            if switch {
+                pulse_alongside(e, source_id, id);
+            } else if e.index == Some(source_id) {
                 if let Some(event_type) = event_type {
                     append_event(e, event_type, id);
                 } else {
@@ -222,6 +234,46 @@ fn collect_sources(
     }
     if group {
         path.pop();
+    }
+}
+
+/// An Activate or Deactivate: its Targets and Objects are switched on or off,
+/// never pulsed.
+pub(crate) fn is_switch(block_type: &str) -> bool {
+    matches!(block_type, "MCU_Activate" | "MCU_Deactivate")
+}
+
+/// MCUs whose outputs are `OnEvents` / `OnReports` hooks, not Targets.
+fn fires_hooks(node: &Il2Entity) -> bool {
+    matches!(
+        node.block_type.as_str(),
+        "MCU_TR_Entity" | "MCU_TR_ComplexTrigger"
+    )
+}
+
+fn is_hook_wrapper(node: &Il2Entity) -> bool {
+    matches!(node.block_type.as_str(), "OnEvents" | "OnReports")
+}
+
+/// Wherever `node` pulses `switch`, also pulse `crumb`: a Target beside it,
+/// or a copy of the event or report hook that names it.
+fn pulse_alongside(node: &mut Il2Entity, switch: i32, crumb: i32) {
+    if fires_hooks(node) {
+        for wrapper in node.children.iter_mut().filter(|e| is_hook_wrapper(e)) {
+            let copies: Vec<_> = wrapper
+                .children
+                .iter()
+                .filter(|h| integer(h, "TarId") == Some(switch))
+                .map(|h| {
+                    let mut copy = h.clone();
+                    copy.set_property("TarId", crumb.to_string());
+                    copy
+                })
+                .collect();
+            wrapper.children.extend(copies);
+        }
+    } else if pulse_targets(node, None).contains(&switch) {
+        node.append_target(crumb);
     }
 }
 
@@ -404,13 +456,14 @@ fn number(node: &Il2Entity, key: &str) -> Option<f64> {
 fn event_hooks(node: &Il2Entity) -> impl Iterator<Item = &Il2Entity> {
     node.children
         .iter()
-        .filter(|e| matches!(e.block_type.as_str(), "OnEvents" | "OnReports"))
+        .filter(|e| is_hook_wrapper(e))
         .flat_map(|e| &e.children)
         .filter(|e| matches!(e.block_type.as_str(), "OnEvent" | "OnReport"))
 }
 
 fn pulse_targets(node: &Il2Entity, event_type: Option<i32>) -> Vec<i32> {
-    if node.block_type == "MCU_TR_Entity" {
+    // A Complex Trigger's outputs are its OnEvents, like an entity's.
+    if fires_hooks(node) {
         event_hooks(node)
             // An event breadcrumb observes OnEvent, never a same-numbered report.
             .filter(|h| {
@@ -978,6 +1031,82 @@ mod tests {
             group_path: vec!["Test".into()],
             expected_s: None,
         }
+    }
+
+    /// A switch (MCU_Activate / MCU_Deactivate) treats its Targets as things to
+    /// switch, so a breadcrumb there is switched, never fired (flight A2: the
+    /// zones' `ARM` never logged). Its inputs pulse the breadcrumb instead.
+    #[test]
+    fn switch_sources_are_traced_from_their_inputs() {
+        for kind in ["MCU_Activate", "MCU_Deactivate"] {
+            let mut root = parse_group_file(&format!(
+                "Group {{ \
+                   MCU_Timer {{ Index = 1; Targets = [2]; Time = 3; Random = 100; }} \
+                   {kind} {{ Index = 2; Targets = [3]; }} \
+                   MCU_Timer {{ Index = 3; Time = 0; Random = 100; }} \
+                   MCU_TR_Entity {{ Index = 4; Targets = []; \
+                     OnEvents {{ OnEvent {{ Type = 13; TarId = 2; }} }} \
+                     OnReports {{ OnReport {{ Type = 2; TarId = 2; }} }} }} \
+                   {kind} {{ Index = 5; Targets = [2]; }} \
+                   MCU_TR_ComplexTrigger {{ Index = 6; Targets = []; OnEvents {{ OnEvent {{ Type = 58; TarId = 8; }} }} }} \
+                   {kind} {{ Index = 8; Targets = [3]; }} \
+                 }}"
+            ))
+            .unwrap();
+            let map = selected(&mut root, &[1, 2, 8]);
+            let crumb = map
+                .entries
+                .iter()
+                .find(|e| e.source_index == 2)
+                .expect("the switch is traced")
+                .breadcrumb_index;
+            assert_eq!(node(&root, 2).targets, [3], "{kind}: its own Targets are untouched");
+            assert!(node(&root, 1).targets.contains(&crumb), "{kind}: the timer that pulses it");
+            let hooks: Vec<_> = event_hooks(node(&root, 4))
+                .map(|h| (integer(h, "Type"), integer(h, "TarId")))
+                .collect();
+            assert_eq!(
+                hooks,
+                [
+                    (Some(13), Some(2)),
+                    (Some(13), Some(crumb)),
+                    (Some(2), Some(2)),
+                    (Some(2), Some(crumb))
+                ],
+                "{kind}: the entity's event and report"
+            );
+            assert_eq!(node(&root, 5).targets, [2], "{kind}: a switch aimed at it is not an input");
+            // A switch fed only by a Complex Trigger's OnEvents is traced too.
+            let trigger_crumb = map
+                .entries
+                .iter()
+                .find(|e| e.source_index == 8)
+                .expect("the trigger-fed switch is traced")
+                .breadcrumb_index;
+            let trigger_hooks: Vec<_> = event_hooks(node(&root, 6))
+                .map(|h| (integer(h, "Type"), integer(h, "TarId")))
+                .collect();
+            assert_eq!(
+                trigger_hooks,
+                [(Some(58), Some(8)), (Some(58), Some(trigger_crumb))],
+                "{kind}: the trigger's event"
+            );
+            // The breadcrumb logs in the tick the timer fires the switch.
+            assert_eq!(edge(&map, 1, 2).delay_s, 0.0, "{kind}");
+        }
+    }
+
+    /// A switch that nothing pulses can never fire, so it gets no breadcrumb.
+    #[test]
+    fn a_switch_with_no_input_is_not_traced() {
+        let mut root = parse_group_file(
+            "Group { MCU_Activate { Index = 1; Targets = [2]; } MCU_Timer { Index = 2; Time = 0; Random = 100; } }",
+        )
+        .unwrap();
+        let before = serialize_group(&root);
+        let map = selected(&mut root, &[1]);
+        assert!(map.entries.is_empty());
+        assert_eq!(serialize_group(&root), before);
     }
 
     fn selected(root: &mut Il2Entity, indexes: &[i32]) -> TraceMap {

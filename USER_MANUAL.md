@@ -598,6 +598,7 @@ Use these to find out what a mission's logic did in a flown session.
   - every timer with Random below 100;
   - on the Map and Air Tasking tabs, also the Air Tasking sortie steps (START, GO, DONE HUB and the others).
 - Each breadcrumb writes one line to the server's text log when its MCU fires.
+- A switch (an Activate or Deactivate MCU, such as Air Tasking's `ARM`) cannot carry a breadcrumb itself, so the MCUs that pulse it also pulse its breadcrumb. Its line means "the switch was pulsed". The switch may still have been off itself.
 - Generate also writes `<file>.trace.json` next to the `.Group`, and the status bar says "Trace build: N breadcrumbs."
 - The box is off at every start. With it off, Generate writes exactly what it wrote before.
 

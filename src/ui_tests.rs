@@ -4710,8 +4710,8 @@ fn a2_spawns_json() -> String {
 /// Map tests do: the three NATO objectives, one Zone entry per area, and the
 /// settings above. Then Trace build on and Generate Base Map through
 /// `generate_front_file`, the Generate button's own call. Returns the written
-/// `.Group` and every (block, Country) outside Air Tasking (`map_countries`).
-fn build_a2(h: &mut Harness) -> (PathBuf, crate::ast::Il2Entity, Vec<(String, String)>) {
+/// root and every (block, Country) outside Air Tasking (`map_countries`).
+fn build_a2(h: &mut Harness) -> (crate::ast::Il2Entity, Vec<(String, String)>) {
     use crate::airtask::{self, AirSide, PoolEntry, TargetRef, TriggerMode};
     h.tab("Map");
     h.wait_for_map();
@@ -4747,9 +4747,7 @@ fn build_a2(h: &mut Harness) -> (PathBuf, crate::ast::Il2Entity, Vec<(String, St
         "the Air Tasking check fails"
     );
     assert!(!h.find("Generate Base Map").disabled);
-    let file = format!("{A2_STEM}.Group");
-    let (root, countries) = generate_map(h, &file);
-    (h.out(&file), root, countries)
+    generate_map(h, &format!("{A2_STEM}.Group"))
 }
 
 #[test]
@@ -4775,21 +4773,16 @@ fn write_p14_acceptance_a2() {
     println!("{}", h.status());
 }
 
-/// The A2 build, as the run sheet describes it, and still byte-identical to
-/// the frozen files copied into the game (`handoff/p14-probes/acceptance-a2/`).
+/// The A2 build, as the run sheet describes it. A2 was flown on 2026-10-29, so
+/// its frozen files stay as flown and are checked by parse and links only
+/// (`frozen_a2_files_parse_and_links_resolve`); the trace build has changed
+/// since (switch breadcrumbs), so this checks the current build's
+/// facts, not its bytes.
 #[test]
-fn a2_map_build_matches_the_frozen_files_and_the_run_sheet() {
+fn a2_map_build_watches_three_nato_areas_for_dprk_players() {
     let mut h = Harness::new("p14_acceptance_a2");
-    let (out, root, countries) = build_a2(&mut h);
+    let (root, countries) = build_a2(&mut h);
     let frozen = repo("handoff/p14-probes/acceptance-a2");
-    for ext in ["Group", "eng", "trace.json"] {
-        let built = std::fs::read(out.with_extension(ext)).unwrap();
-        let kept = std::fs::read(frozen.join(format!("{A2_STEM}.{ext}"))).unwrap();
-        assert!(
-            built == kept,
-            "{ext}: the build no longer matches the frozen A2 file"
-        );
-    }
     let spawns = std::fs::read_to_string(frozen.join(format!("{A2_STEM}.spawns.json"))).unwrap();
     assert_eq!(spawns, a2_spawns_json());
 
