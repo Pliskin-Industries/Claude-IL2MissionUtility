@@ -20,6 +20,15 @@ pub(crate) fn ai_country(side: AirSide) -> i32 {
     }
 }
 
+/// The AI country that replaces a player country: 601 to 602, 501 to 503.
+pub(crate) fn ai_country_for_player(country: i32) -> Option<i32> {
+    match country {
+        NATO_PLAYER_COUNTRY => Some(NATO_AI_COUNTRY),
+        DPRK_PLAYER_COUNTRY => Some(DPRK_AI_COUNTRY),
+        _ => None,
+    }
+}
+
 /// Object Entered, confirmed in flights 1N and 1D. See docs/il2-loader-and-log-facts.md.
 pub(crate) const OBJECT_ENTERED: i32 = 58;
 /// Object Left, confirmed in flights 1N and 1D. See docs/il2-loader-and-log-facts.md.

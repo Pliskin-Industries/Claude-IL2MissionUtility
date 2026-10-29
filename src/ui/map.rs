@@ -7700,6 +7700,7 @@ impl super::GroupGeneratorApp {
         } else {
             Vec::new()
         };
+        let with_air = !air_packs.is_empty();
         let air_sidecars = if air_packs.is_empty() {
             Vec::new()
         } else {
@@ -7740,6 +7741,10 @@ impl super::GroupGeneratorApp {
         };
         self.stamp_air_starts(&mut pack.root);
         let strike_notes = self.stamp_missions(&mut pack.root);
+        // Decision 0037 A: the Map's own AI must not start Air Tasking cycles.
+        if with_air {
+            crate::airtask::move_map_ai_off_player_countries(&mut pack.root);
+        }
         let terrain_note = self.apply_terrain(&mut pack.root);
         let trace = self.trace_generated(&mut pack.root);
         let text = serialize_group(&pack.root);

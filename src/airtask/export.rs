@@ -261,6 +261,28 @@ fn build_side(
     Ok(SideTrees { logic, sorties })
 }
 
+/// Decision 0037 A: move the Map's own AI aircraft off the player countries
+/// (601 to 602, 501 to 503), so they cannot start an Air Tasking cycle.
+/// Player spawns keep their country: a plane with `CoopStart` on, and
+/// everything under an `Airfield`. Only `Plane` blocks change.
+pub(super) fn move_map_ai_off_player_countries(node: &mut Il2Entity) {
+    if node.block_type == "Airfield" {
+        return;
+    }
+    if node.block_type == "Plane" && node.property("CoopStart").is_none_or(|c| c == "0") {
+        let ai_country = node
+            .property("Country")
+            .and_then(|c| c.parse().ok())
+            .and_then(threshold::ai_country_for_player);
+        if let Some(ai_country) = ai_country {
+            node.set_property("Country", ai_country.to_string());
+        }
+    }
+    for child in &mut node.children {
+        move_map_ai_off_player_countries(child);
+    }
+}
+
 /// The indexes of the Air Tasking nodes a trace build follows by name (the
 /// sortie cycle's decision points: slot opens, GO, the zone and threshold
 /// steps, and each sortie's START to DELETE DELAY). Sorted, no repeats.
@@ -1923,5 +1945,58 @@ mod tests {
             .unwrap();
         }
         writeln!(report, "TRACE {} Air Tasking sources", map.entries.len()).unwrap();
+    }
+
+    // Decision 0037 A: the Map's own AI aircraft leave the player countries.
+
+    fn map_plane(country: &str) -> Il2Entity {
+        let mut plane = Il2Entity::new("Plane");
+        plane.set_property("Country", country);
+        plane.set_property("CoopStart", "0");
+        plane
+    }
+
+    fn map_group(children: Vec<Il2Entity>) -> Il2Entity {
+        let mut group = Il2Entity::new("Group");
+        group.children = children;
+        group
+    }
+
+    fn countries(root: &Il2Entity) -> Vec<String> {
+        let mut out = Vec::new();
+        root.for_each(&mut |node| {
+            if let Some(c) = node.property("Country") {
+                out.push(format!("{} {c}", node.block_type));
+            }
+        });
+        out
+    }
+
+    #[test]
+    fn map_ai_planes_move_off_the_player_countries() {
+        let mut root = map_group(vec![map_group(vec![map_plane("601"), map_plane("501")])]);
+        move_map_ai_off_player_countries(&mut root);
+        assert_eq!(countries(&root), ["Plane 602", "Plane 503"]);
+    }
+
+    #[test]
+    fn player_spawns_ground_units_and_other_countries_keep_their_country() {
+        let mut coop = map_plane("601");
+        coop.set_property("CoopStart", "1");
+        let mut airfield = Il2Entity::new("Airfield");
+        airfield.set_property("Country", "501");
+        let mut planes = Il2Entity::new("Planes");
+        planes.children.push(map_plane("501"));
+        airfield.children.push(planes);
+        let mut units = Vec::new();
+        for (block, country) in [("Vehicle", "601"), ("Ship", "501"), ("Train", "601"), ("Block", "501")] {
+            let mut unit = Il2Entity::new(block);
+            unit.set_property("Country", country);
+            units.push(unit);
+        }
+        let mut root = map_group(vec![coop, airfield, map_group(units), map_plane("101"), map_plane("602")]);
+        let before = countries(&root);
+        move_map_ai_off_player_countries(&mut root);
+        assert_eq!(countries(&root), before);
     }
 }

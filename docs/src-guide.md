@@ -187,7 +187,9 @@ then the app's AI country (602 / 503) on every copied plane. Output is one
 pack rooted at `Air Tasking` (decision 0035). D30 within r_in (0033), totals
 limits (0032), D41 locale conflicts. Tests pin `export_test_plan()` and
 `acceptance_test_plan()`; the ignored `write_p14_acceptance_mission` writes
-the step 11 trace build (0034). **Air Tasking generation, Map export.**
+the step 11 trace build (0034). `move_map_ai_off_player_countries` moves
+the Map's own AI planes from 601 / 501 to 602 / 503 when Map Generate adds
+Air Tasking (decision 0037 A). **Air Tasking generation, Map export.**
 
 ### `airfield.rs` — SP airfield → multiplayer
 `inspect_airfield` / `AirfieldInfo` (player planes, checkzones to
