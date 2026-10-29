@@ -61,7 +61,7 @@ What this makes easier, harder or necessary.
 | [0023](0023-step-4-threshold-one-complex-trigger-per-area.md) | Step 4 threshold: one Complex Trigger per area, re-activated as the presence check | Accepted |
 | [0024](0024-threshold-presence-check-is-a-pulsed-check-zone.md) | The threshold's presence check is a pulsed check zone (ZonePulse), after flight 2J | Accepted |
 | [0025](0025-remove-trigger-reactivate.md) | Remove the TriggerReactivate presence check from the code | Accepted |
-| [0026](0026-air-tasking-and-upstream-strikes-and-caps.md) | Air Tasking schedules and budgets upstream's strikes and CAPs instead of placing its own | Proposed |
+| [0026](0026-air-tasking-and-upstream-strikes-and-caps.md) | Air Tasking schedules and budgets upstream's strikes and CAPs instead of placing its own | Accepted (A) |
 | [0027](0027-air-tasking-rail-tab-design.md) | The Air Tasking rail tab (step 8): layout, adding entries, behaviour before step 7 | Accepted |
 | [0028](0028-upstream-air-groups-feed-the-pool.md) | Upstream's air-group builders feed the pool, as their own step after the upstream merge | Accepted |
 | [0029](0029-step-5-clock-lean-design.md) | Step 5 clock: a leaner build of plan §3.7 on flown facts | Accepted |
