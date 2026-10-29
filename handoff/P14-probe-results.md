@@ -1019,6 +1019,33 @@ Run 1 (`real_48`) crashed 2 min after the spawn, before any area: the first LShi
 - Presence checks held for 25 minutes at 160.00 s intervals once the orbit was centred; a drifting orbit costs a COLD and a full re-entry (re-armed with the player inside: not reported).
 - Not shown: a second refusal (SN01 had ended early), a player who lands inside an area, a Yak copy.
 
+## Flight 2K (what a switched-off running timer does; check zones switched off and on) — 2026-10-29, one run, no pilot, Tacview recorded
+
+A probe flown before fixing flight A2's extra zone cooldown (the user: "probe it first until the root cause is accurately identified"). Run sheet and cell design: `handoff/sessions/2026-10-29-p14-flight-2k.md`. Frozen: `handoff/p14-probes/flight2k/`. Logs: `real_49`. One AI pair was the only load.
+
+| Cell | Flown | Reading |
+|---|---|---|
+| K1A | fired **85.98** | paused at 64 with 6 s left, resumed at 80 |
+| K1B | fired **108.98** | paused at 61 with 9 s left, resumed at 100 |
+| K1C | fired **94.96** | paused twice; each switch-on resumed the time left (7 s, then 5 s) |
+| K2A | fired **92.00** | a pulse restarts a resumed timer (full 10 s from 82) |
+| K3A | fired **85.98** | the pulse at 67, while off, was dropped; the time left was unchanged |
+| K4 | **none at 70**; 8 of 20 at **75.00** (01, 02, 03, 07, 10, 17, 18, 20) | a failed roll on a running timer does not leave it running; a passing roll restarts it |
+| K5B | fired **151.98** | the pair's entry (flight 2J: 151.98 on this route) |
+| K5C | fired **330.00** only | a zone never pulsed does not fire at an entry; its first pulse with the pair inside fires it at once |
+| K5A | fired **300.00** (switch-on); nothing at 330 | a pulsed zone's watch survives being switched off; switching on with the pair inside fires it; a later pulse while the pair is still inside does not fire it again |
+| K5E | **never** fired | switching on a zone that was never pulsed does nothing, so K5A's 300 is the resumed watch |
+| K5D | fired **250.00**, then **300.00** | a zone that already fired fires again when switched off and on with the plane inside, with no new pulse |
+| K6 | all 18 switch breadcrumbs at their own times (61, 63, 64×3, 71, 73, 80×3, 90×3, 100, 260, 300×3) | decision 0043 works in the game |
+
+Times are to 0.02 s (one tick); the resumed timers fired one tick early (85.98, not 86.00), as A2's MISS WAIT did (0.88, not 0.90).
+
+### What this changes (reading)
+
+- **A switched-off running timer is paused and resumes when switched on.** It accounts exactly for A2's `MISS WAIT` firing 0.88 s after `ARM`. Every design that switches a running timer off and later on must expect it to finish its time: the zone front end's `MISS WAIT` (seen in A2) and the clock's `ATTEMPT END` (`WIN` then `REROLL ON`) are affected; `DENY WAIT` (restarted by `FIRE`) and `ENii RANDOM` (re-triggered by `DRAW`, K4) are not.
+- **A check zone, once pulsed, stays armed, and switching it on is a check.** The threshold's presence check works because of this, not because of its 0.1 s pulse.
+- **Decision 0043's switch breadcrumbs log.**
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.

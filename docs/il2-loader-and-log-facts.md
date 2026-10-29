@@ -29,7 +29,7 @@ Facts about the game that are not obvious from this repo's code. Each one cost a
 - **AI aircraft trigger check zones.** The coalition filter still works. See `docs/decisions/0008-ai-aircraft-trigger-check-zones.md`.
 - An empty "Closer 0" zone does not fire on Activate plus a pulse.
 - A pulse into an inactive relay is dropped, not replayed when the relay is activated.
-- Deactivating a running timer stops it. **It is paused, not cancelled: activating it again resumes the countdown** (flight A2, 2026-10-29, below). Re-triggering a running timer restarts it.
+- Deactivating a running timer stops it. **It is paused, not cancelled: activating it again resumes the countdown with the time it had left** (flights A2 and 2K, 2026-10-29, below). Re-triggering a running timer restarts it, a resumed one too.
 - Inputs to an inactive counter are not counted; the count survives Deactivate and Activate.
 
 - **An aircraft that dies raises OnEvent 13, then 0, then 2; it does not raise 4.** Seen for a gun kill and for a Damage command (flight 1G, 2026-10-12). 13 and 0 come within 0.1 s of the kill, 2 some seconds later when the wreck hits the ground, and not always.
@@ -169,3 +169,18 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **Helper turns:** with the level-flight helper on, holding LAlt+X or LAlt+Z gives about 3°/s at 450 km/h indicated (radius about 2.7 km), height held to ±2 m. It held a 16 km area's 8 km presence check for 25 minutes once centred. On the minimap, the target circle of AI attack aircraft marks their target.
 - **Tacview's `.acmi` is locked exclusively while recording.** It cannot be read, even with shared read access, until the mission ends. For a live position, use the minimap grid: squares are 10 km, labelled row (north to south) then column (west to east); the column 23/24 line is at z ≈ 258 km and the row 28/29 line at x ≈ 190 km.
 - **One spawn per session, again:** after the crash, Leave Server then Accept (Enter held 1 s, twice) went to the results screen. The server reloaded the mission into a new session, where the spawn worked.
+
+## Found on 2026-10-29 (flight 2K, game 1.005)
+
+- **A switched-off running timer is paused; switching it on resumes it with the time it had left.** A 10 s timer switched off 4 s in and on 16 s later fired 6 s after the switch-on (85.98 for 86). Two off/on cycles add up (94.96 for 95). Resumed timers fired one tick (0.02 s) early.
+- **A pulse restarts a resumed timer** (full time from the pulse), and **a pulse while the timer is off is dropped**, leaving its time left unchanged.
+- **A failed random roll on a running timer does not leave it running.** 20 timers at Random 50 %, pulsed at 60 and again at 65 while running: none fired at 70; 8 fired at 75. Either the failed roll stops the timer, or the roll is made when the timer ends.
+- **Check zones:**
+  - a pulse arms a zone, and it stays armed;
+  - an armed zone fires when its condition becomes true;
+  - switching an armed zone on is a check: it fires if the condition holds, also if it already fired before it was switched off;
+  - a zone never pulsed does not fire, on an entry or on a switch-on;
+  - a first pulse with the condition already true fires at once;
+  - a further pulse into an armed zone whose condition still holds does nothing.
+- **Decision 0043's switch breadcrumbs log in the game** (all 18 at their times).
+
