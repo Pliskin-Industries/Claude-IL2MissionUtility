@@ -3914,6 +3914,200 @@ fn map_generate_with_air_includes_air_tasking_group() {
     assert_eq!(air, 1, "one Air Tasking group in the base map");
 }
 
+/// A reference group near the NATO objective: a truck on 601, an AI plane on
+/// 501 and a co-op player plane on 601.
+const REF_UNITS_0037: &str = r#"Group
+{
+  Name = "Ref units";
+  Index = 1;
+  Desc = "";
+  Vehicle
+  {
+    Index = 2;
+    Name = "Ref truck";
+    LinkTrId = 0;
+    XPos = 211000.000;
+    YPos = 0.000;
+    ZPos = 201000.000;
+    XOri = 0.00;
+    YOri = 0.00;
+    ZOri = 0.00;
+    Country = 601;
+  }
+  Plane
+  {
+    Index = 3;
+    Name = "Ref AI";
+    LinkTrId = 0;
+    XPos = 212000.000;
+    YPos = 1000.000;
+    ZPos = 202000.000;
+    XOri = 0.00;
+    YOri = 0.00;
+    ZOri = 0.00;
+    Country = 501;
+    CoopStart = 0;
+  }
+  Plane
+  {
+    Index = 4;
+    Name = "Ref coop";
+    LinkTrId = 0;
+    XPos = 213000.000;
+    YPos = 1000.000;
+    ZPos = 203000.000;
+    XOri = 0.00;
+    YOri = 0.00;
+    ZOri = 0.00;
+    Country = 601;
+    CoopStart = 1;
+  }
+}
+"#;
+
+/// A strike mission's group: one AI plane on 501.
+const STRIKE_0037: &str = r#"Group
+{
+  Name = "Strike AI";
+  Index = 1;
+  Desc = "";
+  Plane
+  {
+    Index = 2;
+    Name = "Strike AI lead";
+    LinkTrId = 0;
+    XPos = 180000.000;
+    YPos = 1500.000;
+    ZPos = 210000.000;
+    XOri = 0.00;
+    YOri = 0.00;
+    ZOri = 0.00;
+    Country = 501;
+    CoopStart = 0;
+  }
+}
+"#;
+
+/// (block, Country) of every node outside the Air Tasking group, in file order.
+fn map_countries(node: &crate::ast::Il2Entity, out: &mut Vec<(String, String)>) {
+    if node.block_type == "Group" && node.name() == Some("Air Tasking") {
+        return;
+    }
+    if let Some(c) = node.property("Country") {
+        let coop = node.property("CoopStart").is_some_and(|s| s != "0");
+        let block = if coop { format!("{} coop", node.block_type) } else { node.block_type.clone() };
+        out.push((block, c.to_string()));
+    }
+    for child in &node.children {
+        map_countries(child, out);
+    }
+}
+
+fn generate_map(h: &mut Harness, file: &str) -> (crate::ast::Il2Entity, Vec<(String, String)>) {
+    let out = h.out(file);
+    dialog::answer(vec![out.clone()]);
+    h.app.generate_front_file();
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    let root = crate::parser::parse_group_file(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    let mut countries = Vec::new();
+    map_countries(&root, &mut countries);
+    (root, countries)
+}
+
+fn country_of<'a>(root: &'a crate::ast::Il2Entity, name: &str) -> Option<&'a str> {
+    root.find_by_name(name).and_then(|n| n.property("Country"))
+}
+
+/// Decision 0037 A: with Air Tasking in the base map, the Map's own AI aircraft
+/// are written on 602 / 503. Player spawns and ground units keep their countries.
+#[test]
+fn map_generate_with_air_moves_map_ai_off_player_countries() {
+    let mut h = Harness::new("air_map_0037");
+    h.tab("Map");
+    h.wait_for_map();
+    fill_air_pool(&mut h);
+    h.click("Forces");
+    // The Fighters section's Place NATO (Units has one too, further down).
+    let place = h
+        .all("Place NATO")
+        .into_iter()
+        .min_by(|a, b| a.rect.top().total_cmp(&b.rect.top()))
+        .expect("Place NATO");
+    h.click_at(place.rect.center());
+    assert!(h.app.map_fighters.as_ref().is_some_and(|l| !l.eastern), "{}", h.status());
+    h.app.placed_air_starts.push(crate::airstart::PlacedAirStart {
+        field: crate::airstart::default_field("NATO start", true),
+        x: 215_000.0,
+        z: 205_000.0,
+    });
+    h.app.map_refs = vec![crate::frontlines::MapRefGroup {
+        path: PathBuf::from("Ref units.Group"),
+        entity: crate::parser::parse_group_file(REF_UNITS_0037).unwrap(),
+    }];
+    h.app.map_missions = vec![super::map::PlacedMission {
+        name: "Strike AI".into(),
+        eastern: true,
+        root: crate::parser::parse_group_file(STRIKE_0037).unwrap(),
+        target_x: 210_000.0,
+        target_z: 200_000.0,
+        start_x: 180_000.0,
+        start_z: 210_000.0,
+        ip_x: 195_000.0,
+        ip_z: 205_000.0,
+        target_label: "Custom".into(),
+        target_class: None,
+        attacks: Vec::new(),
+    }];
+    h.app.terrain_apply = false;
+
+    h.app.air_plan.include_in_base_map = false;
+    let (plain_root, plain) = generate_map(&mut h, "base_map_0037_plain.Group");
+    h.app.air_plan.include_in_base_map = true;
+    let (air_root, air) = generate_map(&mut h, "base_map_0037_air.Group");
+
+    let has = |list: &[(String, String)], block: &str, country: &str| {
+        list.iter().any(|(b, c)| b == block && c == country)
+    };
+    // Without Air Tasking the Map writes its fighters on the player country.
+    assert!(has(&plain, "Plane", "601"), "{plain:?}");
+    assert!(has(&plain, "Plane", "501"), "the reference group's AI plane");
+    for block in ["Vehicle", "Airfield", "Plane coop"] {
+        assert!(has(&plain, block, "601"), "{block} in {plain:?}");
+    }
+    // With it, every AI plane moves; nothing else changes.
+    let expected: Vec<(String, String)> = plain
+        .iter()
+        .map(|(block, country)| {
+            let moved = match (block.as_str(), country.as_str()) {
+                ("Plane", "601") => "602",
+                ("Plane", "501") => "503",
+                _ => country.as_str(),
+            };
+            (block.clone(), moved.to_string())
+        })
+        .collect();
+    assert_eq!(air, expected);
+    // Each writer: the fighter pack, the reference group and the strike mission.
+    assert_eq!(country_of(&plain_root, "Ref AI"), Some("501"));
+    assert_eq!(country_of(&air_root, "Ref AI"), Some("503"));
+    assert_eq!(country_of(&plain_root, "Strike AI lead"), Some("501"));
+    assert_eq!(country_of(&air_root, "Strike AI lead"), Some("503"));
+    assert_eq!(country_of(&air_root, "Ref coop"), Some("601"));
+    // The whole file, Air Tasking included: no AI plane on a player country,
+    // and the Air Tasking entry triggers still watch 601 and 501.
+    let mut watched = std::collections::BTreeSet::new();
+    air_root.for_each(&mut |node| {
+        let country = node.property("Country").unwrap_or("");
+        if node.block_type == "Plane" && node.property("CoopStart") == Some("0") {
+            assert!(!["601", "501"].contains(&country), "{:?} on {country}", node.name());
+        }
+        if node.block_type == "MCU_TR_ComplexTrigger" {
+            watched.insert(country.to_string());
+        }
+    });
+    assert!(watched.contains("601") && watched.contains("501"), "{watched:?}");
+}
+
 /// `replay.Group` traced at A, B and C, with its sidecar, in the harness dir.
 /// With the `chain` logs, A fires; B (3 s on, unconditional) and C never do.
 fn replay_chain_group(h: &Harness) -> PathBuf {

@@ -477,6 +477,11 @@ pub fn weighted_random_pct(weights: &[u32]) -> Vec<u8> {
 pub fn build_air_packs(plan: &AirPlan, ctx: &AirContext) -> Result<Vec<MapAirPack>, String> {
     export::build_air_packs(plan, ctx)
 }
+/// Decision 0037 A: Map Generate calls this on the finished base map when it
+/// holds Air Tasking. Moves the Map's AI planes from 601 to 602 and 501 to 503.
+pub fn move_map_ai_off_player_countries(root: &mut crate::ast::Il2Entity) {
+    export::move_map_ai_off_player_countries(root);
+}
 /// Preview the plan's geometry and clock slots without building.
 #[cfg(test)] // the UI reads it through `check`, one evaluation for all three
 pub fn preview(plan: &AirPlan, ctx: &AirContext) -> AirPreview {
