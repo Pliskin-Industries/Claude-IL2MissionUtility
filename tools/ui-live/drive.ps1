@@ -8,6 +8,8 @@
 #   key         -Keys 1,2,Esc,F1,Enter  plain key presses
 #   ctrl        -Keys G,Z,1             Ctrl+key
 #   shiftclick  -X -Y                   Shift+left click
+# Every action takes -Window <title> to act on another of the app's windows
+# (e.g. 'IL-2 Group Generator — Replay'); the default is the main window.
 # Coordinates are client pixels = pixels of the `shot` image, in physical
 # pixels: the script makes itself per-monitor DPI aware, so this holds at any
 # Windows scaling. (Unaware, at 150 % it saw scaled sizes and `shot` captured
@@ -30,7 +32,8 @@ param(
     [string]$Action,
     [int]$X = 0, [int]$Y = 0, [int]$X2 = 0, [int]$Y2 = 0,
     [string]$Keys = '',
-    [string]$Out = ''
+    [string]$Out = '',
+    [string]$Window = 'IL-2 Group Generator'
 )
 Add-Type -AssemblyName System.Drawing
 if (-not ('UiLiveDrv' -as [type])) {
@@ -51,17 +54,36 @@ public class UiLiveDrv {
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint f);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [StructLayout(LayoutKind.Sequential)] public struct PT { public int X, Y; }
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  // The visible top-level window of process `pid` whose title is exactly `title`.
+  public static IntPtr FindWindow(uint pid, string title) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((h, l) => {
+      uint p; GetWindowThreadProcessId(h, out p);
+      var sb = new System.Text.StringBuilder(256); GetWindowText(h, sb, 256);
+      if (p == pid && IsWindowVisible(h) && sb.ToString() == title) { found = h; return false; }
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
 }
 "@
 }
 # Per-monitor aware v2 (-4): real pixels for every call below in this process.
 [void][UiLiveDrv]::SetProcessDpiAwarenessContext([IntPtr]-4)
 $proc = Get-Process il2_mission_utility -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -like '*\target\debug\il2_mission_utility.exe' -and $_.MainWindowTitle -eq 'IL-2 Group Generator' } |
+    Where-Object { $_.Path -like '*\target\debug\il2_mission_utility.exe' -and $_.MainWindowHandle -ne 0 } |
     Select-Object -First 1
-# The title check skips windowless `--probe-*` CLI runs of the same exe.
+# The window check skips windowless `--probe-*` CLI runs of the same exe.
 if (-not $proc) { throw 'the app window is not open (cargo build, then start target\debug\il2_mission_utility.exe)' }
-$h = $proc.MainWindowHandle
+# -Window picks another of the app's windows by its title, e.g. the Replay
+# window 'IL-2 Group Generator — Replay'. Default: the main window.
+$h = [UiLiveDrv]::FindWindow([uint32]$proc.Id, $Window)
+if ($h -eq [IntPtr]::Zero) { throw "no visible app window titled '$Window'" }
 
 function Set-Front {
     [void][UiLiveDrv]::SetForegroundWindow($h); Start-Sleep -Milliseconds 150

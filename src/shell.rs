@@ -966,6 +966,7 @@ pub fn readiness(ui: &mut Ui, checks: &[Check]) {
 }
 
 /// Header row. `leading` draws right after the title (e.g. a sub-mode switch).
+/// `beside_primary` draws just left of the primary button (the Trace build box).
 /// `secondary` runs inside a right-to-left layout: add buttons in REVERSE order.
 /// `checks` show as a readiness chip next to the primary button.
 /// Returns true when the primary button is clicked.
@@ -976,6 +977,7 @@ pub fn page_header(
     file: Option<&str>,
     primary: &str,
     primary_enabled: bool,
+    beside_primary: impl FnOnce(&mut Ui),
     checks: &[Check],
     leading: impl FnOnce(&mut Ui),
     secondary: impl FnOnce(&mut Ui),
@@ -989,6 +991,8 @@ pub fn page_header(
         }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             clicked = primary_button(ui, primary, "Ctrl G", primary_enabled).clicked();
+            ui.add_space(4.0);
+            beside_primary(ui);
             ui.add_space(4.0);
             readiness(ui, checks);
             ui.add_space(8.0);

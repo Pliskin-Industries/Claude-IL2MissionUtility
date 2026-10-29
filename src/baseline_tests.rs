@@ -65,6 +65,16 @@ impl Fixture {
 }
 
 fn template_fixture() -> Fixture {
+    Fixture::new(
+        "template.Group",
+        template::generate_template(&template_options()).unwrap(),
+        &[],
+    )
+}
+
+/// The Template tab inputs behind `template.Group` (also driven through the UI
+/// by `ui_tests::trace_checkbox_off_output_matches_baseline`).
+pub(crate) fn template_options() -> TemplateOptions {
     let unit = template::builtin_plane_catalog()
         .into_iter()
         .find(|u| model_spec::script_id(&u.script) == "f80c10")
@@ -99,7 +109,7 @@ fn template_fixture() -> Fixture {
         }
         seats.push(seat);
     }
-    let opts = TemplateOptions {
+    TemplateOptions {
         name: "P14 F-80C baseline".into(),
         waypoint_count: template::used_waypoint_count(&seats),
         waypoint_speed: model_spec::suggested_waypoint_speed_kmh(["f80c10"]),
@@ -107,12 +117,7 @@ fn template_fixture() -> Fixture {
         zone_coalition: template::ZoneCoalition::Eastern,
         seats,
         ..TemplateOptions::default()
-    };
-    Fixture::new(
-        "template.Group",
-        template::generate_template(&opts).unwrap(),
-        &[],
-    )
+    }
 }
 
 fn recon_input(path: &str, copies: usize) -> ReconInput {
@@ -419,6 +424,19 @@ fn trace_off_changes_nothing() {
                 continue;
             }
             let source = std::fs::read_to_string(&path).unwrap();
+            if file == "ui.rs" && path.parent().is_some_and(|p| p.ends_with("src")) {
+                // Step 9T: the one call is the header "Trace build" hook,
+                // which returns before instrumenting while the box is off.
+                let calls: Vec<_> = source.match_indices("instrument(").collect();
+                assert_eq!(calls.len(), 1, "ui.rs: one trace hook only");
+                let hook = source.find("fn trace_generated(").expect("ui.rs trace hook");
+                let body = &source[hook..calls[0].0];
+                assert!(
+                    body.contains("if !self.trace_build {") && body.contains("return None;"),
+                    "ui.rs: instrument( must sit behind the Trace build flag"
+                );
+                continue;
+            }
             let tests = source.find("#[cfg(test)]\nmod tests").or_else(|| {
                 source.find("#[cfg(test)]\r\nmod tests")
             });

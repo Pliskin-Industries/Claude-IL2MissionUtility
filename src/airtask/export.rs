@@ -261,6 +261,46 @@ fn build_side(
     Ok(SideTrees { logic, sorties })
 }
 
+/// The indexes of the Air Tasking nodes a trace build follows by name (the
+/// sortie cycle's decision points: slot opens, GO, the zone and threshold
+/// steps, and each sortie's START to DELETE DELAY). Sorted, no repeats.
+pub(super) fn trace_role_indexes(root: &Il2Entity) -> Vec<i32> {
+    let mut indexes = BTreeSet::new();
+    root.for_each(&mut |group| {
+        if group.block_type != "Group" || group.name() != Some(AIR_TASKING_GROUP) {
+            return;
+        }
+        group.for_each(&mut |node| {
+            let name = node.name().unwrap_or("");
+            let role = name.split_once(' ').map(|(prefix, role)| {
+                (prefix.trim_end_matches(|c: char| c.is_ascii_digit()), role)
+            });
+            let traced = matches!(
+                role,
+                Some(("CLK", "D SLOT OPEN" | "N SLOT OPEN"))
+                    | Some(("ED" | "EN", "GO"))
+                    | Some((
+                        "ZD" | "ZN",
+                        "CHANCE" | "MISS WAIT" | "FIRE" | "DENY WAIT" | "COOLDOWN" | "ARM"
+                    ))
+                    // INNER is PASS. PASS OFF cancels CLOSE DELAY on success;
+                    // CLOSE still fires then, so only CLOSE DELAY means COLD.
+                    | Some(("THD" | "THN", "INNER" | "CLOSE DELAY"))
+                    | Some((
+                        "SD" | "SN",
+                        "START" | "ON STATION" | "EXTEND" | "COLD" | "LOSSES"
+                            | "HARD STOP" | "DONE HUB" | "DELETE DELAY"
+                    ))
+                    | Some(("Zone", "Out"))
+            );
+            if traced {
+                indexes.extend(node.index);
+            }
+        });
+    });
+    indexes.into_iter().collect()
+}
+
 #[cfg(test)]
 thread_local! {
     static EVALUATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -1553,6 +1593,32 @@ mod tests {
         }
     }
 
+    /// The P14 names a trace build adds on the Air Tasking and Map tabs:
+    /// only nodes inside Air Tasking, and the roles the A1 build traced.
+    #[test]
+    fn trace_role_indexes_name_p14_roles_inside_air_tasking() {
+        let (plan, mut input) = acceptance_test_plan();
+        input.opts.air_packs = super::super::build_air_packs(&plan, &input.context()).unwrap();
+        let mission = frontlines::generate_front(&input.opts).unwrap();
+        let indexes = super::super::trace_role_indexes(&mission.root);
+        let mut inside = BTreeSet::new();
+        named(&mission.root, "Air Tasking").for_each(&mut |n| {
+            inside.extend(n.index);
+        });
+        let mut names = BTreeSet::new();
+        mission.root.for_each(&mut |n| {
+            if n.index.is_some_and(|i| indexes.contains(&i)) {
+                names.insert(n.name().unwrap_or("").to_string());
+            }
+        });
+        assert!(indexes.iter().all(|i| inside.contains(i)), "only Air Tasking nodes");
+        assert!(indexes.windows(2).all(|w| w[0] < w[1]), "sorted, no repeats");
+        for name in ["CLK D SLOT OPEN", "SD01 START", "SD01 DONE HUB", "ZD01 FIRE", "THD01 INNER"] {
+            assert!(names.contains(name), "{name} missing from {names:?}");
+        }
+        assert!(!names.iter().any(|n| n.ends_with("JITTER 1")), "jitter timers are not roles");
+    }
+
     fn acceptance_mission() -> (frontlines::FrontPack, trace::TraceMap) {
         let (plan, input) = acceptance_test_plan();
         traced_acceptance_mission(plan, input)
@@ -1567,38 +1633,18 @@ mod tests {
         input.opts.air_packs = super::super::build_air_packs(&plan, &input.context()).unwrap();
         let mut mission = frontlines::generate_front(&input.opts).unwrap();
         let decisions = trace::TraceSelect::decision_points();
-        let mut indexes = BTreeSet::new();
+        let mut indexes: BTreeSet<_> = super::super::trace_role_indexes(&mission.root)
+            .into_iter()
+            .collect();
         // Scope decision points to Air Tasking as well: existing Map packs
         // must not acquire breadcrumbs merely because they contain a counter.
+        // (The UI's trace build traces decision points across the whole file.)
         named(&mission.root, "Air Tasking").for_each(&mut |node| {
-            let name = node.name().unwrap_or("");
-            let role = name.split_once(' ').map(|(prefix, role)| {
-                (prefix.trim_end_matches(|c: char| c.is_ascii_digit()), role)
-            });
-            let breadcrumb = matches!(
-                role,
-                Some(("CLK", "D SLOT OPEN" | "N SLOT OPEN"))
-                    | Some(("ED" | "EN", "GO"))
-                    | Some((
-                        "ZD" | "ZN",
-                        "CHANCE" | "MISS WAIT" | "FIRE" | "DENY WAIT" | "COOLDOWN" | "ARM"
-                    ))
-                    // INNER is PASS. PASS OFF cancels CLOSE DELAY on success;
-                    // CLOSE still fires then, so only CLOSE DELAY means COLD.
-                    // This is the existing role called INNER CLOSE OUT in the prompt.
-                    | Some(("THD" | "THN", "INNER" | "CLOSE DELAY"))
-                    | Some((
-                        "SD" | "SN",
-                        "START" | "ON STATION" | "EXTEND" | "COLD" | "LOSSES"
-                            | "HARD STOP" | "DONE HUB" | "DELETE DELAY"
-                    ))
-                    | Some(("Zone", "Out"))
-            );
             let decision = decisions.block_types.contains(&node.block_type)
                 || (decisions.random_timers
                     && node.block_type == "MCU_Timer"
                     && number(node, "Random").is_ok_and(|pct| pct < 100.0));
-            if breadcrumb || decision {
+            if decision {
                 indexes.insert(node.index.expect("trace source has an index"));
             }
         });

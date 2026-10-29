@@ -4259,6 +4259,7 @@ impl super::GroupGeneratorApp {
             }
         };
         let terrain_note = self.apply_terrain(&mut pack);
+        let trace = self.trace_generated(&mut pack);
         let text = serialize_group(&pack);
         let default_name = self
             .tpl_loaded_path
@@ -4288,6 +4289,7 @@ impl super::GroupGeneratorApp {
                 opts.seats.len(),
                 opts.bring_up.label()
             ),
+            trace.as_ref(),
         );
         self.add_terrain_note(terrain_note);
     }

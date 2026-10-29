@@ -497,6 +497,11 @@ pub fn totals(plan: &AirPlan, ctx: &AirContext) -> AirTotals {
 pub fn check(plan: &AirPlan, ctx: &AirContext) -> AirCheck {
     export::check(plan, ctx)
 }
+/// Air Tasking nodes a trace build follows by name, on the Air Tasking and
+/// Map tabs (step 9T): pass them as `TraceSelect::indexes`.
+pub fn trace_role_indexes(root: &crate::ast::Il2Entity) -> Vec<i32> {
+    export::trace_role_indexes(root)
+}
 /// How many full evaluations this thread has run (tests of the UI's cache).
 #[cfg(test)]
 pub fn evaluations() -> usize {
