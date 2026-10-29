@@ -1,8 +1,8 @@
 # 0026. Air Tasking schedules and budgets upstream's strikes and CAPs instead of placing its own
 
-- **Status:** Proposed
+- **Status:** Accepted (option A, proposed to the upstream author before any integration)
 - **Date:** 2026-10-18
-- **Decided by:** not yet (the user). Options and recommendation by Claude, from the upstream merge plan (`handoff/sessions/2026-10-18-upstream-merge.md`).
+- **Decided by:** the user, 2026-10-28 ("our method of automating targets and the flights with trigger zones makes better sense. I'm ok adopting his targets. Let's propose that and see what he has to say."). Options and recommendation by Claude, from the upstream merge plan (`handoff/sessions/2026-10-18-upstream-merge.md`).
 
 ## Context
 
@@ -25,7 +25,17 @@ So after the merge the app has two ways to put AI strikes and CAPs on Map target
 - **C. Air Tasking generates its sorties with upstream's mission builder.** Air Tasking calls `apply_mission_package` for each tasking (the target and its side are known), so every sortie is an upstream Strike or CAP, and the six built-ins become example data only. Closest to "one way to build a mission"; drops the shell logic flights 2 to 2I proved (Zone IN gate, `HOT` / `COLD` / `EXTEND`) unless it is moved onto upstream's shape.
 - **D. Decide after one probe flight.** Wrap one upstream Strike and one CAP with today's shell as far as it accepts them, fly it, then choose between A and C.
 
-## Recommendation
+## Decision (2026-10-28)
+
+**Air Tasking is the orchestrator of AI air activity in a mission.** It decides when sorties launch, against which targets, and how many fly at once per side.
+
+- **Upstream's Template Builder builds what a flight does:** aircraft, formation, loadout, and the Strike and CAP packages. Air Tasking takes such a group as a sortie template. It supplies the start and the budget, and it releases the budget slot from the group's own `MISSION END` / `ALL DESTROYED`.
+- **Upstream's target types are adopted** (tanks, trucks, rail, ships, airbases, bridges, dams) as Air Tasking targets, next to Map objectives and attack arrows (as decision 0028 already set).
+- **For scheduled air activity, Air Tasking replaces Map › Missions and Exclusive Activation.** The per-side budget does the lock's job and allows more than one flight at a time.
+- **Proposed to the upstream author first.** The draft is `handoff/upstream-air-tasking-proposal-draft.md`; the user decides when to send it. Integration code (decision 0028's step: a new tested shape in `inspect_sortie`, the target kinds, one probe flight of a wrapped Strike and CAP) waits for his answer.
+- The rest of the build (steps 9T and 10, decision 0037, acceptance flight A2) does not depend on his answer and goes ahead.
+
+## Recommendation (Claude, 2026-10-18)
 
 **D, then most likely A.** A keeps what both sides have proven: upstream owns the mission itself (route, attack, go-home, which the author fixed and maintains), Air Tasking owns scheduling and the budget (which flights 2 to 2I proved in the game). But how a shell attaches to upstream's `MISSION END`, `ALL DESTROYED` and disabled Zone Out has not been checked, and the shell's Zone IN gate (decision 0018) may not fit a strike that turns Zone Out off. One probe answers that before code is planned.
 
