@@ -21,7 +21,7 @@
 //! Presentation only. Group text is built by [`crate::frontlines`] and the
 //! other map modules. Heights come from [`crate::terrain::open_store`].
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{
     self, Align, Align2, Color32, ColorImage, FontFamily, FontId, Layout, Pos2, Rect, RichText,
@@ -43,6 +43,7 @@ use crate::frontlines::{
     timeline_index, timeline_preview,
 };
 use crate::geo::{self, MAP_MAX, MAP_MIN};
+use crate::harvest::{place_field_spawn, place_ramp_start};
 use crate::heightprobe;
 use crate::help::HelpTopic;
 use crate::locale::{LANG_EXTS, merge_template_sidecars, write_sidecars};
@@ -69,6 +70,7 @@ use crate::pack::{
 };
 use crate::parser::{parse_group_file, parse_il2_document};
 use crate::placement::PlaceOpts;
+use crate::provisions::{self, is_landscape_file, landscape_label};
 use crate::recon::{
     ArmyCopyInfo, ReconBuild, ReconInput, allocate_copies, generate_recon_ex, inspect_army_copies,
     park_army_mixed, park_recon_copies_headed, park_recon_copies_spots,
@@ -2511,6 +2513,9 @@ impl super::GroupGeneratorApp {
     /// Map tab (README §5.6): tool palette, the map with a front-date strip,
     /// and a right dock with Period / Forces / References.
     pub(super) fn map_page(&mut self, ctx: &egui::Context) {
+        if self.provisions_loaded_for.is_empty() {
+            self.reload_map_provisions();
+        }
         self.ensure_map_assets(ctx);
         egui::SidePanel::left("map_tools")
             .exact_width(shell::TOOL_PALETTE_W)
@@ -2713,7 +2718,8 @@ impl super::GroupGeneratorApp {
     }
 
     fn map_dock_panel(&mut self, ui: &mut egui::Ui) {
-        shell::dock_tabs(ui, &mut self.map_dock, &MapDock::tabs(self.map_refs.len()));
+        let refs = self.map_ref_sources().len();
+        shell::dock_tabs(ui, &mut self.map_dock, &MapDock::tabs(refs));
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
             .id_salt("map_dock_scroll")
@@ -3509,7 +3515,7 @@ impl super::GroupGeneratorApp {
                 (*z as i64).hash(&mut h);
             }
         }
-        for group in &self.map_refs {
+        for group in self.map_ref_sources() {
             group.path.to_string_lossy().hash(&mut h);
         }
         fn hash_layout(h: &mut DefaultHasher, layout: Option<&MapGroundLayout>) {
@@ -3591,7 +3597,7 @@ impl super::GroupGeneratorApp {
         let mut out = Vec::new();
         if focus.is_fixed() {
             let holdings = self.enemy_holdings(enemy_eastern);
-            for group in &self.map_refs {
+            for group in self.map_ref_sources() {
                 let stem = group
                     .path
                     .file_stem()
@@ -3875,12 +3881,133 @@ impl super::GroupGeneratorApp {
 
     fn map_references_tab(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
-        if ui.button("Add reference groups…").clicked() {
+        shell::section_title(ui, "Template folder", None);
+        shell::hint(
+            ui,
+            "Every base map imports the landscape groups from this folder (tunnels, stations, mines, camps, ports, dams, cities, road bridges, rail bridges). Airfields stay in the harvested folder. Browse or Refresh after changing the path.",
+            false,
+        );
+        ui.label(
+            RichText::new("Template folder")
+                .small()
+                .color(c::NEUTRAL_700),
+        );
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 28.0),
+            Layout::right_to_left(Align::Center),
+            |ui| {
+                if ui.button("Browse…").clicked()
+                    && let Some(dir) = dialog::FileDialog::new().pick_folder()
+                {
+                    self.map_template_dir = dir.display().to_string();
+                    self.provisions_loaded_for.clear();
+                }
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.map_template_dir)
+                        .desired_width(ui.available_width())
+                        .min_size(Vec2::new(0.0, 28.0)),
+                );
+            },
+        );
+        if ui
+            .add_sized([ui.available_width(), 28.0], egui::Button::new("Refresh"))
+            .clicked()
+        {
+            self.provisions_loaded_for.clear();
+        }
+        let template = Path::new(self.map_template_dir.trim());
+        if !self.map_template_dir.trim().is_empty() && !template.is_dir() {
+            ui.label(
+                RichText::new("That template folder was not found.")
+                    .small()
+                    .color(c::NEUTRAL_700),
+            );
+        } else if self.map_provision_missing.is_empty() && !self.map_provisions.is_empty() {
+            ui.label(
+                RichText::new("All 9 landscape groups are included.")
+                    .small()
+                    .color(c::NEUTRAL_700),
+            );
+        } else if !self.map_provision_missing.is_empty() {
+            let names = self
+                .map_provision_missing
+                .iter()
+                .map(|file| landscape_label(file))
+                .collect::<Vec<_>>()
+                .join(", ");
+            ui.label(
+                RichText::new(format!("Not in the folder: {names}"))
+                    .small()
+                    .color(c::NEUTRAL_700),
+            );
+        }
+        if !self.map_provision_errors.is_empty() {
+            ui.label(
+                RichText::new(self.map_provision_errors.join(" "))
+                    .small()
+                    .color(c::WARN),
+            );
+        }
+        let airfields = self
+            .map_provisions
+            .iter()
+            .filter(|g| !is_landscape_file(&g.path))
+            .count();
+        ui.label(
+            RichText::new(format!(
+                "{airfields} airfield group(s) from the database folder. Set their aircraft on the Airfield tab."
+            ))
+            .small()
+            .color(c::NEUTRAL_700),
+        );
+        if !self.airfield_coalition_notes.is_empty() {
+            ui.label(
+                RichText::new(format!(
+                    "{} group(s) left out so the other coalition is not placed on the same field.",
+                    self.airfield_coalition_notes.len()
+                ))
+                .color(c::WARN_TEXT),
+            );
+        }
+        for note in &self.ramp_start_notes {
+            ui.label(RichText::new(note).color(c::WARN_TEXT));
+        }
+        self.korea_fields_panel(ui);
+        ui.add_space(6.0);
+        if !self.map_provisions.is_empty() {
+            shell::section_title(ui, "Automatic", None);
+            for g in &self.map_provisions {
+                let label = g
+                    .path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("group");
+                shell::card(ui, false, |ui| {
+                    ui.label(
+                        egui::RichText::new(label).font(FontId::new(13.0, theme::bold_family())),
+                    );
+                    ui.label(
+                        RichText::new("Included in every base map")
+                            .small()
+                            .color(c::NEUTRAL_700),
+                    );
+                });
+                ui.add_space(4.0);
+            }
+        }
+        ui.add_space(4.0);
+        if ui
+            .add_sized(
+                [ui.available_width(), 28.0],
+                egui::Button::new("Add reference groups…"),
+            )
+            .clicked()
+        {
             self.add_map_refs();
         }
         shell::hint(
             ui,
-            "Airfields, blocks and entities are stamped at their saved spots, trimmed to the AO plus 10 km. Landscape MCU_Waypoint marks show as nested dots but are not exported.",
+            "Extra groups are stamped at their saved spots, trimmed to the AO plus 10 km. Landscape MCU_Waypoint marks show as nested dots but are not exported.",
             false,
         );
         ui.add_space(4.0);
@@ -3926,7 +4053,7 @@ impl super::GroupGeneratorApp {
             self.record_map_undo(format!("Removed {name}"));
             self.map_refs.remove(i);
         }
-        if self.map_refs.is_empty() {
+        if self.map_refs.is_empty() && self.map_provisions.is_empty() {
             ui.label(RichText::new("No reference groups loaded.").color(c::NEUTRAL_700));
         }
     }
@@ -5155,7 +5282,7 @@ impl super::GroupGeneratorApp {
 
         // 7. Draw Reference Groups
         let place = self.front_aabb.expanded(PLACE_MARGIN);
-        for g in &self.map_refs {
+        for g in self.map_ref_sources() {
             for dot in preview_dots(&g.entity, 2500) {
                 if dot.kind == PreviewKind::Airfield {
                     continue;
@@ -5168,7 +5295,7 @@ impl super::GroupGeneratorApp {
                 painter.circle_filled(world_to_pos(map_rect, dot.x, dot.z), radius, color);
             }
         }
-        for g in &self.map_refs {
+        for g in self.map_ref_sources() {
             for dot in preview_dots(&g.entity, 2500) {
                 if dot.kind != PreviewKind::Airfield {
                     continue;
@@ -6404,7 +6531,7 @@ impl super::GroupGeneratorApp {
             if self.map_armies.iter().any(|a| a.path == path) {
                 continue;
             }
-            if self.map_refs.iter().any(|g| g.path == path) {
+            if self.map_ref_sources().iter().any(|g| g.path == path) {
                 errors.push(format!(
                     "{} is already a reference group — remove it there first to load it as an army.",
                     path.file_stem().and_then(|s| s.to_str()).unwrap_or("group")
@@ -7539,7 +7666,7 @@ impl super::GroupGeneratorApp {
                 }
             }
         }
-        for group in &self.map_refs {
+        for group in self.map_ref_sources() {
             let mut marks = Vec::new();
             group.entity.for_each(&mut |e| {
                 let Some((x, z)) = e.pos_xz() else {
@@ -7636,6 +7763,8 @@ impl super::GroupGeneratorApp {
                 return;
             }
         };
+        let (ref_groups, mut spawn_notes) = self.ref_groups_for_export();
+        let ref_paths: Vec<PathBuf> = ref_groups.iter().map(|g| g.path.clone()).collect();
         let opts = FrontOptions {
             year: self.front_year,
             season: self.front_season,
@@ -7647,7 +7776,7 @@ impl super::GroupGeneratorApp {
             attacks: false,
             naval: false,
             influence: true,
-            ref_groups: self.map_refs.clone(),
+            ref_groups,
             battle_focus: self.front_focus,
             timeline_idx: Some(self.front_t.round() as usize),
             custom_front: if self.custom_front_xz.is_empty() {
@@ -7669,7 +7798,7 @@ impl super::GroupGeneratorApp {
             }
         };
         self.stamp_air_starts(&mut pack.root);
-        let strike_notes = self.stamp_missions(&mut pack.root);
+        let mut strike_notes = self.stamp_missions(&mut pack.root);
         let terrain_note = self.apply_terrain(&mut pack.root);
         let text = serialize_group(&pack.root);
         let suggested = format!("Korea_BaseMap_{}.Group", self.current_mark().date_label());
@@ -7684,7 +7813,7 @@ impl super::GroupGeneratorApp {
             self.status = Status::Error(format!("Could not write file: {err}"));
             return;
         }
-        let mut paths: Vec<PathBuf> = self.map_refs.iter().map(|g| g.path.clone()).collect();
+        let mut paths = ref_paths;
         paths.extend(self.recon_slots.iter().map(|s| s.path.clone()));
         paths.extend(self.map_armies.iter().map(|a| a.path.clone()));
         let mut tables = merge_template_sidecars(&paths);
@@ -7722,6 +7851,7 @@ impl super::GroupGeneratorApp {
                         .join(", "),
                     pack.clip_preview.replace('\n', " "),
                 ));
+                strike_notes.append(&mut spawn_notes);
                 if !strike_notes.is_empty() {
                     if let Status::Info(lead) = std::mem::replace(&mut self.status, Status::Idle) {
                         self.status = Status::Warn {
@@ -7995,6 +8125,103 @@ impl super::GroupGeneratorApp {
         ));
     }
 
+    /// Automatic provisions first, then groups added by hand. A path counts once.
+    fn map_ref_sources(&self) -> Vec<&MapRefGroup> {
+        let mut seen = std::collections::HashSet::new();
+        self.map_provisions
+            .iter()
+            .chain(self.map_refs.iter())
+            .filter(|g| seen.insert(g.path.as_path()))
+            .collect()
+    }
+
+    /// Hold-short for every harvested airfield, on that field's own taxi graph.
+    /// A group with no graph, or without two runway ends, stays where it is.
+    fn stamp_harvested_ramps(groups: &mut [MapRefGroup]) -> Vec<String> {
+        let mut notes = Vec::new();
+        for group in groups.iter_mut() {
+            if place_ramp_start(&mut group.entity, None).is_ok() {
+                continue;
+            }
+            let name = provisions::airfield_identity(&group.entity, &group.path).key;
+            notes.push(format!("{name} is missing a ramp start"));
+        }
+        notes
+    }
+
+    fn airfield_country(root: &crate::ast::Il2Entity) -> Option<i32> {
+        let mut country = None;
+        root.for_each(&mut |entity| {
+            if country.is_none() && entity.block_type == "Airfield" {
+                country = entity
+                    .property("Country")
+                    .and_then(|value| value.parse().ok());
+            }
+        });
+        country
+    }
+
+    fn reload_map_provisions(&mut self) {
+        let template = PathBuf::from(self.map_template_dir.trim());
+        let db = PathBuf::from(self.harvest_db_dir.trim());
+        let landscape = provisions::load_named_groups(&template, provisions::LANDSCAPE_FILES);
+        let airfields = provisions::load_harvested_airfields(&db);
+        let mut placed = self.place_harvested_airfields(airfields.groups);
+        self.airfield_coalition_notes = placed.notes;
+        self.ramp_start_notes = Self::stamp_harvested_ramps(&mut placed.groups);
+        self.map_provision_missing = landscape.missing;
+        self.map_provision_errors = landscape.errors;
+        self.map_provision_errors.extend(airfields.errors);
+        let mut groups = landscape.groups;
+        groups.extend(placed.groups);
+        self.map_provisions = groups;
+        self.provisions_loaded_for = format!(
+            "{}\n{}",
+            self.map_template_dir.trim(),
+            self.harvest_db_dir.trim()
+        );
+    }
+
+    /// Provisions plus hand-added groups. Every harvested airfield is already
+    /// on its hold-short. A configured airbase also gets its aircraft list,
+    /// and that list keeps the harvested country (501, 502, 503, or 601).
+    fn ref_groups_for_export(&mut self) -> (Vec<MapRefGroup>, Vec<String>) {
+        self.reload_map_provisions();
+        self.remember_airbase_edits();
+        let spawns: Vec<(PathBuf, Vec<crate::airstart::AirStartPlane>, String)> = self
+            .airbases
+            .iter()
+            .filter(|s| !s.planes.is_empty())
+            .map(|s| (s.path.clone(), s.planes.clone(), s.info.name.clone()))
+            .collect();
+        let sources = self.map_provisions.clone();
+        let manual = self.map_refs.clone();
+        let mut notes = self.airfield_coalition_notes.clone();
+        notes.extend(self.ramp_start_notes.iter().cloned());
+        let mut groups = Vec::new();
+        for src in sources {
+            let mut entity = src.entity.clone();
+            if let Some((_, planes, name)) = spawns.iter().find(|(path, _, _)| path == &src.path) {
+                let country = Self::airfield_country(&entity);
+                if let Err(err) = place_field_spawn(&mut entity, planes, None, country) {
+                    notes.push(format!("{name}: field spawn was not written ({err})"));
+                    entity = src.entity;
+                }
+            }
+            groups.push(MapRefGroup {
+                path: src.path,
+                entity,
+            });
+        }
+        for g in manual {
+            if groups.iter().any(|p| p.path == g.path) {
+                continue;
+            }
+            groups.push(g);
+        }
+        (groups, notes)
+    }
+
     fn add_map_refs(&mut self) {
         let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
@@ -8005,7 +8232,7 @@ impl super::GroupGeneratorApp {
         let mut added = 0usize;
         let mut errors = Vec::new();
         for path in paths {
-            if self.map_refs.iter().any(|g| g.path == path) {
+            if self.map_ref_sources().iter().any(|g| g.path == path) {
                 continue;
             }
             match std::fs::read_to_string(&path) {

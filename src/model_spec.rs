@@ -413,6 +413,15 @@ const SPECS: &[ModelSpec] = &[
         0.0,
         "",
     ),
+    spec("ferrym2", "M2 ferry", ModelClass::SmallBoat, 10.0, 0.0, ""),
+    spec(
+        "ferryn2p",
+        "N2P ferry",
+        ModelClass::SmallBoat,
+        10.0,
+        0.0,
+        "",
+    ),
     spec("g5", "G-5", ModelClass::TorpedoBoat, 98.0, 0.0, ""),
     spec(
         "gleaves",

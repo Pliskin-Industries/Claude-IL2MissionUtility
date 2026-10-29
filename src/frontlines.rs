@@ -2722,6 +2722,32 @@ mod tests {
     }
 
     #[test]
+    fn april_1951_front_sides_for_the_seoul_fields() {
+        let front = densify(
+            &preview_front_xz(timeline_index(1951, Season::LateSpring) as f32),
+            4_000.0,
+        );
+        let mut lines = Vec::new();
+        for (name, x, z) in [
+            ("K-13 Suwon", 70_869.0, 288_613.0),
+            ("K-14 Kimpo", 105_934.0, 269_477.0),
+            ("K-16 Seoul", 102_349.0, 280_779.0),
+            ("K-20 Sinmak", 202_934.0, 221_507.0),
+        ] {
+            let side = if crate::mapclip::on_dprk_side(&front, &[], x, z) {
+                "DPRK"
+            } else {
+                "NATO"
+            };
+            lines.push(format!("{name} {side}"));
+        }
+        assert_eq!(
+            lines.join(", "),
+            "K-13 Suwon NATO, K-14 Kimpo NATO, K-16 Seoul NATO, K-20 Sinmak DPRK"
+        );
+    }
+
+    #[test]
     fn summer_1950_has_no_sabre_or_mig() {
         let ids: Vec<_> = suggested_aircraft(1950, Season::Summer)
             .iter()

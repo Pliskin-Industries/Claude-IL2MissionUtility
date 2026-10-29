@@ -7536,6 +7536,24 @@ mod tests {
     }
 
     #[test]
+    fn ferry_models_are_ship_units() {
+        let cat = bundled_catalog();
+        let ferry = |script: &str| {
+            cat.iter()
+                .find(|u| u.script.to_ascii_lowercase().contains(script))
+                .unwrap_or_else(|| panic!("{script} missing from the ship catalog"))
+        };
+        let m2 = ferry("ferrym2");
+        let n2p = ferry("ferryn2p");
+        assert_eq!(m2.kind, UnitKind::Ship);
+        assert_eq!(n2p.kind, UnitKind::Ship);
+        assert_eq!(m2.label(), "M2 ferry");
+        assert_eq!(n2p.label(), "N2P ferry");
+        assert_eq!(m2.country(), 601);
+        assert_eq!(n2p.country(), 503);
+    }
+
+    #[test]
     fn zone_defaults_follow_air_ground_train_mix() {
         assert_eq!(zone_defaults(ZoneMix::Air), (16_000.0, 35_000.0));
         assert_eq!(zone_defaults(ZoneMix::Ground), (10_000.0, 19_000.0));

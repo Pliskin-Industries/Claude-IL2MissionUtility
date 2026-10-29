@@ -69,7 +69,10 @@ Group text is still built by `frontlines.rs` and the other map modules.
 
 ### `ui/airfield.rs` — Airfield tab
 The Airfield page: load and export panels, the harvest section, field
-spawn, and the air-start bank. `ui.rs` calls `airfield_page`,
+spawn, and the air-start bank. The Airbases list splits fields inside the
+map area (the box plus 10 km) from the rest, then splits that area into
+DPRK and NATO by the front. Data required shows when a field in that area
+has no runway group. `ui.rs` calls `airfield_page`,
 `export_airfield`, `load_airfield`, and `poll_harvest`. State stays on
 the app. Group text is still built by `crate::airfield`, `harvest.rs`, and
 `airstart.rs`. **Airfield.**
@@ -163,6 +166,29 @@ into-wind threshold. Defaults are the Korea Missions folder and
 rewrite once it has been stable for 1.5 s. Drops `#` comments and the
 `Options` header before parsing (`WindLayers` rows are not `.Group` syntax).
 **Airfield mode.**
+
+### `provisions.rs` — landscape and harvested airfields on every base map
+`LANDSCAPE_FILES` is the nine Korea scenery groups (no airfields) loaded from
+the template folder the Map tab remembers. `load_harvested_airfields` reads
+top-level `*.Group` files in the harvest database and skips `catalog.Group`.
+`place_matching_coalition` keeps one file per field: the country that belongs
+to that field's side of the front (600-series NATO, 500-series DPRK). The
+other country's copy is left on disk. `guess_nato` reads an `Airfield`
+Country, then a `_601` / `_502` / `_503` file suffix.
+The Map tab stamps the kept airfields with the landscape groups. Each of
+those airfields, whatever its country, is moved to the hold-short on its own
+taxi graph (`place_ramp_start`: `fakefield_rnwspawn` model and script, nose
+toward the strip). A field with no taxi graph, or without two runway ends,
+stays where it is and is listed as missing a ramp start. The Airfield
+tab lists those files as separate airbases, each with its own field-spawn list.
+**Map, Airfield.**
+
+### `korea_fields.rs` — Korea airfields still to harvest
+The 39 AIRFIELDS marks from the game's `landscape_Korea_FullScene.Group`, plus
+six K-sites from `docs/historical-reference` that have no position on this map.
+`ao_harvest` says which of those fall in the current area and whether the
+selected side has a harvest. A file for the other coalition does not count.
+**Airfield, Map References.**
 
 ### `airstart.rs` — fake-field air starts
 A bank of `fakefield` airfields with a `Planes` list, shaped like

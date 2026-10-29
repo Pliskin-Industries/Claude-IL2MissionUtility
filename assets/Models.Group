@@ -6374,6 +6374,102 @@ Group
   Ship
   {
     Name = "Ship";
+    Index = 799;
+    LinkTrId = 800;
+    XPos = 17122.471;
+    YPos = 0.000;
+    ZPos = 34965.250;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Script = "LuaScripts\WorldObjects\Ships\ferrym2.txt";
+    Model = "graphics\ships\ferrym2\ferrym2.mgm";
+    Desc = "";
+    Country = 601;
+    Vulnerable = 1;
+    Engageable = 1;
+    LimitAmmo = 1;
+    AILevel = 2;
+    DamageReport = 50;
+    DamageThreshold = 1;
+    DeleteAfterDeath = 1;
+    Spotter = -1;
+    BeaconChannel = 0;
+    Callsign = 0;
+    TCode = "";
+    TCodeColor = "";
+  }
+  
+
+  MCU_TR_Entity
+  {
+    Index = 800;
+    Name = "Ship entity";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 17122.471;
+    YPos = 0.200;
+    ZPos = 34965.250;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    MisObjID = 799;
+  }
+  
+
+  Ship
+  {
+    Name = "Ship";
+    Index = 802;
+    LinkTrId = 803;
+    XPos = 15708.052;
+    YPos = 0.000;
+    ZPos = 34965.250;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Script = "LuaScripts\WorldObjects\Ships\ferryn2p.txt";
+    Model = "graphics\ships\ferryn2p\ferryn2p.mgm";
+    Desc = "";
+    Country = 503;
+    Vulnerable = 1;
+    Engageable = 1;
+    LimitAmmo = 1;
+    AILevel = 2;
+    DamageReport = 50;
+    DamageThreshold = 1;
+    DeleteAfterDeath = 1;
+    Spotter = -1;
+    BeaconChannel = 0;
+    Callsign = 0;
+    TCode = "";
+    TCodeColor = "";
+  }
+  
+
+  MCU_TR_Entity
+  {
+    Index = 803;
+    Name = "Ship entity";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 15708.052;
+    YPos = 0.200;
+    ZPos = 34965.250;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    MisObjID = 802;
+  }
+  
+
+  Ship
+  {
+    Name = "Ship";
     Index = 757;
     LinkTrId = 758;
     XPos = 36924.339;

@@ -1,7 +1,7 @@
 # HANDOFF — IL-2 Mission Utility (Claude working copy)
 
 > Read this first in every new session. Update the **Session log** and
-> **State** sections before you stop. Last updated: 2026-10-14.
+> **State** sections before you stop. Last updated: 2026-10-28.
 
 ## 1. Where things live
 
@@ -283,3 +283,9 @@ continue at delegation-loop step 3 (§2).
 | 2026-10-11 | Cursor | **Map unit text.** Fighter, ship, and ground numbers, and waypoint captions, are light gray at partial opacity again, with the existing dark shadow. Positions are unchanged. Orange stays on the selection rings. |
 | 2026-10-11 | Cursor | **AO resize undo.** An unlocked empty-map drag that redraws the AO, and Reset AO, join the map undo. Ctrl Z restores the previous box. |
 | 2026-10-14 | Cursor | **Korea 1.005 logic (issue 1).** Death counters and ALL DESTROYED listen for OnKilled. Fighter Pack sends that event to the plane's Delay Delete so a kill counts once. Spawn Trigger Delete lists entity indexes; Activate omits Delete. CAP and Strike drop bingo fuel, and abort events share a once-only Go Home Once counter. 543 tests pass. |
+| 2026-10-25 | Cursor | **Map provisions.** The References tab takes a template folder and imports the nine landscape groups (not airfields) into every base map. Harvested groups in `Template\MP Airfields` are imported too, and the Airfield tab lists them as separate airbases so each can have its own field spawn. |
+| 2026-10-25 | Cursor | **Ferry ships.** `ferrym2` and `ferryn2p` from `TemplateExamples/ferry_bridge.Group` are ship units in the catalog (M2 ferry, NATO; N2P ferry, DPRK). |
+| 2026-10-25 | Cursor | **Airbases in the map area.** The Airbases list leads with fields inside the map box plus 10 km. A field in that area with no runway group, or a catalog row whose group file is missing, is marked Data required. |
+| 2026-10-25 | Cursor | **Airbases by side of the front.** Fields in the map area are listed under DPRK or NATO. DPRK is north of the active front, NATO is south, and a detached pocket stays with the side that holds it. |
+| 2026-10-28 | Cursor | **One airfield group per coalition.** A base map places the harvested file whose country matches that field's side of the front, and leaves the other country's copy on disk. The Airfield tab and Map References list the Korea fields inside the AO that still need a harvest for that side. |
+| 2026-10-28 | Cursor | **Ramp start on every coalition.** A harvested airfield moves to the hold-short on its own taxi graph when it is loaded onto a base map, for USA, USSR, DPRK, and PRC. A field with no taxi graph or fewer than two runway ends stays where it is and is reported as missing a ramp start. |

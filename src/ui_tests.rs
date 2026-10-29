@@ -118,6 +118,7 @@ impl Harness {
         app.terrain_use_builtin = false;
         app.harvest_db_dir = dir.join("airfields").display().to_string();
         app.harvest_missions_dir = dir.join("missions").display().to_string();
+        app.map_template_dir = dir.join("template").display().to_string();
         app.mark_saved(AppMode::Template);
         app.mark_saved(AppMode::Map);
         let mut h = Harness {
@@ -1341,6 +1342,192 @@ fn exclusive_editing_clears_on_generate_and_when_emptied() {
 // ── Airfield ──────────────────────────────────────────────────────────────
 
 #[test]
+fn map_imports_landscape_and_harvested_airfields() {
+    let mut h = Harness::new("provisions");
+    let template = PathBuf::from(&h.app.map_template_dir);
+    let db = PathBuf::from(&h.app.harvest_db_dir);
+    std::fs::create_dir_all(&template).unwrap();
+    std::fs::create_dir_all(&db).unwrap();
+    std::fs::write(
+        template.join("landscape_Korea_Cities.Group"),
+        tiny_named_group("CitiesProvision"),
+    )
+    .unwrap();
+    std::fs::write(
+        db.join("catalog.Group"),
+        tiny_named_group("NotAnAirfieldCatalog"),
+    )
+    .unwrap();
+    std::fs::write(db.join("Yonpo_502.Group"), tiny_named_group("YonpoField")).unwrap();
+    h.app.custom_front_xz = vec![(100_000.0, 0.0), (100_000.0, 499_200.0)];
+
+    h.tab("Map");
+    let tab = h.find_prefix("References");
+    h.click_at(tab.rect.center());
+    assert!(
+        h.has("landscape_Korea_Cities"),
+        "landscape group is listed: {:?}",
+        h.labels()
+    );
+    assert!(
+        h.has("Yonpo_502"),
+        "harvested airfield is listed: {:?}",
+        h.labels()
+    );
+    assert!(
+        !h.has("NotAnAirfieldCatalog"),
+        "the catalog is not an airfield"
+    );
+    assert!(h.has("TEMPLATE FOLDER"));
+
+    let out = h.out("provisioned.Group");
+    dialog::answer(vec![out.clone()]);
+    h.click("Generate Base Map");
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.contains("CitiesProvision"), "{text}");
+    assert!(text.contains("YonpoField"), "{text}");
+    assert!(!text.contains("NotAnAirfieldCatalog"), "{text}");
+}
+
+#[test]
+fn airfield_lists_each_harvested_airbase() {
+    let mut h = Harness::new("airbases");
+    let db = PathBuf::from(&h.app.harvest_db_dir);
+    std::fs::create_dir_all(&db).unwrap();
+    std::fs::write(
+        db.join("Suwon_601.Group"),
+        tiny_named_group_at("Suwon", "140000.000", "150000.000"),
+    )
+    .unwrap();
+    std::fs::write(
+        db.join("Yonpo_502.Group"),
+        tiny_named_group_at("Yonpo", "160000.000", "150000.000"),
+    )
+    .unwrap();
+    h.app.custom_front_xz = vec![(148_000.0, 0.0), (148_000.0, 499_200.0)];
+    h.tab("Airfield");
+    assert!(h.has("AIRBASES"));
+    assert!(h.has("Suwon"), "{:?}", h.labels());
+    assert!(h.has("Yonpo"));
+    h.click("Add aircraft");
+    h.settle();
+    assert!(
+        h.has("Suwon · 1"),
+        "the selected airbase keeps the aircraft"
+    );
+    h.click("Yonpo");
+    assert!(h.has("Yonpo"), "{:?}", h.labels());
+    assert!(!h.app.field_spawn_nato, "Yonpo is a DPRK field");
+    assert!(
+        h.app.field_planes.is_empty(),
+        "Yonpo starts with no aircraft"
+    );
+    let suwon = h
+        .app
+        .airbases
+        .iter()
+        .find(|s| s.info.name == "Suwon")
+        .expect("Suwon slot");
+    assert_eq!(suwon.planes.len(), 1);
+    assert!(suwon.nato);
+}
+
+#[test]
+fn airbases_in_the_map_area_mark_missing_data() {
+    let mut h = Harness::new("airbase_area");
+    let db = PathBuf::from(&h.app.harvest_db_dir);
+    std::fs::create_dir_all(&db).unwrap();
+    std::fs::write(
+        db.join("Suwon_502.Group"),
+        tiny_named_group("Suwon"),
+    )
+    .unwrap();
+    std::fs::write(
+        db.join("Kimpo_601.Group"),
+        tiny_named_group_at("Kimpo", "142000.000", "150000.000"),
+    )
+    .unwrap();
+    std::fs::write(
+        db.join("Yonpo_502.Group"),
+        tiny_named_group_at("Yonpo", "200000.000", "20000.000"),
+    )
+    .unwrap();
+    let mut catalog = crate::ast::Il2Entity::new("Group");
+    catalog.set_name("AirfieldDB");
+    let mut missing = crate::ast::Il2Entity::new("AirfieldRecord");
+    missing.set_name("Wonsan");
+    missing.set_property("File", "\"Wonsan_502.Group\"");
+    missing.set_property("XPos", "155000.000");
+    missing.set_property("ZPos", "155000.000");
+    missing.set_property("TaxiNodes", "0");
+    catalog.children.push(missing);
+    std::fs::write(
+        db.join("catalog.Group"),
+        crate::serialize::serialize_group(&catalog),
+    )
+    .unwrap();
+    h.app.front_aabb =
+        crate::mapclip::WorldAabb::from_corners(140_000.0, 140_000.0, 160_000.0, 160_000.0);
+    h.app.custom_front_xz = vec![(148_000.0, 0.0), (148_000.0, 499_200.0)];
+    h.tab("Airfield");
+    assert!(h.has("IN THE AREA"), "{:?}", h.labels());
+    assert!(h.has("OUTSIDE THE AREA"), "{:?}", h.labels());
+    let row = |label: &str| {
+        let mut hits: Vec<_> = h
+            .all(label)
+            .into_iter()
+            .filter(|node| node.rect.left() > SCREEN.x - 290.0)
+            .collect();
+        assert!(!hits.is_empty(), "no {label} in the airbases list");
+        hits.sort_by(|a, b| a.rect.top().total_cmp(&b.rect.top()));
+        hits.remove(0)
+    };
+    let notice_under = |row: &Node| {
+        h.all("Data required").iter().any(|node| {
+            node.rect.left() > SCREEN.x - 290.0
+                && node.rect.top() >= row.rect.bottom() - 2.0
+                && node.rect.top() < row.rect.bottom() + 30.0
+        })
+    };
+    let dprk = row("DPRK");
+    let nato = row("NATO");
+    let suwon = row("Suwon");
+    let wonsan = row("Wonsan");
+    let kimpo = row("Kimpo");
+    let yonpo = row("Yonpo");
+    assert!(dprk.rect.bottom() <= suwon.rect.top() + 1.0);
+    assert!(suwon.rect.bottom() <= wonsan.rect.top() + 1.0);
+    assert!(wonsan.rect.bottom() <= nato.rect.top() + 1.0);
+    assert!(nato.rect.bottom() <= kimpo.rect.top() + 1.0);
+    assert!(kimpo.rect.bottom() <= yonpo.rect.top() + 1.0);
+    assert!(notice_under(&suwon), "Suwon has no runway group");
+    assert!(notice_under(&wonsan), "Wonsan has no harvested file");
+    assert!(notice_under(&kimpo), "Kimpo has no runway group");
+    assert!(!notice_under(&yonpo), "Yonpo is outside the map area");
+}
+
+fn tiny_named_group(name: &str) -> String {
+    tiny_named_group_at(name, "150000.000", "150000.000")
+}
+
+fn tiny_named_group_at(name: &str, x: &str, z: &str) -> String {
+    let mut root = crate::ast::Il2Entity::new("Group");
+    root.set_name(name);
+    root.index = Some(1);
+    root.set_property("Index", "1");
+    root.set_property("Desc", "\"\"");
+    let mut block = crate::ast::Il2Entity::new("Block");
+    block.set_name("Hall");
+    block.index = Some(2);
+    block.set_property("Index", "2");
+    block.set_property("XPos", x);
+    block.set_property("YPos", "0.000");
+    block.set_property("ZPos", z);
+    root.children.push(block);
+    crate::serialize::serialize_group(&root)
+}
+
+#[test]
 fn airfield_load_side_and_generate() {
     let mut h = Harness::new("airfield");
     h.tab("Airfield");
@@ -2392,11 +2579,12 @@ fn map_objective_tool_hint_is_short() {
 fn map_dock_tabs_fit_a_three_digit_reference_count() {
     let mut h = Harness::new("docktabs");
     h.tab("Map");
-    let group = crate::frontlines::MapRefGroup {
-        path: PathBuf::from("K13 AFB_mp.Group"),
-        entity: crate::ast::Il2Entity::new("Group"),
-    };
-    h.app.map_refs = vec![group; 123];
+    h.app.map_refs = (0..123)
+        .map(|i| crate::frontlines::MapRefGroup {
+            path: PathBuf::from(format!("ref_{i}.Group")),
+            entity: crate::ast::Il2Entity::new("Group"),
+        })
+        .collect();
     h.settle();
     let tabs: Vec<Node> = ["Period", "Forces", "References 123", "Terrain"]
         .iter()

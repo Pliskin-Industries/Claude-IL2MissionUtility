@@ -353,6 +353,24 @@ struct GroupGeneratorApp {
     map_zoom: f32,
     map_pan: Pos2,
     map_refs: Vec<MapRefGroup>,
+    /// Template folder that holds the landscape groups imported into every map.
+    map_template_dir: String,
+    /// Landscape groups plus harvested airfields. Reloaded when the folder changes.
+    map_provisions: Vec<MapRefGroup>,
+    map_provision_missing: Vec<String>,
+    map_provision_errors: Vec<String>,
+    /// Empty until the next Map frame should read the folders again.
+    provisions_loaded_for: String,
+    /// Harvested airfields, each with its own field-spawn list.
+    airbases: Vec<airfield::AirbaseSlot>,
+    /// Catalog rows, so a field in the map area with no group file can still be named.
+    airbase_index: Vec<airfield::IndexedAirbase>,
+    /// Empty until the Airfield tab should read the database folder again.
+    airbase_scan_dir: String,
+    /// Harvested copies left out because they belong to the other coalition.
+    airfield_coalition_notes: Vec<String>,
+    /// Harvested airfields that could not be moved to a hold-short.
+    ramp_start_notes: Vec<String>,
     drawing_custom_front: bool,
     custom_front_xz: Vec<(f64, f64)>,
     map_drawing_mode: MapDrawingMode,
@@ -621,6 +639,16 @@ impl Default for GroupGeneratorApp {
             map_zoom: 1.0,
             map_pan: Pos2::new(0.5, 0.5),
             map_refs: Vec::new(),
+            map_template_dir: crate::provisions::DEFAULT_TEMPLATE_DIR.to_string(),
+            map_provisions: Vec::new(),
+            map_provision_missing: Vec::new(),
+            map_provision_errors: Vec::new(),
+            provisions_loaded_for: String::new(),
+            airbases: Vec::new(),
+            airbase_index: Vec::new(),
+            airbase_scan_dir: String::new(),
+            airfield_coalition_notes: Vec::new(),
+            ramp_start_notes: Vec::new(),
             drawing_custom_front: false,
             custom_front_xz: Vec::new(),
             map_drawing_mode: MapDrawingMode::None,
