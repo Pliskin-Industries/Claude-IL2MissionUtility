@@ -202,3 +202,19 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **Yak-9P at 58 % throttle and 2,000 m:** about 485 km/h indicated. A held helper turn there gave about 3°/s (radius about 2.9 km) and held height to ±1 m for 15 minutes.
 - **Leaving the server in flight logs the player's aircraft as destroyed** (`AType:3`, `AID:-1`, at its last position and height).
 - **The launcher once failed with "wget: unable to resolve host address s3.il2korea.com".** The local DNS timed out once; Restart in the error box went straight on.
+
+## Found on 2026-10-30 (standalone-file check L, game 1.005)
+
+- **The Mission Editor's File › Import From File re-indexes the imported group.** A standalone Air Tasking file indexed from 1 was imported into a mission whose indexes also started at 1.
+  - The editor renumbers the whole mission, not only the import. Right after the import, before any save, the tree showed the base map's group as 3 (1,126 in the file) and the imported group as 2,251 (1 in the file). The saved file has the base map at 3 to 2,249 and the imported group at 2,251 to 2,995. Whether the base map was renumbered on load or on import was not checked.
+  - No index was used twice. Every block, property, position and link (`Targets`, `Objects`, `LinkTrId`, `MisObjID`, `TarId`) was kept in both parts.
+  - The imported group kept its file coordinates.
+  - Check: `standalone_l_editor_import_renumbers_and_keeps_every_link`.
+- **The editor cuts a Group's name to 31 characters when it saves.** The six sortie copies' group names (48 and 52 characters) were cut. Every MCU name, and every other group name, was shorter and is unchanged. The app's own code matches copies on the `SNnn ` prefix, which survives the cut.
+- **The editor gives every Mission Objective its own `LCName` and `LCDesc` on save**, with the text `<no name>`, where the file had 0. The `AType:8` log line carries no text, so the trace breadcrumbs are unaffected.
+- The editor writes `90` where the file had `90.000`. The value is the same.
+- **The editor's own Save works on game 1.005** (`MissionResaver.exe` crashes there). Next to the `.Mission` and six language files, it writes a `.msnbin` and an empty `.list`.
+- **With a `.msnbin` next to the `.Mission`, the client host loads the `.msnbin`** (log header `MFile:Multiplayer/Dogfight/….msnbin`).
+- **A map icon with `LCName = 0` seems to show language id 0, the mission title, on the briefing map.** In flight L every front-line icon of the Map base map was labelled with the mission title. This was read from the screen only; no file or screenshot was kept. Earlier Map builds (A2, A3) have the same icons; it was not looked for there.
+- **Breadcrumbs still match after an import.** Replay matches an objective's `AType:8` line by position, so the standalone file's own `.trace.json` reads the log of the imported mission: no dead links. The logged `OBJID`s were A3's plus 1,996.
+- **Closing the game from the results screen** (`CloseMainWindow`) brought up a run of "CAllocTable … leaks detected … Break program?" boxes. Cancel on each (about eight) let the game exit normally. OK would break into a debugger.

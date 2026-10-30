@@ -335,3 +335,83 @@ fn write_p14_acceptance_a1() {
     let (written, map) = write_a1_files(Path::new("target/p14"));
     report_written(&written, &map);
 }
+
+/// P14 step 11 item 4 (risk l): the Air Tasking tab's standalone file,
+/// imported with the Mission Editor's File › Import From File into a mission
+/// built from the base map (`build_standalone_l` in `ui_tests.rs`), then saved
+/// by the editor. Run sheet: `handoff/sessions/2026-10-30-p14-standalone-l.md`.
+const L_DIR: &str = "handoff/p14-probes/standalone-l";
+const L_SAVED: &str = "P14_Standalone_L_20261030";
+
+/// The editor renumbered both parts of the mission and kept every block,
+/// property, position and link: the saved mission is the base map and the
+/// standalone group, each under one index map, with no index used twice. The
+/// standalone file's trace sidecar still matches the saved breadcrumbs, as
+/// Replay matches them, by position.
+#[test]
+fn standalone_l_editor_import_renumbers_and_keeps_every_link() {
+    use crate::airtask::testkit::{
+        EDITOR_GROUP_NAME_CHARS, Renumbering, assert_indexes_unique_and_links_resolve, assert_same_up_to_indexes,
+        read_locale_file,
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(L_DIR);
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let saved = crate::harvest::parse_mission_body(&read(&format!("{L_SAVED}.Mission"))).unwrap();
+    let saved_eng = read_locale_file(&dir.join(format!("{L_SAVED}.eng")));
+    let group = |stem: &str| crate::parser::parse_group_file(&read(&format!("{stem}.Group"))).unwrap();
+    let (base, air) = (group("P14_Standalone_L_Base"), group("P14_Standalone_L_Air"));
+
+    // The body is two blocks: the base map, then the imported group.
+    let top: Vec<_> = saved.children.iter().map(|c| (c.block_type.as_str(), c.name())).collect();
+    assert_eq!(top, [("Group", Some("Korea Base Map 1951-04-22")), ("Group", Some("Air Tasking"))]);
+    let (saved_base, saved_air) = (&saved.children[0], &saved.children[1]);
+    let unique = assert_indexes_unique_and_links_resolve(&saved, L_SAVED);
+
+    // Each part is its file, renumbered. The base map's texts moved with the
+    // builder's language offset; the standalone file has none (every id is 0).
+    let base_eng = read_locale_file(&dir.join("P14_Standalone_L_Base.eng"));
+    let base_map = assert_same_up_to_indexes(
+        &base,
+        saved_base,
+        Renumbering { locales: Some((&base_eng, &saved_eng)), editor_saved: true },
+    );
+    let no_texts = crate::locale::LocaleTable::default();
+    let air_map =
+        assert_same_up_to_indexes(&air, saved_air, Renumbering { locales: Some((&no_texts, &saved_eng)), editor_saved: true });
+    assert_eq!(base_map.len() + air_map.len(), unique.len(), "a block was added or lost");
+    // The two files share indexes (both start at 1), so the editor had to
+    // renumber: the saved file's indexes are unique (above).
+    assert!(base_map.keys().any(|k| air_map.contains_key(k)), "the two files do not share an index");
+    assert_eq!(air_map.get(&1), Some(&2251), "the Air Tasking group, as the editor's tree shows it");
+    // Only the six copies' group names were longer than the editor keeps.
+    let mut cut = Vec::new();
+    air.for_each(&mut |node| {
+        if let Some(name) = node.name()
+            && name.chars().count() > EDITOR_GROUP_NAME_CHARS
+        {
+            cut.push((node.block_type.clone(), name.chars().take(4).collect::<String>()));
+        }
+    });
+    let copies: Vec<_> = (1..=6).map(|n| ("Group".to_string(), format!("SN0{n}"))).collect();
+    assert_eq!(cut, copies, "names the editor cut");
+
+    // The trace sidecar: each breadcrumb is at its position in the saved file,
+    // and that position is unique among the saved objectives.
+    let map = crate::trace::read_trace_sidecar(&dir.join("P14_Standalone_L_Air.trace.json")).unwrap();
+    let mut objectives = Vec::new();
+    saved.for_each(&mut |node| {
+        if node.block_type == "MCU_TR_MissionObjective" {
+            let at = node.pos_xz().unwrap_or_else(|| panic!("objective {:?} without a position", node.index));
+            objectives.push((node.index.unwrap(), at));
+        }
+    });
+    assert_eq!(map.entries.len(), objectives.len(), "every objective is a breadcrumb");
+    for entry in &map.entries {
+        let at: Vec<_> = objectives
+            .iter()
+            .filter(|(_, (x, z))| (x - entry.pos.0).abs() <= 1.0 && (z - entry.pos.1).abs() <= 1.0)
+            .collect();
+        assert_eq!(at.len(), 1, "{}: one objective at its position", entry.source_name);
+        assert_eq!(Some(&at[0].0), air_map.get(&entry.breadcrumb_index), "{}", entry.source_name);
+    }
+}

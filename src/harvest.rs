@@ -192,6 +192,13 @@ fn parse_mission_with_header(text: &str) -> Result<(Il2Entity, MissionHeader), S
     Ok((root, header))
 }
 
+/// The blocks of a `.Mission` file without its header (tests read
+/// editor-saved missions with it).
+#[cfg(test)]
+pub(crate) fn parse_mission_body(text: &str) -> Result<Il2Entity, String> {
+    parse_mission_with_header(text).map(|(root, _)| root)
+}
+
 /// Remove the first top-level `name { … }` block. Returns the rest and the block text.
 fn cut_top_level_block(text: &str, name: &str) -> (String, Option<String>) {
     let bytes = text.as_bytes();

@@ -5190,3 +5190,99 @@ fn a3_map_build_matches_the_frozen_files_and_the_run_sheet() {
         .collect();
     assert_eq!(blocks, [&("Airfield".to_string(), "501".to_string())]);
 }
+
+// ---- P14 step 11 item 4: the standalone file (risk l; run sheet: handoff/sessions/2026-10-30-p14-standalone-l.md) ----
+
+/// The base map the editor imports the standalone file into.
+const L_BASE_STEM: &str = "P14_Standalone_L_Base";
+/// The Air Tasking tab's standalone file.
+const L_AIR_STEM: &str = "P14_Standalone_L_Air";
+
+/// A3's inputs (`a3_inputs`) with "Include in base map" off. Map Generate
+/// writes the base map, which then has no Air Tasking group; the Air Tasking
+/// tab's Generate File (Ctrl G) writes the standalone file, whose indexes start
+/// at 1 like the base map's. Returns both written roots.
+fn build_standalone_l(h: &mut Harness) -> (crate::ast::Il2Entity, crate::ast::Il2Entity) {
+    a3_inputs(h);
+    h.app.air_plan.include_in_base_map = false;
+    h.settle();
+    assert!(map_air_check(h).is_none(), "an unticked plan does not touch the base map");
+    assert!(!h.find("Generate Base Map").disabled);
+    let (base, _) = generate_map(h, &format!("{L_BASE_STEM}.Group"));
+    h.tab("Air Tasking");
+    assert!(!h.find("Generate File").disabled);
+    let path = h.out(&format!("{L_AIR_STEM}.Group"));
+    dialog::answer(vec![path.clone()]);
+    h.key_with(Key::G, CTRL);
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    let air = crate::parser::parse_group_file(&std::fs::read_to_string(path).unwrap()).unwrap();
+    (base, air)
+}
+
+#[test]
+#[ignore = "writes target/p14/P14_Standalone_L_Base.* and P14_Standalone_L_Air.*"]
+fn write_p14_standalone_l() {
+    let mut h = Harness::new("p14_standalone_l_write");
+    build_standalone_l(&mut h);
+    copy_flight_files(&h, L_BASE_STEM);
+    copy_flight_files(&h, L_AIR_STEM);
+    println!("{}", h.status());
+}
+
+/// The two files the editor check starts from, as the run sheet describes
+/// them: byte for byte the frozen copies; the base map has the air start and
+/// no Air Tasking; the standalone file is one `Air Tasking` group indexed from
+/// 1, so its indexes collide with the base map's; and, under that renumbering,
+/// it is A3's flown Air Tasking group (same inputs, same seed).
+#[test]
+fn standalone_l_build_matches_the_frozen_files_and_a3() {
+    let mut h = Harness::new("p14_standalone_l");
+    let (base, air) = build_standalone_l(&mut h);
+    let frozen = repo("handoff/p14-probes/standalone-l");
+    // The base map's and the standalone file's files in a folder, sorted.
+    let stem_files = |dir: &Path| -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+            .map(|f| f.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(&format!("{L_BASE_STEM}.")) || n.starts_with(&format!("{L_AIR_STEM}.")))
+            .collect();
+        names.sort();
+        names
+    };
+    let built = stem_files(&h.dir);
+    assert_eq!(built, stem_files(&frozen), "the build writes the frozen file set");
+    for name in &built {
+        assert!(
+            std::fs::read(h.dir.join(name)).unwrap() == std::fs::read(frozen.join(name)).unwrap(),
+            "{name}: the build no longer matches the frozen file"
+        );
+    }
+
+    // The base map: the air start, no Air Tasking, indexes from 1.
+    assert!(base.find_by_name("Air Tasking").is_none());
+    assert!(base.find_by_name(A3_AIR_START).is_some());
+    let mut base_indexes = Vec::new();
+    base.collect_indexes(&mut base_indexes);
+    // The standalone file: one Air Tasking group, indexes 1..=n.
+    assert_eq!((air.name(), air.index), (Some("Air Tasking"), Some(1)));
+    let mut air_indexes = Vec::new();
+    air.collect_indexes(&mut air_indexes);
+    air_indexes.sort_unstable();
+    assert_eq!(air_indexes, (1..=air_indexes.len() as i32).collect::<Vec<_>>());
+    crate::airtask::testkit::assert_links_resolve(&air);
+    let clashes = air_indexes.iter().filter(|i| base_indexes.contains(i)).count();
+    assert_eq!(clashes, air_indexes.len(), "every standalone index is also used by the base map");
+
+    // A3's flown Air Tasking group, renumbered. The Map writes the trace
+    // breadcrumbs at the base map's root and the standalone file inside its
+    // one group, so A3's are moved into its group, in file order, first.
+    let a3_dir = repo("handoff/p14-probes/acceptance-a3");
+    let a3 = crate::parser::parse_group_file(&std::fs::read_to_string(a3_dir.join(format!("{A3_STEM}.Group"))).unwrap())
+        .unwrap();
+    let mut a3_air = a3.find_by_name("Air Tasking").unwrap().clone();
+    let crumbs: Vec<_> = a3.children.iter().filter(|c| c.block_type == "MCU_TR_MissionObjective").cloned().collect();
+    let a3_trace = crate::trace::read_trace_sidecar(&a3_dir.join(format!("{A3_STEM}.trace.json"))).unwrap();
+    assert_eq!(crumbs.len(), a3_trace.entries.len(), "A3's breadcrumbs are its root objectives");
+    a3_air.children.extend(crumbs);
+    crate::airtask::testkit::assert_same_up_to_indexes(&a3_air, &air, crate::airtask::testkit::Renumbering::default());
+}
