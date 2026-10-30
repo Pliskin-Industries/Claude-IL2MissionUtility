@@ -121,13 +121,15 @@ pub(crate) enum Flight {
     TwoH,
     TwoI,
     TwoJ,
+    TwoK,
+    TwoL,
     Load,
 }
 
 impl Flight {
-    const ALL: [Self; 22] = [
+    const ALL: [Self; 24] = [
         Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG, Self::OneH, Self::OneJ,
-        Self::OneK, Self::OneL, Self::OneM, Self::OneP, Self::Two, Self::TwoB, Self::TwoC, Self::TwoD, Self::TwoE, Self::TwoF, Self::TwoG, Self::TwoH, Self::TwoI, Self::TwoJ, Self::Load,
+        Self::OneK, Self::OneL, Self::OneM, Self::OneP, Self::Two, Self::TwoB, Self::TwoC, Self::TwoD, Self::TwoE, Self::TwoF, Self::TwoG, Self::TwoH, Self::TwoI, Self::TwoJ, Self::TwoK, Self::TwoL, Self::Load,
     ];
 
     fn stem(self) -> &'static str {
@@ -153,6 +155,8 @@ impl Flight {
             Self::TwoH => "P14_Probe_2H",
             Self::TwoI => "P14_Probe_2I",
             Self::TwoJ => "P14_Probe_2J",
+            Self::TwoK => "P14_Probe_2K",
+            Self::TwoL => "P14_Probe_2L",
             Self::Load => "P14_Load_Probe",
         }
     }
@@ -180,6 +184,8 @@ impl Flight {
             Self::TwoH => RUN_SHEET_2H,
             Self::TwoI => RUN_SHEET_2I,
             Self::TwoJ => RUN_SHEET_2J,
+            Self::TwoK => RUN_SHEET_2K,
+            Self::TwoL => RUN_SHEET_2L,
             Self::Load => &[],
         }
     }
@@ -249,7 +255,7 @@ impl Flight {
                 script: "f80c10",
             }],
             Self::Zero | Self::OneA | Self::OneG | Self::OneH | Self::OneJ | Self::OneK
-                | Self::OneL | Self::OneM | Self::OneP | Self::Two | Self::TwoB | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::Load => &[],
+                | Self::OneL | Self::OneM | Self::OneP | Self::Two | Self::TwoB | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::TwoK | Self::TwoL | Self::Load => &[],
         }
     }
 }
@@ -1291,6 +1297,11 @@ pub(crate) const CUES: &[Cue] = &[
     Cue { flight: Flight::TwoJ, time_s: TWO_J_DELETE_S, text: "Flight 2J: KD KE KF pairs deleted. Expect KD and KF to go COLD by 13:00" },
     Cue { flight: Flight::TwoJ, time_s: TWO_J_POLL_END_S, text: "Flight 2J: leave the server at 13:30" },
     Cue { flight: Flight::TwoJ, time_s: TWO_J_CLOSE_S, text: "Flight 2J closed. Every aircraft has a Delete. End the mission normally" },
+    Cue { flight: Flight::TwoK, time_s: 0.0, text: "Flight 2K: spectate and press LCtrl+R. Leave the server at 07:00" },
+    Cue { flight: Flight::TwoK, time_s: TWO_K_ZONE_ON_S, text: "Flight 2K: K5A and K5D zones switched on" },
+    Cue { flight: Flight::TwoK, time_s: TWO_K_CLOSE_S, text: "Flight 2K closed. Every aircraft has a Delete. Leave the server" },
+    Cue { flight: Flight::TwoL, time_s: 0.0, text: "Flight 2L: spectate and press LCtrl+R. Leave the server at 12:30" },
+    Cue { flight: Flight::TwoL, time_s: TWO_L_CLOSE_S, text: "Flight 2L closed. Every aircraft has a Delete. Leave the server" },
 ];
 
 const A1_START_KM: (f64, f64) = (-30.0, 60.0);
@@ -3171,6 +3182,10 @@ impl Probe {
             for source in sources {
                 let node = source.index;
                 let event_type = source.event_type;
+                // A switch's Targets are switched, so a breadcrumb linked there
+                // would never log: switches go through observe_command.
+                assert!(!trace::is_switch(&source.block_type),
+                    "{}: observe a switch with observe_command (hand-wired) or through trace::instrument (decision 0043)", source.name);
                 let blocks = trace::breadcrumb(carrier, &mut self.map, &mut self.next_id, source);
                 let breadcrumb = self.map.entries.last()
                     .expect("trace::breadcrumb must register a trace map entry")
@@ -5130,6 +5145,17 @@ fn add_threshold_probe_side(p: &mut Probe, rows: &[ThresholdProbeCell]) {
     }
 }
 
+/// The cell's CLOSE deletes every aircraft in the cell, and a map icon marks it.
+fn add_cell_safety_close(p: &mut Probe, cell: Cell) {
+    let close = id(&p.root, &format!("{} CLOSE", cell.key));
+    for (index, entity) in block_ids(named(&p.root, cell.key), "MCU_TR_Entity").into_iter().enumerate() {
+        let delete = p.delete(&format!("{} aircraft {} CLOSE DELETE", cell.key, index + 1), &[entity]);
+        p.link(close, delete);
+    }
+    p.observe(close, &format!("{} safety close", cell.key));
+    p.icon(&format!("{} map", cell.key), cell.centre_km, COALITION_NATO);
+}
+
 fn build_threshold_probe() -> Probe {
     let mut p = Probe::new(Flight::TwoJ);
     for (&cell, row) in RUN_SHEET_2J.iter().zip(TWO_J_CELLS) {
@@ -5138,13 +5164,7 @@ fn build_threshold_probe() -> Probe {
         if row.threshold_prefix.is_none() {
             build_threshold_probe_switches(&mut p, row);
         }
-        let close = id(&p.root, &format!("{} CLOSE", cell.key));
-        for (index, entity) in block_ids(named(&p.root, cell.key), "MCU_TR_Entity").into_iter().enumerate() {
-            let delete = p.delete(&format!("{} aircraft {} CLOSE DELETE", cell.key, index + 1), &[entity]);
-            p.link(close, delete);
-        }
-        p.observe(close, &format!("{} safety close", cell.key));
-        p.icon(&format!("{} map", cell.key), cell.centre_km, COALITION_NATO);
+        add_cell_safety_close(&mut p, cell);
     }
     add_threshold_probe_side(&mut p, &TWO_J_CELLS[3..]);
     p.cues(Flight::TwoJ);
@@ -5154,6 +5174,12 @@ fn build_threshold_probe() -> Probe {
 fn build(flight: Flight) -> Probe {
     if flight == Flight::TwoJ {
         return build_threshold_probe();
+    }
+    if flight == Flight::TwoK {
+        return build_timer_pause_probe();
+    }
+    if flight == Flight::TwoL {
+        return build_paused_timer_fix_probe();
     }
     if flight == Flight::Load {
         return build_load_probe();
@@ -5271,6 +5297,121 @@ pub(crate) fn generate_probe_2i() -> Il2Entity {
 
 pub(crate) fn generate_probe_2j() -> Il2Entity {
     build(Flight::TwoJ).root
+}
+
+// Flight 2K (2026-10-29): what a switched-off running timer does. Flight A2
+// saw each zone's MISS WAIT fire 0.88 s after its ARM switched it back on, the
+// rest of its 1 s. K1-K3 time switched timers, K4 a failed random roll on a
+// running timer, K5 switched check zones (an AI pair flies in), and every
+// switch carries a breadcrumb fed by its input (decision 0043, K6).
+// Run sheet: handoff/sessions/2026-10-29-p14-flight-2k.md.
+const TWO_K_T0_S: f64 = 60.0;
+const TWO_K_TIMER_S: f64 = 10.0;
+const TWO_K_RANDOM_TIMERS: usize = 20;
+const TWO_K_RANDOM_PCT: u32 = 50;
+const TWO_K_RETRIGGER_S: f64 = 65.0;
+const TWO_K_ZONE_ON_S: f64 = 300.0;
+const TWO_K_CLOSE_S: f64 = 400.0;
+
+/// A timer or check zone, pulsed and switched at fixed mission seconds.
+struct SwitchScript {
+    cell: &'static str,
+    name: &'static str,
+    pulses: &'static [f64],
+    offs: &'static [f64],
+    ons: &'static [f64],
+}
+
+const TWO_K_TIMERS: &[SwitchScript] = &[
+    // Paused at 64 with 6 s left: 86 if it resumes, 90 if switch-on restarts it.
+    SwitchScript { cell: "K1", name: "K1A", pulses: &[TWO_K_T0_S], offs: &[64.0], ons: &[80.0] },
+    // Paused at 61 with 9 s left: 109 if it resumes.
+    SwitchScript { cell: "K1", name: "K1B", pulses: &[TWO_K_T0_S], offs: &[61.0], ons: &[100.0] },
+    // Off twice: 7 s left at 63, still 7 at 71, 5 left at 73: 95 if it resumes each time.
+    SwitchScript { cell: "K1", name: "K1C", pulses: &[TWO_K_T0_S], offs: &[63.0, 73.0], ons: &[71.0, 90.0] },
+    // Resumed at 80, pulsed at 82: 92 if a pulse restarts it, 86 if ignored.
+    SwitchScript { cell: "K2", name: "K2A", pulses: &[TWO_K_T0_S, 82.0], offs: &[64.0], ons: &[80.0] },
+    // Pulsed at 67 while off: 86 if that pulse is dropped.
+    SwitchScript { cell: "K3", name: "K3A", pulses: &[TWO_K_T0_S, 67.0], offs: &[64.0], ons: &[80.0] },
+];
+
+const TWO_K_ZONES: &[SwitchScript] = &[
+    // Pulsed while empty, off before the pair arrives, on with the pair inside.
+    SwitchScript { cell: "K5", name: "K5A", pulses: &[70.0, 330.0], offs: &[90.0], ons: &[TWO_K_ZONE_ON_S] },
+    // The control: pulsed while empty and left on, so it fires at the entry.
+    SwitchScript { cell: "K5", name: "K5B", pulses: &[70.0], offs: &[], ons: &[] },
+    // Never pulsed before 330: does an unpulsed zone fire at the entry?
+    SwitchScript { cell: "K5", name: "K5C", pulses: &[330.0], offs: &[], ons: &[] },
+    // Fires at 250 with the pair inside, off at 260, on at 300 (the INNER pattern).
+    SwitchScript { cell: "K5", name: "K5D", pulses: &[250.0], offs: &[260.0], ons: &[TWO_K_ZONE_ON_S] },
+    // Never pulsed, but switched off and on like K5A: does switching on alone make a zone check?
+    SwitchScript { cell: "K5", name: "K5E", pulses: &[], offs: &[90.0], ons: &[TWO_K_ZONE_ON_S] },
+];
+
+/// The AI pair for K5: flight 2J's KD approach (20 km south, then the orbit).
+const TWO_K_PAIR: ThresholdProbeCell = ThresholdProbeCell {
+    cell: "K5", country: COUNTRY_NATO_AI, route: ThresholdProbeRoute::Approach,
+    activate_s: TWO_K_T0_S, delete_s: TWO_K_CLOSE_S - 10.0, switches: &[], control_s: None,
+    threshold_prefix: None,
+};
+
+pub(crate) const RUN_SHEET_2K: &[Cell] = &[
+    Cell { key: "K1", centre_km: (60.0, 0.0), arm_s: TWO_K_T0_S, close_s: TWO_K_CLOSE_S },
+    Cell { key: "K2", centre_km: (60.0, 10.0), arm_s: TWO_K_T0_S, close_s: TWO_K_CLOSE_S },
+    Cell { key: "K3", centre_km: (60.0, 20.0), arm_s: TWO_K_T0_S, close_s: TWO_K_CLOSE_S },
+    Cell { key: "K4", centre_km: (60.0, 30.0), arm_s: TWO_K_T0_S, close_s: TWO_K_CLOSE_S },
+    Cell { key: "K5", centre_km: (230.0, 0.0), arm_s: TWO_K_T0_S, close_s: TWO_K_CLOSE_S },
+];
+
+/// Pulses and switches `target` as `script` says. Each switch is observed
+/// through the trace build's own switch path (decision 0043): flight 2K's K6.
+fn build_switch_script(p: &mut Probe, target: i32, script: &SwitchScript) {
+    p.pulses(script.name, script.pulses, target);
+    for (block, state, times) in [("MCU_Deactivate", "OFF", script.offs), ("MCU_Activate", "ON", script.ons)] {
+        for (index, &time_s) in times.iter().enumerate() {
+            let switch = p.switch_at(block, &format!("{} {state} {}", script.name, index + 1), time_s, &[target]);
+            p.observe_breadcrumb(switch);
+        }
+    }
+}
+
+fn build_timer_pause_probe() -> Probe {
+    let mut p = Probe::new(Flight::TwoK);
+    for &cell in RUN_SHEET_2K {
+        p.start_cell(cell);
+        for script in TWO_K_TIMERS.iter().filter(|script| script.cell == cell.key) {
+            let timer = p.relay(script.name, TWO_K_TIMER_S);
+            p.observe(timer, &format!("{} fired", script.name));
+            build_switch_script(&mut p, timer, script);
+        }
+        if cell.key == "K4" {
+            // Each timer is pulsed again while running; how a failed roll on
+            // that second pulse treats the running timer shows at +10 s.
+            let timers: Vec<_> = (1..=TWO_K_RANDOM_TIMERS).map(|number| {
+                let timer = p.relay(&format!("K4 {number:02}"), TWO_K_TIMER_S);
+                by_id_mut(&mut p.root, timer).set_property("Random", TWO_K_RANDOM_PCT.to_string());
+                p.observe(timer, &format!("K4 {number:02} fired"));
+                timer
+            }).collect();
+            p.at("K4 PULSE 1", TWO_K_T0_S, &timers);
+            p.at("K4 PULSE 2", TWO_K_RETRIGGER_S, &timers);
+        }
+        if cell.key == "K5" {
+            build_threshold_probe_pair(&mut p, &TWO_K_PAIR);
+            for script in TWO_K_ZONES.iter().filter(|script| script.cell == cell.key) {
+                let zone = p.zone(script.name, TWO_J_RADIUS_M, true, COALITION_NATO, cell.centre_km);
+                p.observe(zone, &format!("{} fired", script.name));
+                build_switch_script(&mut p, zone, script);
+            }
+            add_cell_safety_close(&mut p, cell);
+        }
+    }
+    p.cues(Flight::TwoK);
+    p
+}
+
+pub(crate) fn generate_probe_2k() -> Il2Entity {
+    build(Flight::TwoK).root
 }
 
 fn threshold_probe_arrival_s(row: &ThresholdProbeCell) -> f64 {
@@ -6402,6 +6543,247 @@ fn write_p14_probe_2j() {
     write_probe(Flight::TwoJ, TraceCarrier::default());
 }
 
+/// Flight 2K as its run sheet describes it: switched timers of 10 s, K4's
+/// random timers pulsed twice, 6 km zones, and every switch observed through
+/// its own input (decision 0043, K6), never through its Targets.
+#[test]
+fn flight_2k_switches_are_traced_through_their_inputs() {
+    let (root, map) = build(Flight::TwoK).traced(TraceCarrier::default());
+    let mut switches = 0;
+    for entry in map.entries.iter().filter(|e| trace::is_switch(&e.source_type)) {
+        switches += 1;
+        let switch = by_id(&root, entry.source_index);
+        assert!(!switch.targets.contains(&entry.breadcrumb_index), "{}", entry.source_name);
+        let at = id(&root, &format!("{} AT", entry.source_name));
+        assert_eq!(by_id(&root, at).targets, [entry.source_index, entry.breadcrumb_index], "{}", entry.source_name);
+    }
+    let scripted: usize = TWO_K_TIMERS.iter().chain(TWO_K_ZONES).map(|s| s.offs.len() + s.ons.len()).sum();
+    assert_eq!((switches, scripted), (18, 18));
+    for script in TWO_K_TIMERS {
+        assert_eq!(by_id(&root, id(&root, script.name)).property("Time"), Some("10"), "{}", script.name);
+    }
+    for number in 1..=TWO_K_RANDOM_TIMERS {
+        let timer = by_id(&root, id(&root, &format!("K4 {number:02}")));
+        assert_eq!((timer.property("Time"), timer.property("Random")), (Some("10"), Some("50")));
+    }
+    for script in TWO_K_ZONES {
+        assert_eq!(by_id(&root, id(&root, script.name)).property("Zone"), Some("6000"), "{}", script.name);
+    }
+    assert_eq!(root.count_block_type("Plane"), 2, "one AI pair, the only aircraft");
+}
+
+#[test]
+#[ignore = "writes target/p14 probe files"]
+fn write_p14_probe_2k() {
+    write_probe(Flight::TwoK, TraceCarrier::default());
+}
+
+// Flight 2L (decision 0044): the paused-timer fix in the game, no pilot. One
+// NATO Air Tasking area built by the real export (build_air_packs), watched by
+// an AI pair on 501, a player country (flight 2J: AI on a player country
+// triggers an area). The pair flies 2K's KD approach in and orbits inside r_in.
+// Budget 1. At the first pass the first zone entry wins and its one copy flies;
+// from then on every request is refused. The second zone entry (staggered) rolls,
+// is refused and cools down at every pass; each clock slot after the first (the
+// area is still COLD at 1 min) wins and is refused. Run sheet:
+// handoff/sessions/2026-10-29-p14-flight-2l.md.
+const TWO_L_PAIR_ACTIVATE_S: f64 = 10.0;
+const TWO_L_CLOSE_S: f64 = 780.0;
+const TWO_L_HOLD_S: f64 = 120.0;
+const TWO_L_COOLDOWN_MIN: f64 = 1.5;
+
+pub(crate) const RUN_SHEET_2L: &[Cell] = &[
+    Cell { key: "L1", centre_km: (120.0, 0.0), arm_s: TWO_L_PAIR_ACTIVATE_S, close_s: TWO_L_CLOSE_S },
+];
+
+const TWO_L_PAIR: ThresholdProbeCell = ThresholdProbeCell {
+    cell: "L1", country: super::threshold::DPRK_PLAYER_COUNTRY, route: ThresholdProbeRoute::Approach,
+    activate_s: TWO_L_PAIR_ACTIVATE_S, delete_s: TWO_L_CLOSE_S - 10.0, switches: &[], control_s: None,
+    threshold_prefix: None,
+};
+
+/// Extra MCUs traced in 2L beyond the Air Tasking trace roles: the clock's
+/// attempt chain (Q10) and the zone's gates (Q9).
+const TWO_L_EXTRA_TRACED: &[&str] = &[
+    "CLK N DRAW", "CLK N Randomizer:INPUT", "CLK N ATTEMPT END", "CLK N REROLL", "CLK N WIN",
+    "ZN01 PASS IN", "ZN01 MISS WAIT", "ZN01 DISARM",
+    "ZN02 PASS IN", "ZN02 MISS WAIT", "ZN02 DISARM",
+];
+
+fn two_l_plan(target: (f64, f64)) -> super::AirPlan {
+    use super::library::builtin_library;
+    use super::{AirPlan, AirSide, PoolEntry, TargetRef, TriggerMode, NATO};
+    let mut plan = AirPlan { library: builtin_library(), seed: 7, ..AirPlan::default() };
+    plan.budget.per_side = [1, 1];
+    plan.threshold.dwell_s = Some(60.0);
+    plan.threshold.hold_s = Some(TWO_L_HOLD_S);
+    plan.zone.chance_pct = 100;
+    plan.zone.cooldown_min = TWO_L_COOLDOWN_MIN;
+    let schedule = &mut plan.schedule[NATO];
+    schedule.first_slot_min = 1.0;
+    schedule.period_min = 2.0;
+    schedule.jitter_steps = 1;
+    schedule.jitter_step_min = 0.0;
+    schedule.quiet_pct = 0;
+    for mode in [TriggerMode::Zone, TriggerMode::Zone, TriggerMode::Clock, TriggerMode::Clock] {
+        let mut entry = PoolEntry::new(plan.library[1].id.clone(), TargetRef::Objective { side: AirSide::Nato, xz: target });
+        entry.mode = mode;
+        entry.runs = 1;
+        plan.pool.push(entry);
+    }
+    plan
+}
+
+fn build_paused_timer_fix_probe() -> Probe {
+    use super::{AirContext, WorldAabb};
+    let mut p = Probe::new(Flight::TwoL);
+    let cell = RUN_SHEET_2L[0];
+    p.start_cell(cell);
+    build_threshold_probe_pair(&mut p, &TWO_L_PAIR);
+    add_cell_safety_close(&mut p, cell);
+    p.cell = None;
+    let target = world(cell.centre_km);
+    let objectives = [target];
+    let front = [(target.0 + 40_000.0, 0.0), (target.0 + 40_000.0, 500_000.0)];
+    let ctx = AirContext {
+        east_objectives: &[],
+        nato_objectives: &objectives,
+        arrows: &[],
+        front: &front,
+        aabb: WorldAabb { x_min: 0.0, x_max: 450_000.0, z_min: 50_000.0, z_max: 500_000.0 },
+        date: (1950, 11, 15),
+    };
+    let mut packs = super::build_air_packs(&two_l_plan(target), &ctx)
+        .unwrap_or_else(|error| panic!("flight 2L Air Tasking: {error}"));
+    assert_eq!(packs.len(), 1, "flight 2L: one Air Tasking pack");
+    let (mut pack, _) = crate::duplicate::duplicate_template(&packs.remove(0).root, &mut p.next_id);
+    pack.for_each_mut(&mut |node| {
+        if node.block_type == "MCU_TR_MissionBegin" {
+            // Probe::new already owns the builder's Mission Begin name.
+            node.set_name("Air Tasking Translator Mission Begin");
+        }
+    });
+    let mut traced: BTreeSet<i32> = super::trace_role_indexes(&pack).into_iter().collect();
+    let decisions = trace::TraceSelect::decision_points();
+    pack.for_each(&mut |node| {
+        let random = node.block_type == "MCU_Timer"
+            && node.property("Random").and_then(|pct| pct.parse::<f64>().ok()).is_some_and(|pct| pct < 100.0);
+        let extra = node.name().is_some_and(|name| TWO_L_EXTRA_TRACED.contains(&name));
+        if decisions.block_types.contains(&node.block_type) || random || extra {
+            traced.insert(node.index.expect("2L trace source has an index"));
+        }
+        if node.block_type == "MCU_TR_ComplexTrigger" {
+            // The probe rule: a trigger's event relays are traced (THN01 ARM).
+            node.for_each(&mut |event| {
+                if event.block_type == "OnEvent" {
+                    traced.insert(event.property("TarId").and_then(|id| id.parse().ok()).expect("OnEvent TarId"));
+                }
+            });
+        }
+    });
+    p.root.children.push(pack);
+    for index in traced {
+        p.sources.push(p.source(index, None, None));
+    }
+    p.cues(Flight::TwoL);
+    p
+}
+
+pub(crate) fn generate_probe_2l() -> Il2Entity {
+    build(Flight::TwoL).root
+}
+
+#[test]
+#[ignore = "writes target/p14 probe files"]
+fn write_p14_probe_2l() {
+    write_probe(Flight::TwoL, TraceCarrier::default());
+}
+
+#[test]
+fn flight_2l_is_the_real_air_tasking_side_and_one_ai_pair() {
+    let root = generate_probe_2l();
+    assert_eq!(root.count_block_type("Plane"), 2 + 4 * 4, "one AI pair and four 4-ship copies");
+    let air = named(&root, "Air Tasking");
+    for entry in ["ZN01", "ZN02"] {
+        assert!(air.find_by_name(&format!("{entry} PASS IN")).is_some());
+        assert!(air.find_by_name(&format!("{entry} MISS WAIT OUT")).is_some());
+    }
+    assert_eq!(by_id(&root, id(&root, "CLK N WIN")).targets, [id(&root, "CLK N REROLL")]);
+    let (traced, map) = build(Flight::TwoL).traced(TraceCarrier::default());
+    for name in ["ZN01 CHANCE", "ZN01 MISS WAIT OUT", "ZN01 COOLDOWN", "ZN01 ARM", "CLK N ATTEMPT END", "CLK N REROLL", "THN01 INNER"] {
+        assert!(map.entries.iter().any(|entry| entry.source_name == name), "{name} is traced");
+    }
+    super::testkit::assert_links_resolve(&traced);
+}
+
+/// The run sheet's predictions: the walker on 2L with the pair's ideal track
+/// and the flown settings. The copy never reaches WP 1 here, so it holds the
+/// budget for the whole run, as it should in the game until its DONE HUB.
+#[test]
+fn flight_2l_predictions() {
+    use super::shell::test_support::ticks;
+    use super::testkit::{ScriptedTrack, WalkerConfig, WalkerInput, walk};
+    let root = generate_probe_2l();
+    let cell = RUN_SHEET_2L[0];
+    let input = WalkerInput {
+        until: ticks(TWO_L_CLOSE_S),
+        tracks: (0..TWO_J_PAIR_SIZE).map(|_| ScriptedTrack {
+            coalition: 1,
+            country: TWO_L_PAIR.country,
+            samples: (TWO_L_PAIR.activate_s as u32..=TWO_L_CLOSE_S as u32).map(|second| {
+                let point = threshold_probe_point(cell, &TWO_L_PAIR, f64::from(second));
+                (ticks(f64::from(second)), point.0, point.1)
+            }).collect(),
+        }).collect(),
+        ..WalkerInput::default()
+    };
+    let log = walk(&root, WalkerConfig::default().flown(), &input);
+    let at = |name: &str| -> Vec<f64> {
+        let index = id(&root, name);
+        log.pulses.iter().filter(|pulse| pulse.index == index).map(|pulse| pulse.t as f64 / 20.0).collect()
+    };
+    let passes = at("THN01 INNER");
+    let slots = at("CLK N SLOT OPEN");
+    // Printed for the run sheet.
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let sortie = &two_l_plan(world(cell.centre_km)).library[1];
+    writeln!(out, "2L sortie {}: {:.0} km/h, attack {:.0} s", sortie.id, sortie.wp_speed_kmh, sortie.attack_time_s).unwrap();
+    for name in ["THN01 INNER", "THN01 CLOSE DELAY", "ZN01 CHANCE", "ZN01 DENY WAIT", "ZN01 COOLDOWN", "ZN01 ARM", "ZN01 MISS WAIT",
+        "ZN01 MISS WAIT OUT", "ZN02 CHANCE", "ZN02 DENY WAIT", "ZN02 COOLDOWN", "ZN02 ARM", "ZN02 MISS WAIT", "ZN02 MISS WAIT OUT",
+        "SN01 START", "SN02 START", "SN03 START", "SN04 START", "EN01 EXHAUSTED", "EN02 EXHAUSTED",
+        "CLK N SLOT OPEN", "CLK N DRAW", "CLK N WIN", "CLK N ATTEMPT END", "CLK N REROLL", "CLK N Randomizer:INPUT"] {
+        writeln!(out, "2L {name}: {:?}", at(name)).unwrap();
+    }
+    assert!(passes.len() >= 5, "{passes:?}");
+    assert!(passes.windows(2).all(|pair| (pair[1] - pair[0] - TWO_L_HOLD_S).abs() < 1e-9), "{passes:?}");
+    // One zone entry wins at the first pass; the other rolls at every pass:
+    // each refusal's 90 s cooldown ends before the next pass.
+    let mut chances: Vec<_> = ["ZN01", "ZN02"].map(|entry| at(&format!("{entry} CHANCE"))).into_iter().collect();
+    chances.sort_by_key(Vec::len);
+    assert_eq!(chances[0], [passes[0] + 0.1]);
+    assert_eq!(chances[1].len(), passes.len());
+    for entry in ["ZN01", "ZN02"] {
+        assert!(at(&format!("{entry} MISS WAIT OUT")).is_empty(), "{entry}: MISS WAIT runs out into the closed relay");
+    }
+    // Slot 1 is COLD (before the first pass): it rerolls until SLOT CLOSE.
+    // Every later slot wins at its first draw; ATTEMPT END runs out 2 s later
+    // into the switched-off REROLL.
+    let draws = at("CLK N DRAW");
+    assert_eq!(draws.len(), slots.len());
+    let hot: Vec<_> = draws.iter().copied().filter(|&draw| draw > passes[0]).collect();
+    assert_eq!(hot.len(), draws.len() - 1);
+    assert_eq!(at("CLK N WIN").len(), hot.len());
+    let ends = at("CLK N ATTEMPT END");
+    let rerolls = at("CLK N REROLL");
+    for draw in &hot {
+        assert!(ends.contains(&(draw + 2.0)), "ATTEMPT END after the draw at {draw}");
+        assert!(rerolls.iter().all(|t| t < draw), "no reroll after the draw at {draw}");
+    }
+    let redraws: Vec<_> = at("CLK N Randomizer:INPUT").into_iter().filter(|&t| t > passes[0]).collect();
+    assert_eq!(redraws, hot);
+}
+
 fn build_load_probe() -> Probe {
     use super::assemble::{assemble_side, emit_side_logic};
     use super::library::builtin_library;
@@ -6564,8 +6946,10 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     // 0020/0022 remove 2E and 2G's eight files from the previous total of 56.
     // 2I (flown 2026-10-18) adds four files. 0025 freezes 2J, removing its
     // four flown files from the previous total of 56. 0038 freezes 2F, 2H
-    // and 2I, removing their twelve files: 52 - 12 = 40.
-    assert_eq!(compared, 40);
+    // and 2I, removing their twelve files: 52 - 12 = 40. 2K (built
+    // 2026-10-29, not yet flown) adds four: 44. 2L (built 2026-10-29) adds
+    // four: 48.
+    assert_eq!(compared, 48);
 }
 
 fn flown_formation_probe(flight: Flight) -> Il2Entity {
@@ -10555,6 +10939,8 @@ fn probe_files_parse_and_links_resolve() {
         (Flight::TwoH, generate_probe_2h()),
         (Flight::TwoI, generate_probe_2i()),
         (Flight::TwoJ, generate_probe_2j()),
+        (Flight::TwoK, generate_probe_2k()),
+        (Flight::TwoL, generate_probe_2l()),
         (Flight::Load, build(Flight::Load).root),
     ] {
         let (traced, _) = build(flight).traced(TraceCarrier::default());
@@ -13452,6 +13838,12 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::TwoJ, "KD", (230.0, 0.0), 60.0, 900.0),
         (Flight::TwoJ, "KE", (140.0, -45.0), 60.0, 900.0),
         (Flight::TwoJ, "KF", (230.0, -45.0), 60.0, 900.0),
+        (Flight::TwoK, "K1", (60.0, 0.0), 60.0, 400.0),
+        (Flight::TwoK, "K2", (60.0, 10.0), 60.0, 400.0),
+        (Flight::TwoK, "K3", (60.0, 20.0), 60.0, 400.0),
+        (Flight::TwoK, "K4", (60.0, 30.0), 60.0, 400.0),
+        (Flight::TwoK, "K5", (230.0, 0.0), 60.0, 400.0),
+        (Flight::TwoL, "L1", (120.0, 0.0), 10.0, 780.0),
     ];
     let expected_cues = [
         (
@@ -13651,6 +14043,11 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::TwoJ, 600.0, "Flight 2J: KD KE KF pairs deleted. Expect KD and KF to go COLD by 13:00"),
         (Flight::TwoJ, 780.0, "Flight 2J: leave the server at 13:30"),
         (Flight::TwoJ, 900.0, "Flight 2J closed. Every aircraft has a Delete. End the mission normally"),
+        (Flight::TwoK, 0.0, "Flight 2K: spectate and press LCtrl+R. Leave the server at 07:00"),
+        (Flight::TwoK, 300.0, "Flight 2K: K5A and K5D zones switched on"),
+        (Flight::TwoK, 400.0, "Flight 2K closed. Every aircraft has a Delete. Leave the server"),
+        (Flight::TwoL, 0.0, "Flight 2L: spectate and press LCtrl+R. Leave the server at 12:30"),
+        (Flight::TwoL, 780.0, "Flight 2L closed. Every aircraft has a Delete. Leave the server"),
     ];
     assert_eq!(CUES.len(), expected_cues.len());
     for (&cue, &(flight, time_s, text)) in CUES.iter().zip(&expected_cues) {

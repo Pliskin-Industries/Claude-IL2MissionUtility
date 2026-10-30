@@ -302,7 +302,7 @@ pub(crate) fn build_side(
         ("SLOT OPEN", open),
         ("SLOT OPEN OFF", vec![ids["SLOT OPEN"]]),
         ("NO REPEAT", all("LAST")),
-        ("REROLL ON", vec![ids["REROLL"], ids["ATTEMPT END"]]),
+        ("REROLL ON", vec![ids["REROLL"]]),
         ("SLOT CLOSE", vec![ids["REROLL OFF"]]),
         ("REROLL OFF", vec![ids["REROLL"]]),
         (
@@ -318,7 +318,7 @@ pub(crate) fn build_side(
         ("ReOpen Outputs", all("OUT")),
         ("ATTEMPT END", vec![ids["REROLL"]]),
         ("REROLL", vec![ids["Randomizer:INPUT"], ids["ATTEMPT END"]]),
-        ("WIN", vec![ids["ATTEMPT END"], ids["REROLL"]]),
+        ("WIN", vec![ids["REROLL"]]),
     ] {
         by_id_mut(&mut root, ids[from]).unwrap().set_targets(to);
     }
@@ -362,8 +362,10 @@ pub(crate) fn build_side(
                 .collect(),
         );
     }
-    // J1 cancels ATTEMPT END directly; REROLL also rejects a late expiry if
-    // that timer runs on. SLOT OPEN re-arms both before DRAW can reach either.
+    // ATTEMPT END is never switched: switching a running timer off only
+    // pauses it (flight 2K). After WIN or SLOT CLOSE it runs out into the
+    // switched-off REROLL, which drops it (the D11 relay, decision 0044).
+    // SLOT OPEN's REROLL ON switches REROLL on before DRAW restarts it.
     registry.init_off.push(ids["REROLL"]);
     registry.mission_begin.push(ids["FIRST"]);
     *logic = registry;
@@ -515,11 +517,13 @@ pub(crate) mod tests {
             (SameTickDelivery::Batched, false),
             (SameTickDelivery::Batched, true),
         ]
-        .map(|(same_tick_delivery, reverse_targets)| WalkerConfig {
-            same_tick_delivery,
-            reverse_targets,
-            deactivate_running_timer: DeactivateRunningTimer::Cancels,
-            ..WalkerConfig::default()
+        .map(|(same_tick_delivery, reverse_targets)| {
+            WalkerConfig {
+                same_tick_delivery,
+                reverse_targets,
+                ..WalkerConfig::default()
+            }
+            .flown()
         })
     }
 
@@ -878,16 +882,9 @@ pub(crate) mod tests {
                     clock_id(&h, "ATTEMPT END"),
                 ],
             ),
-            (
-                "WIN",
-                "MCU_Deactivate",
-                vec![clock_id(&h, "ATTEMPT END"), clock_id(&h, "REROLL")],
-            ),
-            (
-                "REROLL ON",
-                "MCU_Activate",
-                vec![clock_id(&h, "REROLL"), clock_id(&h, "ATTEMPT END")],
-            ),
+            // Nothing switches ATTEMPT END (decision 0044).
+            ("WIN", "MCU_Deactivate", vec![clock_id(&h, "REROLL")]),
+            ("REROLL ON", "MCU_Activate", vec![clock_id(&h, "REROLL")]),
             ("ATTEMPT END", "MCU_Timer", vec![clock_id(&h, "REROLL")]),
             ("SLOT CLOSE", "MCU_Timer", vec![clock_id(&h, "REROLL OFF")]),
             ("REROLL OFF", "MCU_Deactivate", vec![clock_id(&h, "REROLL")]),
@@ -1893,18 +1890,19 @@ pub(crate) mod tests {
         plan.pool[first].runs = 1;
         let h = harness(&plan, 60.0);
         let used = &h.copies.entries[first];
-        // This scenario scripts the zone start. Disarm its PASS timers before
-        // they can launch early or consume the clock's seeded random sequence.
+        // This scenario scripts the zone start. Disarm the zone (DISARM shuts
+        // PASS IN) before a pass can launch early or consume the clock's
+        // seeded random sequence.
         let zone_disarm = named(&h.root, &format!("ZN{:02} DISARM", used.number))
             .index
             .unwrap();
         for config in configs() {
-            for cancellation in [
+            for deactivate in [
                 DeactivateRunningTimer::RunsOn,
-                DeactivateRunningTimer::Cancels,
+                DeactivateRunningTimer::Pauses,
             ] {
                 let config = WalkerConfig {
-                    deactivate_running_timer: cancellation,
+                    deactivate_running_timer: deactivate,
                     ..config
                 };
                 let log = run(
@@ -1920,7 +1918,7 @@ pub(crate) mod tests {
                 assert_eq!(times(&log, used.copies[0].shell.start), [ticks(600.5)]);
                 assert_eq!(times(&log, used.exhausted), [ticks(600.5)]);
                 assert!(times(&log, entry_id(&h, used.number, "GO")).is_empty());
-                let expected = if cancellation == DeactivateRunningTimer::RunsOn {
+                let expected = if deactivate == DeactivateRunningTimer::RunsOn {
                     vec![ticks(600.9)]
                 } else {
                     vec![]
@@ -1932,7 +1930,7 @@ pub(crate) mod tests {
                 assert_eq!(gos(&log, &h).len(), 1);
                 assert_eq!(times(&log, clock_id(&h, "WIN")), [launches[1].t]);
                 assert!(launches[1].t > ticks(600.9));
-                if cancellation == DeactivateRunningTimer::RunsOn {
+                if deactivate == DeactivateRunningTimer::RunsOn {
                     assert!(times(&log, clock_id(&h, "REROLL")).contains(&ticks(602.9)));
                 }
             }
@@ -2071,14 +2069,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn clock_late_attempt_end_after_win_does_not_reroll() {
-        // One short slot isolates a late RunsOn expiry after its winner has shut REROLL.
+    fn clock_attempt_end_after_win_runs_out_into_reroll_off() {
+        // One short slot: WIN leaves ATTEMPT END running (switching it off would
+        // only pause it, flight 2K). It runs out into the switched-off REROLL.
         let h = harness(&fast_plan(1, 1), 60.0);
         for config in configs() {
-            let config = WalkerConfig {
-                deactivate_running_timer: DeactivateRunningTimer::RunsOn,
-                ..config
-            };
             // Seed 2 preserves the common fixture; this single-entry draw is certain to win.
             let log = run(&h, config, 2, 100.0, &[1], &[]);
             assert_slots(&h, &log, &[80.1]);
@@ -2094,5 +2089,111 @@ pub(crate) mod tests {
             assert!(times(&log, clock_id(&h, "REROLL")).is_empty());
             assert_eq!(times(&log, clock_id(&h, "Randomizer:INPUT")), [ticks(80.4)]);
         }
+    }
+
+    #[test]
+    fn clock_two_won_slots_in_a_row_leave_no_attempt_end_paused() {
+        // Flight 2L's clock check: slot 2 follows a won slot 1. The ATTEMPT END
+        // left running by WIN runs out into the switched-off REROLL, so nothing
+        // is left paused for the next slot. (Under the old wiring the paused
+        // remainder was at least 1 s, so DRAW restarted it 0.3 s after REROLL
+        // ON resumed it; the fault showed only as ATTEMPT END never running
+        // out.) Each slot also draws first at DRAW, and every later draw is a
+        // REROLL.
+        let h = harness(&fast_plan(2, 2), 60.0);
+        let (attempt, _) = slot_timing(&h.copies.entries);
+        let mut both_won = 0;
+        for seed in 0..20 {
+            for config in configs() {
+                let log = run(&h, config, seed, 400.0, &[1, 2], &[]);
+                assert_slots(&h, &log, &[80.1, 260.1]);
+                assert_wins_match_requests(&h, &log);
+                let [draws, ends, rerolls, wins] =
+                    ["Randomizer:INPUT", "ATTEMPT END", "REROLL", "WIN"]
+                        .map(|role| times(&log, clock_id(&h, role)));
+                for slot in [80.1, 260.1] {
+                    let open = ticks(slot);
+                    let in_slot = |list: &[Tick]| -> Vec<Tick> {
+                        list.iter()
+                            .copied()
+                            .filter(|t| (open..open + ticks(170.0)).contains(t))
+                            .collect()
+                    };
+                    let slot_draws = in_slot(&draws);
+                    let why = format!("seed {seed}, slot {slot}, {config:?}");
+                    assert_eq!(slot_draws[0], open + ticks(0.3), "{why}");
+                    assert_eq!(slot_draws[1..], in_slot(&rerolls), "{why}");
+                    if let [win] = in_slot(&wins)[..] {
+                        let last = *slot_draws.last().unwrap();
+                        assert!(last < win, "{why}");
+                        assert_eq!(
+                            in_slot(&ends).last(),
+                            Some(&(last + ticks(attempt))),
+                            "{why}"
+                        );
+                    }
+                }
+                both_won += usize::from(wins.len() == 2);
+            }
+        }
+        assert!(both_won > 0);
+    }
+
+    #[test]
+    fn clock_paused_random_cannot_fire_out_of_turn() {
+        // Q11 (flight 2K's K4). Three entries share one area, cold in slot 1:
+        // the first RANDOM to fire takes COLD, and AREA OUT pauses the later
+        // RANDOMs mid-run. The area is hot by slot 2: RANDOM ON resumes them and
+        // DRAW re-rolls them 0.3 s later. A failed re-roll stops a running
+        // timer, so every RANDOM fires a whole delay after a draw.
+        let h = harness(&fast_plan(3, 1), 60.0);
+        let (x, z) = h.copies.areas[0];
+        let tracks = vec![ScriptedTrack {
+            country: threshold::DPRK_PLAYER_COUNTRY,
+            coalition: 1,
+            samples: vec![(ticks(150.0), x + 1000.0, z)],
+        }];
+        let delays: Vec<_> = h
+            .copies
+            .entries
+            .iter()
+            .map(|entry| {
+                let random = entry_id(&h, entry.number, "RANDOM");
+                (
+                    random,
+                    ticks(number(by_id(&h.root, random), "Time").unwrap()),
+                )
+            })
+            .collect();
+        let longest = delays.iter().map(|&(_, delay)| delay).max().unwrap();
+        let mut paused = 0;
+        for seed in 0..40 {
+            for config in configs() {
+                let input = WalkerInput {
+                    seed,
+                    until: ticks(300.0),
+                    tracks: tracks.clone(),
+                    ..WalkerInput::default()
+                };
+                let log = walk(&h.root, config, &input);
+                let draws = times(&log, clock_id(&h, "Randomizer:INPUT"));
+                for &(random, delay) in &delays {
+                    for t in times(&log, random) {
+                        assert!(
+                            draws.iter().any(|&draw| draw + delay == t),
+                            "seed {seed}, {config:?}: RANDOM {random} at tick {t} is out of turn"
+                        );
+                    }
+                }
+                // Coverage: slot 1 went cold before the last RANDOM ran out.
+                let first_cold = delays
+                    .iter()
+                    .filter(|&&(random, _)| times(&log, random).iter().any(|&t| t < ticks(200.0)))
+                    .map(|&(_, delay)| delay)
+                    .min();
+                paused += usize::from(first_cold.is_some_and(|delay| delay < longest));
+            }
+        }
+        assert!(paused > 0);
     }
 }

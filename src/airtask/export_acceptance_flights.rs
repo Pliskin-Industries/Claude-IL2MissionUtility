@@ -17,6 +17,8 @@ const K14_AIRFIELD: &str = "K-14_Kimpo_AF";
 const WAVE: &str = "NATO Fighters Wave 1 pack 1";
 const WAVE_PLANES: usize = 18;
 const A1_STEM: &str = "P14_Acceptance_A1";
+/// Flight A2's frozen files (built by the Map tab; see the A2 test below).
+const A2_STEM: &str = "P14_Acceptance_A2";
 /// The fallback NATO air start (`--spawns`): 20 km south of K14 at 500 m,
 /// heading north (YOri 0 is north, +X), so a level pass crosses the area centre.
 const AIR_START: (f64, f64) = (K14.0 - 20_000.0, K14.1);
@@ -245,6 +247,48 @@ fn frozen_acceptance_files_parse_and_links_resolve() {
     // A1's spawn list is still what the A1 writer produces.
     let spawns = frozen.join("acceptance-a1").join(format!("{A1_STEM}.spawns.json"));
     assert_eq!(std::fs::read_to_string(spawns).unwrap(), a1_spawns_json());
+}
+
+/// Flight A2: built by the Map tab after decision 0038 and flown on
+/// 2026-10-29, so frozen as flown. Its writer and its build-facts check are UI
+/// tests (`ui_tests::write_p14_acceptance_a2`,
+/// `a2_map_build_watches_three_nato_areas_for_dprk_players`).
+#[test]
+fn frozen_a2_files_parse_and_links_resolve() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/acceptance-a2");
+    let root = crate::airtask::testkit::assert_frozen_files_resolve(&dir.join(A2_STEM));
+    // After 0038, DONE HUB OFF also switches off the copy's timers and zones.
+    let mut offs = 0;
+    root.for_each(&mut |node| {
+        if node.name().is_some_and(|name| name.ends_with(" DONE HUB OFF")) {
+            assert!(node.targets.len() > 1, "A2: DONE HUB OFF closes only its hub");
+            offs += 1;
+        }
+    });
+    assert_eq!(offs, 9, "A2: nine NATO copies");
+    // One DPRK (501) Yak-9P air start, outside every area's R (twice the
+    // entry trigger's radius), so the player is seen flying in.
+    let spawns = std::fs::read_to_string(dir.join(format!("{A2_STEM}.spawns.json"))).unwrap();
+    assert!(spawns.contains("\"country\":501,") && spawns.contains("\"script\":\"yak9p\""), "{spawns}");
+    // The list is one flat JSON object (no serde_json here): read a number field.
+    let number = |key: &str| -> f64 {
+        let label = format!("\"{key}\":");
+        let start = spawns.find(&label).unwrap_or_else(|| panic!("A2 spawn list: no {key}")) + label.len();
+        let tail = &spawns[start..];
+        let end = tail.find([',', '}']).unwrap_or_else(|| panic!("A2 spawn list: {key} unterminated"));
+        tail[..end].trim().parse().unwrap_or_else(|_| panic!("A2 spawn list: {key} is not a number"))
+    };
+    let spawn = (number("x"), number("z"));
+    let mut triggers = 0;
+    root.for_each(&mut |node| {
+        if node.block_type == "MCU_TR_ComplexTrigger" {
+            triggers += 1;
+            assert_eq!(node.property("Country"), Some("501"), "A2: the areas watch DPRK players");
+            let radius: f64 = node.property("Radius").unwrap().parse().unwrap();
+            assert!(distance(spawn, node.pos_xz().unwrap()) > 2.0 * radius, "A2: spawn inside R");
+        }
+    });
+    assert_eq!(triggers, 3, "A2: three NATO areas");
 }
 
 #[test]

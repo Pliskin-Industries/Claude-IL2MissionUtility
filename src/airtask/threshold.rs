@@ -219,7 +219,7 @@ mod tests {
     use super::*;
     use crate::airtask::assemble::emit_side_logic;
     use crate::airtask::library::{by_id, nodes, number};
-    use crate::airtask::shell::test_support::{active, mcus, named, ticks, times};
+    use crate::airtask::shell::test_support::{active, flown_configs, mcus, named, ticks, times};
     use crate::airtask::testkit::*;
     use std::collections::BTreeSet;
 
@@ -730,21 +730,8 @@ mod tests {
     }
 
     fn game_config() -> WalkerConfig {
-        // Flight 0 J1, also used by the flight 2 probe walk schedules.
-        WalkerConfig {
-            deactivate_running_timer: DeactivateRunningTimer::Cancels,
-            ..WalkerConfig::default()
-        }
-    }
-
-    fn game_configs() -> Vec<WalkerConfig> {
-        crate::airtask::shell::test_support::configs()
-            .into_iter()
-            .map(|config| WalkerConfig {
-                deactivate_running_timer: DeactivateRunningTimer::Cancels,
-                ..config
-            })
-            .collect()
+        // The timer facts flown in flight 2K.
+        WalkerConfig::default().flown()
     }
 
     fn track(
@@ -822,7 +809,7 @@ mod tests {
     #[test]
     fn threshold_one_zone_loiter_passes() {
         let h = default_harness();
-        for config in game_configs() {
+        for config in flown_configs() {
             for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
                 let config = WalkerConfig {
                     same_tick_delivery,
@@ -854,7 +841,7 @@ mod tests {
     #[test]
     fn threshold_one_zone_straight_pass_fails() {
         let h = default_harness();
-        for config in game_configs() {
+        for config in flown_configs() {
             let log = run(
                 &h,
                 config,
@@ -925,9 +912,9 @@ mod tests {
     #[test]
     fn threshold_hot_and_cold_are_never_both_off() {
         let h = default_harness();
-        for config in game_configs() {
+        for config in flown_configs() {
             let log = run(&h, config, 400.0, vec![leave_and_return()]);
-            assert_passes(&h, &log, &[61.1, 310.1]);
+            assert_passes(&h, &log, &[61.1, 310.0]);
             assert_eq!(times(&log, id(&h, "COLD ON")), [ticks(183.15)]);
             for (&hot, &cold) in h.logic.hot_consumers[&1]
                 .iter()
@@ -947,7 +934,7 @@ mod tests {
     #[test]
     fn threshold_pass_and_timeout_in_one_tick_is_a_pass() {
         let h = default_harness();
-        for config in game_configs() {
+        for config in flown_configs() {
             for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
                 let config = WalkerConfig {
                     same_tick_delivery,
@@ -1002,8 +989,8 @@ mod tests {
         let late_pass_id = late_pass.index.unwrap();
         h.root.children.push(late_pass);
         let input = WalkerInput {
-            // Include HOLD's expiry after a pass, before that recheck closes.
-            until: ticks(183.0),
+            // Include HOLD's recheck after a pass (183 s), before it closes.
+            until: ticks(183.1),
             tracks: vec![track(DPRK_PLAYER_COUNTRY, 1, 183, |s| {
                 if s == 1 || s >= 63 {
                     orbit(s)
@@ -1016,7 +1003,7 @@ mod tests {
             pulses: vec![(ticks(61.05), late_pass_id.into())],
             ..WalkerInput::default()
         };
-        for config in game_configs() {
+        for config in flown_configs() {
             for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
                 let config = WalkerConfig {
                     same_tick_delivery,
@@ -1037,8 +1024,15 @@ mod tests {
                 );
                 assert_eq!(times(&log, id(&h, "DWELL")), [ticks(61.0)], "{config:?}");
                 assert_eq!(times(&log, id(&h, "TRIGGER")), [ticks(1.0)], "{config:?}");
+                // The next check (HOLD at 183 s) is the walk's last tick.
+                let before_recheck = |role| {
+                    times(&log, id(&h, role))
+                        .into_iter()
+                        .filter(|&t| t < ticks(183.0))
+                        .count()
+                };
                 assert_eq!(
-                    times(&log, id(&h, "HOT ON")).len() + times(&log, id(&h, "CLOSE DELAY")).len(),
+                    before_recheck("HOT ON") + before_recheck("CLOSE DELAY"),
                     1,
                     "exactly one outcome for the 63 s check, {config:?}"
                 );
@@ -1065,9 +1059,12 @@ mod tests {
                         assert_cold(&h, &log);
                     }
                     SameTickDelivery::Batched => {
-                        // INNER still passes; PASS OFF cancels the running
-                        // CLOSE DELAY when deactivations commit at tick end.
-                        assert_passes(&h, &log, &[63.0]);
+                        // INNER still passes; PASS OFF pauses the running
+                        // CLOSE DELAY when deactivations commit at tick end
+                        // (decision 0044's one-tick edge). At 183 s CHECK ON
+                        // resumes it, the armed INNER passes at the switch-on,
+                        // and PASS OFF pauses it again.
+                        assert_passes(&h, &log, &[63.0, 183.0]);
                         assert_eq!(times(&log, id(&h, "HOLD")), [ticks(183.0)], "{config:?}");
                         for role in [
                             "CLOSE DELAY",
@@ -1098,14 +1095,14 @@ mod tests {
     #[test]
     fn threshold_stays_hot_through_a_successful_recheck() {
         let h = default_harness();
-        for config in game_configs() {
+        for config in flown_configs() {
             let log = run(
                 &h,
                 config,
                 600.0,
                 vec![track(DPRK_PLAYER_COUNTRY, 1, 600, orbit)],
             );
-            assert_passes(&h, &log, &[61.1, 181.2, 301.3, 421.4, 541.5]);
+            assert_passes(&h, &log, &[61.1, 181.1, 301.1, 421.1, 541.1]);
             assert!(times(&log, id(&h, "COLD ON")).is_empty());
             for snapshot in log.snapshots.iter().filter(|s| s.t >= ticks(61.1)) {
                 assert!(
@@ -1120,9 +1117,9 @@ mod tests {
     #[test]
     fn threshold_pass_leave_pass_again() {
         let h = default_harness();
-        for config in game_configs() {
+        for config in flown_configs() {
             let log = run(&h, config, 400.0, vec![leave_and_return()]);
-            assert_passes(&h, &log, &[61.1, 310.1]);
+            assert_passes(&h, &log, &[61.1, 310.0]);
             assert_eq!(times(&log, id(&h, "ARM")), [ticks(1.0), ticks(250.0)]);
             assert_eq!(times(&log, id(&h, "CLOSE DELAY")), [ticks(183.15)]);
             assert_eq!(times(&log, id(&h, "REARM ON")), [ticks(183.15)]);
@@ -1133,7 +1130,7 @@ mod tests {
     #[test]
     fn threshold_second_plane_after_close_does_not_pass() {
         let h = default_harness();
-        for config in game_configs() {
+        for config in flown_configs() {
             let log = run(
                 &h,
                 config,
@@ -1147,7 +1144,7 @@ mod tests {
             );
             assert_eq!(times(&log, id(&h, "ARM")), [ticks(1.0), ticks(64.0)]);
             assert_eq!(times(&log, id(&h, "CLOSE DELAY")), [ticks(63.05)]);
-            assert_passes(&h, &log, &[124.1]); // A new, full dwell is mandatory.
+            assert_passes(&h, &log, &[124.0]); // A new, full dwell is mandatory.
         }
     }
 
@@ -1157,7 +1154,7 @@ mod tests {
         // Latches use DepthFirst, as the existing shell/budget game scenarios
         // do. Batched deliberately defers switches and does not latch two
         // same-tick inputs (walker_same_tick_latch_and_target_order).
-        for config in game_configs() {
+        for config in flown_configs() {
             let log = run(
                 &h,
                 config,
@@ -1168,14 +1165,14 @@ mod tests {
                 ],
             );
             assert_eq!(times(&log, id(&h, "ARM")), [ticks(1.0)]);
-            assert_passes(&h, &log, &[61.1, 181.2, 301.3, 421.4, 541.5]);
+            assert_passes(&h, &log, &[61.1, 181.1, 301.1, 421.1, 541.1]);
             assert_eq!(
                 times(&log, id(&h, "HOLD")),
-                [181.1, 301.2, 421.3, 541.4].map(ticks)
+                [181.1, 301.1, 421.1, 541.1].map(ticks)
             );
             assert_eq!(
                 times(&log, id(&h, "CHECK ON")),
-                [61.0, 181.1, 301.2, 421.3, 541.4].map(ticks)
+                [61.0, 181.1, 301.1, 421.1, 541.1].map(ticks)
             );
         }
     }
@@ -1183,7 +1180,7 @@ mod tests {
     #[test]
     fn threshold_plane_inside_at_load_waits_for_reentry() {
         let h = default_harness();
-        for config in game_configs() {
+        for config in flown_configs() {
             for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
                 let config = WalkerConfig {
                     same_tick_delivery,
@@ -1250,7 +1247,7 @@ mod tests {
                     track(ai, 1, 400, |s| orbit(s + 10)),
                 ],
             );
-            assert_passes(&h, &log, &[61.1, 181.2, 301.3]);
+            assert_passes(&h, &log, &[61.1, 181.1, 301.1]);
             assert!(times(&log, id(&h, "COLD ON")).is_empty());
             assert!(
                 h.logic.hot_consumers[&1]

@@ -351,7 +351,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::airtask::budget;
     use crate::airtask::library::by_id;
-    use crate::airtask::shell::test_support::{active, configs, named, ticks, times};
+    use crate::airtask::shell::test_support::{
+        active, flown_configs, named, ticks, times,
+    };
     use crate::airtask::testkit::*;
     use crate::airtask::{AirBudget, PoolEntry, builtin_library};
     use crate::mapclip::WorldAabb;
@@ -664,7 +666,7 @@ pub(crate) mod tests {
                     .collect(),
                 ..WalkerInput::default()
             };
-            for config in configs() {
+            for config in flown_configs() {
                 let log = walk(&root, config, &script);
                 for (i, copy) in flat.iter().enumerate() {
                     assert_eq!(times(&log, copy.shell.start), [ticks(2.0 + i as f64 * 2.0)]);

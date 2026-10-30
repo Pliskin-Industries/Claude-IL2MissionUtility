@@ -986,6 +986,89 @@ Second stage of the acceptance test (decision 0036; run sheet, predictions P1–
 - **The player is at risk from the raid it calls in**: Il-10 gunners kill a fighter that orbits over their target at their height.
 - Not shown: the single extension and the turn for home (P9), a budget refusal (P13), a Yak copy, exhaustion.
 
+## Flight A2 (a DPRK player through three NATO areas: refusal, COLD end, the single extension; the first app-made mission) — 2026-10-29, two runs, Tacview recorded
+
+Third stage of the acceptance test (decision 0036; run sheet, predictions P1–P17 and the full table: `handoff/sessions/2026-10-28-p14-acceptance-a2.md`). The mission is `P14_Acceptance_A2`, frozen in `handoff/p14-probes/acceptance-a2/`:
+- built by Map Generate with Trace build on;
+- three NATO areas 15 km apart, R 16 km, zone chance 100 %, cooldown 5 min, NATO budget 2;
+- a Yak-9P air start on 501.
+
+Run 1 (`real_48`) crashed 2 min after the spawn, before any area: the first LShift+A switched off the air start's helper. Run 2 (`real_47`, session `2026-10-29_09-42-07`) is the flight below.
+
+| Prediction | Flown |
+|---|---|
+| HOT and COLD on the straight leg | `THN01/02/03 INNER` 217.54, 312.76, 414.12; `THN01/02 CLOSE DELAY` at INNER + 162.04 each |
+| **Budget refusal** (first in the game) | `ZN03 FIRE` 414.26 with no START, `ZN03 DENY WAIT` + 1.00 s, while SN01 and SN04 flew |
+| **COLD end** (first in the game) | `SN04 ON STATION` = Zone IN + 900.50 with `COLD` and `DONE HUB` in one tick, no EXTEND; SN01 ended by `Zone Out` (431.64) when the orbit's start took the player over 35 km from A |
+| Grant after a deletion | `SN07 START` 1,305.66 at C's pass, after SN01's deletion |
+| **The single extension** (first in the game) | `SN07 ON STATION` 2,072.22 (C HOT), `SN07 EXTEND` + `DONE HUB` 2,672.22 (+ 600.00), deleted + 60.60 |
+| Decision 0038 | nothing from a copy after its DONE HUB but `DELETE DELAY`; no HARD STOP and no Zone Out when the player left |
+| Decision 0037 | every AI aircraft on 602; only the player on 501; the Map's fighter pack never spawned |
+| Replay | no dead links |
+
+### What this changes (reading)
+
+- **The NATO cycle works end to end in a mission made by the app**:
+  - HOT and COLD by area;
+  - zone starts;
+  - the budget refusing a third copy;
+  - the on-station decision both ways (COLD → home at once; HOT → one extension → home);
+  - deletion;
+  - the used copies kept quiet.
+- **A deactivated running timer resumes when activated again** (paused, not cancelled; four zone `MISS WAIT`s fired 0.88 s after their `ARM`). The zone front end loses one extra cooldown after every FIRE. Every place that deactivates a running timer and later re-activates it needs a review (`docs/il2-loader-and-log-facts.md`, 2026-10-29).
+- Presence checks held for 25 minutes at 160.00 s intervals once the orbit was centred; a drifting orbit costs a COLD and a full re-entry (re-armed with the player inside: not reported).
+- Not shown: a second refusal (SN01 had ended early), a player who lands inside an area, a Yak copy.
+
+## Flight 2K (what a switched-off running timer does; check zones switched off and on) — 2026-10-29, one run, no pilot, Tacview recorded
+
+A probe flown before fixing flight A2's extra zone cooldown (the user: "probe it first until the root cause is accurately identified"). Run sheet and cell design: `handoff/sessions/2026-10-29-p14-flight-2k.md`. Frozen: `handoff/p14-probes/flight2k/`. Logs: `real_49`. One AI pair was the only load.
+
+| Cell | Flown | Reading |
+|---|---|---|
+| K1A | fired **85.98** | paused at 64 with 6 s left, resumed at 80 |
+| K1B | fired **108.98** | paused at 61 with 9 s left, resumed at 100 |
+| K1C | fired **94.96** | paused twice; each switch-on resumed the time left (7 s, then 5 s) |
+| K2A | fired **92.00** | a pulse restarts a resumed timer (full 10 s from 82) |
+| K3A | fired **85.98** | the pulse at 67, while off, was dropped; the time left was unchanged |
+| K4 | **none at 70**; 8 of 20 at **75.00** (01, 02, 03, 07, 10, 17, 18, 20) | a failed roll on a running timer does not leave it running; a passing roll restarts it |
+| K5B | fired **151.98** | the pair's entry (flight 2J: 151.98 on this route) |
+| K5C | fired **330.00** only | a zone never pulsed does not fire at an entry; its first pulse with the pair inside fires it at once |
+| K5A | fired **300.00** (switch-on); nothing at 330 | a pulsed zone's watch survives being switched off; switching on with the pair inside fires it; a later pulse while the pair is still inside does not fire it again |
+| K5E | **never** fired | switching on a zone that was never pulsed does nothing, so K5A's 300 is the resumed watch |
+| K5D | fired **250.00**, then **300.00** | a zone that already fired fires again when switched off and on with the plane inside, with no new pulse |
+| K6 | all 18 switch breadcrumbs at their own times (61, 63, 64×3, 71, 73, 80×3, 90×3, 100, 260, 300×3) | decision 0043 works in the game |
+
+Times are to 0.02 s (one tick); the resumed timers fired one tick early (85.98, not 86.00), as A2's MISS WAIT did (0.88, not 0.90).
+
+### What this changes (reading)
+
+- **A switched-off running timer is paused and resumes when switched on.** It accounts exactly for A2's `MISS WAIT` firing 0.88 s after `ARM`. Every design that switches a running timer off and later on must expect it to finish its time: the zone front end's `MISS WAIT` (seen in A2) and the clock's `ATTEMPT END` (`WIN` then `REROLL ON`) are affected; `DENY WAIT` (restarted by `FIRE`) and `ENii RANDOM` (re-triggered by `DRAW`, K4) are not.
+- **A check zone, once pulsed, stays armed, and switching it on is a check.** The threshold's presence check works because of this, not because of its 0.1 s pulse.
+- **Decision 0043's switch breadcrumbs log.**
+
+## Flight 2L (the paused-timer fix in the game: a zone rolls again after one cooldown, clock slots in a row) — 2026-10-29, one run, no pilot, Tacview recorded
+
+Checks decisions 0044 and 0045 with the real exported Air Tasking logic: one NATO area, two Zone and two Clock entries, budget 1, an AI pair on 501 as the only trigger. Run sheet and predictions: `handoff/sessions/2026-10-29-p14-flight-2l.md`. Frozen: `handoff/p14-probes/flight2l/`. Logs: `real_50`. Load: the pair and one 4-ship copy. Replay: no dead links; every unobserved successor is a closed relay, a refused request or a copy still on station.
+
+| Check | Flown | Reading |
+|---|---|---|
+| Passes (`THN01 INNER`) | **162.12, 282.12, 402.12, 522.12, 642.12** | exactly `HOLD` (120.00 s) apart: the armed `INNER` passes at `CHECK ON` (0045) |
+| ZN01 | CHANCE 162.22, FIRE and `SN01 START` 162.26 | won; SN01 flew (`Zone IN` 328.82) and kept the budget full |
+| ZN02 rolls | **162.76, 282.76, 402.76, 522.76, 642.76** | **at every pass, one cooldown apart.** The old wiring would have rolled at every second pass |
+| ZN02 refusal and cooldown | DENY WAIT at each roll + 1.04; COOLDOWN and ARM at **253.80, 373.80, 493.80, 613.80, 733.80** | one cooldown per refusal; nothing 0.9 s after `ARM` |
+| `MISS WAIT` / `MISS WAIT OUT` | MISS WAIT at each roll + 0.90 (ZN01 163.12; ZN02 163.66, 283.66, …); **MISS WAIT OUT never** | after a won roll, `MISS WAIT` runs out into the closed relay (0044) |
+| Clock slot 1 (COLD) | rerolls every 2 s from 62.40 to 80.40; a last `ATTEMPT END` at 82.40 with **no** `REROLL` | after `SLOT CLOSE`, `ATTEMPT END` runs out into the switched-off `REROLL` |
+| Clock slots 2–6 (HOT) | WIN 181.40, 300.90, 420.90, 541.40, 661.40; `ATTEMPT END` **182.40, 302.40, 422.40, 542.40, 662.40**; no `REROLL`; `Randomizer:INPUT` only at `DRAW` | five won slots in a row, one attempt each; `ATTEMPT END` runs out 2.0 s after `DRAW` (0044, Q10) |
+| `SN02`–`SN04 START` | never | refused by the budget, as planned |
+
+The walker's predictions held to the tick, with P = 162.12 instead of the walker's 171.1 (the pair entered r_in at 102.02).
+
+### What this changes (reading)
+
+- **The A2 fault is fixed in the game.** A refused zone roll is followed by one cooldown, and the zone rolls at the next pass.
+- **Nothing is left paused in the clock.** Every `ATTEMPT END` runs out, and none passes the switched-off `REROLL`.
+- **Decision 0045's check-zone model matches the game** on the real threshold: passes come exactly `HOLD` apart.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.

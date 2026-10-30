@@ -422,7 +422,9 @@ pub fn wrap_sortie(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    pub(crate) use super::tests::{active, configs, fixture, mcus, named, ticks, times};
+    pub(crate) use super::tests::{
+        active, configs, fixture, flown_configs, mcus, named, ticks, times,
+    };
 }
 
 #[cfg(test)]
@@ -1138,14 +1140,18 @@ mod tests {
                 ticks(60.0)
             ));
         }
-        // With the flown J1 (Cancels), neither timer fires after DONE HUB.
+        // With the flown timer facts, neither timer fires after DONE HUB. The
+        // check-zone model stays Once: this variant re-pulses an armed zone,
+        // which the game ignores (flight 2K, K5A), so with the flown Armed
+        // model it ends the copy 10 s after the first poll. It is unused
+        // (step 12); plan section 3.9, risk b, records the redesign it needs.
         let mut script = input(&f, 60.0, Some(10.0));
         script.tracks[0].samples = (0..=30)
             .map(|s| (ticks(f64::from(s)), TARGET.0 + if s >= 30 { 40000.0 } else { 0.0 }, TARGET.1))
             .collect();
         let config = WalkerConfig {
-            deactivate_running_timer: DeactivateRunningTimer::Cancels,
-            ..WalkerConfig::default()
+            check_zone: CheckZoneMode::Once,
+            ..WalkerConfig::default().flown()
         };
         let log = walk(&runtime, config, &script);
         assert_eq!(times(&log, f.ids.done_hub), [ticks(35.0)]);
@@ -1153,6 +1159,10 @@ mod tests {
             let late: Vec<_> = times(&log, shell_id(&f, name)).into_iter().filter(|&t| t > ticks(35.0)).collect();
             assert!(late.is_empty(), "{name} fired after DONE HUB at {late:?}");
         }
+        // The finding itself: under the flown check-zone model the copy ends
+        // about 10 s after its first watch, with the plane still inside.
+        let log = walk(&runtime, WalkerConfig::default().flown(), &script);
+        assert!(times(&log, f.ids.done_hub)[0] < ticks(25.0));
     }
 
     #[test]
@@ -1308,15 +1318,9 @@ mod tests {
         }
     }
 
-    /// Flight 0 J1: deactivating a running timer cancels it.
-    fn flown_configs() -> Vec<WalkerConfig> {
-        configs()
-            .into_iter()
-            .map(|config| WalkerConfig {
-                deactivate_running_timer: DeactivateRunningTimer::Cancels,
-                ..config
-            })
-            .collect()
+    /// The flown timer facts (flight 2K): see `WalkerConfig::flown`.
+    pub(crate) fn flown_configs() -> Vec<WalkerConfig> {
+        configs().into_iter().map(WalkerConfig::flown).collect()
     }
 
     /// Flight A1 (2026-10-28), run 2. The enemy is inside at arrival,

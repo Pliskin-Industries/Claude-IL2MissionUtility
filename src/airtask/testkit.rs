@@ -25,6 +25,20 @@ pub(crate) enum DeactivateRunningTimer {
     #[default]
     RunsOn,
     Cancels,
+    /// Flown (flight 2K): switch-off pauses a running timer and switch-on
+    /// resumes it with the time it had left. Builder tests use this.
+    Pauses,
+}
+
+/// What a failed random roll does to a timer that is already running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FailedRoll {
+    #[default]
+    LeavesRunning,
+    /// Flown (flight 2K, K4): none of 20 re-rolled timers fired on its
+    /// first run. Either the failed roll stops the timer, or the roll is
+    /// made when it ends; both look the same here.
+    Stops,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -60,19 +74,39 @@ pub(crate) enum CheckZoneMode {
     #[default]
     Once,
     Repeat,
+    /// Flight 2K (K5): a pulse arms a zone and it stays armed, also after it
+    /// fires and while it is off. An armed zone fires when its condition
+    /// becomes true, and switching it on is a check. A pulse into an armed
+    /// zone does nothing. Not flown: that a zone fires again when a plane
+    /// leaves and comes back (here it does, as the condition becomes true).
+    Armed,
 }
 
 /// Configurable hypotheses; use flown settings explicitly in builder tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct WalkerConfig {
     pub timer_retrigger: TimerRetrigger,                  // risk p
-    pub deactivate_running_timer: DeactivateRunningTimer, // risk j (J1)
+    pub deactivate_running_timer: DeactivateRunningTimer, // risk j (J1, 2K)
+    pub failed_roll: FailedRoll,                          // flight 2K (K4)
     pub dropcount_meaning: DropcountMeaning,              // risk e
     pub set_val_refires: SetValRefires,                   // risk e (E6)
     pub same_tick_counts: SameTickCounts,                 // risk r
     pub same_tick_delivery: SameTickDelivery,             // risk q
     pub reverse_targets: bool,                            // risk q
     pub check_zone: CheckZoneMode,                        // risks b, c, o
+}
+
+impl WalkerConfig {
+    /// The facts flown in flight 2K: switch-off pauses a running timer, a
+    /// failed roll does not leave one running, and check zones stay armed.
+    pub(crate) fn flown(self) -> Self {
+        Self {
+            deactivate_running_timer: DeactivateRunningTimer::Pauses,
+            failed_roll: FailedRoll::Stops,
+            check_zone: CheckZoneMode::Armed,
+            ..self
+        }
+    }
 }
 
 /// Names must be unique among indexed nodes. Use Index for repeated pack names.
@@ -144,11 +178,18 @@ pub(crate) struct WalkerLog {
 #[derive(Default)]
 struct NodeState {
     active: bool,
-    running: BTreeSet<u64>,
+    /// Serial of each running timer and the tick it is due.
+    running: BTreeMap<u64, Tick>,
+    /// Ticks left on each timer paused by a switch-off (Pauses).
+    paused: Vec<Tick>,
     count: u32,
     fired: bool,
     last_count: Option<Tick>,
     zone_armed: bool,
+    /// Armed: whether the condition held at the zone's last check while it
+    /// was on. A pulse that arms it and a switch-on clear it, so the next
+    /// check fires if the condition holds.
+    zone_held: bool,
     last_zone_fire: Option<Tick>,
     trigger_inside: BTreeSet<usize>,
 }
@@ -321,13 +362,21 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
                 walker.snapshot_trigger_inside(id);
             }
         }
-        while let Some(event) = walker.pending.pop_front() {
-            processed += 1;
-            assert!(processed <= 1_000_000, "walker event limit at tick {t}");
-            walker.deliver(event);
-        }
-        for (id, active) in std::mem::take(&mut walker.switches) {
-            walker.switch(id, active);
+        // Batched switches commit at tick end. Under Armed, a zone switched on
+        // then checks, and what it fires is delivered in this same tick.
+        loop {
+            while let Some(event) = walker.pending.pop_front() {
+                processed += 1;
+                assert!(processed <= 1_000_000, "walker event limit at tick {t}");
+                walker.deliver(event);
+            }
+            let switches = std::mem::take(&mut walker.switches);
+            if switches.is_empty() {
+                break;
+            }
+            for (id, active) in switches {
+                walker.switch(id, active);
+            }
         }
         walker.log.snapshots.push(WalkerSnapshot {
             t,
@@ -422,16 +471,54 @@ impl Walker<'_> {
         if active && !self.states[&id].active && self.is_trigger(id) {
             self.snapshot_trigger_inside(id);
         }
+        let now = self.now;
         let state = self.states.get_mut(&id).expect("state link resolves");
-        state.active = active;
+        let was_active = std::mem::replace(&mut state.active, active);
+        let armed_model = self.config.check_zone == CheckZoneMode::Armed;
         if !active {
-            state.zone_armed = false;
-            if self.config.deactivate_running_timer == DeactivateRunningTimer::Cancels {
-                state.running.clear();
+            if !armed_model {
+                state.zone_armed = false;
+            }
+            match self.config.deactivate_running_timer {
+                DeactivateRunningTimer::RunsOn => {}
+                DeactivateRunningTimer::Cancels => state.running.clear(),
+                DeactivateRunningTimer::Pauses => {
+                    let left = std::mem::take(&mut state.running)
+                        .into_values()
+                        .map(|due| due - now);
+                    state.paused.extend(left);
+                }
+            }
+        } else if !was_active {
+            // A remainder of zero (switched off on its due tick, before it
+            // fired) resumes one tick later: the queue for this tick is fixed.
+            for left in std::mem::take(&mut state.paused) {
+                self.start_timer(id, now + left.max(1));
+            }
+            // Armed: switching an armed zone on is a check (flight 2K, K5A
+            // and K5D), even if it fired before it was switched off.
+            if armed_model && self.nodes[&id].block_type == "MCU_CheckZone" {
+                self.states.get_mut(&id).unwrap().zone_held = false;
+                self.check_zone(id);
             }
         }
-        // Activation neither replays a dropped pulse nor pulses a check zone.
-        // A Complex Trigger evaluates at its next sample, without a pulse.
+        // Activation never replays a dropped pulse. Under Once and Repeat it
+        // does not check a zone either. A Complex Trigger evaluates at its
+        // next sample, without a pulse.
+    }
+
+    /// Run timer `id` until `due`, under a fresh serial.
+    fn start_timer(&mut self, id: i32, due: Tick) {
+        self.serial += 1;
+        self.states
+            .get_mut(&id)
+            .expect("state link resolves")
+            .running
+            .insert(self.serial, due);
+        self.scheduled
+            .entry(due)
+            .or_default()
+            .push_back(WalkEvent::TimerExpired(id, self.serial));
     }
 
     fn roll(&mut self, percent: u32) -> bool {
@@ -453,7 +540,14 @@ impl Walker<'_> {
             WalkEvent::Pulse(id) => self.pulse(id),
             WalkEvent::MissionBegin(id) => self.fire(id), // Enabled is irrelevant.
             WalkEvent::TimerExpired(id, token) => {
-                if self.states.get_mut(&id).unwrap().running.remove(&token) {
+                if self
+                    .states
+                    .get_mut(&id)
+                    .unwrap()
+                    .running
+                    .remove(&token)
+                    .is_some()
+                {
                     self.fire(id); // RunsOn deliberately ignores current active.
                 }
             }
@@ -493,8 +587,11 @@ impl Walker<'_> {
         match node.block_type.as_str() {
             "MCU_Timer" => {
                 // Every active trigger draws, even if Ignore subsequently drops
-                // a successful roll. A failed roll leaves a running timer alone.
+                // a successful roll.
                 if !self.roll(value(node, "Random", 100)) {
+                    if self.config.failed_roll == FailedRoll::Stops {
+                        self.states.get_mut(&id).unwrap().running.clear();
+                    }
                     return;
                 }
                 let delay = timer_ticks(node);
@@ -510,13 +607,8 @@ impl Walker<'_> {
                         TimerRetrigger::Twice => {}
                     }
                 }
-                self.serial += 1;
-                state.running.insert(self.serial);
                 let due = self.now.checked_add(delay).expect("timer tick overflow");
-                self.scheduled
-                    .entry(due)
-                    .or_default()
-                    .push_back(WalkEvent::TimerExpired(id, self.serial));
+                self.start_timer(id, due);
             }
             "MCU_Activate" | "MCU_Deactivate" => {
                 self.record(id);
@@ -536,7 +628,15 @@ impl Walker<'_> {
             "MCU_CheckZone" => {
                 // Re-pulsing a waiting zone replaces its watch. Once consumes
                 // the watch when it fires; Repeat keeps it until deactivation.
-                self.states.get_mut(&id).unwrap().zone_armed = true;
+                // Armed ignores a pulse into an armed zone (flight 2K, K5A).
+                let state = self.states.get_mut(&id).unwrap();
+                if self.config.check_zone == CheckZoneMode::Armed {
+                    if state.zone_armed {
+                        return;
+                    }
+                    state.zone_held = false;
+                }
+                state.zone_armed = true;
                 self.check_zone(id);
             }
             "MCU_Counter" => self.count(id),
@@ -622,7 +722,19 @@ impl Walker<'_> {
                         (px - x).powi(2) + (pz - z).powi(2) <= radius.powi(2)
                     })
             });
-        if inside == (value(node, "Closer", 1) != 0) {
+        let holds = inside == (value(node, "Closer", 1) != 0);
+        if self.config.check_zone == CheckZoneMode::Armed {
+            // Fire when the condition becomes true; stay armed.
+            let state = self.states.get_mut(&id).unwrap();
+            let becomes_true = holds && !state.zone_held;
+            state.zone_held = holds;
+            if becomes_true {
+                state.last_zone_fire = Some(self.now);
+                self.fire(id);
+            }
+            return;
+        }
+        if holds {
             let state = self.states.get_mut(&id).unwrap();
             state.zone_armed = self.config.check_zone == CheckZoneMode::Repeat;
             state.last_zone_fire = Some(self.now);
@@ -1355,6 +1467,48 @@ mod walker_tests {
         println!("CheckZone: IN at 3 s; OUT at 5 s after the last watched track leaves");
     }
 
+    /// Flight 2K's K5 cells on a 1 s scale. The plane is outside until 5 s,
+    /// then stays inside.
+    #[test]
+    fn walker_armed_zones_follow_flight_2k() {
+        let mut nodes = Vec::new();
+        for (id, name) in [(1, "K5A"), (2, "K5B"), (3, "K5C"), (4, "K5D"), (5, "K5E")] {
+            nodes.push(zone(id, name, true));
+            nodes.push(node("MCU_Deactivate", 10 * id, &format!("{name} OFF"), &[id]));
+            nodes.push(node("MCU_Activate", 10 * id + 1, &format!("{name} ON"), &[id]));
+        }
+        let root = tree(nodes);
+        let s = |seconds: u64| seconds * TICKS_PER_SECOND;
+        let mut points = vec![(200.0, 0.0); 5];
+        points.push((0.0, 0.0));
+        let input = WalkerInput {
+            until: s(12),
+            tracks: vec![track(2, &points)],
+            pulses: [
+                (1, 1), (2, 10), (7, 11), (9, 1), // K5A
+                (1, 2),                           // K5B
+                (8, 3),                           // K5C
+                (6, 4), (7, 40), (9, 41),         // K5D
+                (2, 50), (7, 51),                 // K5E
+            ]
+            .map(|(t, id)| (s(t), id.into()))
+            .to_vec(),
+            ..WalkerInput::default()
+        };
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            let config = WalkerConfig {
+                same_tick_delivery,
+                ..WalkerConfig::default()
+            }
+            .flown();
+            let log = walk(&root, config, &input);
+            for (id, fired) in [(1, vec![7]), (2, vec![5]), (3, vec![8]), (4, vec![6, 9]), (5, vec![])] {
+                let fired: Vec<_> = fired.into_iter().map(s).collect();
+                assert_eq!(times(&log, id), fired, "zone {id}, {config:?}");
+            }
+        }
+    }
+
     #[test]
     fn walker_zone_rearm_requires_a_new_pulse_and_samples_are_atomic() {
         let root = tree(vec![
@@ -1491,6 +1645,70 @@ mod walker_tests {
             times(&walk(&root, WalkerConfig::default(), &input), 2),
             vec![1]
         );
+    }
+
+    /// Flight 2K's K1A, K1C, K2A and K3A, each with a 10 s timer pulsed at 60 s.
+    #[test]
+    fn walker_pauses_a_switched_off_timer_and_resumes_its_time_left() {
+        let root = tree(vec![
+            timer(1, "Delay", "10", &[2]),
+            timer(2, "Hit", "0", &[]),
+            node("MCU_Deactivate", 3, "Off", &[1]),
+            node("MCU_Activate", 4, "On", &[1]),
+        ]);
+        let s = |seconds: u64| seconds * TICKS_PER_SECOND;
+        let cells = [
+            ("K1A", vec![(60, 1), (64, 3), (80, 4)], 86),
+            ("K1C", vec![(60, 1), (63, 3), (71, 4), (73, 3), (90, 4)], 95),
+            ("K2A", vec![(60, 1), (64, 3), (80, 4), (82, 1)], 92),
+            ("K3A", vec![(60, 1), (64, 3), (67, 1), (80, 4)], 86),
+        ];
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            let config = WalkerConfig {
+                deactivate_running_timer: DeactivateRunningTimer::Pauses,
+                same_tick_delivery,
+                ..WalkerConfig::default()
+            };
+            for (cell, script, fired) in &cells {
+                let input = WalkerInput {
+                    until: s(120),
+                    pulses: script.iter().map(|&(t, id)| (s(t), id.into())).collect(),
+                    ..WalkerInput::default()
+                };
+                assert_eq!(
+                    times(&walk(&root, config, &input), 2),
+                    vec![s(*fired)],
+                    "{cell} {config:?}"
+                );
+            }
+        }
+    }
+
+    /// Flight 2K's K4: a 10 s timer at Random 50 %, pulsed at 60 s and 65 s.
+    #[test]
+    fn walker_failed_roll_stops_a_running_timer_when_flown() {
+        let mut roll = timer(1, "Roll", "10", &[2]);
+        roll.set_property("Random", "50");
+        let root = tree(vec![roll, timer(2, "Hit", "0", &[])]);
+        let s = |seconds: u64| seconds * TICKS_PER_SECOND;
+        let fired_at = |config: WalkerConfig| -> Vec<Vec<Tick>> {
+            (0..40)
+                .map(|seed| {
+                    let input = WalkerInput {
+                        seed,
+                        until: s(90),
+                        pulses: vec![(s(60), 1.into()), (s(65), 1.into())],
+                        ..WalkerInput::default()
+                    };
+                    times(&walk(&root, config, &input), 2)
+                })
+                .collect()
+        };
+        let flown = fired_at(WalkerConfig::default().flown());
+        assert!(flown.iter().all(|run| !run.contains(&s(70))));
+        assert!(flown.iter().any(|run| run == &[s(75)]));
+        let unflown = fired_at(WalkerConfig::default());
+        assert!(unflown.iter().any(|run| run == &[s(70)]));
     }
 
     #[test]

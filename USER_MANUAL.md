@@ -598,6 +598,7 @@ Use these to find out what a mission's logic did in a flown session.
   - every timer with Random below 100;
   - on the Map and Air Tasking tabs, also the Air Tasking sortie steps (START, GO, DONE HUB and the others).
 - Each breadcrumb writes one line to the server's text log when its MCU fires.
+- A switch (an Activate or Deactivate MCU, such as Air Tasking's `ARM`) cannot carry a breadcrumb itself, so the MCUs that pulse it also pulse its breadcrumb. Its line means "the switch was pulsed". The switch may still have been off itself.
 - Generate also writes `<file>.trace.json` next to the `.Group`, and the status bar says "Trace build: N breadcrumbs."
 - The box is off at every start. With it off, Generate writes exactly what it wrote before.
 
@@ -621,3 +622,16 @@ Without a trace file, the report has only Never spawned and Timeline (an orange 
 After Run replay, the Map's legend shows a **Replay** layer: a dot where each object spawned, a cross where each one was killed, in DPRK or NATO colour (grey when the log gives no country). Untick it to hide it. A new pick in the Replay window clears the layer.
 
 The same report can be written from the command line: `IL2MissionUtility.exe replay --group <file.Group> [--trace <file.trace.json>] --logs <folder> [--out <report.md>]`.
+
+### IL-2 timer and check-zone terms
+
+These words describe how the game treats MCUs. They help when you read a trace log or edit generated logic by hand. They were measured in the game (probe flight 2K, 2026-10-29).
+
+- **Switch off / switch on**: what a Deactivate / an Activate MCU does to its targets.
+- **Paused**: a running timer that is switched off. It does not fire, and it keeps the time it had left.
+- **Resumes**: a paused timer that is switched on fires after the time it had left, not its full time. A pulse into it then restarts it with its full time. A pulse while it is off is dropped.
+- **Switching a running timer off does not stop it**, and no MCU does. To **cancel** one, let it run out into a zero-second relay timer, and switch that relay off. The relay drops the pulse. Air Tasking does this, for example `ZNii MISS WAIT` runs out into `ZNii MISS WAIT OUT`.
+- **A failed random roll** on a running timer does not leave it running. This is the one thing that stops a running timer, and you cannot choose when it happens.
+- **Armed** (check zones): a pulsed check zone keeps watching, also after it fires and while it is switched off. It fires when its condition becomes true. A further pulse does nothing. Switching an armed zone on is a check: it fires at once if the condition holds. A check zone that was never pulsed does nothing, even when switched on.
+
+If a timer in your own logic fires at an odd time some while after an Activate, it was probably paused and has resumed.
