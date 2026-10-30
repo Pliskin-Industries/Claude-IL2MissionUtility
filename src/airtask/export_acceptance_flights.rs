@@ -19,6 +19,8 @@ const WAVE_PLANES: usize = 18;
 const A1_STEM: &str = "P14_Acceptance_A1";
 /// Flight A2's frozen files (built by the Map tab; see the A2 test below).
 const A2_STEM: &str = "P14_Acceptance_A2";
+/// Flight A3's frozen files (built by the Map tab; see the A3 test below).
+const A3_STEM: &str = "P14_Acceptance_A3";
 /// The fallback NATO air start (`--spawns`): 20 km south of K14 at 500 m,
 /// heading north (YOri 0 is north, +X), so a level pass crosses the area centre.
 const AIR_START: (f64, f64) = (K14.0 - 20_000.0, K14.1);
@@ -257,15 +259,7 @@ fn frozen_acceptance_files_parse_and_links_resolve() {
 fn frozen_a2_files_parse_and_links_resolve() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/acceptance-a2");
     let root = crate::airtask::testkit::assert_frozen_files_resolve(&dir.join(A2_STEM));
-    // After 0038, DONE HUB OFF also switches off the copy's timers and zones.
-    let mut offs = 0;
-    root.for_each(&mut |node| {
-        if node.name().is_some_and(|name| name.ends_with(" DONE HUB OFF")) {
-            assert!(node.targets.len() > 1, "A2: DONE HUB OFF closes only its hub");
-            offs += 1;
-        }
-    });
-    assert_eq!(offs, 9, "A2: nine NATO copies");
+    assert_done_hub_offs(&root, 9, "A2");
     // One DPRK (501) Yak-9P air start, outside every area's R (twice the
     // entry trigger's radius), so the player is seen flying in.
     let spawns = std::fs::read_to_string(dir.join(format!("{A2_STEM}.spawns.json"))).unwrap();
@@ -278,17 +272,61 @@ fn frozen_a2_files_parse_and_links_resolve() {
         let end = tail.find([',', '}']).unwrap_or_else(|| panic!("A2 spawn list: {key} unterminated"));
         tail[..end].trim().parse().unwrap_or_else(|_| panic!("A2 spawn list: {key} is not a number"))
     };
-    let spawn = (number("x"), number("z"));
+    assert_areas_watch_dprk_from_outside(&root, (number("x"), number("z")), 3, "A2");
+}
+
+/// After decision 0038, each copy's DONE HUB OFF also switches off the copy's
+/// timers and zones. `copies` is the number of NATO copies in the flight.
+fn assert_done_hub_offs(root: &Il2Entity, copies: usize, flight: &str) {
+    let mut offs = 0;
+    root.for_each(&mut |node| {
+        if node.name().is_some_and(|name| name.ends_with(" DONE HUB OFF")) {
+            assert!(node.targets.len() > 1, "{flight}: DONE HUB OFF closes only its hub");
+            offs += 1;
+        }
+    });
+    assert_eq!(offs, copies, "{flight}: NATO copies");
+}
+
+/// Every NATO area's entry trigger watches DPRK players (501), and the player
+/// spawn is outside each area's R (twice the trigger's radius), so the player
+/// is seen flying in. `areas` is the number of NATO areas in the flight.
+fn assert_areas_watch_dprk_from_outside(root: &Il2Entity, spawn: (f64, f64), areas: usize, flight: &str) {
     let mut triggers = 0;
     root.for_each(&mut |node| {
         if node.block_type == "MCU_TR_ComplexTrigger" {
             triggers += 1;
-            assert_eq!(node.property("Country"), Some("501"), "A2: the areas watch DPRK players");
+            assert_eq!(node.property("Country"), Some("501"), "{flight}: the areas watch DPRK players");
             let radius: f64 = node.property("Radius").unwrap().parse().unwrap();
-            assert!(distance(spawn, node.pos_xz().unwrap()) > 2.0 * radius, "A2: spawn inside R");
+            assert!(distance(spawn, node.pos_xz().unwrap()) > 2.0 * radius, "{flight}: spawn inside R");
         }
     });
-    assert_eq!(triggers, 3, "A2: three NATO areas");
+    assert_eq!(triggers, areas, "{flight}: NATO areas");
+}
+
+/// Flight A3: built by the Map tab after decisions 0042 and 0045 (run sheet
+/// `handoff/sessions/2026-10-30-p14-acceptance-a3.md`). Its writer and its
+/// byte and facts check are UI tests (`ui_tests::write_p14_acceptance_a3`,
+/// `a3_map_build_matches_the_frozen_files_and_the_run_sheet`).
+#[test]
+fn frozen_a3_files_parse_and_links_resolve() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/acceptance-a3");
+    let root = crate::airtask::testkit::assert_frozen_files_resolve(&dir.join(A3_STEM));
+    assert_done_hub_offs(&root, 6, "A3");
+    // The player spawn is the Map's own air start (no --spawns): one Airfield
+    // on 501, the country the area watches, outside the area's R (twice the
+    // entry trigger's radius).
+    let mut airfields = Vec::new();
+    root.for_each(&mut |node| {
+        if node.block_type == "Airfield" {
+            airfields.push((node.property("Country").map(str::to_string), node.pos_xz().expect("A3: Airfield without a position")));
+        }
+    });
+    let [(Some(country), spawn)] = airfields.as_slice() else {
+        panic!("A3: one air start, {airfields:?}");
+    };
+    assert_eq!(country, "501", "A3: the air start is on the DPRK player country");
+    assert_areas_watch_dprk_from_outside(&root, *spawn, 1, "A3");
 }
 
 #[test]
