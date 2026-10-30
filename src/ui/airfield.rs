@@ -715,11 +715,7 @@ impl super::GroupGeneratorApp {
     }
 
     fn field_spawn_aircraft(&self) -> (Vec<AirStartPlane>, i32) {
-        let country = if self.field_spawn_nato {
-            airstart::COUNTRY_NATO
-        } else {
-            airstart::COUNTRY_DPRK
-        };
+        let country = airstart::side_country(self.field_spawn_nato);
         (self.field_planes.clone(), country)
     }
 

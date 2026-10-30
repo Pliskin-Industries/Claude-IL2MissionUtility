@@ -77,7 +77,7 @@ What this makes easier, harder or necessary.
 | [0039](0039-map-undo-keeps-air-plan-only-for-dock-edits.md) | Map undo keeps the Air Tasking plan only for the Air dock's own edits | Accepted |
 | [0040](0040-parked-player-keeps-drawing-sorties.md) | A player parked inside an Air Tasking area keeps drawing sorties | Accepted |
 | [0041](0041-trace-build-traces-the-whole-file.md) | A trace build from the UI traces decision points across the whole file, plus the P14 names on Map and Air Tasking | Accepted |
-| [0042](0042-dprk-air-start-country.md) | The app's DPRK air start is country 502, but Air Tasking watches DPRK players on 501 | Proposed |
+| [0042](0042-dprk-air-start-country.md) | The app's DPRK air start writes country 501, the country Air Tasking watches for DPRK players | Accepted (A) |
 | [0043](0043-switch-breadcrumbs-from-inputs.md) | A switch's breadcrumb is pulsed by the switch's own inputs | Accepted |
 | [0044](0044-paused-timers-d11-relays.md) | A switched-off timer is paused: the zone and the clock end their timers through D11 relays (supersedes parts of 0029 and 0030) | Accepted |
 | [0045](0045-walker-armed-check-zones.md) | The walker models check zones as flown: a pulsed zone stays armed (supersedes 0044's "Armed" term) | Accepted |

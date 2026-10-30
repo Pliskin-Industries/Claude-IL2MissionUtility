@@ -659,7 +659,7 @@ const THRESHOLD_SLACK_M: f64 = 12.0;
 /// writes `StartType` 1 and `SnapTo` 0 on the 80 m runway-spawn model.
 /// Engine off, parking writes `StartType` 2 and `SnapTo` 2 and leaves the
 /// field on that same hold-short. A field with no Type 3 nodes still
-/// exports. `country`, when set, is written on the airfield (NATO 601 / DPRK 502).
+/// exports. `country`, when set, is written on the airfield (NATO 601 / DPRK 501).
 pub fn place_field_spawn(
     group: &mut Il2Entity,
     planes: &[AirStartPlane],
