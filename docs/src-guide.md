@@ -225,7 +225,7 @@ rewrite once it has been stable for 1.5 s. Drops `#` comments and the
 ### `airstart.rs` — fake-field air starts
 A bank of `fakefield` airfields with a `Planes` list, shaped like
 `TemplateExamples/Airstart.Group`. Each entry has a coalition (NATO 601 /
-DPRK 502) and aircraft options (how many, skill, altitude, fuel, payload, mods, renew).
+DPRK 501, the country Air Tasking watches for DPRK players; decision 0042) and aircraft options (how many, skill, altitude, fuel, payload, mods, renew).
 `Number` `-1` is unlimited, matching the template.
 Facing is set on the map: the field icon stays upright and `direction.svg`
 points along `YOri` (0 = north). `field_group` writes one field;

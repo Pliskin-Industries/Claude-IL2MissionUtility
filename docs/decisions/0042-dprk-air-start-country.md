@@ -1,8 +1,8 @@
-# 0042. The app's DPRK air start is country 502, but Air Tasking watches DPRK players on 501
+# 0042. The app's DPRK air start writes country 501, the country Air Tasking watches for DPRK players
 
-- **Status:** Proposed
+- **Status:** Accepted (option A)
 - **Date:** 2026-10-28
-- **Decided by:** open, for the user. Found by Claude while building acceptance flight A2 (`handoff/sessions/2026-10-28-p14-acceptance-a2.md`).
+- **Decided by:** the user, 2026-10-29 ("correct the DPRK air start faction"), choosing option A, Claude's recommendation. Found by Claude while building acceptance flight A2 (`handoff/sessions/2026-10-28-p14-acceptance-a2.md`).
 
 ## Context
 
@@ -25,5 +25,9 @@
 
 ## Consequences
 
-- Until this is decided, piloted DPRK flights use `build_probe_mission.py --spawns` with country 501 (A2 does).
-- Whatever is chosen, the manual (step 10) states which countries Air Tasking watches.
+- **Built** (branch `claude/p14-dprk-air-start-501`): `airstart::COUNTRY_DPRK` is 501. The Airfield tab's DPRK air starts and its DPRK field spawn both take it from `airstart::side_country`, so both write 501 (pinned by `airstart::tests::dprk_country_and_combined_group`). Generate and export output change for every mission with a DPRK air start or field spawn, with or without Air Tasking. Test: `dprk_air_start_is_on_the_country_air_tasking_watches` (a DPRK air start on the Map is written on the country the NATO areas' triggers watch).
+- Decision 0037's move of the Map's AI planes off 501 leaves everything under an `Airfield` alone, so the air start keeps 501 when Air Tasking is in the mission.
+- **Not covered:** DPRK spawns a mission maker builds in the editor on 502 or 503. Also upstream commit `571504a` (not merged here) makes harvested DPRK airfields default to 502; if it is merged, its default should use this constant.
+- **Still to check in the game:** a player spawning at the app's own 501 air start. A2 flew a 501 air start, but that one was written by `build_probe_mission.py --spawns`.
+- `USER_MANUAL.md` (Air Tasking) states which countries Air Tasking watches.
+- The country names still disagree (`aircraft::COUNTRIES` reads 501 USSR, 502 DPRK; decision 0008 reads 502 PRC, 503 DPRK). This decision does not rename them.

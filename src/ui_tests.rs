@@ -1456,7 +1456,7 @@ fn air_start_bank_reaches_the_map() {
         h.app.field_spawn_nato,
         "the field spawn coalition stays NATO"
     );
-    assert_eq!(h.app.air_starts[0].country(), 502);
+    assert_eq!(h.app.air_starts[0].country(), 501);
     h.tab("Map");
     h.click("Forces");
     assert!(h.has("Air start 1 · DPRK"));
@@ -4113,6 +4113,42 @@ fn map_generate_with_air_moves_map_ai_off_player_countries() {
     assert!(watched.contains("601") && watched.contains("501"), "{watched:?}");
 }
 
+/// Decision 0042 A: a DPRK air start placed on the Map is written on the
+/// country the NATO Air Tasking areas watch for DPRK players, so a player who
+/// spawns there can start a NATO sortie.
+#[test]
+fn dprk_air_start_is_on_the_country_air_tasking_watches() {
+    let mut h = Harness::new("air_map_0042");
+    h.tab("Map");
+    h.wait_for_map();
+    fill_air_pool(&mut h);
+    h.app.placed_air_starts.push(crate::airstart::PlacedAirStart {
+        field: crate::airstart::default_field("DPRK start", false),
+        x: 230_000.0,
+        z: 205_000.0,
+    });
+    h.app.terrain_apply = false;
+    let (root, _) = generate_map(&mut h, "base_map_0042.Group");
+
+    let field = root.find_by_name("DPRK start").expect("the air start group");
+    let airfield = field
+        .children
+        .iter()
+        .find(|c| c.block_type == "Airfield")
+        .expect("its Airfield");
+    let nato = root
+        .find_by_name("Air Tasking NATO Logic")
+        .expect("NATO Air Tasking");
+    let mut watched = std::collections::BTreeSet::new();
+    nato.for_each(&mut |node| {
+        if node.block_type == "MCU_TR_ComplexTrigger" {
+            watched.insert(node.property("Country").unwrap_or("").to_string());
+        }
+    });
+    assert_eq!(watched.len(), 1, "{watched:?}");
+    assert_eq!(airfield.property("Country"), watched.first().map(String::as_str));
+}
+
 /// `replay.Group` traced at A, B and C, with its sidecar, in the harness dir.
 /// With the `chain` logs, A fires; B (3 s on, unconditional) and C never do.
 fn replay_chain_group(h: &Harness) -> PathBuf {
@@ -4695,7 +4731,7 @@ const A2_SORTIES: [&str; 3] = [
 
 /// The A2 spawn list for `build_probe_mission.py --spawns`. Country 501, the
 /// DPRK player country the NATO areas watch: the Map's own DPRK air start
-/// writes 502 (decision 0042, Proposed), so A2 cannot use it.
+/// wrote 502 when A2 was built (decision 0042), so A2 could not use it.
 fn a2_spawns_json() -> String {
     let (x, z) = A2_SPAWN;
     format!(

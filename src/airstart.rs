@@ -12,7 +12,7 @@
 //! * `fn default_field` / `fn default_plane` / `fn plane_paths`
 //! * `fn field_group` — one field as a `Group`
 //! * `fn combined_group` — several fields in one `Group`
-//! * `COUNTRY_NATO` (601) / `COUNTRY_DPRK` (502)
+//! * `COUNTRY_NATO` (601) / `COUNTRY_DPRK` (501) / `fn side_country`
 //!
 //! ## Used by
 //! * ui.rs (Airfield) — the bank and its export
@@ -24,8 +24,10 @@ use crate::payloads;
 
 /// USA. Matches `TemplateExamples/Airstart.Group`.
 pub const COUNTRY_NATO: i32 = 601;
-/// DPRK, from `aircraft::COUNTRIES`.
-pub const COUNTRY_DPRK: i32 = 502;
+/// DPRK: 501, as on the DPRK airfield in the game's own dogfight test
+/// mission. Air Tasking's NATO areas watch 501 for DPRK players
+/// (decision 0042 A), so a player on this field can start a NATO sortie.
+pub const COUNTRY_DPRK: i32 = 501;
 
 const FAKE_MODEL: &str = r"graphics\airfields\fakefield.mgm";
 const FAKE_SCRIPT: &str = r"LuaScripts\WorldObjects\Airfields\fakefield.txt";
@@ -70,13 +72,15 @@ pub struct PlacedAirStart {
     pub z: f64,
 }
 
+/// The country a player spawn of one side is written on: air starts and the
+/// Airfield tab's field spawn.
+pub fn side_country(nato: bool) -> i32 {
+    if nato { COUNTRY_NATO } else { COUNTRY_DPRK }
+}
+
 impl AirStartField {
     pub fn country(&self) -> i32 {
-        if self.nato {
-            COUNTRY_NATO
-        } else {
-            COUNTRY_DPRK
-        }
+        side_country(self.nato)
     }
 
     pub fn side_label(&self) -> &'static str {
@@ -459,7 +463,9 @@ mod tests {
             .iter()
             .find(|c| c.block_type == "Airfield")
             .unwrap();
-        assert_eq!(air.property("Country"), Some("502"));
+        assert_eq!(air.property("Country"), Some("501"));
+        assert_eq!(side_country(false), 501, "the field spawn's DPRK country");
+        assert_eq!(side_country(true), 601);
         let mig = air.children[0].children[0].property("Script").unwrap();
         assert!(mig.contains("mig15bis"), "{mig}");
         assert_eq!(air.children[0].children[0].property("AILevel"), Some("3"));
