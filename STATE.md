@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-30: flights A2, 2K and 2L flown and merged; paused-timer fix (0044, 0045) and the DPRK air start on 501 (0042) on `main`. Next: acceptance flight A3.
+> Last updated: 2026-10-30: acceptance flight A3 flown and merged (PR #43); step 11 items 1 to 3 are seen in the game. Next: the standalone-file check.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -17,15 +17,15 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 
 | Branch | Holds | State |
 |---|---|---|
-| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); decisions 0001 to 0045 | `0a9c3c1`, equal to `origin/main` |
+| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); decisions 0001 to 0045 | `416dad5`, equal to `origin/main` |
 
 `upstream/main` has one commit not merged here (`571504a`, harvested coalition groups and ramp starts per country). Merged branches and their worktrees under `.claude/worktrees/` can be deleted once their idle sessions are archived.
 
-Last recorded test run on `main` (`0a9c3c1`): **1044 passed, 0 failed, 35 ignored** (`cargo test --offline`, 2026-10-30). Warnings: 81 build, 306 clippy (PR #41). Record each new run on this line.
+Last recorded test run on `main` (`416dad5`): **1046 passed, 0 failed, 36 ignored** (`cargo test --offline`, 2026-10-30). Warnings: 81 build, 306 clippy (PR #43). Record each new run on this line.
 
 ## P14 Air Tasking ("Wing Commander")
 
-Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user decisions U1 to U24). Flight results: `handoff/P14-probe-results.md` (flights 0 to 2L, A0 to A2). Facts that cost a flight: `docs/il2-loader-and-log-facts.md`. Step and flight notes: `handoff/sessions/`.
+Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user decisions U1 to U24). Flight results: `handoff/P14-probe-results.md` (flights 0 to 2L, A0 to A2); A3's are in its run sheet, `handoff/sessions/2026-10-30-p14-acceptance-a3.md`. Facts that cost a flight: `docs/il2-loader-and-log-facts.md`. Step and flight notes: `handoff/sessions/`.
 
 - **Built (on `main`):** steps 1a to 9T: the sortie shell, budget, threshold, clock, zone, export, the Air Tasking rail tab, the Map dock's Air tab and Map Generate, the Trace build checkbox, the Replay window and the Map's Replay layer. Also: a used copy goes quiet at `DONE HUB` (0038); the Map's own AI planes leave the player countries when Air Tasking is in the mission (0037 A); zone and clock end their timers through D11 relays, because a switched-off running timer is paused, not cancelled (0044, flight 2K); the DPRK air start and field spawns write 501 (0042 A).
 - **Flown and seen in the game:**
@@ -34,27 +34,25 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
   - A2 (DPRK player, the first app-made mission, built through Map Generate): three NATO areas go HOT and COLD to the hundredth; **the first budget refusal**; **the single extension, then home** (P9); a clean COLD end; a used copy stays quiet (0038); the Map's own AI start nothing (0037); no dead links.
   - 2K: a switched-off running timer is paused and resumes when switched on; a pulsed check zone stays armed.
   - 2L (no pilot): the paused-timer fix holds; a zone rolls again after one cooldown.
-- **Still open from the step 11 list** (plan §8 "Step 11"):
-  1. A DPRK player on the **app's own** air start (0042 A, not flown; A2 used the game's 501 spawn).
-  2. A **NATO clock launch** in the game (A1 saw a DPRK clock start; all of A2's NATO starts came from zones).
-  3. **Two sorties on one target ending together**, both deleted in one tick, then **a later start** on that side (review finding C1; A1 saw the first half only).
-  4. The **standalone file** imported into a mission that already has groups (risk l).
+  - A3 (DPRK player, built through Map Generate, logs `real_51`; run 1 crashed, `real_52`): **the Map's own air start on 501** (0042 A); **a NATO clock launch** (slot 1 at 600.10 s); **two sorties on one area end in one tick and are deleted in one tick** 60.60 s later (C1); **a later start** after one cooldown; the clock's no-repeat (`LAST`) keeps slot 2 quiet. A3 set the NATO clock to one jitter step and no quiet slots, so the 20 % quiet roll is not flown.
+- **Still open from the step 11 list** (plan §8 "Step 11"; items 1 to 3 are done by A3):
+  4. The **standalone file** imported into a mission that already has groups (risk l). No pilot needed.
   5. Load time and tick delay next to `validate`'s totals: only on the real host, not this PC.
   - Also unseen: a Yak copy, a player who lands inside an area (0040: no change needed), a DPRK-side extension.
 - **Formations:** AI losses in flights 2C to 2I were wingmen crossing their leader, a game bug (0021). Workarounds: Safe density (0019), Pairs at Loose (0020 A) except a Cover flight (0022 A2).
-- **Remaining steps:** acceptance A3 (items 1 to 3) → the standalone check (item 4) → 10 docs → 12 multi-player. Upstream integration (0026: Template Builder's Strike/CAP as sorties, his target types) waits for eszyman's answer to the proposal.
+- **Remaining steps:** the standalone check (item 4) → 10 docs → 12 multi-player. Upstream integration (0026: Template Builder's Strike/CAP as sorties, his target types) waits for eszyman's answer to the proposal.
 
 ## Waiting on the user
 
-1. **Send the Air Tasking proposal to eszyman?** Draft: `handoff/upstream-air-tasking-proposal-draft.md` (decision 0026). Where to post it (new issue or issue #1) and when is yours.
+1. **Send the Air Tasking proposal to eszyman?** Draft: `handoff/upstream-air-tasking-proposal-draft.md` (decision 0026). The bar was a working concept and UI; A2 and A3 now run end to end from the app's Map Generate. Where to post it (new issue or issue #1) and when is yours.
 2. **Merge `upstream/main` `571504a`?** It touches the airfield harvest that 0042 also changed.
 3. **Three game bug reports are drafted, not posted** (`handoff/il2-bug-report-drafts.md`). The paused-timer finding (2K) may be a fourth.
 4. **The six built-in sorties** still carry the old Delete list in their files; Air Tasking replaces it on the copies it places (0017).
 
 ## Next steps
 
-1. Build and fly **A3**: a DPRK player on the app's own Map air start, with a NATO clock launch and two sorties on one target that end together, then a later start (items 1 to 3). Trace build; Replay afterwards; Tacview with LCtrl+R.
-2. The standalone-file check (item 4), then step 10 (docs).
+1. **The standalone-file check** (item 4): export the Air Tasking file, import it into a mission that already has groups, and confirm no name, link-ID or country collision. No pilot needed.
+2. Step 10 (docs): the user manual for Air Tasking and the Map's Air tab, from what A0 to A3 showed.
 
 ## Traps
 
@@ -66,7 +64,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 - Do not push `v*` tags casually: they start the release build.
 - Nothing is pushed or merged to `main` without the user (`docs/decisions/0005`). A hook blocks `git push` (even a branch delete) while the checkout is on `main`.
 - The game here is 1.005 (`261013`). Its `MissionResaver.exe` crashes: build missions with `--no-resave`. This PC is a test bed: its load times and tick delay are not used. It allows one spawn per game session.
-- **Flying on this PC:** an air start may begin with the level-flight helper on; pressing LShift+A then switches it off (A2 run 1 crashed this way). Tacview: `tacviewrecord = 1` with the game closed, then LCtrl+R in the mission.
-- Flown probe flights regenerate byte for byte from frozen inputs (`src/testdata/p14_probe_inputs/`, `handoff/p14-probes/`), except those frozen as flown (2F, 2H, 2I, A0, A1, A2): those are checked by parse-and-links tests only. Never edit those files or re-run their writers. Flight names are never reused. The next free log folder is `src/testdata/missionlog/real_51`.
+- **Flying on this PC:** an air start may begin with the level-flight helper on; pressing LShift+A then switches it off (A2 run 1 crashed this way). **Never move the mouse or click in the cockpit**: it works the stick (A3 run 1 spun in). To regain keyboard focus, use PowerShell `AppActivate`. Tacview: `tacviewrecord = 1` with the game closed, then LCtrl+R in the mission.
+- Flown probe flights regenerate byte for byte from frozen inputs (`src/testdata/p14_probe_inputs/`, `handoff/p14-probes/`), except those frozen as flown (2F, 2H, 2I, A0, A1, A2; A3 is also checked byte for byte against its Map build): those are checked by parse-and-links tests only. Never edit those files or re-run their writers. Flight names are never reused. The next free log folder is `src/testdata/missionlog/real_53`.
 - Only one session writes `STATE.md` at a time; other sessions put their facts in a session note in `handoff/sessions/`.
 - Stage is not declared yet (the session-start check treats the repo as `prototype`); `/promote` sets it.
