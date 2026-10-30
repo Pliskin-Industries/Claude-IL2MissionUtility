@@ -16,7 +16,8 @@ mod probe;
 mod shell;
 mod standalone;
 #[cfg(test)]
-mod testkit;
+// Test-only; `ui_tests` uses its tree checks.
+pub(crate) mod testkit;
 mod threshold;
 mod timing;
 mod zone;

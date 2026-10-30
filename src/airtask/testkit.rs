@@ -958,22 +958,10 @@ pub(crate) fn assert_frozen_files_resolve(path: &std::path::Path) -> Il2Entity {
     let stem = path.file_name().unwrap().to_string_lossy().into_owned();
     let text = std::fs::read_to_string(path.with_extension("Group")).unwrap();
     let root = crate::parser::parse_group_file(&text).unwrap();
-    assert_links_resolve(&root);
-    let mut indexes = Vec::new();
-    root.collect_indexes(&mut indexes);
-    let unique: BTreeSet<_> = indexes.iter().copied().collect();
-    assert_eq!(unique.len(), indexes.len(), "{stem}: duplicate Index");
-    let english = std::fs::read(path.with_extension("eng")).unwrap();
-    let locale = crate::locale::parse_locale(&crate::locale::decode_locale_bytes(&english).unwrap());
+    let unique = assert_indexes_unique_and_links_resolve(&root, &stem);
+    let locale = read_locale_file(&path.with_extension("eng"));
     root.for_each(&mut |node| {
-        // 0 means "no link" (unlinked map objects in a full mission).
-        for key in ["LinkTrId", "MisObjID", "TarId", "CmdId"] {
-            if let Some(value) = node.property(key) {
-                let value = value.parse::<i32>().unwrap();
-                assert!(value == 0 || unique.contains(&value), "{stem}: unresolved {key}={value}");
-            }
-        }
-        for key in ["LCName", "LCDesc", "LCText"] {
+        for key in LOCALE_KEYS {
             if let Some(value) = node.property(key) {
                 let value = value.parse::<i32>().unwrap();
                 assert!(value == 0 || locale.get(value).is_some(), "{stem}: missing locale {value}");
@@ -1974,4 +1962,147 @@ mod walker_tests {
         assert!(check(&root, &[1]).unwrap_err()[0].contains("Nested OUT"));
         assert!(check(&root, &[1, 6]).is_ok());
     }
+}
+
+/// Keys that hold another block's `Index` (0 means no link).
+pub(crate) const INDEX_LINK_KEYS: [&str; 4] = ["LinkTrId", "MisObjID", "TarId", "CmdId"];
+/// Keys that hold a language-table id (0 means no text).
+pub(crate) const LOCALE_KEYS: [&str; 3] = ["LCName", "LCDesc", "LCText"];
+
+/// A language file (`.eng` or another), read from disk.
+pub(crate) fn read_locale_file(path: &std::path::Path) -> crate::locale::LocaleTable {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let text = crate::locale::decode_locale_bytes(&bytes).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    crate::locale::parse_locale(&text)
+}
+
+/// No `Index` is used twice in `root`, and every link (`Targets`, `Objects`
+/// and `INDEX_LINK_KEYS`) points at a block in it. Returns the indexes.
+pub(crate) fn assert_indexes_unique_and_links_resolve(root: &Il2Entity, what: &str) -> BTreeSet<i32> {
+    assert_links_resolve(root);
+    let mut indexes = Vec::new();
+    root.collect_indexes(&mut indexes);
+    let unique: BTreeSet<_> = indexes.iter().copied().collect();
+    assert_eq!(unique.len(), indexes.len(), "{what}: duplicate Index");
+    root.for_each(&mut |node| {
+        // 0 means "no link" (unlinked map objects in a full mission).
+        for key in INDEX_LINK_KEYS {
+            if let Some(value) = node.property(key) {
+                let value = value.parse::<i32>().unwrap_or_else(|e| panic!("{what}: {key} {value}: {e}"));
+                assert!(value == 0 || unique.contains(&value), "{what}: unresolved {key}={value}");
+            }
+        }
+    });
+    unique
+}
+
+/// The Mission Editor keeps the first 31 characters of a Group's name when it
+/// saves (standalone check L, 2026-10-30); other names were all shorter.
+pub(crate) const EDITOR_GROUP_NAME_CHARS: usize = 31;
+
+/// How `assert_same_up_to_indexes` compares two trees.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Renumbering<'a> {
+    /// Compare language ids by their text in these tables (first tree's,
+    /// second tree's) instead of as written.
+    pub(crate) locales: Option<(&'a crate::locale::LocaleTable, &'a crate::locale::LocaleTable)>,
+    /// The second tree was saved by the Mission Editor, which cuts Group names
+    /// to `EDITOR_GROUP_NAME_CHARS`.
+    pub(crate) editor_saved: bool,
+}
+
+impl Renumbering<'_> {
+    /// The name the second tree should have for a block named `name`.
+    fn expected_name(&self, block_type: &str, name: &str) -> String {
+        if self.editor_saved && block_type == "Group" {
+            name.chars().take(EDITOR_GROUP_NAME_CHARS).collect()
+        } else {
+            name.to_string()
+        }
+    }
+}
+
+/// The properties other than `Index`, `Targets` and `Objects` (those three
+/// are compared through the typed fields), in file order: a Boundary's point
+/// rows all have an empty key.
+fn plain_properties(e: &Il2Entity) -> Vec<(&str, &str)> {
+    e.properties
+        .iter()
+        .filter(|(k, _)| !matches!(k.as_str(), "Index" | "Targets" | "Objects"))
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect()
+}
+
+/// Checks that `b` is `a` with its indexes renumbered, as an editor import
+/// does (risk l): the same blocks in the same order, the same properties, and
+/// every link (`Targets`, `Objects` and `INDEX_LINK_KEYS`) pointing at the
+/// renumbered block. Numbers are compared as numbers ("90" is "90.000");
+/// `how` sets the rest. Returns the index map, a to b.
+pub(crate) fn assert_same_up_to_indexes(a: &Il2Entity, b: &Il2Entity, how: Renumbering) -> BTreeMap<i32, i32> {
+    fn map_indexes(a: &Il2Entity, b: &Il2Entity, map: &mut BTreeMap<i32, i32>, path: &str, how: Renumbering) {
+        let here = format!("{path}/{} {:?}", a.block_type, a.name().unwrap_or(""));
+        assert_eq!(a.block_type, b.block_type, "{here}: block type");
+        let expected = a.name().map(|n| how.expected_name(&a.block_type, n));
+        assert_eq!(expected.as_deref(), b.name(), "{here}: name");
+        match (a.index, b.index) {
+            (Some(x), Some(y)) => {
+                assert!(map.insert(x, y).is_none(), "{here}: Index {x} twice in the first tree");
+            }
+            (None, None) => {}
+            other => panic!("{here}: Index {other:?}"),
+        }
+        assert_eq!(a.children.len(), b.children.len(), "{here}: child count");
+        for (x, y) in a.children.iter().zip(&b.children) {
+            map_indexes(x, y, map, &here, how);
+        }
+    }
+    fn compare_blocks(a: &Il2Entity, b: &Il2Entity, map: &BTreeMap<i32, i32>, path: &str, how: Renumbering) {
+        let here = format!("{path}/{} {:?}", a.block_type, a.name().unwrap_or(""));
+        let moved = |links: &[i32]| -> Vec<i32> {
+            links
+                .iter()
+                .map(|i| *map.get(i).unwrap_or_else(|| panic!("{here}: link {i} leaves the tree")))
+                .collect()
+        };
+        assert_eq!(moved(&a.targets), b.targets, "{here}: Targets");
+        assert_eq!(moved(&a.objects), b.objects, "{here}: Objects");
+        let (props_a, props_b) = (plain_properties(a), plain_properties(b));
+        let keys = |props: &[(&str, &str)]| props.iter().map(|(k, _)| k.to_string()).collect::<Vec<_>>();
+        assert_eq!(keys(&props_a), keys(&props_b), "{here}: keys");
+        let id = |key: &str, value: &str| -> i32 {
+            value.parse().unwrap_or_else(|e| panic!("{here}: {key} {value}: {e}"))
+        };
+        for (&(key, value), &(_, other)) in props_a.iter().zip(&props_b) {
+            if key == "Name" {
+                let expected = format!("\"{}\"", how.expected_name(&a.block_type, value.trim_matches('"')));
+                assert_eq!(expected, other, "{here}: Name");
+            } else if INDEX_LINK_KEYS.contains(&key) {
+                let (x, y) = (id(key, value), id(key, other));
+                let want = if x == 0 { 0 } else { *map.get(&x).unwrap_or_else(|| panic!("{here}: {key} {x} leaves the tree")) };
+                assert_eq!(y, want, "{here}: {key}");
+            } else if let (true, Some((la, lb))) = (LOCALE_KEYS.contains(&key), how.locales) {
+                // 0 is "no text"; the editor gives every Mission Objective its
+                // own id on save, with the text "<no name>".
+                let (x, y) = (id(key, value), id(key, other));
+                assert!(x == 0 || la.get(x).is_some(), "{here}: {key} {x} is not in the first table");
+                assert!(y == 0 || lb.get(y).is_some(), "{here}: {key} {y} is not in the second table");
+                let text = |table: &crate::locale::LocaleTable, id: i32| {
+                    (id != 0).then(|| table.get(id)).flatten().filter(|t| *t != "<no name>").map(str::to_string)
+                };
+                assert_eq!(text(la, x), text(lb, y), "{here}: {key} text ({x} and {y})");
+            } else if let (Ok(x), Ok(y)) = (value.parse::<f64>(), other.parse::<f64>()) {
+                // The editor writes "90" for "90.000".
+                assert!((x - y).abs() <= 1e-6 * x.abs().max(1.0), "{here}: {key} {value} and {other}");
+            } else {
+                assert_eq!(value, other, "{here}: {key}");
+            }
+        }
+        for (x, y) in a.children.iter().zip(&b.children) {
+            compare_blocks(x, y, map, &here, how);
+        }
+    }
+    let mut map = BTreeMap::new();
+    map_indexes(a, b, &mut map, "", how);
+    compare_blocks(a, b, &map, "", how);
+    map
 }
