@@ -4986,13 +4986,12 @@ const A3_COOLDOWN_MIN: f64 = 5.0;
 const A3_ZONE_SORTIE: &str = "1950_US_F80_HVAR_Strike_4ship.Group";
 const A3_CLOCK_SORTIE: &str = "1950_US_F51_CloseSupport_4ship.Group";
 
-/// The A3 base map. Map tab at its default date, no fighter pack. The inputs a
+/// The A3 inputs. Map tab at its default date, no fighter pack. The inputs a
 /// user enters on the map or in the panels are set on the app directly, as in
 /// `build_a2`: the objective, the air start (a DPRK bank field changed to a
-/// Yak-9P), the two entries and the settings above. Then Trace build on and
-/// Generate Base Map. Returns the written root and every (block, Country)
-/// outside Air Tasking.
-fn build_a3(h: &mut Harness) -> (crate::ast::Il2Entity, Vec<(String, String)>) {
+/// Yak-9P), the two entries and the settings above, then Trace build on. The
+/// standalone check (`build_standalone_l`) starts from the same inputs.
+fn a3_inputs(h: &mut Harness) {
     use crate::airtask::{self, AirSide, PoolEntry, TargetRef, TriggerMode};
     h.tab("Map");
     h.wait_for_map();
@@ -5044,6 +5043,12 @@ fn build_a3(h: &mut Harness) -> (crate::ast::Il2Entity, Vec<(String, String)>) {
     assert!(h.app.air_plan.include_in_base_map);
     h.app.trace_build = true;
     h.settle();
+}
+
+/// The A3 base map: `a3_inputs`, then Generate Base Map. Returns the written
+/// root and every (block, Country) outside Air Tasking.
+fn build_a3(h: &mut Harness) -> (crate::ast::Il2Entity, Vec<(String, String)>) {
+    a3_inputs(h);
     assert!(
         map_air_check(h).is_some_and(|c| c.ok),
         "the Air Tasking check fails"
