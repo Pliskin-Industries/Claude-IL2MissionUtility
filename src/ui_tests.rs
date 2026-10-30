@@ -5061,9 +5061,10 @@ fn write_p14_acceptance_a3() {
     println!("{}", h.status());
 }
 
-/// The A3 build, as the run sheet describes it. Until A3 is flown, the build
-/// must match the frozen files byte for byte; once flown, they stay as flown
-/// and this checks the facts only (as A2's check does).
+/// The A3 build, as the run sheet describes it. A3 was flown on 2026-10-30, so
+/// its frozen files stay as flown. While the build still matches them byte for
+/// byte, this checks that; if the trace build changes, drop the byte check and
+/// keep the facts (as A2's check did).
 #[test]
 fn a3_map_build_matches_the_frozen_files_and_the_run_sheet() {
     let mut h = Harness::new("p14_acceptance_a3");

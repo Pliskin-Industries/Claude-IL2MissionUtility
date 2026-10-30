@@ -1,6 +1,6 @@
 # 2026-10-30 — P14 acceptance, flight A3 (Map air start, NATO clock launch, two sorties end together): run sheet
 
-**Status: built 2026-10-30, not yet flown.** Branch `claude/p14-acceptance-a3`, cut from `main` at `8e33e0b`. The user approved the design ("Build it", 2026-10-30) and chose that Claude flies it by keyboard, as in A2.
+**Status: flown 2026-10-30 by Claude (two runs; all predictions met in run 2; results at the end).** Branch `claude/p14-acceptance-a3`, cut from `main` at `8e33e0b`. The user approved the design ("Build it", 2026-10-30) and chose that Claude flies it by keyboard, as in A2.
 
 **Why this flight.** It covers the three open items of P14 step 11 (`handoff/P14-air-tasking.md` §8):
 1. **A DPRK player on the app's own Map air start** (`placed_air_starts`, written by Map Generate, no `--spawns`). Since decision 0042 (A) it writes country 501. The player must log as 501, and the NATO area must see them.
@@ -20,7 +20,7 @@
     - The check `a3_map_build_matches_the_frozen_files_and_the_run_sheet`:
       - a byte check against the frozen files;
       - the build facts in "Timing read from the file".
-      - Once A3 is flown, its files stay as flown, and this becomes a facts-only check, as A2's did.
+      - A3 was flown on 2026-10-30, so its files stay as flown. If the trace build changes, the byte check is dropped and the facts stay, as A2's were.
   - `src/airtask/export_acceptance_flights.rs`: `frozen_a3_files_parse_and_links_resolve` (parse and links). It also checks:
     - six `DONE HUB OFF`s;
     - one Airfield, on 501, outside twice the trigger radius;
@@ -251,8 +251,53 @@ S is the player's spawn time (the `AType:10` line). **P** is the first `THN01 IN
   - DH + 60.6 to `DELETE DELAY`;
   - only SN01–03 re-arming ZN01;
   - the spawn distances (30.0 and 43.3 km).
-- No game fact was learned (nothing was flown), so `docs/il2-loader-and-log-facts.md` is unchanged.
+- No game fact was learned before the flight. The flight's facts are in `docs/il2-loader-and-log-facts.md`, "Found on 2026-10-30".
 
-## Results
+## Results (flown 2026-10-30)
 
-Not flown yet.
+Flown by Claude on this PC (game 1.005), keyboard only, Tacview on, from the frozen mission `P14_Acceptance_A3_20261030` in the Dogfight folder.
+
+- **Run 1**, session `2026-10-30_12-25-15`, logs `src/testdata/missionlog/real_52/` (18 files), Tacview `handoff/tacview/P14_Acceptance_A3_run1.zip.acmi`.
+  - Spawn S = 119.24 s at (187,500; 258,037), 1,998 m, `COUNTRY:501`.
+  - The NATO area saw the player: `THN01 INNER` 306.74 (S + 187.5), `ZN01 CHANCE` 306.84, `ZN01 FIRE` and `SN01 START` 306.88.
+  - Before the orbit I moved the mouse to the top of the screen and clicked, to give the game keyboard focus, then held LAlt+Z. The Yak pulled into a stall and spin and hit the ground at 412.30 s, about 5 km from A. The instructor showed "Don't pull the stick so much!" and "Spin!". Most likely the mouse movement worked the stick: see `docs/il2-loader-and-log-facts.md`, 2026-10-30.
+  - Leave Server took the game to the results screen, and the server reloaded the mission into a new session.
+- **Run 2**, session `2026-10-30_12-34-44`, logs `src/testdata/missionlog/real_51/` (65 files), Tacview `handoff/tacview/P14_Acceptance_A3_run2.zip.acmi`. The raw `.acmi` files of both runs are in `C:\Machine Intelligence\P14 Flight A3\tracks\`.
+  - Spawn **S = 98.74 s**, throttle **58 %** (about 485 km/h indicated, 2,000 m), heading 089.
+  - The mouse was not moved in flight. A 3 s test turn showed the helper on (height held).
+  - Left orbit begun abeam A at about S + 2:40. Rolled out on heading 358 at about 1,040 s, 7 s before `SN01 ON STATION`. A stayed HOT until its next check, so SN01 still saw A HOT.
+  - North to 35 km. A 180° left turn about 36 s after DH, then back south. A **right** orbit over A, because the track was about 1 km east of A's line.
+  - Left the server at about 1,892 s. Leaving in flight logged the Yak as destroyed (`AType:3`, `AID:-1`). The results-screen leave looped into a mission reload; `CloseMainWindow` closed the game cleanly.
+  - Mission time kept pace with wall time.
+- **Replay** (`replay` command on `real_51`, report `target/p14/acceptance_a3_report.md`, not committed): **no dead links**.
+
+### Run 2, prediction by prediction
+
+| Id | Flown |
+|---|---|
+| Q1 | **yes**: loads; the DPRK spawn list offered "P14 A3 DPRK air start" (Yak-9P, unlimited), the Map's own air start. The player is a Yak-9P on **`COUNTRY:501`** at (187,500; 258,037), 1,998 m. |
+| Q2 | **yes: the NATO area sees the Map air start's player.** `THN01 INNER` **279.66** (P = S + 180.9). `ZN01 CHANCE` 279.76 (+0.10); `ZN01 FIRE` and `SN01 START` 279.80 (+0.14). |
+| Q3 | **yes**: `THN01 INNER` 279.66, 439.66, 599.66, 759.66, 919.66 and 1,079.66, **exactly 160.00 s apart**. No `CLOSE DELAY` while orbiting, and no `ZN01 CHANCE` at these passes. |
+| Q4 | **yes: the NATO clock launch.** `CLK N SLOT OPEN` **600.10**; `EN02 GO` and **`SN04 START` 600.90**; `BUD N COUNT` 601.14 (two copies). |
+| Q5 | **yes**: `SN01 Zone IN` 446.28 (s + 166.48); `SN04 Zone IN` 914.94 (s + 314.04, inside 901–926). |
+| Q6 | **yes**: `SN01 ON STATION` **1,046.78** = Zone IN + 600.50, no `SN01 COLD`. |
+| Q7 | **yes: two sorties on one target ended together.** `SN01 Zone Out`, `SN01 DONE HUB`, `SN04 Zone Out` and `SN04 DONE HUB` all at **1,280.66** (DH), one tick, about 240 s after the roll-out north. No `SN04 ON STATION`, no `SN04 COLD`. |
+| Q8 | **yes: deleted together.** `SN01 DELETE DELAY` and `SN04 DELETE DELAY` at **1,341.26** = DH + 60.60, one tick. No `BUD N COUNT`. |
+| Q9 | **yes (decision 0038)**: after DH, SN01 and SN04 logged only `DELETE DELAY`. Never logged: `SN01 EXTEND` (due ≈ 1,647), `SN04 ON STATION` (due ≈ 1,815), either `HARD STOP`, or a second `Zone IN` when the player came back within 35 km. |
+| Q10 | **yes**: `THN01 CLOSE DELAY` **1,241.70** = the last `INNER` (1,079.66) + 162.04 (the 1,239.66 check failed). |
+| Q11 | **yes (decisions 0044, 0045)**: `ZN01 COOLDOWN` and `ZN01 ARM` at **1,580.66** = DH + 300.00; no `MISS WAIT OUT`, no second cooldown. |
+| Q12 | **yes: a later zone start on the same side.** Back in A's ring, `THN01 INNER` **1,699.54** (after ARM). `ZN01 CHANCE` 1,699.64; `ZN01 FIRE` and **`SN02 START` 1,699.68**; no `BUD N COUNT` (one copy). `SN02 Zone IN` 1,866.30 (s + 166.62). |
+| Q13 | **yes: slot 2 was quiet by the no-repeat rule.** `CLK N SLOT OPEN` **1,800.10** with A HOT (`INNER` 1,699.54 and 1,859.54) and SN02 alone flying, and **no `EN02 GO`, no `SN05 START`**. |
+| Q14 | **yes**: at most two NATO copies at once (SN01 + SN04, then SN02 alone). SN03, SN05 and SN06 never started. No `DENY WAIT`, no `LOSSES`, no `HARD STOP`, and no AI aircraft was lost. |
+| Q15 | **yes (decision 0037)**: every AI aircraft in the log is 602 (F-80C-10, F-51D); the only 501 objects are the player's Yak and pilot. 13 `AType:28`: the player plus 12 AI (SN01, SN04, SN02). |
+| Q16 | **yes**: no dead links. Never fired, as listed: SN03, SN05, SN06, `ZN01 DENY WAIT`, `ZN01 MISS WAIT OUT`, every `HARD STOP` and `LOSSES`, `SN01 COLD`, `SN01 EXTEND`, `SN04 ON STATION`. SN02's later timers were still running at the leave. |
+
+**All three step 11 items are seen in the game:**
+- the Map air start's player on 501, seen by a NATO area (Q1, Q2);
+- a NATO clock launch (Q4);
+- two sorties on one target ending in one tick and deleted together, then a later start on that side (Q7, Q8, Q12).
+
+### Not predicted
+
+- **Run 1's spin** (see Run 1). The run sheet's step 4 warned against LShift+A but not against the mouse. Mouse movement in flight most likely works the stick.
+- **The roll-out came 7 s before the leave cue** (1,040 against 1,046.78), to reach heading 000 without a second circle. This changed nothing, because A stays HOT until its next presence check. SN01's `ON STATION` saw A HOT.

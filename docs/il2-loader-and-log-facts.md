@@ -189,3 +189,16 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 - **The D11 relay works as a cancel.** A running timer that runs out into a switched-off zero-second relay timer is dropped there: `ZNii MISS WAIT` into `MISS WAIT OUT` (6 times) and `CLK N ATTEMPT END` into `REROLL` (6 times). Nothing fired later.
 - **The real threshold passes exactly `HOLD` apart** while a plane stays inside (120.00 s, five in a row): `CHECK ON` switching the armed `INNER` on is the check.
 - **AI on 501 triggers a NATO Air Tasking area** with the exported logic, as in flight 2J.
+
+## Found on 2026-10-30 (flight A3, game 1.005)
+
+- **The app's own Map air start works as a player spawn.** The fake-field Airfield with a Planes list (`StartType 0`, country 501), written by Map Generate with no `--spawns`, shows in the DPRK spawn list under its name. The Yak-9P spawned there at 2,000 m (logged `COUNTRY:501`) with the level-flight helper on: a 3 s LAlt+Z held height to ±2 m.
+- **Do not move the mouse while flying.** In run 1 I moved the mouse from the bottom-right corner to the top of the screen and clicked there, to give the game keyboard focus. I then held LAlt+Z. The Yak pulled into a stall and a spin from 2,000 m, and the instructor showed "Don't pull the stick so much!" and "Spin!". In run 2 the mouse stayed still and the same turns flew clean.
+  - Most likely the mouse movement works the stick.
+  - If keyboard focus is lost in flight, use PowerShell `AppActivate`, not a click.
+- **Two copies on one area end in one tick.** Their `Zone Out`s have the same centre and 35 km radius, so both `Zone Out`s and both `DONE HUB`s logged at the same tick (1,280.66). Both `DELETE DELAY`s followed 60.60 s later, also in one tick.
+- **The clock's no-repeat works in the game.** A copy started after a slot's `DRAW` keeps its entry out of the next slot: slot 2 opened (1,800.10) with A HOT and the budget open, and no `GO` followed.
+- **A clock copy's arrival:** F-51D Close Support, spawned 43.3 km out (520 km/h × 5 min), logged `Zone IN` at `START` + 314.0 s, 14 s after the nominal 5 min. A2's zone copy of the same type was 12 s late.
+- **Yak-9P at 58 % throttle and 2,000 m:** about 485 km/h indicated. A held helper turn there gave about 3°/s (radius about 2.9 km) and held height to ±1 m for 15 minutes.
+- **Leaving the server in flight logs the player's aircraft as destroyed** (`AType:3`, `AID:-1`, at its last position and height).
+- **The launcher once failed with "wget: unable to resolve host address s3.il2korea.com".** The local DNS timed out once; Restart in the error box went straight on.
