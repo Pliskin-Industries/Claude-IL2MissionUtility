@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-10-30: the standalone-file check (risk l) passed and is merged (PR #45); every step 11 item this PC can check is done. Next: step 10 (docs).
+> Last updated: 2026-10-31: step 10 (docs) merged (PR #47); flight L's F-80 loss recorded as the known steady-turn crossing (0021). Next: step 12 (multi-player).
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -17,15 +17,15 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 
 | Branch | Holds | State |
 |---|---|---|
-| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); standalone check L (PR #45); decisions 0001 to 0045 | `aa5bfcb`, equal to `origin/main` |
+| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); standalone check L (PR #45); step 10 docs (PR #47); L's F-80 collision note with this refresh; decisions 0001 to 0045 | the merge of this refresh, equal to `origin/main` |
 
 `upstream/main` has one commit not merged here (`571504a`, harvested coalition groups and ramp starts per country). Merged branches and their worktrees under `.claude/worktrees/` can be deleted once their idle sessions are archived.
 
-Last recorded test run on `main` (`aa5bfcb`, the same tree as `24d6346`, where it ran): **1048 passed, 0 failed, 37 ignored** (`cargo test --offline`, 2026-10-30). Warnings: 81 build, 306 clippy (PR #45). Record each new run on this line.
+Last recorded test run: **1052 passed, 0 failed, 37 ignored** (`cargo test --offline`, 2026-10-31), on step 10's `e6f5eb4` (the same tree as `main` `f33d57c`) and again on this refresh's branch (docs only on top). Warnings: 81 build, 306 clippy (PR #47). Record each new run on this line.
 
 ## P14 Air Tasking ("Wing Commander")
 
-Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user decisions U1 to U24). Flight results: `handoff/P14-probe-results.md` (flights 0 to 2L, A0 to A2); A3's and L's are in their run sheets, `handoff/sessions/2026-10-30-p14-acceptance-a3.md` and `2026-10-30-p14-standalone-l.md` (not yet in `P14-probe-results.md`). Facts that cost a flight: `docs/il2-loader-and-log-facts.md`. Step and flight notes: `handoff/sessions/`.
+Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user decisions U1 to U24). Flight results: `handoff/P14-probe-results.md` (flights 0 to 2L, A0 to A3, L); run sheets for A3 and L: `handoff/sessions/2026-10-30-p14-acceptance-a3.md` and `2026-10-30-p14-standalone-l.md`. End-user manual for Air Tasking: `USER_MANUAL.md` (step 10). Facts that cost a flight: `docs/il2-loader-and-log-facts.md`. Step and flight notes: `handoff/sessions/`.
 
 - **Built (on `main`):** steps 1a to 9T: the sortie shell, budget, threshold, clock, zone, export, the Air Tasking rail tab, the Map dock's Air tab and Map Generate, the Trace build checkbox, the Replay window and the Map's Replay layer. Also: a used copy goes quiet at `DONE HUB` (0038); the Map's own AI planes leave the player countries when Air Tasking is in the mission (0037 A); zone and clock end their timers through D11 relays, because a switched-off running timer is paused, not cancelled (0044, flight 2K); the DPRK air start and field spawns write 501 (0042 A).
 - **Flown and seen in the game:**
@@ -35,12 +35,13 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
   - 2K: a switched-off running timer is paused and resumes when switched on; a pulsed check zone stays armed.
   - 2L (no pilot): the paused-timer fix holds; a zone rolls again after one cooldown.
   - A3 (DPRK player, built through Map Generate, logs `real_51`; run 1 crashed, `real_52`): **the Map's own air start on 501** (0042 A); **a NATO clock launch** (slot 1 at 600.10 s); **two sorties on one area end in one tick and are deleted in one tick** 60.60 s later (C1); **a later start** after one cooldown; the clock's no-repeat (`LAST`) keeps slot 2 quiet. A3 set the NATO clock to one jitter step and no quiet slots, so the 20 % quiet roll is not flown.
-  - L, the standalone-file check (risk l, logs `real_53`): the Air Tasking tab's standalone file, imported (File › Import From File) into a Map base map that already has groups, is **re-indexed cleanly by the Mission Editor** (no Index twice, every link kept; a test compares the frozen editor save with the file). The saved mission flew with A3's timings. Seen in passing: one F-80 HVAR lost with no attacker (563.88 s), and the briefing map's front-line icons may show the mission title (seen on screen once, not saved).
+  - L, the standalone-file check (risk l, logs `real_53`): the Air Tasking tab's standalone file, imported (File › Import From File) into a Map base map that already has groups, is **re-indexed cleanly by the Mission Editor** (no Index twice, every link kept; a test compares the frozen editor save with the file). The saved mission flew with A3's timings. Seen in passing: one F-80 HVAR lost at 563.88 s to its own wingman in a steady circling turn over the empty area (Tacview; the 0021 steady-turn crossing), and the briefing map's front-line icons may show the mission title (seen on screen once, not saved).
 - **Still open from the step 11 list** (plan §8 "Step 11"; items 1 to 3 done by A3, item 4 by L):
   5. Load time and tick delay next to `validate`'s totals: only on the real host, not this PC.
   - Also unseen: a Yak copy, a player who lands inside an area (0040: no change needed), a DPRK-side extension.
-- **Formations:** AI losses in flights 2C to 2I were wingmen crossing their leader, a game bug (0021). Workarounds: Safe density (0019), Pairs at Loose (0020 A) except a Cover flight (0022 A2).
-- **Remaining steps:** 10 docs → 12 multi-player. Step 11 item 5 waits for the real host. Upstream integration (0026: Template Builder's Strike/CAP as sorties, his target types) waits for eszyman's answer to the proposal.
+- **Formations:** AI losses in flights 2C to 2I were wingmen crossing their leader, a game bug (0021). Workarounds: Safe density (0019), Pairs at Loose (0020 A) except a Cover flight (0022 A2). Flight L lost one F-80 of a 4-ship Wedge at Safe to the steady-turn crossing; no formation setting removes that kind, so the user decided (2026-10-31) to change nothing and fly no probe. It waits for a game fix.
+- **Built: step 10** (docs, PR #47): the Air Tasking manual, a Help topic "Trace builds and replay", `docs/src-guide.md` for every file.
+- **Remaining steps:** 12 multi-player. Step 11 item 5 waits for the real host. Upstream integration (0026: Template Builder's Strike/CAP as sorties, his target types) waits for eszyman's answer to the proposal.
 
 ## Waiting on the user
 
@@ -51,8 +52,8 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Next steps
 
-1. **Step 10 (docs):** the user manual for Air Tasking and the Map's Air tab, from what A0 to A3 and L showed. This includes adding A3's and L's results to `handoff/P14-probe-results.md`.
-2. Step 12 (multi-player), then step 11 item 5 on the real host.
+1. **Step 12 (multi-player)** (plan §8): two or more players; the manual's last UNVERIFIED items include it.
+2. Step 11 item 5 (load time and tick delay) on the real host.
 
 ## Traps
 
