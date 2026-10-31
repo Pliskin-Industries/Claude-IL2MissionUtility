@@ -74,7 +74,7 @@ Session `2026-10-30_18-25-28`, logs `src/testdata/missionlog/real_53/` (35 files
 | Leave | Leave Server at 979.08. The player logged as destroyed (`AType:3 AID:-1`), as in A3. The results screen was closed with `CloseMainWindow` |
 | Replay | `replay --group handoff/p14-probes/standalone-l/P14_Standalone_L_Air.Group --trace ….trace.json --logs src/testdata/missionlog/real_53`: **no dead links**; every breadcrumb matched by position. Never fired: the sorties' own Mission Begin breadcrumbs (A3's never logged either), `LOSSES`, SN02, SN03, SN05 and SN06, and the timers still running at the leave |
 
-**Not predicted, and not caused by the import:** at 563.88 SN01's fourth F-80C ("Red 14") was destroyed with no attacker (`AType:3 AID:-1`) at 896 m, about 11 km from A. The pilot bailed out at 570.14, and the aircraft hit the ground at 578.14. The cause is not known. Losses of HVAR F-80s are the subject of another session.
+**Not predicted, and not caused by the import:** at 563.88 SN01's fourth F-80C ("Red 14") was destroyed with no attacker (`AType:3 AID:-1`) at 896 m, about 11 km from A. The pilot bailed out at 570.14, and the aircraft hit the ground at 578.14. **The Tacview shows a mid-air collision with Red 13**, its neighbour on the left of the Wedge (Safe density): closest 5.2 m at 563.4 s, both attitudes jumping at 563.2 s. It came in the steady descending right turn the flight flew over A, which had no ground target. Details are in `docs/il2-loader-and-log-facts.md` (2026-10-30, standalone-file check L). Losses of HVAR F-80s are the subject of another session.
 
 ## Choices, and why
 
