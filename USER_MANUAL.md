@@ -458,8 +458,9 @@ Towns and buildings are **never** written as map icons. Airfields and scenery bl
 
 ### What you set
 
-- **Tools** — the strip left of the map holds six tools, also on keys **1–6**: Select AO / move units, Draw front, Salient, Attack arrow, DPRK objective, NATO objective. Each tool's key sits in the corner of its button. One tool is active at a time; the banner over the map and the status bar name it and say how to use it. **Esc** drops a half-drawn salient or arrow, the points of a front drag still under way, or a unit WP pick, and returns to Select; a finished front stays. Picking another tool drops a half-drawn line the same way. An objective tool returns to Select after one placement; hold **Shift** to place more. Leaving the Map tab puts the tool down. **Ctrl Z** undoes the last action: a drawing (each front click or drag, salient or arrow) or a **Clear** / **Remove**; the status bar and the Undo button's hover say which. **Ctrl Y** redoes a drawing. The right dock has five tabs: **Period** (date, battle focus, suggested aircraft, clear drawn marks), **Forces** (fighters, objectives, units), **References** (with the number loaded), **Terrain** and **Air** (Air Tasking sorties on this map; see Air Tasking).
+- **Tools** — the strip left of the map holds six tools, also on keys **1–6**: Select AO / move units, Draw front, Salient, Attack arrow, DPRK objective, NATO objective. Each tool's key sits in the corner of its button. One tool is active at a time; the banner over the map and the status bar name it and say how to use it. **Esc** drops a half-drawn salient or arrow, the points of a front drag still under way, or a unit WP pick, and returns to Select; a finished front stays. Picking another tool drops a half-drawn line the same way. An objective tool returns to Select after one placement; hold **Shift** to place more. Leaving the Map tab puts the tool down. **Ctrl Z** undoes the last action: a drawing (each front click or drag, salient or arrow) or a **Clear** / **Remove**; the status bar and the Undo button's hover say which. **Ctrl Y** redoes a drawing. The right dock has five tabs: **Period** (date, battle focus, suggested aircraft, clear drawn marks), **Forces** (fighters, objectives, units), **References** (with the number loaded), **Terrain** and **Air**.
 - **Terrain** (fourth dock tab) — measured ground heights. **Height store** shows how much of the map's land is measured. Those heights are built into the utility. A newer file at `%APPDATA%\IL2MissionUtility\terrain\korea_100m.hgt` is merged on top when it exists. **Export survey pass…** writes 390 625 Helper Input probes (`MCU_H_Input`) 800 m apart over the whole map, 256 per file. **Export AO tiles…** writes the 100 m probes for each 224 × 224-node tile the AO touches, in the same 256-probe files. Import one file in the mission editor, select all, **set to ground**, save, then **Import snapped…** here. A file saved without set to ground is refused. **Learn from mission…** also keeps the snapped height of pinned ground units in any mission you ran set to ground on. **Coverage** shades each tile by how much of it is measured; **Relief** colours measured ground by height with hillshade. With either layer on, the map shows the ground height under the pointer. **Apply terrain heights on export** (on by default; turn it off for this session to keep authored heights) puts ground units and their waypoints on the measured ground plus a margin, parked planes just above it and ships at sea level, for Template, Exclusive Activation, Army Generator, Map and Fighter Pack exports (not Airfield). Units already on the ground keep their height; where the terrain is not measured, units keep their height and the export status lists them. The same actions exist on the command line: `--probe-survey`, `--probe-ingest [--learn]`, `--probe-status`.
+- **Air** (fifth dock tab) — the Air Tasking plan on this map, one side at a time (see Air Tasking). It lists that side's entries with weight, mode and ✖, and its **Auto-fill from objectives** adds that side's sorties for each of its objectives and arrows. **Show** turns the map's approach lines, threshold rings, spawn points and RTB points on or off; **Timeline** shows both sides' slots over the first three hours. Map's **Ctrl Z** undoes the dock's Auto-fill and ✖. Generate Base Map stays disabled while the plan has an error; when no entry is valid (all off, orphaned or out of date), the dock shows an orange note and the base map is written without Air Tasking. **Load base map…** clears the pool, because a base map does not keep it (its objectives are preview-only); the library and settings stay, and the Load cannot be undone. A loaded map that already had Air Tasking gets an orange note: that Air Tasking is not loaded back, so Generate writes only the current plan.
 - **Year** (1950–1953) and **Season** (early spring, late spring, summer, fall, winter). Jump to the first dated mark in that year/season. The mark title and note describe that date (38th Parallel, June invasion, Inchon to the Yalu, Chosin, Hungnam, Ripper, MLR, Triangle Hill, Pork Chop, armistice DMZ, …).
 - **Front date** slider — a **non-uniform** dated timeline: week-to-week in early 1950, month-to-month through mid-1951, then seasonal after the MLR. Drag interpolates the preview between adjacent marks. **Generate Base Map** uses the nearest mark (not a coarse season average). **Left/Right** arrow keys step one mark; **Home/End** jump to the first/last date. The slider is a full-width row so you can hit a specific interesting date.
 - **Editor map** — the selected date recommends the IL-2 landscape to load (Spring / Summer / Autumn / Winter + year), for example `Editor map: Winter 1950 (IL-2 landscape)`.
@@ -520,6 +521,8 @@ After import, generate again with a different box if you need a tighter AO.
 
 ## Air Tasking
 
+Air Tasking adds AI sorties that fly against players during a multiplayer mission. Each sortie is a copy of a library template, parked and switched off until something starts it. A sortie starts only over an area where a player of the other side is flying, and only while that side has room in its budget.
+
 Open **Air Tasking** with **Ctrl 7**. Pick a library sortie, choose one of its side's Map objectives or arrows, and click **Add to pool**. **Auto-fill from objectives** adds the available sorties for both sides without repeating existing pairs. The Map date decides which sorties are valid.
 
 Library cards show their category: **Air alert**, **Strike**, **Close support**, **Armed recon** or **Interdiction**. Interdiction can describe attacks on naval vessels too. Select a card and use its **Category** combo to change it. **Escorted** appears automatically when a lead has a Cover order.
@@ -528,9 +531,128 @@ The centre has **Pool** and **Categories** tabs. The Pool filter shows **All cat
 
 Category edits last for this run. To keep a template's category between runs, put a line `Category: <name>` in the top-level group's description (**Desc**) in the mission editor, for example `Category: Interdiction`. The first such line supplies the category when the file loads, and a new name joins the list. Without a label, user templates with an air patrol order start as Air alert; other user templates start as Strike. The six built-ins use their curated categories. Reset restores the default category list and keeps the library's labels. Generate does not write category edits back to templates.
 
-Each pool row has an on/off switch, weight, trigger mode and maximum runs. Select a row to set its heading and see its hard stop. The right panel holds the budget, player threshold, schedules, zone triggers and output totals. The threshold is fixed at one player. **Add template…** (**Ctrl O**) adds a supported file to the library. Removing a user template removes its entries too. **Reset** clears the pool and restores the settings while keeping the library; **Ctrl Z** undoes an edit, removal or reset. **Generate File** writes the air sorties as one group.
+Each pool row has an on/off switch, weight, trigger mode (**Clock**, **Zone** or **Both**) and maximum runs. Select a row to set its heading and see its hard stop. The right panel holds the budget, player threshold, schedules, zone triggers and output totals. **Add template…** (**Ctrl O**) adds a supported file to the library. Removing a user template removes its entries too. **Reset** clears the pool and restores the settings while keeping the library; **Ctrl Z** undoes an edit, removal or reset. **Generate File** writes the air sorties as one group. Its indexes start at 1. The mission editor renumbers the group when you import it into a mission (File › Import From File), and every link survives (check L).
 
-With **Include in base map** ticked, Map's **Generate Base Map** adds the same **Air Tasking** group to the base map. It also moves the Map's own AI aircraft (fighter packs, strike missions, and aircraft in loaded armies or reference groups) from USA (601) to country 602 and from DPRK (501) to 503, so they cannot start a sortie as a player would; the editor shows those two countries as a number, not a name. Player spawns, co-op player planes and ground units keep their countries, and a base map without Air Tasking is written as before. Air Tasking sees players on countries 601 (NATO) and 501 (DPRK side) only; 501 is the country of the DPRK airfield in the game's own dogfight test mission. The Airfield tab's air starts and field spawns write those two countries. A DPRK-side spawn built in the editor on 502 or 503 does not start a sortie. Map's **Air** dock tab shows one side's entries with weight, mode and ✖, and its **Auto-fill from objectives** adds that side's sorties for each of its objectives and arrows. **Show** turns the map's approach lines, threshold rings, spawn points and RTB points on or off; **Timeline** shows both sides' slots over the first three hours. Map's **Ctrl Z** undoes the dock's Auto-fill and ✖. Generate Base Map stays disabled while the plan has an error; when no entry is valid (all off, orphaned or out of date), the dock shows an orange note and the base map is written without Air Tasking. **Load base map…** clears the pool, because a base map does not keep it (its objectives are preview-only); the library and settings stay, and the Load cannot be undone. A loaded map that already had Air Tasking gets an orange note: that Air Tasking is not loaded back, so Generate writes only the current plan.
+With **Include in base map** ticked, Map's **Generate Base Map** adds the same **Air Tasking** group to the base map. It also moves the Map's own AI aircraft (fighter packs, strike missions, and aircraft in loaded armies or reference groups) from USA (601) to country 602 and from DPRK (501) to 503, so they cannot start a sortie as a player would; the editor shows those two countries as a number, not a name. Player spawns, co-op player planes and ground units keep their countries, and a base map without Air Tasking is written as before. Map's **Air** dock tab shows the plan on the map (see Map, **Air**).
+
+### Who starts a sortie
+
+Air Tasking sees players on countries 601 (NATO) and 501 (DPRK side) only; 501 is the country of the DPRK airfield in the game's own dogfight test mission. The Airfield tab's air starts and field spawns, and the Map's air starts, write those two countries. A DPRK-side spawn built in the editor on 502 or 503 does not start a sortie.
+
+Each entry's target (an objective or arrow) is an **area**. The threshold is **one player**: one player of the other side inside the area's inner ring makes the area **HOT**. The inner ring is half the threshold radius R (R is 12 km by default, so 6 km).
+- The entry trigger fires when a player flies across the inner ring. The first presence check runs a dwell time later (60 s at R 12 km, 80 s at R 16 km). If the player is still inside, the area turns HOT.
+- While the area is HOT, the presence check looks again every HOLD (120 s at R 12 km, 160 s at R 16 km). The area is HOT when the **last presence check** found a player inside. When a check finds nobody, the area turns **COLD** 2 s later and waits for the next entry.
+- A player who **spawns** inside an area is not seen. They are seen once they leave the ring and fly back in.
+- A player who flew in and then lands or parks inside the area keeps it HOT, and it keeps drawing sorties (decision 0040).
+
+### Clock and zone triggers
+
+An entry starts sorties from the clock (**Clock**), from its zone trigger (**Zone**), or from both (**Both**).
+
+**Clock.** Each side has its own clock. The first slot is at 10 min and the next ones every 20 min. Each slot rolls when it is due: with the defaults it opens on time, 3 min or 6 min late, or not at all (the quiet roll, 20 %). When a slot opens, the side draws one entry by **waterfall**: the entries whose area is HOT are tried in pool order, each with a chance of its weight against the weights still left, and the first that passes wins. A draw that picks nobody is drawn again while the slot is open (every 1.5 s with one clock entry; each attempt is longer with more entries). **No back-to-back:** an entry that started a copy since the previous slot's draw, by winning that slot or from its zone trigger, sits this slot out. So the clock never picks the same entry twice in a row.
+
+**Zone.** A Zone entry rolls each time a presence check finds its area HOT. Its chance is the zone chance (50 % by default), written as a timer's **Random %**. A win starts a copy. The zone then stays shut until that copy has ended and one cooldown (15 min by default) has passed. A miss, or a refusal by the budget, also waits one cooldown. After the cooldown the **zone re-arm** lets the next presence check that finds the area HOT roll again.
+
+**Budget.** Each side has at most a set number of copies flying (2 by default). The budget is a **head count**: each copy has a flag that is on from its start until its aircraft are deleted, and the side counts the flags again at every start and every deletion. When the count is full, every start is shut and a request is refused. A copy that has ended holds its place for about a minute, until its aircraft are deleted.
+
+**Runs.** Each entry has a number of copies, its maximum **runs** (default 3, from 1 to 6), shared by the clock and the zone. A pool of E entries gives at most E × runs sorties in a mission. An entry with no copy left stops drawing.
+
+### How a sortie flies and ends
+
+A started copy activates its aircraft at its spawn point and flies to the target. Zone starts spawn 30 km from the target; clock starts spawn as far out as the type flies in 5 min. The copy's own check zones, `Zone IN` and **Zone Out**, sit on the target with a 35 km radius. They see aircraft of the other side, AI and players alike.
+- **On arrival,** or later once an aircraft of the other side comes within 35 km, `Zone IN` arms Zone Out. When none is left within 35 km (the player flew away, or the last one was shot down), Zone Out ends the sortie within a few seconds. An empty target is held until the on-station time ends.
+- **At the end of the on-station time** the copy looks at its area. COLD ends the sortie. HOT gives **one extension** (10 min by default); the sortie ends after it, HOT or not.
+- **Losses:** the sortie ends when all its aircraft are lost. Losses are counted from the game's **kill events**, one per lost aircraft.
+- **Hard stop:** a last timer from the start ends the sortie whatever happened; the pool row shows it. It is final.
+
+Every end goes through the copy's `DONE HUB` once. It switches off the copy's other timers and zones (decision 0038), sends the aircraft home, and deletes them 60.6 s later. The copy then leaves the head count. Each copy flies once.
+
+### Approximations and limits
+
+- **One player:** v1 counts one player per area. Two or more players are not counted apart (multi-player comes later).
+- **AI may count** in two places. An AI aircraft of the other side inside the inner ring at a presence check keeps a HOT area HOT, as a player would; Generate warns (orange) when a sortie's path crosses such a ring. And `Zone IN` / Zone Out count AI aircraft as seen. AI cannot make an area HOT: the entry trigger counts the players' countries only, and the Map moves its own AI off those countries.
+- **The one way over budget:** **two requests in the same tick** that each find their start open (the clock and a zone, or zones on different areas) both start (seen in probe flight 2). The next recount shuts the starts again, so the side is back within budget once a copy is deleted.
+- **One copy can be started twice in one tick** if the clock and the zone pick the same Both entry in the same 0.02 s tick. The copy then gets its orders twice.
+- **No back-to-back can leave a slot quiet** when only the last winner's area is HOT.
+- **A slot can stay quiet with an entry available:** draws that pick nobody are random, and the slot is open for a limited time. In the worst simple case (three entries, the only one that can pass first in the waterfall) about 0.5 % of slots go quiet; more can with many entries.
+- **Zone re-arm for a Both entry:** a clock copy that ends first can re-arm the zone while the zone's own copy is still flying.
+- **The totals** Air Tasking adds (aircraft, MCUs, check zones) are shown in the right panel. Generate warns above 240 aircraft, 2,300 MCUs or 48 check zones: the size that loaded and ran idle at 50 SPS on the upstream author's dedicated server (decision 0032).
+- **UNVERIFIED:** the mission's load time and the tick delay on a real dedicated server with sorties flying; whether the 20 % quiet roll leaves about one slot in five quiet in the game (flight A1 saw one quiet slot, too few to measure a rate); and anything with two or more players.
+
+### What has been flown
+
+These flights were hosted on a test PC, 2026-10-27 to 2026-10-30, with one player (none in A0). The logs and results are in `handoff/P14-probe-results.md`.
+- **A0** (no pilot): the whole Air Tasking group for both sides (84 aircraft, 1,092 MCUs, 40 check zones) loads; the default clock's slots open on time or on a later jitter step, a later step opens nothing, and nothing launches.
+- **A1** (a NATO player over a DPRK area): HOT and the presence check, a zone start and a clock start, the budget at two, a quiet slot, Zone Out when the player was shot down, and deletion.
+- **A2** (a DPRK player through three NATO areas; the first mission made by Map Generate): COLD and HOT at the end of the on-station time, the one extension, a refusal by the budget, a start after a deletion, and a used copy kept quiet.
+- **A3** (the Map's own DPRK air start): the player on 501 seen by a NATO area, a NATO clock launch, two sorties on one target ending in one tick and deleted together, the zone re-arm after one cooldown, a later start on that side, and a quiet slot by the no back-to-back rule.
+- **Check L:** the Air Tasking tab's own file imported in the mission editor and saved, then one clock slot flown from the editor's `.msnbin`, at A3's times to the tick.
+
+Not seen in an acceptance flight: a Yak sortie and an extension on the DPRK side.
+
+### Known issues
+
+- **AI formations collide.** In a turn, a wingman can cross its leader's track at the same height and hit it (decision 0021, a game bug). The app flies formations at Safe density, which makes it rarer but does not stop it. In check L a 4-ship F-80 Wedge at Safe lost one aircraft to its own wingman while it circled the empty target.
+- **On the test PCs, a player can spawn only once per game session.** After the first death or leave, "Waiting for mission results…" never clears and Start stays disabled. To fly again, leave the server and start a new session.
+- **A spawn inside an area is not seen** (see Who starts a sortie). Put player airfields outside the areas, or expect the area to stay quiet until the player has left and come back.
+- **Il-10 gunners** shoot down a fighter that orbits their target at their height.
+
+---
+
+## Trace builds and replay
+
+A trace build and Replay show what a mission's logic did in a flown session: which MCUs fired, when, and where a chain stopped.
+
+### Breadcrumbs
+
+A **breadcrumb** is a small silent Mission Objective MCU that Generate adds next to an MCU it traces. When the traced MCU fires, it also pulses its breadcrumb, and the breadcrumb writes one line to the server's text log (an `AType:8` line with the breadcrumb's position). The breadcrumbs sit in a row away from the map, one position per traced MCU, so a log line names the MCU by where it is.
+- Traced: every check zone, counter, spawner and Mission Begin, and every timer with Random below 100.
+- On the Map and Air Tasking tabs, also the Air Tasking steps (`START`, `GO`, `ON STATION`, `DONE HUB`, `DELETE DELAY` and the others).
+- A switch (an Activate or Deactivate MCU, such as Air Tasking's `ARM`) cannot carry a breadcrumb itself, so the MCUs that pulse it also pulse its breadcrumb. Its line means "the switch was pulsed". The switch may still have been off itself.
+
+### Trace build
+
+Tick **Trace build** (header checkbox, every tab, beside Generate). Generate then:
+- adds the breadcrumbs to the file;
+- writes `<file>.trace.json` (the **sidecar**) next to the `.Group`: one entry per breadcrumb, with the MCU it traces (name, type and group) and the breadcrumb's position;
+- says "Trace build: N breadcrumbs." in the status bar.
+
+The box is off at every start. With it off, Generate writes exactly what it wrote before. Keep the sidecar with the `.Group` it was built with. It still works after the group is imported into a mission in the editor: Replay matches breadcrumbs by position, and the editor keeps positions when it renumbers.
+
+### Server log
+
+Set `mission_text_log = 1` under `[KEY = system]` in the server's `startup.cfg`. The `missionReport*.txt` files land in `data\logs\txt\`. Copy the files of one session to a folder of their own.
+
+### Replay window
+
+**Replay…** (header button, every tab) opens a window:
+1. **Pick .Group…**: the file you generated for the mission the logs are from (for an imported group, that file, not the saved mission). The `.trace.json` next to it is read. Use **Trace file…** only when the trace file sits somewhere else.
+2. **Log folder…**: the folder with that session's `missionReport*.txt` files.
+3. **Run replay**: it needs a `.Group` and at least one log file. A trace file that does not match the `.Group` (for example, left from an earlier build) is refused.
+
+The report's sections are tabs:
+- **Dead links**: faults. A traced MCU fired, and the next traced MCU on a path with no gate, random roll or counter never logged, though the log ran at least 5 s past when it was due.
+- **Unobserved**: a traced MCU never fired although one before it did. These are observations, not faults: a closed gate, a failed random roll or a counter below its value can explain them.
+- **Never fired**: traced MCUs the log never saw.
+- **Fired**: traced MCUs the log saw, with each time.
+- **Never spawned**: names that spawned fewer times than there are objects with that name. The count is per name, because the log does not carry a group.
+- **Timeline**: spawns, kills, takeoffs, landings and breadcrumbs in time order. Filter it by group. Objects whose name repeats in the file have no group.
+
+Without a trace file, the report has only Never spawned and Timeline (an orange note says so).
+
+After Run replay, the Map's legend shows a **Replay** layer: a dot where each object spawned, a cross where each one was killed, in DPRK or NATO colour (grey when the log gives no country). Untick it to hide it. A new pick in the Replay window clears the layer.
+
+### Command line
+
+The same report can be written from the command line, as Markdown:
+
+`IL2MissionUtility.exe replay --group <file.Group> [--trace <file.trace.json>] --logs <folder> [--out <report.md>]`
+
+- `--logs` takes one folder, or a list of `missionReport*.txt` files.
+- The command line does not look for the sidecar: give `--trace`, or the report has only Never spawned and Timeline.
+- Without `--out`, the report is printed.
+
+---
 
 ## Language files
 
@@ -587,41 +709,6 @@ Fighter Pack and Exclusive Activation already contain NodeGates. Army Generator 
 **Airfield still has a player** — load from `_gen.mission` Freeflight, not a hand-built group that never marked a player plane.
 
 **Front line empty** — the box does not intersect that snapshot, or the layer sits off-map (Pusan). Draw a larger box or pick another season.
-
-### Trace build and Replay
-
-Use these to find out what a mission's logic did in a flown session.
-
-**Trace build** (header checkbox, every tab, beside Generate):
-- When it is ticked, Generate adds a small silent Mission Objective (a *breadcrumb*) to each decision point:
-  - every check zone, counter, spawner and Mission Begin;
-  - every timer with Random below 100;
-  - on the Map and Air Tasking tabs, also the Air Tasking sortie steps (START, GO, DONE HUB and the others).
-- Each breadcrumb writes one line to the server's text log when its MCU fires.
-- A switch (an Activate or Deactivate MCU, such as Air Tasking's `ARM`) cannot carry a breadcrumb itself, so the MCUs that pulse it also pulse its breadcrumb. Its line means "the switch was pulsed". The switch may still have been off itself.
-- Generate also writes `<file>.trace.json` next to the `.Group`, and the status bar says "Trace build: N breadcrumbs."
-- The box is off at every start. With it off, Generate writes exactly what it wrote before.
-
-**Server log.** Set `mission_text_log = 1` under `[KEY = system]` in the server's `startup.cfg`. The `missionReport*.txt` files land in `data\logs\txt\`.
-
-**Replay…** (header button, every tab) opens a window:
-1. **Pick .Group…**: the mission file the logs are from. The `.trace.json` next to it is read. Use **Trace file…** only when the trace file sits somewhere else.
-2. **Log folder…**: the folder with that session's `missionReport*.txt` files.
-3. **Run replay**: it needs a `.Group` and at least one log file. A trace file that does not match the `.Group` (for example, left from an earlier build) is refused.
-
-The report's sections are tabs:
-- **Dead links**: faults. A traced MCU fired, and the next traced MCU on a path with no gate, random roll or counter never logged, though the log ran at least 5 s past when it was due.
-- **Unobserved**: a traced MCU never fired although one before it did. These are observations, not faults: a closed gate, a failed random roll or a counter below its value can explain them.
-- **Never fired**: traced MCUs the log never saw.
-- **Fired**: traced MCUs the log saw, with each time.
-- **Never spawned**: names that spawned fewer times than there are objects with that name. The count is per name, because the log does not carry a group.
-- **Timeline**: spawns, kills, takeoffs, landings and breadcrumbs in time order. Filter it by group. Objects whose name repeats in the file have no group.
-
-Without a trace file, the report has only Never spawned and Timeline (an orange note says so).
-
-After Run replay, the Map's legend shows a **Replay** layer: a dot where each object spawned, a cross where each one was killed, in DPRK or NATO colour (grey when the log gives no country). Untick it to hide it. A new pick in the Replay window clears the layer.
-
-The same report can be written from the command line: `IL2MissionUtility.exe replay --group <file.Group> [--trace <file.trace.json>] --logs <folder> [--out <report.md>]`.
 
 ### IL-2 timer and check-zone terms
 

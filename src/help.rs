@@ -6,14 +6,15 @@
 //!
 //! ## Public API
 //! * `MANUAL` — the raw markdown
-//! * `enum HelpTopic` — Overview, Keyboard shortcuts, each mode, Language,
-//!   Import, Troubleshooting (`title`, `ALL`)
+//! * `enum HelpTopic` — Overview, Keyboard shortcuts, each mode, Trace builds
+//!   and replay, Language, Import, Troubleshooting (`title`, `ALL`)
 //! * `fn show_window` — immediate viewport; no-op while `open` is false;
 //!   Esc or the window's close button closes it
 //! * `fn section_for` — markdown slice for a topic
 //!
 //! ## Used by
 //! * ui.rs — Help buttons on every mode set `help_open` + `help_topic`
+//! * ui/replay.rs — the Replay window's Help opens Trace builds and replay
 
 use eframe::egui::{self, RichText, ViewportBuilder, ViewportId};
 
@@ -30,13 +31,14 @@ pub enum HelpTopic {
     Airfield,
     Front,
     AirTasking,
+    TraceReplay,
     Language,
     Import,
     Troubleshooting,
 }
 
 impl HelpTopic {
-    pub const ALL: [HelpTopic; 12] = [
+    pub const ALL: [HelpTopic; 13] = [
         HelpTopic::Overview,
         HelpTopic::Shortcuts,
         HelpTopic::Template,
@@ -46,6 +48,7 @@ impl HelpTopic {
         HelpTopic::Airfield,
         HelpTopic::Front,
         HelpTopic::AirTasking,
+        HelpTopic::TraceReplay,
         HelpTopic::Language,
         HelpTopic::Import,
         HelpTopic::Troubleshooting,
@@ -62,6 +65,7 @@ impl HelpTopic {
             HelpTopic::Airfield => "Airfield",
             HelpTopic::Front => "Map",
             HelpTopic::AirTasking => "Air Tasking",
+            HelpTopic::TraceReplay => "Trace builds and replay",
             HelpTopic::Language => "Language files",
             HelpTopic::Import => "Importing into the mission editor",
             HelpTopic::Troubleshooting => "Troubleshooting",
@@ -462,5 +466,84 @@ mod tests {
         assert!(s.contains("LinkTrId"));
         assert!(!s.contains("Generate Icons"));
         assert!(!s.contains("Buildings / towns"));
+    }
+
+    // ── P14 step 10 acceptance (handoff/P14-air-tasking.md §8) ──────────────
+
+    /// The Air Tasking section names every approximation the design accepts.
+    /// UNVERIFIED stays only on what no flight has shown: load time and tick
+    /// delay on a real server, the quiet roll in the game, and multi-player.
+    #[test]
+    fn manual_air_tasking_names_every_approximation() {
+        let s = section_for(HelpTopic::AirTasking);
+        for phrase in [
+            "one player",
+            "waterfall",
+            "no back-to-back",
+            "one extension",
+            "last presence check",
+            "AI may count",
+            "runs",
+            "head count",
+            "two requests in the same tick",
+            "zone re-arm",
+            "UNVERIFIED",
+            "Zone Out",
+            "kill events",
+            "Random %",
+            "totals",
+        ] {
+            assert!(s.contains(phrase), "Air Tasking section misses {phrase:?}");
+        }
+        assert_eq!(s.matches("UNVERIFIED").count(), 1, "one UNVERIFIED list");
+        let unverified = s.lines().find(|l| l.contains("UNVERIFIED")).unwrap();
+        for open in [
+            "load time",
+            "tick delay",
+            "20 % quiet roll",
+            "two or more players",
+        ] {
+            assert!(unverified.contains(open), "UNVERIFIED misses {open:?}");
+        }
+        for flown in [
+            "jitter",
+            "Zone Out",
+            "extension",
+            "head count",
+            "re-arm",
+            "kill events",
+            "clock launch",
+        ] {
+            assert!(
+                !unverified.contains(flown),
+                "{flown:?} was flown, not UNVERIFIED"
+            );
+        }
+        assert!(s.contains("Known issues") && s.contains("decision 0021"));
+        assert!(s.contains("spawn only once per game session"));
+    }
+
+    /// The trace section covers the server setting, breadcrumbs, the sidecar,
+    /// the CLI and the Replay window; Troubleshooting no longer holds it.
+    #[test]
+    fn trace_section_covers_log_breadcrumbs_sidecar_cli_and_window() {
+        let s = section_for(HelpTopic::TraceReplay);
+        for phrase in [
+            "mission_text_log = 1",
+            "[KEY = system]",
+            "**breadcrumb**",
+            "`<file>.trace.json`",
+            "imported into a mission",
+            "IL2MissionUtility.exe replay --group",
+            "**Replay…**",
+            "**Dead links**",
+            "**Replay** layer",
+        ] {
+            assert!(
+                s.contains(phrase),
+                "Trace builds and replay misses {phrase:?}"
+            );
+        }
+        assert!(!section_for(HelpTopic::Troubleshooting).contains("Trace build"));
     }
 }

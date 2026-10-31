@@ -1069,6 +1069,74 @@ The walker's predictions held to the tick, with P = 162.12 instead of the walker
 - **Nothing is left paused in the clock.** Every `ATTEMPT END` runs out, and none passes the switched-off `REROLL`.
 - **Decision 0045's check-zone model matches the game** on the real threshold: passes come exactly `HOLD` apart.
 
+## Flight A3 (a DPRK player on the Map's own air start: NATO clock launch, two sorties on one target end together) — 2026-10-30, two runs, Tacview recorded
+
+Fourth stage of the acceptance test, covering three open items of step 11. Run sheet, predictions Q1–Q16 and the full results: `handoff/sessions/2026-10-30-p14-acceptance-a3.md`. The mission is `P14_Acceptance_A3`, frozen in `handoff/p14-probes/acceptance-a3/`:
+- built by Map Generate with Trace build on (78 breadcrumbs), no `--spawns`: the player spawn is the Map's own air start (a Yak-9P at 2,000 m, decision 0042: country 501);
+- one NATO area A, R 16 km, zone chance 100 %, cooldown 5 min, budget 2;
+- two entries on A: EN01 F-80C HVAR Strike (Zone, SN01–03) and EN02 F-51D Close Support (Clock, SN04–06);
+- the NATO clock with **one jitter step and quiet 0 %**, so slot 1 opens at 600.1 s for certain. The 20 % quiet roll and the later jitter steps were not flown.
+
+Run 1 (`real_52`, session `2026-10-30_12-25-15`) spun in at 412.30 s after a mouse move before the orbit; its first `INNER`, `ZN01 FIRE` and `SN01 START` matched run 2. Run 2 (`real_51`, session `2026-10-30_12-34-44`, spawn S = 98.74 s) is the flight below. Tacview: `handoff/tacview/P14_Acceptance_A3_run1.zip.acmi`, `…_run2.zip.acmi`. Mission time kept pace with wall time. Replay: no dead links.
+
+| Prediction | Flown (run 2) |
+|---|---|
+| Q1: the Map air start's player | the DPRK spawn list offered "P14 A3 DPRK air start"; the player is a Yak-9P on **`COUNTRY:501`** at (187,500; 258,037), 1,998 m |
+| Q2: the NATO area sees that player | `THN01 INNER` **279.66** (S + 180.9); `ZN01 CHANCE` 279.76; `ZN01 FIRE` and `SN01 START` 279.80 |
+| Q3: A stays HOT in the orbit | `INNER` at 279.66, 439.66, 599.66, 759.66, 919.66, 1,079.66: **160.00 s apart**; no `CLOSE DELAY`, no `ZN01 CHANCE` while SN01 flew |
+| Q4: **a NATO clock launch** (first with a pilot) | `CLK N SLOT OPEN` **600.10**; `EN02 GO` and **`SN04 START` 600.90**; `BUD N COUNT` 601.14 (two copies) |
+| Q5: transit | `SN01 Zone IN` 446.28 (s + 166.48); `SN04 Zone IN` 914.94 (s + 314.04) |
+| Q6: SN01 on station, A HOT | `SN01 ON STATION` **1,046.78** = Zone IN + 600.50, no `COLD` |
+| Q7: **two sorties on one target end together** | after the player flew north to 35 km: `SN01 Zone Out`, `SN01 DONE HUB`, `SN04 Zone Out` and `SN04 DONE HUB` all at **1,280.66** (DH), one tick |
+| Q8: deleted together | `SN01 DELETE DELAY` and `SN04 DELETE DELAY` at **1,341.26** = DH + 60.60 |
+| Q9: decision 0038 | after DH, SN01 and SN04 logged only `DELETE DELAY`: no `EXTEND`, no `ON STATION`, no `HARD STOP`, no second `Zone IN` when the player came back |
+| Q10: A goes COLD | `THN01 CLOSE DELAY` 1,241.70 = last `INNER` + 162.04 |
+| Q11: **zone re-arm after one cooldown** (0044, 0045) | `ZN01 COOLDOWN` and `ZN01 ARM` at **1,580.66** = DH + 300.00; no `MISS WAIT OUT`, no second cooldown |
+| Q12: **a later start on that side** | back over A: `THN01 INNER` 1,699.54; `ZN01 FIRE` and **`SN02 START` 1,699.68**; `SN02 Zone IN` 1,866.30 |
+| Q13: **slot 2 quiet by the no back-to-back rule** | `CLK N SLOT OPEN` **1,800.10** with A HOT and room in the budget, and no `EN02 GO`, no `SN05 START` |
+| Q14: budget | at most two NATO copies at once; SN03, SN05, SN06 never started; no `DENY WAIT`, `LOSSES` or `HARD STOP`; no AI aircraft lost |
+| Q15: decision 0037 | every AI aircraft on 602; the only 501 objects are the player's Yak and pilot |
+| Q16: replay | no dead links; never fired as predicted |
+
+### What this changes (reading)
+
+- **All three step 11 items are seen in the game:** the Map's own air start puts a player on 501 who is seen by a NATO area; a clock launch with a pilot; two sorties on one target that end in one tick, are deleted together, and leave the zone able to start again.
+- **The no back-to-back rule works in the game:** the slot after a win stays quiet for that entry.
+- **The zone re-arm (decisions 0044, 0045) works with a pilot:** exactly one cooldown after `DONE HUB`, then a roll at the next pass.
+- **Mouse movement in flight works the stick** on this PC (run 1's spin). Keyboard-only flights must not move the mouse.
+- Not shown: the 20 % quiet roll and the jitter steps after the first; a Yak copy; a DPRK-side extension.
+
+## Check L (the Air Tasking tab's standalone file imported in the mission editor; one clock slot flown) — 2026-10-30, one run, Tacview recorded
+
+Risk l (`handoff/P14-air-tasking.md` §9): the Air Tasking tab's Generate File writes a standalone `.Group` with indexes from 1, and the design relied on the editor re-indexing an import. Run sheet and results: `handoff/sessions/2026-10-30-p14-standalone-l.md`. Frozen: `handoff/p14-probes/standalone-l/` (the base map, the standalone file, and the editor's saved mission). Inputs are A3's, with "Include in base map" off; under renumbering the standalone file is A3's flown Air Tasking group.
+
+**In the editor:** File › Import From File added the standalone group with no error or question. The saved mission (`standalone_l_editor_import_renumbers_and_keeps_every_link`):
+
+| Check | Result |
+|---|---|
+| Indexes | 1,608 blocks, **none used twice**: the editor renumbered both parts (base map 3 to 2,249, Air Tasking 2,251 to 2,995) |
+| Blocks and links | each part is its source file block for block; every `Targets`, `Objects`, `LinkTrId`, `MisObjID`, `TarId` and `CmdId` points at the renumbered block; nothing dangles |
+| Names | the six sortie copies' group names are cut to 31 characters; nothing else changed |
+| Trace sidecar | each of the 78 entries matches exactly one saved breadcrumb by position, so the standalone file's own `.trace.json` reads the imported mission's log |
+
+**Flight** (session `2026-10-30_18-25-28`, logs `real_53`, Tacview `handoff/tacview/P14_Standalone_L.zip.acmi`). The host loaded the editor's `.msnbin`. Spawn S = 86.78 s, Yak-9P on 501.
+
+| | Flown |
+|---|---|
+| A goes HOT | `THN01 INNER` **265.88** (S + 179.1); `ZN01 FIRE` and `SN01 START` 266.02 |
+| A stays HOT | `INNER` every **160.00 s** (265.88 to 905.88) |
+| The clock slot | `CLK N SLOT OPEN` **600.10**; `EN02 GO` and `SN04 START` **600.90**; `BUD N COUNT` 601.14: A3's times to the tick |
+| Transit | `SN01 Zone IN` 432.68; `SN04 Zone IN` 914.80 |
+| Leave | Leave Server at 979.08 |
+| Replay | no dead links; every breadcrumb matched by position |
+
+**Not caused by the import:** at 563.88 SN01's Red 14 was lost with no attacker. The Tacview shows a collision with Red 13 (5.2 m at 563.4 s) in the 4-ship Wedge at Safe density, during the steady descending right turn the flight flew over the empty target. The Tacview reading is commit `64e82b1` on branch `claude/goofy-lederberg-944d08` (the facts doc and the run sheet; not yet on `main`).
+
+### What this changes (reading)
+
+- **Risk l is answered: no fallback is needed.** The standalone file can be imported into any mission; the editor renumbers it, keeps every link, and the result flies as the base-map path does.
+- **A Wedge at Safe can still collide in a long steady turn** (decision 0021). Flight 2E's "Wedge never under 20 m at Safe" came from shorter turns.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -1117,5 +1185,9 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | new | a player who spawns inside a switched-on entry trigger (ground start at the area centre) is not seen; flying in fires it, and the presence check then holds the area HOT every 120.00 s | flight A1 |
 | new | the DPRK cycle runs end to end in the game: zone roll and clock each start a copy, the copy flies to the area, holds on station while HOT, the budget counts two, the shell deletes it 60.6 s after `DONE HUB`. When the last watched plane dies, `Zone Out` fires within 3.1 s; the copy's other timers keep running after that early end (fixed by decision 0038) | flight A1 |
 | new | on this PC a player cannot spawn twice in one session (the results wait never clears); Il-10 gunners shoot down a fighter orbiting their target at 500 m | flight A1 |
+| new | the Map's own air start puts a DPRK player on 501, and a NATO area sees them; a clock launch with a pilot; two sorties on one target end in one tick (`Zone Out`) and are deleted together 60.6 s later; the zone re-arms one cooldown after `DONE HUB` and starts again; the slot after a win is quiet for that entry (no back-to-back) | flight A3 |
+| new | mouse movement in flight works the stick on this PC (a keyboard-only pilot spun in) | flight A3 |
+| l | **answered:** the editor's File › Import From File renumbers the standalone file, keeps every link and cuts group names to 31 characters; the saved `.msnbin` flies one clock slot at A3's times, and the file's own trace sidecar still reads the log | check L |
+| new | a 4-ship Wedge at Safe lost one aircraft to its own wingman in a long steady turn over an empty target (decision 0021) | check L |
 
 Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.

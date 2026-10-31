@@ -31,13 +31,14 @@ The files in `docs/ui-redesign/design/` are **design references built in HTML**.
 Panel order matters in egui: panels added first take the outer space.
 
 ```rust
-const MODES: [(AppMode, &str); 6] = [
+const MODES: [(AppMode, &str); 7] = [ // Ctrl 1–7 follow this order
     (AppMode::Template, "Template"),
     (AppMode::Recon, "Army Generator"),
     (AppMode::Fighter, "Fighter Pack"),
     (AppMode::Exclusive, "Exclusive Activation"),
     (AppMode::Airfield, "Airfield"),
     (AppMode::Map, "Map"),
+    (AppMode::AirTasking, "Air Tasking"),
 ];
 
 fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -60,9 +61,11 @@ fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         AppMode::Exclusive => self.bomber_page(ctx),
         AppMode::Airfield => self.airfield_page(ctx),
         AppMode::Map => self.map_page(ctx),
+        AppMode::AirTasking => self.air_page(ctx),
     }
     self.confirm_dialogs(ctx); // §6.3
     help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
+    self.replay_window(ctx); // the Replay… window, its own OS window like Help
 }
 
 fn template_page(&mut self, ctx: &egui::Context) {
@@ -81,7 +84,7 @@ fn template_page(&mut self, ctx: &egui::Context) {
 | Region | Size | Contents |
 |---|---|---|
 | Mode rail | 172 px wide, full height | "IL-2 GROUP / GENERATOR" in Condensed 17 px; seven 32 px rows showing a two-digit index and the label; "Ctrl 1–7" hint; Help + `F1` at the bottom |
-| Header | 54 px tall, 18 px side padding | Title (Heading, uppercase), optional leading control, file name (italic, NEUTRAL_700); on the right: secondary buttons, then the primary button with a `Ctrl G` hint |
+| Header | 54 px tall, 18 px side padding | Title (Heading, uppercase), optional leading control, file name (italic, NEUTRAL_700); on the right, left to right: **Replay…**, the secondary buttons, the readiness chip, the **Trace build** checkbox, and the primary button with a `Ctrl G` hint |
 | Left panel | per tab (§5) | Inputs: files, units, templates, plans |
 | Center | fills | Canvas or output preview |
 | Right panel | per tab | The current selection first, then settings sections that collapse to a one-line summary |
@@ -251,8 +254,8 @@ Only panels scroll, and the rail, header and status bar never move. Settings sec
 | Keys | Action |
 |---|---|
 | `Ctrl G` | This tab's primary action. Ignored if the button is disabled |
-| `Ctrl O` | This tab's Load… / Add… (first secondary button) |
-| `Ctrl Z` / `Ctrl Y` | Undo / redo (redo is Map drawings only, as today) |
+| `Ctrl O` | This tab's Load… / Add… (first secondary button; Air Tasking: **Add template…**) |
+| `Ctrl Z` / `Ctrl Y` | Undo / redo (redo is Map drawings only, as today). Air Tasking: undo a pool or settings edit, a removal or a reset; on the Map, also the Air dock's Auto-fill and ✖ |
 | `Ctrl 1–7` | Switch tab |
 | `F1` | Help for this tab (`open_help(page_help_topic())`) |
 | `Esc` | Close dialog → cancel map line → back to Select |

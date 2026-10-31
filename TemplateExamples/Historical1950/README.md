@@ -12,7 +12,7 @@ Each file was reloaded with `template::load_template`: seats and orders round-tr
 **To use a template:**
 1. Import the `.Group` in the mission editor (or load it in Template Builder).
 2. Move the group onto the map.
-3. Put **WP 1** on the target area. The ground AttackArea is flown at WP 1.
+3. Put **WP 1** on the target area, and move each **AttackArea** onto the target as well. The flight attacks around the AttackArea's own position, not WP 1. In these files every AttackArea sits at or next to the spawn point (40,000; 40,000), 4 km short of WP 1 (44,000; 40,000), so a group moved without them attacks near where it spawned.
 4. Adjust skill (all are Average, `AILevel 2`) and the mission time.
 
 | File | Aircraft | Orders (lead) | Sourced | My choices |
@@ -26,7 +26,7 @@ Each file was reloaded with `template::load_template`: seats and orders round-tr
 
 **Formation density.** Pairs fly at `FormationDensity = 2` (Loose), except a flight flying a Cover order keeps `1` (Safe). Both DPRK Yak pairs fly Loose; the NATO F-51 ArmedRecon Red pair flies Loose and its covering Blue pair stays Safe. Every other aircraft formation stays Safe. Decisions 0019, 0020 and 0022 are workarounds for AI wingmen colliding in the game, to remove when the game bug is fixed (decision 0021).
 
-**Zone triggers.** US templates watch Eastern players (`PlaneCoalitions = [1]`); North Korean templates watch Western players (`[2]`).
+**Zone triggers.** US templates watch DPRK-side players (`PlaneCoalitions = [1]`); North Korean templates watch NATO players (`[2]`).
 
 **Not in this set.**
 - **No La-9 or La-11.** Neither flew in Korea in 1950. The La-9 first appears on 30 Nov 1951, escorting Tu-2s [S9 p.437], and the La-11 in Apr 1953 with the night hecklers [S9 p.686].

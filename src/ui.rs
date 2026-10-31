@@ -1131,7 +1131,7 @@ impl GroupGeneratorApp {
             shell::all_ok(&checks),
             |ui| {
                 ui.checkbox(&mut self.trace_build, "Trace build")
-                    .on_hover_text("Generate also writes log breadcrumbs and a .trace.json, for Replay…. Off at every start. Help › Troubleshooting.");
+                    .on_hover_text("Generate also writes log breadcrumbs and a .trace.json, for Replay…. Off at every start. Help › Trace builds and replay.");
             },
             &checks,
             |ui| {

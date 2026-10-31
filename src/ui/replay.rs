@@ -259,7 +259,7 @@ impl GroupGeneratorApp {
         match action {
             PanelAction::None => {}
             PanelAction::Close => self.replay.open = false,
-            PanelAction::Help => self.open_help(HelpTopic::Troubleshooting),
+            PanelAction::Help => self.open_help(HelpTopic::TraceReplay),
             PanelAction::PickGroup => self.replay_pick_group(),
             PanelAction::PickTrace => self.replay_pick_trace(),
             PanelAction::PickLogs => self.replay_pick_logs(),
