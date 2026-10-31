@@ -567,6 +567,13 @@ Differences: names carry the `CLK s` prefix, and exclusion acts on `ENii RANDOM`
 
 U16 moves everything that needs a second player to step 12. The designs are kept here so step 12 starts from them. Nothing in this section is built, tested or emitted before step 12.
 
+**Revised 2026-10-31 (step 12 scoped; decisions 0046 to 0048; `handoff/sessions/2026-10-31-p14-step12-scope.md`).** Where this note and the text below differ, this note holds.
+- **The entry is already a Complex Trigger.** Step 4 built `THsaa TRIGGER` → `ARM` (§3.5). N ≥ 2 only adds a counter and a window between them; there is no `THsaa ENTRY ZONE` to replace.
+- **No window (decision 0047, option E; replaces the `WINDOW` loop below).** Entered → `COUNT` (N, Dropcount 0) → `ARM`. Left → `ZERO`, and `REARM ON` → `ZERO`. The area arms when N planes have entered and none has left since. 2 MCUs per (side, area). N runs from 1 to 3 (default 1), one N for both sides; N to start, one plane to hold.
+- **E6 is answered (flight 0):** `ZERO` re-arms a fired counter, so `CounterResetImpl::Ring` is not needed and the enum is removed (0046).
+- **T-d is answered** by flights 1N, 1D, 2J and A1 (0046).
+- **T-b (risk b)** is flown first with AI stand-ins, no pilot (flight 2M), then with two people (flight 2N). The Watchdog stays unusable as built; decision 0048 lists the options if 2M shows ANY-out.
+
 **Entry path for N ≥ 2 (Complex Trigger).** It replaces `THsaa ENTRY ZONE` and feeds the same `THsaa ARM`:
 
 ```
@@ -1969,18 +1976,18 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 
 ### Step 12. Multi-player phase — after step 11 (U16)
 
-**Starts only when the breadcrumbs, the replay and every step 11 check are confirmed working.** It needs at least two players. It is planned here and scoped in detail when it starts.
+**Scoped and approved 2026-10-31** (decision 0046). Scope, cells, test names and open questions: `handoff/sessions/2026-10-31-p14-step12-scope.md`. The table of 2026-09-27 is replaced: 12a was done by the user on 2026-10-12, T-d is answered by flights 1N, 1D, 2J and A1, and AI stand-ins answer what a pilot is not needed for.
 
 | Part | What | Needs |
 |---|---|---|
-| 12a | **Complex Trigger reference (user, in the mission editor).** In a blank Korea mission, place one `MCU_TR_ComplexTrigger` with radius 10000. Tick every filter the editor offers (countries, object types, names, any player-only flag). Link each event slot to its own dummy timer, named after the event. Save it as a group, `TemplateExamples/Reference/ComplexTrigger_reference.Group`. Claude then adds the round-trip test `complex_trigger_reference_round_trips` (`parse_group_file` → `serialize_group`) | The user; `TemplateExamples/Reference/` does not exist yet |
-| 12b | **Probe flight 2.** File `P14_Probe_2.Group`, written by `write_p14_probe_2` from the 12a reference. Cell **T-d** (Complex Trigger: R 10 km, planes, DPRK countries; each event slot → its own subtitle and its own Counter(2) readout; a DPRK AI pair passes through from 01:00; a DPRK player passes, then circles, from 10:00; Deactivate at 14:00 and Activate at 14:01 with the player inside; a NATO player shoots the DPRK player down inside from 20:00). Cell **T-b** (Closer 0 with two NATO players: both enter, one leaves, then the other; variant: one is shot down inside) | 12a; two or three players; about 45 min |
-| 12c | **Threshold for N ≥ 2** (§3.9): `ThresholdImpl::ComplexTrigger`, `CounterResetImpl::{SetVal, Ring}`, the walker's Complex Trigger rule, and the tests `threshold_complex_trigger_structure`, `threshold_counter_ring_structure`, `threshold_n2_fewer_than_n_in_window_does_not_fire`, `threshold_n2_count_resets_at_w`, `threshold_n2_fires_again_after_failed_dwell` | 12b confirms d |
-| 12d | **Zone Out strategy.** If T-b shows ANY-out, switch the default to `ZoneOutImpl::Watchdog` (allowed only if flight 0 gave p = "restart") | 12b |
-| 12e | **UI.** The THRESHOLD section lets N go above 1 | 12c |
-| 12f | **Acceptance with two or more players:** the step 11 mission with N = 2 | 12c–12e |
+| 12a | Complex Trigger reference: **done** (`TemplateExamples/Reference/ComplexTrigger_reference.Group`, the user, 2026-10-12). Claude adds `complex_trigger_reference_round_trips` | nothing |
+| 12c | **Threshold for N ≥ 2**: `ThresholdImpl::Counted`, decision 0047 E (Entered → `COUNT`, Left → `ZERO`); walker tests first; N = 1 output unchanged. `CounterResetImpl` removed (mechanical commit) | nothing |
+| 12b, part 1 | **Flight 2M**, no pilot, on this PC, about 20 min. AI of the players' country stand in for players. Cells B1 to B4 (risk b: two watched planes; one deleted, killed, flown out, or a pair's wingman; the other later). Cells D1 to D5 (the exported N = 2 cell). Cells L1 and L2 (does a plane killed or deleted inside raise Left? 0047) | 12c; the user's OK for the Dogfight folder and a free screen |
+| 12d | **Zone Out strategy** by 2M's cells B: decision 0048. ALL-out: remove the dead `Watchdog`. ANY-out: the option the user picks | 2M |
+| 12e | **UI.** THRESHOLD lets N go from 1 to 3 (one N for both sides); `readiness_checks`, `validate`, the manual | 12c |
+| 12f | **Flight 2N**: two human pilots on the real dedicated server, about 30 min (two halves of 15 min). Half 1: the N = 2 threshold. Half 2: Zone Out with two players leaving at different times. Step 11 item 5 (load time and tick delay) in the same session | 12c to 12e; a second pilot |
 
-Confirmed if (12b): T-d "entered" fires once per plane that enters, and a country filter excludes the other side. T-b is ALL-out if the zone fires only after the second player leaves, and fires when the last player dies inside.
+Confirmed if (2M, cells B): Zone Out fires only when the last watched plane has gone (ALL-out). Confirmed if (2M, cells D): one entry does not arm; two entries arm; an entry, a leave and an entry do not; a loiterer and a later arrival arm; each aircraft of a pair counts; a failed dwell is followed by a fresh count. Flight 2N confirms both with players.
 
 ---
 
@@ -1991,10 +1998,10 @@ The repo does not prove any of these in game. The shipped files only show what t
 | ID | Behaviour | P14 assumes | Repo evidence | Status | Fallback |
 |---|---|---|---|---|---|
 | a | CheckZone `PlaneCoalitions` fires for AI | Only players should start sorties | `USER_MANUAL.md` ≈75 "until a player enters"; Fighter Pack Zone IN `[2]` 16 km | UNVERIFIED (flights 0 and 1A) | The D30 validator and the dwell. If AI counts, the D30 warning becomes an error and the user decides (§10 item 15). No player-only filter is known for a check zone |
-| b | Closer 0 with several players | Fires when ALL have left | `USER_MANUAL.md` ≈75, ≈113 | UNVERIFIED. **It cannot be tested solo: step 12 (T-b).** v1 uses the same Zone Out as every shipped template | Watchdog (it needs p = "restart") plus the hard stop |
+| b | Closer 0 with several players | Fires when ALL have left | `USER_MANUAL.md` ≈75, ≈113 | UNVERIFIED. **Step 12: flight 2M with AI stand-ins (no pilot), then flight 2N with two players** (0046). v1 uses the same Zone Out as every shipped template | Decision 0048 (Proposed): the Watchdog as built cannot work (0045); options if ANY-out |
 | c | Activate/pulse while a player is already inside fires at once | Dwell CHECK and the presence re-check | `USER_MANUAL.md` ≈111; COOLDOWN re-pulse (`flights.rs` `build_flight_group`) | UNVERIFIED (flight 1A) | Closer 0 + race-timer negative logic, only if z is confirmed. If c and z both fail, the build stops at step 4 |
-| d | Complex Trigger filters and events | Per-object "entered alive", country filter | None: 0 hits in samples; only the drop-list in `template.rs` | UNVERIFIED. **Step 12 only**; it needs the user's 12a file and a two-player flight | v1 does not use it |
-| e | Counter reset (Dropcount, ModifierSetVal) | `Dropcount 1` = reset after firing (the codebase convention, §3.2 note); ModifierSetVal clears a partial count (the budget's `COUNT`, §3.3). Step 12 only: a fired `Dropcount 0` counter fires again after a reset (T-e E6) | `template.rs` `DeathCount` / `Reset Counter`, `flights.rs` `DeathCount`, commit `7437c51` | UNVERIFIED (flight 0) | `BudgetImpl::SingleSlot` (budget 1, no counter). Counter ring in step 12 |
+| d | Complex Trigger filters and events | Per-object "entered alive", country filter | None: 0 hits in samples; only the drop-list in `template.rs` | **Answered for what step 12 needs** (0046): one Entered per aircraft, AI or player, and the country filter excludes the other side (flights 1N, 1D); switched off it reports nothing, switched on it does not report a plane already inside (2J, A1). Step 4 uses it for the entry. The 12a file exists (2026-10-12). Untested: more than one `Country` line, the other 19 event numbers | Not needed |
+| e | Counter reset (Dropcount, ModifierSetVal) | `Dropcount 1` = reset after firing (the codebase convention, §3.2 note); ModifierSetVal clears a partial count (the budget's `COUNT`, §3.3). Step 12 only: a fired `Dropcount 0` counter fires again after a reset (T-e E6) | `template.rs` `DeathCount` / `Reset Counter`, `flights.rs` `DeathCount`, commit `7437c51` | **Answered by flight 0:** E1, E2, E4 and E6 confirmed (a fired `Dropcount 0` counter fires again after SetVal) | `BudgetImpl::SingleSlot` (budget 1, no counter). The counter ring is not needed (0046) |
 | f | Timer `Random %` rolled on each trigger | Quiet, jitter, waterfall, zone chance | `flights.rs` ≈1010-1013, `recon.rs` ≈1246-1256 | UNVERIFIED (the Fighter Pack already depends on it) | `RandomImpl::Seeded` |
 | g | Kill events per aircraft | Type 13 once per plane; no 4/2/0 latch and no event-7 abort (decisions 0011/0015/0017) | `handoff/P14-probe-results.md`, flights 1G/1P | VERIFIED for gun/Damage loss and fuel-bail-out; crash without damage remains for flight 2 T-l | On-station end, Zone Out and hard stop still end the sortie |
 | h | Deactivating a waiting checkzone cancels it | INNER CLOSE, INNER OFF | `USER_MANUAL.md` ≈203, `flights.rs` ≈905-915 | **Answered by flight 2K (K5A): no.** A switched-off pulsed zone keeps its watch, and switching it on is a check (decisions 0044, 0045) | Gate a downstream relay instead |
@@ -2173,3 +2180,4 @@ The repo does not prove any of these in game. The shipped files only show what t
 - **2026-10-22, step 6 built.** §3.8 opens with the zone as built (decision 0030 C): `INNER` pulses `CHANCE` and `MISS WAIT` directly, one `DISARM` at the outcome, direct cancels of `MISS WAIT`, `DENY WAIT` and `COOLDOWN`; 11 MCUs per zone entry (from 17); a hold check in `zone::validate_zone`; no debug subtitles. The busy-area check keeps the clock's `LAST SET` rule B.
 - **2026-10-27, step 7 built.** §7 opens with the export as built (decisions 0032 to 0035): `airtask/export.rs`, one pack rooted at `Air Tasking`, AI country at export, D30 within r_in, totals limits 240 / 2,300 / 48, the acceptance mission as a trace build. Acceptance plan totals: 84 aircraft, 1,092 MCUs, 40 check zones.
 - **2026-10-29, paused timers (decision 0044).** Flight 2K: a switched-off running timer is paused, and switching it on resumes it. D11 is revised. §3.8: `PASS IN` and `MISS WAIT OUT` relays, 13 MCUs per zone entry (from 11). §3.7: nothing switches `ATTEMPT END`; it runs out into the switched-off `REROLL`. The walker's flown settings are `WalkerConfig::flown()`.
+- **2026-10-31, step 12 scoped (decision 0046; 0047 and 0048 Proposed).** §8 step 12 rewritten: 12a done, T-d answered by flights 1N, 1D, 2J and A1, risk b flown first with AI stand-ins (flight 2M, no pilot), two human pilots last (flight 2N, with step 11 item 5). §3.9 opens with what changed: no window, the count resets on Left (0047 E), no counter ring (E6), the Watchdog options (0048). Risks b, d and e updated.

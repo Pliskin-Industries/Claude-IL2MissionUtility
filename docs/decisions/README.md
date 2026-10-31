@@ -81,5 +81,8 @@ What this makes easier, harder or necessary.
 | [0043](0043-switch-breadcrumbs-from-inputs.md) | A switch's breadcrumb is pulsed by the switch's own inputs | Accepted |
 | [0044](0044-paused-timers-d11-relays.md) | A switched-off timer is paused: the zone and the clock end their timers through D11 relays (supersedes parts of 0029 and 0030) | Accepted |
 | [0045](0045-walker-armed-check-zones.md) | The walker models check zones as flown: a pulsed zone stays armed (supersedes 0044's "Armed" term) | Accepted |
+| [0046](0046-step-12-test-plan.md) | Step 12 test plan: AI stand-ins first (flight 2M, no pilot), two human pilots last (flight 2N); 12a done; `CounterResetImpl` removed | Accepted |
+| [0047](0047-what-n-2-means.md) | N ≥ 2 players: the count resets when anyone leaves (no window); N 1 to 3, one N for both sides; N to start, 1 to hold | Accepted (E) |
+| [0048](0048-zone-out-with-several-players.md) | Zone Out with several players: keep the check zone if ALL-out; options if ANY-out | Proposed |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
