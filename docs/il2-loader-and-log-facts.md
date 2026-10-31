@@ -256,3 +256,14 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
   - damage that does not kill (Damage level 1) raises 68 only;
   - none of them raises Left.
 - An event is raised only if its filter key is 1 and an `OnEvent` with its number exists. Flight 2P had every filter on; whether an event with its filter at 0 still fires was not flown.
+
+## Found on 2026-10-31 (sides check S1, game 1.005)
+
+Built with `build_probe_mission.py --coalition 602:3 --coalition 503:4` on flight 2P's group, with plane A moved to 602 and plane B to 503 (plane C stayed on 601). Logs `real_56`, Tacview `handoff/tacview/P14_Sides_S1.zip.acmi`.
+
+- **The `Countries` table in `Options` takes sides other than 0, 1 and 2.** With `602 : 3;` and `503 : 4;` the editor opens the file and the game hosts it. The log header reads `CNTRS:0:0,501:1,502:1,503:4,601:2,602:3,603:2`.
+- **The editor knows only three sides.** Its Mission Countries dialog (Mission Properties, Countries…) offers Neutral, Eastern Bloc and Western Bloc, and lists a country on side 3 or 4 with an empty side. In that dialog 503 is named DPRK, and 602 and 603 have no name. Whether an editor Save keeps sides 3 and 4 was not tried.
+- **Tacview writes an empty side for them:** `Coalition=` for the planes on 602 and 503, `Coalition=Western Bloc` for the plane on 601.
+- **Players see two sides only.** The briefing and results screens show Eastern Bloc and Western Bloc; nothing offers a third side.
+- Planes on 602 and 503 spawn on Activate, and a Damage command kills one (logged `COUNTRY:602`). A Complex Trigger filtered to country 601 does not see them; it saw the 601 plane as in flight 2P.
+- **Not known yet:** whether AI on sides 3 and 4 fights the right enemy and spares its own players, and whether a check zone watching side 1 or 2 ignores it (flight 2Q, decision 0050).

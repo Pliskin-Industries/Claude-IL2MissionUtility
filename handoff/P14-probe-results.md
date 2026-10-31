@@ -1206,6 +1206,24 @@ No other type in 55 to 80 fired; Left (60) never fired.
 - **Killed is 70.** It fires on a kill only: not on a Delete, and not on damage without a kill. Decision 0049 B wires it to the N ≥ 2 count's `ZERO`.
 - A Delete raises Finished (62) and Finished alive (63), and a kill raises Finished 15 s later; neither raises Left (flight 2M).
 
+## Sides check S1 (can the mission put AI countries on sides 3 and 4?) — 2026-10-31, one run, no pilot, Tacview recorded
+
+Decision 0050, stage 1. Flight 2P's frozen group in a scratch copy with plane A on 602 and plane B on 503 (C stayed on 601), built with `tools/p14/build_probe_mission.py --coalition 602:3 --coalition 503:4 --no-resave` as `P14_Sides_S1_20261031`. Opened in the editor (not saved), then hosted on this PC with Claude spectating. Session `2026-10-31_16-47-30`, logs `real_56` (16 files). Tacview `handoff/tacview/P14_Sides_S1.zip.acmi`. Left the server at about 434 s. Replay: no dead links.
+
+| Check | Result |
+|---|---|
+| Editor opens the file | yes; Mission Countries lists 602 and 503 with an empty side and offers only Neutral, Eastern Bloc, Western Bloc |
+| Game hosts it, log header | `CNTRS:0:0,501:1,502:1,503:4,601:2,602:3,603:2` |
+| Sides shown to players | Eastern Bloc and Western Bloc only (briefing, results) |
+| Planes on 602 and 503 | spawned at 60.00 and 90.00; A killed by Damage at 300.02 (`COUNTRY:602`), B deleted at 360.00 |
+| Tacview side | `Coalition=` (empty) for A and B, `Western Bloc` for C |
+| 601-filtered Complex Trigger | Entered and Entered alive for C only (208.00); Critically damaged for C's damage (420.04); nothing for A or B |
+
+### What this changes (reading)
+
+- A mission can put countries on sides 3 and 4, and the game keeps them. Stage 2 (flight 2Q) can go ahead: does such AI fight the right enemy, and does a check zone on side 1 or 2 ignore it?
+- A mission maker who opens such a file in the editor sees an empty side and cannot pick 3 or 4 there.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -1261,5 +1279,6 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | b | **answered with AI stand-ins: ALL-out.** A Closer 0 zone with two watched groups inside fires only when the last is gone (deleted, killed, flown out, or a pair's wingman first) | flight 2M |
 | new | a Complex Trigger raises no Left for a plane deleted or killed inside it (it does for a fly-out); the N = 2 threshold (0047 E) arms on the second entry and resets on a Left, in the game | flight 2M |
 | new | Complex Trigger event numbers follow the filter-key order: 58 Entered, 59 Entered alive, 62 Finished, 63 Finished alive, 67 Damaged, 68 Critically damaged, 70 Killed. A kill raises 67, 68, 70 (and 62 when the wreck lands), a Delete 62 and 63, level 1 damage 68 | flight 2P |
+| new | a mission's `Countries` table can put countries on sides 3 and 4: the game hosts it and logs them, planes on them spawn and die normally, players see only two sides, and the editor and Tacview show those sides with no name | sides check S1 |
 
 Not tested by any flight: two or more human players (step 12, flight 2N), and a Complex Trigger with more than one `Country` line.
