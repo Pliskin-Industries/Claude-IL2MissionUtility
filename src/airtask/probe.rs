@@ -124,13 +124,14 @@ pub(crate) enum Flight {
     TwoK,
     TwoL,
     TwoM,
+    TwoP,
     Load,
 }
 
 impl Flight {
-    const ALL: [Self; 25] = [
+    const ALL: [Self; 26] = [
         Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG, Self::OneH, Self::OneJ,
-        Self::OneK, Self::OneL, Self::OneM, Self::OneP, Self::Two, Self::TwoB, Self::TwoC, Self::TwoD, Self::TwoE, Self::TwoF, Self::TwoG, Self::TwoH, Self::TwoI, Self::TwoJ, Self::TwoK, Self::TwoL, Self::TwoM, Self::Load,
+        Self::OneK, Self::OneL, Self::OneM, Self::OneP, Self::Two, Self::TwoB, Self::TwoC, Self::TwoD, Self::TwoE, Self::TwoF, Self::TwoG, Self::TwoH, Self::TwoI, Self::TwoJ, Self::TwoK, Self::TwoL, Self::TwoM, Self::TwoP, Self::Load,
     ];
 
     fn stem(self) -> &'static str {
@@ -159,6 +160,7 @@ impl Flight {
             Self::TwoK => "P14_Probe_2K",
             Self::TwoL => "P14_Probe_2L",
             Self::TwoM => "P14_Probe_2M",
+            Self::TwoP => "P14_Probe_2P",
             Self::Load => "P14_Load_Probe",
         }
     }
@@ -189,6 +191,7 @@ impl Flight {
             Self::TwoK => RUN_SHEET_2K,
             Self::TwoL => RUN_SHEET_2L,
             Self::TwoM => RUN_SHEET_2M,
+            Self::TwoP => RUN_SHEET_2P,
             Self::Load => &[],
         }
     }
@@ -258,7 +261,7 @@ impl Flight {
                 script: "f80c10",
             }],
             Self::Zero | Self::OneA | Self::OneG | Self::OneH | Self::OneJ | Self::OneK
-                | Self::OneL | Self::OneM | Self::OneP | Self::Two | Self::TwoB | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::TwoK | Self::TwoL | Self::TwoM | Self::Load => &[],
+                | Self::OneL | Self::OneM | Self::OneP | Self::Two | Self::TwoB | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::TwoK | Self::TwoL | Self::TwoM | Self::TwoP | Self::Load => &[],
         }
     }
 }
@@ -958,6 +961,9 @@ enum StandInRemoval {
     Kill,
     /// The wingman's Delete at this time, then the lead's at `delete_s`.
     WingmanFirst(f64),
+    /// One Damage, level 1, on the lead at `delete_s`: it is damaged, not killed,
+    /// and stays until the safety close (flight 2P).
+    Damaged,
 }
 
 struct ThresholdProbeCell {
@@ -982,6 +988,7 @@ impl ThresholdProbeCell {
         match self.removal {
             StandInRemoval::WingmanFirst(wingman_s) if aircraft > 0 => wingman_s,
             StandInRemoval::Delete | StandInRemoval::Kill | StandInRemoval::WingmanFirst(_) => self.delete_s,
+            StandInRemoval::Damaged => f64::INFINITY,
         }
     }
 }
@@ -1333,6 +1340,8 @@ pub(crate) const CUES: &[Cue] = &[
     Cue { flight: Flight::TwoL, time_s: TWO_L_CLOSE_S, text: "Flight 2L closed. Every aircraft has a Delete. Leave the server" },
     Cue { flight: Flight::TwoM, time_s: 0.0, text: "Flight 2M: spectate and press LCtrl+R. Leave the server at 13:30" },
     Cue { flight: Flight::TwoM, time_s: TWO_M_CLOSE_S, text: "Flight 2M closed. Every aircraft has a Delete. Leave the server" },
+    Cue { flight: Flight::TwoP, time_s: 0.0, text: "Flight 2P: spectate and press LCtrl+R. Leave the server at 09:00" },
+    Cue { flight: Flight::TwoP, time_s: TWO_P_CLOSE_S, text: "Flight 2P closed. Every aircraft has a Delete. Leave the server" },
 ];
 
 const A1_START_KM: (f64, f64) = (-30.0, 60.0);
@@ -5090,6 +5099,11 @@ fn build_threshold_probe_pair(p: &mut Probe, row: &ThresholdProbeCell) {
             let kill = p.at(&format!("{name} KILL AT"), row.delete_s, &[damage]);
             p.observe(kill, &format!("{name} killed"));
         }
+        StandInRemoval::Damaged => {
+            let damage = p.damage_command(&format!("{name} DAMAGE"), lead, DamageLevel::Level1);
+            let at = p.at(&format!("{name} DAMAGE AT"), row.delete_s, &[damage]);
+            p.observe(at, &format!("{name} damaged"));
+        }
         StandInRemoval::WingmanFirst(wingman_s) => {
             assert_eq!(entities.len(), 2, "{name}: a lead and a wingman");
             for (aircraft, time_s, role) in [(1, wingman_s, "wingman"), (0, row.delete_s, "lead")] {
@@ -5245,6 +5259,9 @@ fn build(flight: Flight) -> Probe {
     }
     if flight == Flight::TwoM {
         return build_zone_out_probe();
+    }
+    if flight == Flight::TwoP {
+        return build_event_number_probe();
     }
     if flight == Flight::Load {
         return build_load_probe();
@@ -7144,6 +7161,170 @@ fn flight_2m_predictions() {
     }
 }
 
+// Flight 2P (decision 0049 B): no pilot. Which Complex Trigger event number
+// does a kill, a Delete or damage raise? Flight 2M showed none raises Left (60).
+// One trigger with all 21 event filters on and a traced relay for every event
+// type 55 to 80; three 601 Yak singles, killed, deleted and damaged inside it.
+// Run sheet: handoff/sessions/2026-10-31-p14-flight-2p.md.
+const TWO_P_CLOSE_S: f64 = 600.0;
+const TWO_P_TOP_M: f64 = 4050.0; // A third single, 500 m above the second.
+const TWO_P_EVENTS: std::ops::RangeInclusive<i32> = 55..=80;
+
+pub(crate) const RUN_SHEET_2P: &[Cell] = &[
+    Cell { key: "P1", centre_km: (140.0, 0.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_P_CLOSE_S },
+];
+
+const TWO_P_SINGLES: &[ThresholdProbeCell] = &[
+    two_m_yak("P1", "P1 A single", 1, 60.0, TWO_J_ALTITUDE_M, 300.0, StandInRemoval::Kill),
+    two_m_yak("P1", "P1 B single", 1, 90.0, TWO_M_HIGH_M, 360.0, StandInRemoval::Delete),
+    two_m_yak("P1", "P1 C single", 1, 120.0, TWO_P_TOP_M, 420.0, StandInRemoval::Damaged),
+];
+
+/// Flight 2P's `{key}-CT`: as `add_probe_complex_trigger` clones it, with every
+/// `EventsFilter` key on and one traced 0 s relay `{key}-CT EV nn` per event type.
+fn add_event_number_trigger(p: &mut Probe) -> i32 {
+    let cell = p.cell.expect("Complex Trigger cell");
+    let name = format!("{}-CT", cell.key);
+    let mut node = p.reference_mcu("MCU_TR_ComplexTrigger", &name);
+    node.properties.retain(|(key, _)| !matches!(key.as_str(), "ObjectScript" | "ObjectName"));
+    node.set_property("Country", COUNTRY_USA.to_string());
+    node.set_property("Radius", format!("{TWO_J_RADIUS_M:.0}"));
+    let filters: Vec<String> = node.properties.iter().map(|(key, _)| key.clone())
+        .filter(|key| key.starts_with("EventsFilter")).collect();
+    assert_eq!(filters.len(), 21, "{name}: the reference's event filters");
+    for key in &filters {
+        node.set_property(key, "1");
+    }
+    let trigger = p.add(node);
+    p.close_node(trigger);
+    for event in TWO_P_EVENTS {
+        let relay = p.relay(&format!("{name} EV {event}"), 0.0);
+        attach_event(by_id_mut(&mut p.root, trigger), event, relay);
+        p.observe(relay, &format!("{name} event {event}"));
+    }
+    trigger
+}
+
+fn build_event_number_probe() -> Probe {
+    let mut p = Probe::new(Flight::TwoP);
+    let cell = RUN_SHEET_2P[0];
+    p.start_cell(cell);
+    for row in TWO_P_SINGLES {
+        build_threshold_probe_pair(&mut p, row);
+    }
+    add_event_number_trigger(&mut p);
+    add_cell_safety_close(&mut p, cell);
+    p.cues(Flight::TwoP);
+    p
+}
+
+pub(crate) fn generate_probe_2p() -> Il2Entity {
+    build(Flight::TwoP).root
+}
+
+#[test]
+#[ignore = "writes target/p14 probe files"]
+fn write_p14_probe_2p() {
+    write_probe(Flight::TwoP, TraceCarrier::default());
+}
+
+/// Flight 2P as its run sheet describes it: one trigger with every filter on
+/// and an observed relay per event type, and three singles killed, deleted and
+/// damaged inside it.
+#[test]
+fn flight_2p_cells_match_the_run_sheet() {
+    let root = generate_probe_2p();
+    assert_eq!(root.count_block_type("Plane"), 3, "three Yak singles");
+    let cell = named(&root, "P1");
+    for (group, activate_s, metres) in [("P1 A single", 60.0, "3050.000"), ("P1 B single", 90.0, "3550.000"),
+        ("P1 C single", 120.0, "4050.000")] {
+        let planes = block_ids(named(cell, group), "Plane");
+        assert_eq!(planes.len(), 1, "{group}");
+        let plane = by_id(&root, planes[0]);
+        assert_eq!((plane.property("Country"), plane.property("YPos")), (Some("601"), Some(metres)), "{group}");
+        assert_near(number(named(&root, &format!("{group} ACTIVATE AT")), "Time"), activate_s);
+    }
+    // The actions: each timer's command, its level, and the entity it names.
+    let entity = |group: &str| block_ids(named(&root, group), "MCU_TR_Entity");
+    for (timer, time_s, command, level, group) in [
+        ("P1 A single KILL AT", 300.0, "MCU_CMD_Damage", Some("2"), "P1 A single"),
+        ("P1 B single DELETE AT", 360.0, "MCU_Delete", None, "P1 B single"),
+        ("P1 C single DAMAGE AT", 420.0, "MCU_CMD_Damage", Some("1"), "P1 C single"),
+    ] {
+        let timer = named(&root, timer);
+        assert_near(number(timer, "Time"), time_s);
+        let commands: Vec<_> = timer.targets.iter().map(|&target| by_id(&root, target))
+            .filter(|node| node.block_type == command).collect();
+        assert_eq!(commands.len(), 1, "{group}");
+        assert_eq!(commands[0].property("Damage"), level, "{group}");
+        assert_eq!(commands[0].objects, entity(group), "{group}");
+    }
+    assert_eq!(root.count_block_type("MCU_CMD_Damage"), 2);
+    // The trigger: every filter on, one OnEvent per type 55 to 80, each to its
+    // own observed 0 s relay.
+    let trigger = named(cell, "P1-CT");
+    assert_eq!(trigger.block_type, "MCU_TR_ComplexTrigger");
+    assert_eq!((trigger.property("Country"), trigger.property("Radius"), trigger.property("Cylinder")),
+        (Some("601"), Some("6000"), Some("1")));
+    assert_eq!(trigger.pos_xz(), cell.pos_xz());
+    let filters: Vec<_> = trigger.properties.iter().filter(|(key, _)| key.starts_with("EventsFilter")).collect();
+    assert_eq!(filters.len(), 21);
+    assert!(filters.iter().all(|(_, value)| value == "1"), "{filters:?}");
+    let mut hooks = Vec::new();
+    trigger.for_each(&mut |event| {
+        if event.block_type == "OnEvent" {
+            hooks.push((number(event, "Type") as i32, number(event, "TarId") as i32));
+        }
+    });
+    assert_eq!(hooks.iter().map(|hook| hook.0).collect::<Vec<_>>(), (55..=80).collect::<Vec<_>>());
+    for (event, relay) in hooks {
+        let node = by_id(&root, relay);
+        assert_eq!(node.name(), Some(format!("P1-CT EV {event}").as_str()));
+        assert_eq!((node.block_type.as_str(), number(node, "Time")), ("MCU_Timer", 0.0));
+        assert!(node.targets.contains(&id(&root, &format!("P1-CT event {event}"))), "EV {event} observed");
+    }
+    let close_off = id(&root, "P1 CLOSE OFF");
+    root.for_each(&mut |node| {
+        if node.targets.contains(&trigger.index.unwrap()) {
+            assert_eq!(node.index, Some(close_off), "P1-CT is only switched off at the safety close");
+        }
+    });
+}
+
+/// The ideal entries (the walker reports Entered, 58, only): A, B and C enter
+/// 6 km 100.8 s after activation, first sample a second later. A and B then go
+/// far outside; C stays.
+#[test]
+fn flight_2p_predictions() {
+    use super::shell::test_support::ticks;
+    use super::testkit::{ScriptedTrack, TICKS_PER_SECOND, WalkerConfig, WalkerInput, walk};
+    let root = generate_probe_2p();
+    let cell = RUN_SHEET_2P[0];
+    let input = WalkerInput {
+        until: ticks(TWO_P_CLOSE_S),
+        tracks: TWO_P_SINGLES.iter().map(|row| ScriptedTrack {
+            coalition: 2,
+            country: row.country,
+            samples: (row.activate_s as u32..=TWO_P_CLOSE_S as u32).map(|second| {
+                let point = threshold_probe_point(cell, row, 0, f64::from(second));
+                (ticks(f64::from(second)), point.0, point.1)
+            }).collect(),
+        }).collect(),
+        ..WalkerInput::default()
+    };
+    let log = walk(&root, WalkerConfig::default().flown(), &input);
+    let at = |name: &str| -> Vec<f64> {
+        let index = id(&root, name);
+        log.pulses.iter().filter(|pulse| pulse.index == index)
+            .map(|pulse| pulse.t as f64 / TICKS_PER_SECOND as f64).collect()
+    };
+    for row in TWO_P_SINGLES {
+        assert!((threshold_probe_arrival_s(row) - (row.activate_s + 100.8)).abs() < 0.05, "{}", row.group);
+    }
+    assert_eq!(at("P1-CT EV 58"), [161.0, 191.0, 221.0]);
+    assert_eq!(at("P1-CT EV 60"), [300.0, 360.0], "the walker's model, not 2M's finding");
+}
+
 fn build_load_probe() -> Probe {
     use super::assemble::{assemble_side, emit_side_logic};
     use super::library::builtin_library;
@@ -7308,8 +7489,9 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     // four flown files from the previous total of 56. 0038 freezes 2F, 2H
     // and 2I, removing their twelve files: 52 - 12 = 40. 2K (built
     // 2026-10-29, not yet flown) adds four: 44. 2L (built 2026-10-29) adds
-    // four: 48. 2M (built 2026-10-31) adds four: 52.
-    assert_eq!(compared, 52);
+    // four: 48. 2M (built 2026-10-31) adds four: 52. 2P (built 2026-10-31)
+    // adds four: 56.
+    assert_eq!(compared, 56);
 }
 
 fn flown_formation_probe(flight: Flight) -> Il2Entity {
@@ -11302,6 +11484,7 @@ fn probe_files_parse_and_links_resolve() {
         (Flight::TwoK, generate_probe_2k()),
         (Flight::TwoL, generate_probe_2l()),
         (Flight::TwoM, generate_probe_2m()),
+        (Flight::TwoP, generate_probe_2p()),
         (Flight::Load, build(Flight::Load).root),
     ] {
         let (traced, _) = build(flight).traced(TraceCarrier::default());
@@ -14227,6 +14410,7 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::TwoM, "MD2", (230.0, 0.0), 60.0, 900.0),
         (Flight::TwoM, "MD3", (60.0, -45.0), 60.0, 900.0),
         (Flight::TwoM, "MD4", (60.0, -90.0), 60.0, 900.0),
+        (Flight::TwoP, "P1", (140.0, 0.0), 60.0, 600.0),
     ];
     let expected_cues = [
         (
@@ -14433,6 +14617,8 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::TwoL, 780.0, "Flight 2L closed. Every aircraft has a Delete. Leave the server"),
         (Flight::TwoM, 0.0, "Flight 2M: spectate and press LCtrl+R. Leave the server at 13:30"),
         (Flight::TwoM, 900.0, "Flight 2M closed. Every aircraft has a Delete. Leave the server"),
+        (Flight::TwoP, 0.0, "Flight 2P: spectate and press LCtrl+R. Leave the server at 09:00"),
+        (Flight::TwoP, 600.0, "Flight 2P closed. Every aircraft has a Delete. Leave the server"),
     ];
     assert_eq!(CUES.len(), expected_cues.len());
     for (&cue, &(flight, time_s, text)) in CUES.iter().zip(&expected_cues) {
