@@ -33,6 +33,18 @@ pub(crate) fn ai_country_for_player(country: i32) -> Option<i32> {
 pub(crate) const OBJECT_ENTERED: i32 = 58;
 /// Object Left, confirmed in flights 1N and 1D. See docs/il2-loader-and-log-facts.md.
 pub(crate) const OBJECT_LEFT: i32 = 60;
+/// Killed, confirmed in flight 2P (a kill inside raised 67, 68 and 70; a Delete
+/// and level 1 damage did not raise 70). Decision 0049.
+pub(crate) const OBJECT_KILLED: i32 = 70;
+/// Finished, Finished alive, Damaged and Critically damaged (flight 2P).
+#[cfg(test)] // read by the test kit only
+pub(crate) const OBJECT_FINISHED: i32 = 62;
+#[cfg(test)]
+pub(crate) const OBJECT_FINISHED_ALIVE: i32 = 63;
+#[cfg(test)]
+pub(crate) const OBJECT_DAMAGED: i32 = 67;
+#[cfg(test)]
+pub(crate) const OBJECT_CRITICALLY_DAMAGED: i32 = 68;
 /// Players needed to arm an area (decision 0047): one N for both sides. The
 /// THRESHOLD control (step 12e) takes its bounds from here too.
 pub(crate) const PLAYERS_RANGE: std::ops::RangeInclusive<u8> = 1..=3;
@@ -41,7 +53,8 @@ pub(crate) const PLAYERS_RANGE: std::ops::RangeInclusive<u8> = 1..=3;
 /// coalition check zone at r_in for presence (decisions 0023 and 0024, flight 2J).
 /// For N >= 2 (decision 0047 E) Entered counts in `COUNT` (Counter = N, Dropcount
 /// 0) before `ARM`, and Left and the failed dwell pulse `ZERO`, so the area arms
-/// when N planes have entered and none has left since: 21 MCUs. Once HOT, one
+/// when N planes have entered and none has left or been killed inside since
+/// (0049 B: Killed also pulses `ZERO`): 21 MCUs. Once HOT, one
 /// plane holds it. `ZERO` re-arms a fired counter (flight 0, E6).
 /// A plane already inside the area when the mission loads is not seen until it
 /// re-enters. Flight 2J showed a trigger does not report a plane already inside
@@ -224,6 +237,10 @@ pub(crate) fn build_side(
                 if counted {
                     template::attach_event(node, OBJECT_ENTERED, ids["COUNT"]);
                     template::attach_event(node, OBJECT_LEFT, ids["ZERO"]);
+                    // Decision 0049 B: a plane killed inside raises no Left
+                    // (flight 2M), but Killed (flight 2P), which also zeroes.
+                    node.set_property("EventsFilterKilled", "1");
+                    template::attach_event(node, OBJECT_KILLED, ids["ZERO"]);
                 } else {
                     template::attach_event(node, OBJECT_ENTERED, ids["ARM"]);
                 }
@@ -683,9 +700,13 @@ mod tests {
                     events,
                     [
                         (OBJECT_ENTERED, id(&h, "COUNT")),
-                        (OBJECT_LEFT, id(&h, "ZERO"))
+                        (OBJECT_LEFT, id(&h, "ZERO")),
+                        (OBJECT_KILLED, id(&h, "ZERO")),
                     ]
                 );
+                // Decision 0049 B: the only property that differs from N = 1.
+                assert_eq!(cell(&h, 1, "TRIGGER").property("EventsFilterKilled"), Some("1"));
+                assert_eq!(cell(&one, 1, "TRIGGER").property("EventsFilterKilled"), Some("0"));
                 let mut fail = cell(&one, 1, "CLOSE DELAY").targets.clone();
                 fail.push(id(&h, "ZERO"));
                 assert_eq!(cell(&h, 1, "CLOSE DELAY").targets, fail);
@@ -697,7 +718,11 @@ mod tests {
                     assert_eq!(counted_node.index, node.index, "{name}");
                     assert_eq!(counted_node.block_type, node.block_type, "{name}");
                     let non_target_props = |e: &Il2Entity| {
-                        e.properties.iter().filter(|(k, _)| k != "Targets").cloned().collect::<Vec<_>>()
+                        e.properties
+                            .iter()
+                            .filter(|(k, _)| k != "Targets" && k != "EventsFilterKilled")
+                            .cloned()
+                            .collect::<Vec<_>>()
                     };
                     assert_eq!(non_target_props(counted_node), non_target_props(node), "{name}");
                     if !name.ends_with("CLOSE DELAY") {
@@ -773,6 +798,50 @@ mod tests {
             assert_eq!(times(&log, id(&h, "ZERO")), [ticks(30.0)], "{config:?}");
             assert_eq!(arms(&h, &log), [ticks(100.0)], "{config:?}");
             assert_passes(&h, &log, &[160.1]);
+        }
+    }
+
+    /// Decision 0049 B (flights 2M and 2P): a counted plane killed inside raises
+    /// no Left, but Killed zeroes the count, so the next single arrival does not
+    /// arm; two arrivals after the kill do.
+    #[test]
+    fn threshold_n2_a_death_inside_zeroes_the_count() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        for config in flown_configs() {
+            let log = walk(
+                &h.root,
+                config,
+                &WalkerInput {
+                    until: ticks(300.0),
+                    tracks: vec![orbit_from(1), orbit_from(60), orbit_from(100)],
+                    track_ends: vec![(ticks(30.0), 0, TrackEnd::Killed)],
+                    ..WalkerInput::default()
+                },
+            );
+            assert_eq!(times(&log, id(&h, "ZERO")), [ticks(30.0)], "{config:?}");
+            assert_eq!(arms(&h, &log), [ticks(100.0)], "{config:?}");
+            assert_passes(&h, &log, &[160.1, 280.1]);
+        }
+    }
+
+    /// The flown 2M gap (no Left on a Delete) is not covered by 0049 B: a
+    /// deleted plane stays counted. Air Tasking never deletes a player.
+    #[test]
+    fn threshold_n2_a_deleted_plane_stays_counted() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        for config in flown_configs() {
+            let log = walk(
+                &h.root,
+                config,
+                &WalkerInput {
+                    until: ticks(200.0),
+                    tracks: vec![orbit_from(1), orbit_from(60)],
+                    track_ends: vec![(ticks(30.0), 0, TrackEnd::Deleted)],
+                    ..WalkerInput::default()
+                },
+            );
+            assert!(times(&log, id(&h, "ZERO")).is_empty(), "{config:?}");
+            assert_eq!(arms(&h, &log), [ticks(60.0)], "{config:?}");
         }
     }
 

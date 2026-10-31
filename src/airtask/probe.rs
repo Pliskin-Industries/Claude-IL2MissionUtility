@@ -202,8 +202,9 @@ impl Flight {
         // 0020 and 0022 change the placed Pairs densities in 2E and 2G.
         // 0025 removed the trigger-reactivation cell that KD and KE flew in 2J.
         // 0038 extends every copy's DONE HUB OFF in 2F, 2H and 2I.
+        // 0049 adds Killed to the N = 2 threshold trigger that 2M flew.
         matches!(self, Self::OneM | Self::Two | Self::TwoB | Self::TwoC | Self::TwoD | Self::TwoE | Self::TwoF
-            | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ)
+            | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::TwoM)
     }
 
     fn regenerates_flown_files(self) -> bool {
@@ -6957,6 +6958,28 @@ pub(crate) fn generate_probe_2m() -> Il2Entity {
     build(Flight::TwoM).root
 }
 
+/// Flight 2M is frozen as flown (decision 0049): its N = 2 triggers count on
+/// Entered and zero on Left only; the generator now also zeroes on Killed.
+#[test]
+fn flight2m_frozen_files_keep_flown_threshold_cells() {
+    assert!(Flight::TwoM.is_frozen());
+    assert!(!Flight::TwoM.regenerates_flown_files());
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/flight2m/P14_Probe_2M_traced");
+    let flown = super::testkit::assert_frozen_files_resolve(&path);
+    let generated = generate_probe_2m();
+    let events = |root: &Il2Entity, prefix: &str| -> Vec<i32> {
+        let trigger = named(root, &format!("{prefix} TRIGGER"));
+        trigger.children.iter().flat_map(|events| &events.children)
+            .map(|event| read_event(event).unwrap().0).collect()
+    };
+    for prefix in ["THD01", "THD02", "THD03", "THD04"] {
+        assert_eq!(events(&flown, prefix), [EVENT_OBJECT_ENTERED, EVENT_OBJECT_LEFT], "{prefix}: as flown");
+        assert_eq!(named(&flown, &format!("{prefix} TRIGGER")).property("EventsFilterKilled"), Some("0"));
+        assert_eq!(events(&generated, prefix), [EVENT_OBJECT_ENTERED, EVENT_OBJECT_LEFT, super::threshold::OBJECT_KILLED],
+            "{prefix}: generator after 0049");
+    }
+}
+
 #[test]
 #[ignore = "writes target/p14 probe files"]
 fn write_p14_probe_2m() {
@@ -7490,8 +7513,9 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     // and 2I, removing their twelve files: 52 - 12 = 40. 2K (built
     // 2026-10-29, not yet flown) adds four: 44. 2L (built 2026-10-29) adds
     // four: 48. 2M (built 2026-10-31) adds four: 52. 2P (built 2026-10-31)
-    // adds four: 56.
-    assert_eq!(compared, 56);
+    // adds four: 56. 0049 freezes 2M as flown (its N = 2 trigger gains
+    // Killed), removing its four files: 52.
+    assert_eq!(compared, 52);
 }
 
 fn flown_formation_probe(flight: Flight) -> Il2Entity {

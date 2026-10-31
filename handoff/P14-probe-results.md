@@ -1182,6 +1182,7 @@ MD3's count is not traced (the trigger feeds `COUNT` and `ZERO`), so Tacview che
   - a Left in between resets the count.
 - After `ARM` the cell runs as the one-player cell does: the dwell, then a pass every `HOLD` (120.00 s apart, decision 0045).
 - **Walker limit:** the walker scripts a Delete or a kill as the track moving outside, so it raises Left. The game does not. The 2M predictions for the B cells' Left rows were therefore wrong. The Zone Out times were right.
+  - *Later the same day (decision 0049):* the walker gained `WalkerInput::track_ends` (`TrackEnd::{Killed, Deleted}`), which removes a track with no Left and raises the events flight 2P found.
 
 ## Flight 2P (which Complex Trigger event does a kill, a Delete or damage raise?) — 2026-10-31, one run, no pilot, Tacview recorded
 
