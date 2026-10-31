@@ -1,0 +1,8233 @@
+Group
+{
+  Index = 1;
+  Name = "P14_Probe_2Q";
+  Desc = "";
+  MCU_TR_MissionBegin
+  {
+    Index = 2;
+    Name = "Translator Mission Begin";
+    Desc = "";
+    Targets = [3,6,8,25,29,47,50,53,56,65,67,84,102,105,114,116,133,151,154,163,165,182,200,203,212,214,231,249,252,261,263,280,298,301,310,312,329,347,350,359,361];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 3;
+    Name = "PROBE INIT";
+    Desc = "";
+    Targets = [4];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 0.50;
+    Random = 100;
+  }
+
+  
+  MCU_Deactivate
+  {
+    Index = 4;
+    Name = "PROBE INIT OFF";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+  }
+
+  
+  Group
+  {
+    Index = 5;
+    Name = "Q1";
+    Desc = "";
+    MCU_Timer
+    {
+      Index = 6;
+      Name = "Q1 ARM";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 7;
+      Name = "Q1 CLOSE OFF";
+      Desc = "";
+      Targets = [16,17,18,19,20,21,22,23,38,39,40,41,42,43,44,45,49,52,55];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 8;
+      Name = "Q1 CLOSE";
+      Desc = "";
+      Targets = [7,58,59,60,61,62,362];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 540;
+      Random = 100;
+    }
+
+    
+    Group
+    {
+      Index = 9;
+      Name = "Q1 602 pair";
+      Desc = "";
+      Plane
+      {
+        Name = "Q1 602 pair 10";
+        Index = 10;
+        LinkTrId = 11;
+        XPos = 145934.000;
+        YPos = 3050.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 11;
+        Name = "Q1 602 pair 11";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 145934.000;
+        YPos = 3050.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 10;
+      }
+
+      
+      Plane
+      {
+        Name = "Q1 602 pair 12";
+        Index = 12;
+        LinkTrId = 13;
+        XPos = 145881.500;
+        YPos = 3050.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 13;
+        Name = "Q1 602 pair 13";
+        Desc = "";
+        Targets = [11];
+        Objects = [];
+        XPos = 145881.500;
+        YPos = 3050.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 12;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 14;
+      Name = "Q1 602 pair ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [11,13];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 15;
+      Name = "Q1 602 pair FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [11];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 16;
+      Name = "Q1 602 pair ORBIT 1";
+      Desc = "";
+      Targets = [17];
+      Objects = [11];
+      XPos = 165934.000;
+      YPos = 3050.000;
+      ZPos = 177477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 17;
+      Name = "Q1 602 pair ORBIT 2";
+      Desc = "";
+      Targets = [18];
+      Objects = [11];
+      XPos = 167348.214;
+      YPos = 3050.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 18;
+      Name = "Q1 602 pair ORBIT 3";
+      Desc = "";
+      Targets = [19];
+      Objects = [11];
+      XPos = 167934.000;
+      YPos = 3050.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 19;
+      Name = "Q1 602 pair ORBIT 4";
+      Desc = "";
+      Targets = [20];
+      Objects = [11];
+      XPos = 167348.214;
+      YPos = 3050.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 20;
+      Name = "Q1 602 pair ORBIT 5";
+      Desc = "";
+      Targets = [21];
+      Objects = [11];
+      XPos = 165934.000;
+      YPos = 3050.000;
+      ZPos = 181477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 21;
+      Name = "Q1 602 pair ORBIT 6";
+      Desc = "";
+      Targets = [22];
+      Objects = [11];
+      XPos = 164519.786;
+      YPos = 3050.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 22;
+      Name = "Q1 602 pair ORBIT 7";
+      Desc = "";
+      Targets = [23];
+      Objects = [11];
+      XPos = 163934.000;
+      YPos = 3050.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 23;
+      Name = "Q1 602 pair ORBIT 8";
+      Desc = "";
+      Targets = [16];
+      Objects = [11];
+      XPos = 164519.786;
+      YPos = 3050.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 24;
+      Name = "Q1 602 pair ORDERS";
+      Desc = "";
+      Targets = [15,22];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 25;
+      Name = "Q1 602 pair ACTIVATE AT";
+      Desc = "";
+      Targets = [14,24,26,363];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 26;
+      Name = "Q1 602 pair activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 2;
+      }
+
+      
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 27;
+      Name = "Q1 602 pair 1 DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [11];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 28;
+      Name = "Q1 602 pair 2 DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [13];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 29;
+      Name = "Q1 602 pair DELETE AT";
+      Desc = "";
+      Targets = [27,28,30,364];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 300;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 30;
+      Name = "Q1 602 pair deleted";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 3;
+      }
+
+      
+    }
+
+    
+    Group
+    {
+      Index = 31;
+      Name = "Q1 601 pair";
+      Desc = "";
+      Plane
+      {
+        Name = "Q1 601 pair 32";
+        Index = 32;
+        LinkTrId = 33;
+        XPos = 145934.000;
+        YPos = 3550.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 601;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 33;
+        Name = "Q1 601 pair 33";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 145934.000;
+        YPos = 3550.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 32;
+      }
+
+      
+      Plane
+      {
+        Name = "Q1 601 pair 34";
+        Index = 34;
+        LinkTrId = 35;
+        XPos = 145881.500;
+        YPos = 3550.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 601;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 35;
+        Name = "Q1 601 pair 35";
+        Desc = "";
+        Targets = [33];
+        Objects = [];
+        XPos = 145881.500;
+        YPos = 3550.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 34;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 36;
+      Name = "Q1 601 pair ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [33,35];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 37;
+      Name = "Q1 601 pair FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [33];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 38;
+      Name = "Q1 601 pair ORBIT 1";
+      Desc = "";
+      Targets = [39];
+      Objects = [33];
+      XPos = 165934.000;
+      YPos = 3550.000;
+      ZPos = 177477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 39;
+      Name = "Q1 601 pair ORBIT 2";
+      Desc = "";
+      Targets = [40];
+      Objects = [33];
+      XPos = 167348.214;
+      YPos = 3550.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 40;
+      Name = "Q1 601 pair ORBIT 3";
+      Desc = "";
+      Targets = [41];
+      Objects = [33];
+      XPos = 167934.000;
+      YPos = 3550.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 41;
+      Name = "Q1 601 pair ORBIT 4";
+      Desc = "";
+      Targets = [42];
+      Objects = [33];
+      XPos = 167348.214;
+      YPos = 3550.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 42;
+      Name = "Q1 601 pair ORBIT 5";
+      Desc = "";
+      Targets = [43];
+      Objects = [33];
+      XPos = 165934.000;
+      YPos = 3550.000;
+      ZPos = 181477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 43;
+      Name = "Q1 601 pair ORBIT 6";
+      Desc = "";
+      Targets = [44];
+      Objects = [33];
+      XPos = 164519.786;
+      YPos = 3550.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 44;
+      Name = "Q1 601 pair ORBIT 7";
+      Desc = "";
+      Targets = [45];
+      Objects = [33];
+      XPos = 163934.000;
+      YPos = 3550.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 45;
+      Name = "Q1 601 pair ORBIT 8";
+      Desc = "";
+      Targets = [38];
+      Objects = [33];
+      XPos = 164519.786;
+      YPos = 3550.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 46;
+      Name = "Q1 601 pair ORDERS";
+      Desc = "";
+      Targets = [37,44];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 47;
+      Name = "Q1 601 pair ACTIVATE AT";
+      Desc = "";
+      Targets = [36,46,48,365];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 300;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 48;
+      Name = "Q1 601 pair activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 4;
+      }
+
+      
+    }
+
+    
+    MCU_CheckZone
+    {
+      Index = 49;
+      Name = "Q1-Z2";
+      Desc = "";
+      Targets = [51,366];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Zone = 6000;
+      Cylinder = 1;
+      Closer = 1;
+      PlaneCoalitions = [2];
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 50;
+      Name = "Q1-Z2 PULSE";
+      Desc = "";
+      Targets = [49];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 51;
+      Name = "Q1-Z2 fired";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 5;
+      }
+
+      
+    }
+
+    
+    MCU_CheckZone
+    {
+      Index = 52;
+      Name = "Q1-Z3";
+      Desc = "";
+      Targets = [54,367];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Zone = 6000;
+      Cylinder = 1;
+      Closer = 1;
+      PlaneCoalitions = [3];
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 53;
+      Name = "Q1-Z3 PULSE";
+      Desc = "";
+      Targets = [52];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 54;
+      Name = "Q1-Z3 fired";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 6;
+      }
+
+      
+    }
+
+    
+    MCU_CheckZone
+    {
+      Index = 55;
+      Name = "Q1-Z23";
+      Desc = "";
+      Targets = [57,368];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Zone = 6000;
+      Cylinder = 1;
+      Closer = 1;
+      PlaneCoalitions = [2,3];
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 56;
+      Name = "Q1-Z23 PULSE";
+      Desc = "";
+      Targets = [55];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 57;
+      Name = "Q1-Z23 fired";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 7;
+      }
+
+      
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 58;
+      Name = "Q1 aircraft 1 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [11];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 59;
+      Name = "Q1 aircraft 2 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [13];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 60;
+      Name = "Q1 aircraft 3 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [33];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 61;
+      Name = "Q1 aircraft 4 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [35];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 62;
+      Name = "Q1 safety close";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 8;
+      }
+
+      
+    }
+
+    
+    MCU_Icon
+    {
+      Index = 63;
+      Name = "Q1 map";
+      Targets = [];
+      Objects = [];
+      XPos = 165934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 9;
+      LCDesc = 10;
+      IconId = 501;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LineType = 0;
+      Coalitions = [2];
+    }
+
+    
+  }
+
+  
+  Group
+  {
+    Index = 64;
+    Name = "Q2";
+    Desc = "";
+    MCU_Timer
+    {
+      Index = 65;
+      Name = "Q2 ARM";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 66;
+      Name = "Q2 CLOSE OFF";
+      Desc = "";
+      Targets = [75,76,77,78,79,80,81,82,93,94,95,96,97,98,99,100];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 67;
+      Name = "Q2 CLOSE";
+      Desc = "";
+      Targets = [66,107,108,109,110,111,369];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 540;
+      Random = 100;
+    }
+
+    
+    Group
+    {
+      Index = 68;
+      Name = "Q2 target";
+      Desc = "";
+      Plane
+      {
+        Name = "Q2 target 69";
+        Index = 69;
+        LinkTrId = 70;
+        XPos = 225934.000;
+        YPos = 3050.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 501;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 70;
+        Name = "Q2 target 70";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 225934.000;
+        YPos = 3050.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 69;
+      }
+
+      
+      Plane
+      {
+        Name = "Q2 target 71";
+        Index = 71;
+        LinkTrId = 72;
+        XPos = 225881.500;
+        YPos = 3050.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 501;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 72;
+        Name = "Q2 target 72";
+        Desc = "";
+        Targets = [70];
+        Objects = [];
+        XPos = 225881.500;
+        YPos = 3050.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 71;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 73;
+      Name = "Q2 target ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [70,72];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 74;
+      Name = "Q2 target FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [70];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 75;
+      Name = "Q2 target ORBIT 1";
+      Desc = "";
+      Targets = [76];
+      Objects = [70];
+      XPos = 245934.000;
+      YPos = 3050.000;
+      ZPos = 177477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 76;
+      Name = "Q2 target ORBIT 2";
+      Desc = "";
+      Targets = [77];
+      Objects = [70];
+      XPos = 247348.214;
+      YPos = 3050.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 77;
+      Name = "Q2 target ORBIT 3";
+      Desc = "";
+      Targets = [78];
+      Objects = [70];
+      XPos = 247934.000;
+      YPos = 3050.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 78;
+      Name = "Q2 target ORBIT 4";
+      Desc = "";
+      Targets = [79];
+      Objects = [70];
+      XPos = 247348.214;
+      YPos = 3050.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 79;
+      Name = "Q2 target ORBIT 5";
+      Desc = "";
+      Targets = [80];
+      Objects = [70];
+      XPos = 245934.000;
+      YPos = 3050.000;
+      ZPos = 181477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 80;
+      Name = "Q2 target ORBIT 6";
+      Desc = "";
+      Targets = [81];
+      Objects = [70];
+      XPos = 244519.786;
+      YPos = 3050.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 81;
+      Name = "Q2 target ORBIT 7";
+      Desc = "";
+      Targets = [82];
+      Objects = [70];
+      XPos = 243934.000;
+      YPos = 3050.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 82;
+      Name = "Q2 target ORBIT 8";
+      Desc = "";
+      Targets = [75];
+      Objects = [70];
+      XPos = 244519.786;
+      YPos = 3050.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 83;
+      Name = "Q2 target ORDERS";
+      Desc = "";
+      Targets = [74,81];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 84;
+      Name = "Q2 target ACTIVATE AT";
+      Desc = "";
+      Targets = [73,83,85,370];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 85;
+      Name = "Q2 target activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 11;
+      }
+
+      
+    }
+
+    
+    Group
+    {
+      Index = 86;
+      Name = "Q2 hunter";
+      Desc = "";
+      Plane
+      {
+        Name = "Q2 hunter 87";
+        Index = 87;
+        LinkTrId = 88;
+        XPos = 225934.000;
+        YPos = 3550.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 88;
+        Name = "Q2 hunter 88";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 225934.000;
+        YPos = 3550.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 87;
+      }
+
+      
+      Plane
+      {
+        Name = "Q2 hunter 89";
+        Index = 89;
+        LinkTrId = 90;
+        XPos = 225881.500;
+        YPos = 3550.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 90;
+        Name = "Q2 hunter 90";
+        Desc = "";
+        Targets = [88];
+        Objects = [];
+        XPos = 225881.500;
+        YPos = 3550.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 89;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 91;
+      Name = "Q2 hunter ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [88,90];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 92;
+      Name = "Q2 hunter FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [88];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 93;
+      Name = "Q2 hunter ORBIT 1";
+      Desc = "";
+      Targets = [94];
+      Objects = [88];
+      XPos = 245934.000;
+      YPos = 3550.000;
+      ZPos = 177477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 94;
+      Name = "Q2 hunter ORBIT 2";
+      Desc = "";
+      Targets = [95];
+      Objects = [88];
+      XPos = 247348.214;
+      YPos = 3550.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 95;
+      Name = "Q2 hunter ORBIT 3";
+      Desc = "";
+      Targets = [96];
+      Objects = [88];
+      XPos = 247934.000;
+      YPos = 3550.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 96;
+      Name = "Q2 hunter ORBIT 4";
+      Desc = "";
+      Targets = [97];
+      Objects = [88];
+      XPos = 247348.214;
+      YPos = 3550.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 97;
+      Name = "Q2 hunter ORBIT 5";
+      Desc = "";
+      Targets = [98];
+      Objects = [88];
+      XPos = 245934.000;
+      YPos = 3550.000;
+      ZPos = 181477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 98;
+      Name = "Q2 hunter ORBIT 6";
+      Desc = "";
+      Targets = [99];
+      Objects = [88];
+      XPos = 244519.786;
+      YPos = 3550.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 99;
+      Name = "Q2 hunter ORBIT 7";
+      Desc = "";
+      Targets = [100];
+      Objects = [88];
+      XPos = 243934.000;
+      YPos = 3550.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 100;
+      Name = "Q2 hunter ORBIT 8";
+      Desc = "";
+      Targets = [93];
+      Objects = [88];
+      XPos = 244519.786;
+      YPos = 3550.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 101;
+      Name = "Q2 hunter ORDERS";
+      Desc = "";
+      Targets = [92,99];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 102;
+      Name = "Q2 hunter ACTIVATE AT";
+      Desc = "";
+      Targets = [91,101,103,371];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 120;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 103;
+      Name = "Q2 hunter activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 12;
+      }
+
+      
+    }
+
+    
+    MCU_CMD_AttackArea
+    {
+      Index = 104;
+      Name = "Q2 hunter HUNT";
+      Desc = "";
+      Targets = [];
+      Objects = [88];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      AttackGround = 0;
+      AttackAir = 1;
+      AttackGTargets = 0;
+      AttackArea = 5000;
+      Time = 260;
+      Priority = 1;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 105;
+      Name = "Q2 hunter HUNT AT";
+      Desc = "";
+      Targets = [104,106,372];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 270;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 106;
+      Name = "Q2 hunter hunting";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 13;
+      }
+
+      
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 107;
+      Name = "Q2 aircraft 1 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [70];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 108;
+      Name = "Q2 aircraft 2 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [72];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 109;
+      Name = "Q2 aircraft 3 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [88];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 110;
+      Name = "Q2 aircraft 4 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [90];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 111;
+      Name = "Q2 safety close";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 14;
+      }
+
+      
+    }
+
+    
+    MCU_Icon
+    {
+      Index = 112;
+      Name = "Q2 map";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 15;
+      LCDesc = 16;
+      IconId = 501;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LineType = 0;
+      Coalitions = [2];
+    }
+
+    
+  }
+
+  
+  Group
+  {
+    Index = 113;
+    Name = "Q3";
+    Desc = "";
+    MCU_Timer
+    {
+      Index = 114;
+      Name = "Q3 ARM";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 115;
+      Name = "Q3 CLOSE OFF";
+      Desc = "";
+      Targets = [124,125,126,127,128,129,130,131,142,143,144,145,146,147,148,149];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 116;
+      Name = "Q3 CLOSE";
+      Desc = "";
+      Targets = [115,156,157,158,159,160,373];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 540;
+      Random = 100;
+    }
+
+    
+    Group
+    {
+      Index = 117;
+      Name = "Q3 target";
+      Desc = "";
+      Plane
+      {
+        Name = "Q3 target 118";
+        Index = 118;
+        LinkTrId = 119;
+        XPos = 315934.000;
+        YPos = 3050.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 601;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 119;
+        Name = "Q3 target 119";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 315934.000;
+        YPos = 3050.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 118;
+      }
+
+      
+      Plane
+      {
+        Name = "Q3 target 120";
+        Index = 120;
+        LinkTrId = 121;
+        XPos = 315881.500;
+        YPos = 3050.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 601;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 121;
+        Name = "Q3 target 121";
+        Desc = "";
+        Targets = [119];
+        Objects = [];
+        XPos = 315881.500;
+        YPos = 3050.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 120;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 122;
+      Name = "Q3 target ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [119,121];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 123;
+      Name = "Q3 target FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [119];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 124;
+      Name = "Q3 target ORBIT 1";
+      Desc = "";
+      Targets = [125];
+      Objects = [119];
+      XPos = 335934.000;
+      YPos = 3050.000;
+      ZPos = 177477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 125;
+      Name = "Q3 target ORBIT 2";
+      Desc = "";
+      Targets = [126];
+      Objects = [119];
+      XPos = 337348.214;
+      YPos = 3050.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 126;
+      Name = "Q3 target ORBIT 3";
+      Desc = "";
+      Targets = [127];
+      Objects = [119];
+      XPos = 337934.000;
+      YPos = 3050.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 127;
+      Name = "Q3 target ORBIT 4";
+      Desc = "";
+      Targets = [128];
+      Objects = [119];
+      XPos = 337348.214;
+      YPos = 3050.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 128;
+      Name = "Q3 target ORBIT 5";
+      Desc = "";
+      Targets = [129];
+      Objects = [119];
+      XPos = 335934.000;
+      YPos = 3050.000;
+      ZPos = 181477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 129;
+      Name = "Q3 target ORBIT 6";
+      Desc = "";
+      Targets = [130];
+      Objects = [119];
+      XPos = 334519.786;
+      YPos = 3050.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 130;
+      Name = "Q3 target ORBIT 7";
+      Desc = "";
+      Targets = [131];
+      Objects = [119];
+      XPos = 333934.000;
+      YPos = 3050.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 131;
+      Name = "Q3 target ORBIT 8";
+      Desc = "";
+      Targets = [124];
+      Objects = [119];
+      XPos = 334519.786;
+      YPos = 3050.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 132;
+      Name = "Q3 target ORDERS";
+      Desc = "";
+      Targets = [123,130];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 133;
+      Name = "Q3 target ACTIVATE AT";
+      Desc = "";
+      Targets = [122,132,134,374];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 134;
+      Name = "Q3 target activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 17;
+      }
+
+      
+    }
+
+    
+    Group
+    {
+      Index = 135;
+      Name = "Q3 hunter";
+      Desc = "";
+      Plane
+      {
+        Name = "Q3 hunter 136";
+        Index = 136;
+        LinkTrId = 137;
+        XPos = 315934.000;
+        YPos = 3550.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 137;
+        Name = "Q3 hunter 137";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 315934.000;
+        YPos = 3550.000;
+        ZPos = 179477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 136;
+      }
+
+      
+      Plane
+      {
+        Name = "Q3 hunter 138";
+        Index = 138;
+        LinkTrId = 139;
+        XPos = 315881.500;
+        YPos = 3550.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 139;
+        Name = "Q3 hunter 139";
+        Desc = "";
+        Targets = [137];
+        Objects = [];
+        XPos = 315881.500;
+        YPos = 3550.000;
+        ZPos = 179627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 138;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 140;
+      Name = "Q3 hunter ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [137,139];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 141;
+      Name = "Q3 hunter FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [137];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 142;
+      Name = "Q3 hunter ORBIT 1";
+      Desc = "";
+      Targets = [143];
+      Objects = [137];
+      XPos = 335934.000;
+      YPos = 3550.000;
+      ZPos = 177477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 143;
+      Name = "Q3 hunter ORBIT 2";
+      Desc = "";
+      Targets = [144];
+      Objects = [137];
+      XPos = 337348.214;
+      YPos = 3550.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 144;
+      Name = "Q3 hunter ORBIT 3";
+      Desc = "";
+      Targets = [145];
+      Objects = [137];
+      XPos = 337934.000;
+      YPos = 3550.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 145;
+      Name = "Q3 hunter ORBIT 4";
+      Desc = "";
+      Targets = [146];
+      Objects = [137];
+      XPos = 337348.214;
+      YPos = 3550.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 146;
+      Name = "Q3 hunter ORBIT 5";
+      Desc = "";
+      Targets = [147];
+      Objects = [137];
+      XPos = 335934.000;
+      YPos = 3550.000;
+      ZPos = 181477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 147;
+      Name = "Q3 hunter ORBIT 6";
+      Desc = "";
+      Targets = [148];
+      Objects = [137];
+      XPos = 334519.786;
+      YPos = 3550.000;
+      ZPos = 180891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 148;
+      Name = "Q3 hunter ORBIT 7";
+      Desc = "";
+      Targets = [149];
+      Objects = [137];
+      XPos = 333934.000;
+      YPos = 3550.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 149;
+      Name = "Q3 hunter ORBIT 8";
+      Desc = "";
+      Targets = [142];
+      Objects = [137];
+      XPos = 334519.786;
+      YPos = 3550.000;
+      ZPos = 178062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 150;
+      Name = "Q3 hunter ORDERS";
+      Desc = "";
+      Targets = [141,148];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 151;
+      Name = "Q3 hunter ACTIVATE AT";
+      Desc = "";
+      Targets = [140,150,152,375];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 120;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 152;
+      Name = "Q3 hunter activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 18;
+      }
+
+      
+    }
+
+    
+    MCU_CMD_AttackArea
+    {
+      Index = 153;
+      Name = "Q3 hunter HUNT";
+      Desc = "";
+      Targets = [];
+      Objects = [137];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      AttackGround = 0;
+      AttackAir = 1;
+      AttackGTargets = 0;
+      AttackArea = 5000;
+      Time = 260;
+      Priority = 1;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 154;
+      Name = "Q3 hunter HUNT AT";
+      Desc = "";
+      Targets = [153,155,376];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 270;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 155;
+      Name = "Q3 hunter hunting";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 19;
+      }
+
+      
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 156;
+      Name = "Q3 aircraft 1 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [119];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 157;
+      Name = "Q3 aircraft 2 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [121];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 158;
+      Name = "Q3 aircraft 3 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [137];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 159;
+      Name = "Q3 aircraft 4 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [139];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 160;
+      Name = "Q3 safety close";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 20;
+      }
+
+      
+    }
+
+    
+    MCU_Icon
+    {
+      Index = 161;
+      Name = "Q3 map";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 179477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 21;
+      LCDesc = 22;
+      IconId = 501;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LineType = 0;
+      Coalitions = [2];
+    }
+
+    
+  }
+
+  
+  Group
+  {
+    Index = 162;
+    Name = "Q4";
+    Desc = "";
+    MCU_Timer
+    {
+      Index = 163;
+      Name = "Q4 ARM";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 164;
+      Name = "Q4 CLOSE OFF";
+      Desc = "";
+      Targets = [173,174,175,176,177,178,179,180,191,192,193,194,195,196,197,198];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 165;
+      Name = "Q4 CLOSE";
+      Desc = "";
+      Targets = [164,205,206,207,208,209,377];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 540;
+      Random = 100;
+    }
+
+    
+    Group
+    {
+      Index = 166;
+      Name = "Q4 target";
+      Desc = "";
+      Plane
+      {
+        Name = "Q4 target 167";
+        Index = 167;
+        LinkTrId = 168;
+        XPos = 225934.000;
+        YPos = 3050.000;
+        ZPos = 224477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 168;
+        Name = "Q4 target 168";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 225934.000;
+        YPos = 3050.000;
+        ZPos = 224477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 167;
+      }
+
+      
+      Plane
+      {
+        Name = "Q4 target 169";
+        Index = 169;
+        LinkTrId = 170;
+        XPos = 225881.500;
+        YPos = 3050.000;
+        ZPos = 224627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 170;
+        Name = "Q4 target 170";
+        Desc = "";
+        Targets = [168];
+        Objects = [];
+        XPos = 225881.500;
+        YPos = 3050.000;
+        ZPos = 224627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 169;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 171;
+      Name = "Q4 target ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [168,170];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 172;
+      Name = "Q4 target FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [168];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 173;
+      Name = "Q4 target ORBIT 1";
+      Desc = "";
+      Targets = [174];
+      Objects = [168];
+      XPos = 245934.000;
+      YPos = 3050.000;
+      ZPos = 222477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 174;
+      Name = "Q4 target ORBIT 2";
+      Desc = "";
+      Targets = [175];
+      Objects = [168];
+      XPos = 247348.214;
+      YPos = 3050.000;
+      ZPos = 223062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 175;
+      Name = "Q4 target ORBIT 3";
+      Desc = "";
+      Targets = [176];
+      Objects = [168];
+      XPos = 247934.000;
+      YPos = 3050.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 176;
+      Name = "Q4 target ORBIT 4";
+      Desc = "";
+      Targets = [177];
+      Objects = [168];
+      XPos = 247348.214;
+      YPos = 3050.000;
+      ZPos = 225891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 177;
+      Name = "Q4 target ORBIT 5";
+      Desc = "";
+      Targets = [178];
+      Objects = [168];
+      XPos = 245934.000;
+      YPos = 3050.000;
+      ZPos = 226477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 178;
+      Name = "Q4 target ORBIT 6";
+      Desc = "";
+      Targets = [179];
+      Objects = [168];
+      XPos = 244519.786;
+      YPos = 3050.000;
+      ZPos = 225891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 179;
+      Name = "Q4 target ORBIT 7";
+      Desc = "";
+      Targets = [180];
+      Objects = [168];
+      XPos = 243934.000;
+      YPos = 3050.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 180;
+      Name = "Q4 target ORBIT 8";
+      Desc = "";
+      Targets = [173];
+      Objects = [168];
+      XPos = 244519.786;
+      YPos = 3050.000;
+      ZPos = 223062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 181;
+      Name = "Q4 target ORDERS";
+      Desc = "";
+      Targets = [172,179];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 182;
+      Name = "Q4 target ACTIVATE AT";
+      Desc = "";
+      Targets = [171,181,183,378];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 183;
+      Name = "Q4 target activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 23;
+      }
+
+      
+    }
+
+    
+    Group
+    {
+      Index = 184;
+      Name = "Q4 hunter";
+      Desc = "";
+      Plane
+      {
+        Name = "Q4 hunter 185";
+        Index = 185;
+        LinkTrId = 186;
+        XPos = 225934.000;
+        YPos = 3550.000;
+        ZPos = 224477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 501;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 186;
+        Name = "Q4 hunter 186";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 225934.000;
+        YPos = 3550.000;
+        ZPos = 224477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 185;
+      }
+
+      
+      Plane
+      {
+        Name = "Q4 hunter 187";
+        Index = 187;
+        LinkTrId = 188;
+        XPos = 225881.500;
+        YPos = 3550.000;
+        ZPos = 224627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 501;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 188;
+        Name = "Q4 hunter 188";
+        Desc = "";
+        Targets = [186];
+        Objects = [];
+        XPos = 225881.500;
+        YPos = 3550.000;
+        ZPos = 224627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 187;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 189;
+      Name = "Q4 hunter ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [186,188];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 190;
+      Name = "Q4 hunter FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [186];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 191;
+      Name = "Q4 hunter ORBIT 1";
+      Desc = "";
+      Targets = [192];
+      Objects = [186];
+      XPos = 245934.000;
+      YPos = 3550.000;
+      ZPos = 222477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 192;
+      Name = "Q4 hunter ORBIT 2";
+      Desc = "";
+      Targets = [193];
+      Objects = [186];
+      XPos = 247348.214;
+      YPos = 3550.000;
+      ZPos = 223062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 193;
+      Name = "Q4 hunter ORBIT 3";
+      Desc = "";
+      Targets = [194];
+      Objects = [186];
+      XPos = 247934.000;
+      YPos = 3550.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 194;
+      Name = "Q4 hunter ORBIT 4";
+      Desc = "";
+      Targets = [195];
+      Objects = [186];
+      XPos = 247348.214;
+      YPos = 3550.000;
+      ZPos = 225891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 195;
+      Name = "Q4 hunter ORBIT 5";
+      Desc = "";
+      Targets = [196];
+      Objects = [186];
+      XPos = 245934.000;
+      YPos = 3550.000;
+      ZPos = 226477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 196;
+      Name = "Q4 hunter ORBIT 6";
+      Desc = "";
+      Targets = [197];
+      Objects = [186];
+      XPos = 244519.786;
+      YPos = 3550.000;
+      ZPos = 225891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 197;
+      Name = "Q4 hunter ORBIT 7";
+      Desc = "";
+      Targets = [198];
+      Objects = [186];
+      XPos = 243934.000;
+      YPos = 3550.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 198;
+      Name = "Q4 hunter ORBIT 8";
+      Desc = "";
+      Targets = [191];
+      Objects = [186];
+      XPos = 244519.786;
+      YPos = 3550.000;
+      ZPos = 223062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 199;
+      Name = "Q4 hunter ORDERS";
+      Desc = "";
+      Targets = [190,197];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 200;
+      Name = "Q4 hunter ACTIVATE AT";
+      Desc = "";
+      Targets = [189,199,201,379];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 120;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 201;
+      Name = "Q4 hunter activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 24;
+      }
+
+      
+    }
+
+    
+    MCU_CMD_AttackArea
+    {
+      Index = 202;
+      Name = "Q4 hunter HUNT";
+      Desc = "";
+      Targets = [];
+      Objects = [186];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      AttackGround = 0;
+      AttackAir = 1;
+      AttackGTargets = 0;
+      AttackArea = 5000;
+      Time = 260;
+      Priority = 1;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 203;
+      Name = "Q4 hunter HUNT AT";
+      Desc = "";
+      Targets = [202,204,380];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 270;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 204;
+      Name = "Q4 hunter hunting";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 25;
+      }
+
+      
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 205;
+      Name = "Q4 aircraft 1 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [168];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 206;
+      Name = "Q4 aircraft 2 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [170];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 207;
+      Name = "Q4 aircraft 3 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [186];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 208;
+      Name = "Q4 aircraft 4 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [188];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 209;
+      Name = "Q4 safety close";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 26;
+      }
+
+      
+    }
+
+    
+    MCU_Icon
+    {
+      Index = 210;
+      Name = "Q4 map";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 27;
+      LCDesc = 28;
+      IconId = 501;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LineType = 0;
+      Coalitions = [2];
+    }
+
+    
+  }
+
+  
+  Group
+  {
+    Index = 211;
+    Name = "Q5";
+    Desc = "";
+    MCU_Timer
+    {
+      Index = 212;
+      Name = "Q5 ARM";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 213;
+      Name = "Q5 CLOSE OFF";
+      Desc = "";
+      Targets = [222,223,224,225,226,227,228,229,240,241,242,243,244,245,246,247];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 214;
+      Name = "Q5 CLOSE";
+      Desc = "";
+      Targets = [213,254,255,256,257,258,381];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 540;
+      Random = 100;
+    }
+
+    
+    Group
+    {
+      Index = 215;
+      Name = "Q5 target";
+      Desc = "";
+      Plane
+      {
+        Name = "Q5 target 216";
+        Index = 216;
+        LinkTrId = 217;
+        XPos = 315934.000;
+        YPos = 3050.000;
+        ZPos = 224477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 217;
+        Name = "Q5 target 217";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 315934.000;
+        YPos = 3050.000;
+        ZPos = 224477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 216;
+      }
+
+      
+      Plane
+      {
+        Name = "Q5 target 218";
+        Index = 218;
+        LinkTrId = 219;
+        XPos = 315881.500;
+        YPos = 3050.000;
+        ZPos = 224627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 219;
+        Name = "Q5 target 219";
+        Desc = "";
+        Targets = [217];
+        Objects = [];
+        XPos = 315881.500;
+        YPos = 3050.000;
+        ZPos = 224627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 218;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 220;
+      Name = "Q5 target ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [217,219];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 221;
+      Name = "Q5 target FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [217];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 222;
+      Name = "Q5 target ORBIT 1";
+      Desc = "";
+      Targets = [223];
+      Objects = [217];
+      XPos = 335934.000;
+      YPos = 3050.000;
+      ZPos = 222477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 223;
+      Name = "Q5 target ORBIT 2";
+      Desc = "";
+      Targets = [224];
+      Objects = [217];
+      XPos = 337348.214;
+      YPos = 3050.000;
+      ZPos = 223062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 224;
+      Name = "Q5 target ORBIT 3";
+      Desc = "";
+      Targets = [225];
+      Objects = [217];
+      XPos = 337934.000;
+      YPos = 3050.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 225;
+      Name = "Q5 target ORBIT 4";
+      Desc = "";
+      Targets = [226];
+      Objects = [217];
+      XPos = 337348.214;
+      YPos = 3050.000;
+      ZPos = 225891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 226;
+      Name = "Q5 target ORBIT 5";
+      Desc = "";
+      Targets = [227];
+      Objects = [217];
+      XPos = 335934.000;
+      YPos = 3050.000;
+      ZPos = 226477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 227;
+      Name = "Q5 target ORBIT 6";
+      Desc = "";
+      Targets = [228];
+      Objects = [217];
+      XPos = 334519.786;
+      YPos = 3050.000;
+      ZPos = 225891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 228;
+      Name = "Q5 target ORBIT 7";
+      Desc = "";
+      Targets = [229];
+      Objects = [217];
+      XPos = 333934.000;
+      YPos = 3050.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 229;
+      Name = "Q5 target ORBIT 8";
+      Desc = "";
+      Targets = [222];
+      Objects = [217];
+      XPos = 334519.786;
+      YPos = 3050.000;
+      ZPos = 223062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 230;
+      Name = "Q5 target ORDERS";
+      Desc = "";
+      Targets = [221,228];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 231;
+      Name = "Q5 target ACTIVATE AT";
+      Desc = "";
+      Targets = [220,230,232,382];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 232;
+      Name = "Q5 target activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 29;
+      }
+
+      
+    }
+
+    
+    Group
+    {
+      Index = 233;
+      Name = "Q5 hunter";
+      Desc = "";
+      Plane
+      {
+        Name = "Q5 hunter 234";
+        Index = 234;
+        LinkTrId = 235;
+        XPos = 315934.000;
+        YPos = 3550.000;
+        ZPos = 224477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 601;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 235;
+        Name = "Q5 hunter 235";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 315934.000;
+        YPos = 3550.000;
+        ZPos = 224477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 234;
+      }
+
+      
+      Plane
+      {
+        Name = "Q5 hunter 236";
+        Index = 236;
+        LinkTrId = 237;
+        XPos = 315881.500;
+        YPos = 3550.000;
+        ZPos = 224627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 601;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 237;
+        Name = "Q5 hunter 237";
+        Desc = "";
+        Targets = [235];
+        Objects = [];
+        XPos = 315881.500;
+        YPos = 3550.000;
+        ZPos = 224627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 236;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 238;
+      Name = "Q5 hunter ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [235,237];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 239;
+      Name = "Q5 hunter FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [235];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 240;
+      Name = "Q5 hunter ORBIT 1";
+      Desc = "";
+      Targets = [241];
+      Objects = [235];
+      XPos = 335934.000;
+      YPos = 3550.000;
+      ZPos = 222477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 241;
+      Name = "Q5 hunter ORBIT 2";
+      Desc = "";
+      Targets = [242];
+      Objects = [235];
+      XPos = 337348.214;
+      YPos = 3550.000;
+      ZPos = 223062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 242;
+      Name = "Q5 hunter ORBIT 3";
+      Desc = "";
+      Targets = [243];
+      Objects = [235];
+      XPos = 337934.000;
+      YPos = 3550.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 243;
+      Name = "Q5 hunter ORBIT 4";
+      Desc = "";
+      Targets = [244];
+      Objects = [235];
+      XPos = 337348.214;
+      YPos = 3550.000;
+      ZPos = 225891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 244;
+      Name = "Q5 hunter ORBIT 5";
+      Desc = "";
+      Targets = [245];
+      Objects = [235];
+      XPos = 335934.000;
+      YPos = 3550.000;
+      ZPos = 226477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 245;
+      Name = "Q5 hunter ORBIT 6";
+      Desc = "";
+      Targets = [246];
+      Objects = [235];
+      XPos = 334519.786;
+      YPos = 3550.000;
+      ZPos = 225891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 246;
+      Name = "Q5 hunter ORBIT 7";
+      Desc = "";
+      Targets = [247];
+      Objects = [235];
+      XPos = 333934.000;
+      YPos = 3550.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 247;
+      Name = "Q5 hunter ORBIT 8";
+      Desc = "";
+      Targets = [240];
+      Objects = [235];
+      XPos = 334519.786;
+      YPos = 3550.000;
+      ZPos = 223062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 248;
+      Name = "Q5 hunter ORDERS";
+      Desc = "";
+      Targets = [239,246];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 249;
+      Name = "Q5 hunter ACTIVATE AT";
+      Desc = "";
+      Targets = [238,248,250,383];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 120;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 250;
+      Name = "Q5 hunter activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 30;
+      }
+
+      
+    }
+
+    
+    MCU_CMD_AttackArea
+    {
+      Index = 251;
+      Name = "Q5 hunter HUNT";
+      Desc = "";
+      Targets = [];
+      Objects = [235];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      AttackGround = 0;
+      AttackAir = 1;
+      AttackGTargets = 0;
+      AttackArea = 5000;
+      Time = 260;
+      Priority = 1;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 252;
+      Name = "Q5 hunter HUNT AT";
+      Desc = "";
+      Targets = [251,253,384];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 270;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 253;
+      Name = "Q5 hunter hunting";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 31;
+      }
+
+      
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 254;
+      Name = "Q5 aircraft 1 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [217];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 255;
+      Name = "Q5 aircraft 2 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [219];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 256;
+      Name = "Q5 aircraft 3 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [235];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 257;
+      Name = "Q5 aircraft 4 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [237];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 258;
+      Name = "Q5 safety close";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 32;
+      }
+
+      
+    }
+
+    
+    MCU_Icon
+    {
+      Index = 259;
+      Name = "Q5 map";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 224477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 33;
+      LCDesc = 34;
+      IconId = 501;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LineType = 0;
+      Coalitions = [2];
+    }
+
+    
+  }
+
+  
+  Group
+  {
+    Index = 260;
+    Name = "Q6";
+    Desc = "";
+    MCU_Timer
+    {
+      Index = 261;
+      Name = "Q6 ARM";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 262;
+      Name = "Q6 CLOSE OFF";
+      Desc = "";
+      Targets = [271,272,273,274,275,276,277,278,289,290,291,292,293,294,295,296];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 263;
+      Name = "Q6 CLOSE";
+      Desc = "";
+      Targets = [262,303,304,305,306,307,385];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 540;
+      Random = 100;
+    }
+
+    
+    Group
+    {
+      Index = 264;
+      Name = "Q6 target";
+      Desc = "";
+      Plane
+      {
+        Name = "Q6 target 265";
+        Index = 265;
+        LinkTrId = 266;
+        XPos = 225934.000;
+        YPos = 3050.000;
+        ZPos = 269477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 266;
+        Name = "Q6 target 266";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 225934.000;
+        YPos = 3050.000;
+        ZPos = 269477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 265;
+      }
+
+      
+      Plane
+      {
+        Name = "Q6 target 267";
+        Index = 267;
+        LinkTrId = 268;
+        XPos = 225881.500;
+        YPos = 3050.000;
+        ZPos = 269627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 602;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 268;
+        Name = "Q6 target 268";
+        Desc = "";
+        Targets = [266];
+        Objects = [];
+        XPos = 225881.500;
+        YPos = 3050.000;
+        ZPos = 269627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 267;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 269;
+      Name = "Q6 target ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [266,268];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 270;
+      Name = "Q6 target FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [266];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 271;
+      Name = "Q6 target ORBIT 1";
+      Desc = "";
+      Targets = [272];
+      Objects = [266];
+      XPos = 245934.000;
+      YPos = 3050.000;
+      ZPos = 267477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 272;
+      Name = "Q6 target ORBIT 2";
+      Desc = "";
+      Targets = [273];
+      Objects = [266];
+      XPos = 247348.214;
+      YPos = 3050.000;
+      ZPos = 268062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 273;
+      Name = "Q6 target ORBIT 3";
+      Desc = "";
+      Targets = [274];
+      Objects = [266];
+      XPos = 247934.000;
+      YPos = 3050.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 274;
+      Name = "Q6 target ORBIT 4";
+      Desc = "";
+      Targets = [275];
+      Objects = [266];
+      XPos = 247348.214;
+      YPos = 3050.000;
+      ZPos = 270891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 275;
+      Name = "Q6 target ORBIT 5";
+      Desc = "";
+      Targets = [276];
+      Objects = [266];
+      XPos = 245934.000;
+      YPos = 3050.000;
+      ZPos = 271477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 276;
+      Name = "Q6 target ORBIT 6";
+      Desc = "";
+      Targets = [277];
+      Objects = [266];
+      XPos = 244519.786;
+      YPos = 3050.000;
+      ZPos = 270891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 277;
+      Name = "Q6 target ORBIT 7";
+      Desc = "";
+      Targets = [278];
+      Objects = [266];
+      XPos = 243934.000;
+      YPos = 3050.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 278;
+      Name = "Q6 target ORBIT 8";
+      Desc = "";
+      Targets = [271];
+      Objects = [266];
+      XPos = 244519.786;
+      YPos = 3050.000;
+      ZPos = 268062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 279;
+      Name = "Q6 target ORDERS";
+      Desc = "";
+      Targets = [270,277];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 280;
+      Name = "Q6 target ACTIVATE AT";
+      Desc = "";
+      Targets = [269,279,281,386];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 281;
+      Name = "Q6 target activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 35;
+      }
+
+      
+    }
+
+    
+    Group
+    {
+      Index = 282;
+      Name = "Q6 hunter";
+      Desc = "";
+      Plane
+      {
+        Name = "Q6 hunter 283";
+        Index = 283;
+        LinkTrId = 284;
+        XPos = 225934.000;
+        YPos = 3550.000;
+        ZPos = 269477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 503;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 284;
+        Name = "Q6 hunter 284";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 225934.000;
+        YPos = 3550.000;
+        ZPos = 269477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 283;
+      }
+
+      
+      Plane
+      {
+        Name = "Q6 hunter 285";
+        Index = 285;
+        LinkTrId = 286;
+        XPos = 225881.500;
+        YPos = 3550.000;
+        ZPos = 269627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 503;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 286;
+        Name = "Q6 hunter 286";
+        Desc = "";
+        Targets = [284];
+        Objects = [];
+        XPos = 225881.500;
+        YPos = 3550.000;
+        ZPos = 269627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 285;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 287;
+      Name = "Q6 hunter ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [284,286];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 288;
+      Name = "Q6 hunter FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [284];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 289;
+      Name = "Q6 hunter ORBIT 1";
+      Desc = "";
+      Targets = [290];
+      Objects = [284];
+      XPos = 245934.000;
+      YPos = 3550.000;
+      ZPos = 267477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 290;
+      Name = "Q6 hunter ORBIT 2";
+      Desc = "";
+      Targets = [291];
+      Objects = [284];
+      XPos = 247348.214;
+      YPos = 3550.000;
+      ZPos = 268062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 291;
+      Name = "Q6 hunter ORBIT 3";
+      Desc = "";
+      Targets = [292];
+      Objects = [284];
+      XPos = 247934.000;
+      YPos = 3550.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 292;
+      Name = "Q6 hunter ORBIT 4";
+      Desc = "";
+      Targets = [293];
+      Objects = [284];
+      XPos = 247348.214;
+      YPos = 3550.000;
+      ZPos = 270891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 293;
+      Name = "Q6 hunter ORBIT 5";
+      Desc = "";
+      Targets = [294];
+      Objects = [284];
+      XPos = 245934.000;
+      YPos = 3550.000;
+      ZPos = 271477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 294;
+      Name = "Q6 hunter ORBIT 6";
+      Desc = "";
+      Targets = [295];
+      Objects = [284];
+      XPos = 244519.786;
+      YPos = 3550.000;
+      ZPos = 270891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 295;
+      Name = "Q6 hunter ORBIT 7";
+      Desc = "";
+      Targets = [296];
+      Objects = [284];
+      XPos = 243934.000;
+      YPos = 3550.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 296;
+      Name = "Q6 hunter ORBIT 8";
+      Desc = "";
+      Targets = [289];
+      Objects = [284];
+      XPos = 244519.786;
+      YPos = 3550.000;
+      ZPos = 268062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 297;
+      Name = "Q6 hunter ORDERS";
+      Desc = "";
+      Targets = [288,295];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 298;
+      Name = "Q6 hunter ACTIVATE AT";
+      Desc = "";
+      Targets = [287,297,299,387];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 120;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 299;
+      Name = "Q6 hunter activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 36;
+      }
+
+      
+    }
+
+    
+    MCU_CMD_AttackArea
+    {
+      Index = 300;
+      Name = "Q6 hunter HUNT";
+      Desc = "";
+      Targets = [];
+      Objects = [284];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      AttackGround = 0;
+      AttackAir = 1;
+      AttackGTargets = 0;
+      AttackArea = 5000;
+      Time = 260;
+      Priority = 1;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 301;
+      Name = "Q6 hunter HUNT AT";
+      Desc = "";
+      Targets = [300,302,388];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 270;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 302;
+      Name = "Q6 hunter hunting";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 37;
+      }
+
+      
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 303;
+      Name = "Q6 aircraft 1 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [266];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 304;
+      Name = "Q6 aircraft 2 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [268];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 305;
+      Name = "Q6 aircraft 3 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [284];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 306;
+      Name = "Q6 aircraft 4 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [286];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 307;
+      Name = "Q6 safety close";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 38;
+      }
+
+      
+    }
+
+    
+    MCU_Icon
+    {
+      Index = 308;
+      Name = "Q6 map";
+      Targets = [];
+      Objects = [];
+      XPos = 245934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 39;
+      LCDesc = 40;
+      IconId = 501;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LineType = 0;
+      Coalitions = [2];
+    }
+
+    
+  }
+
+  
+  Group
+  {
+    Index = 309;
+    Name = "Q7";
+    Desc = "";
+    MCU_Timer
+    {
+      Index = 310;
+      Name = "Q7 ARM";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_Deactivate
+    {
+      Index = 311;
+      Name = "Q7 CLOSE OFF";
+      Desc = "";
+      Targets = [320,321,322,323,324,325,326,327,338,339,340,341,342,343,344,345];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 312;
+      Name = "Q7 CLOSE";
+      Desc = "";
+      Targets = [311,352,353,354,355,356,389];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 540;
+      Random = 100;
+    }
+
+    
+    Group
+    {
+      Index = 313;
+      Name = "Q7 target";
+      Desc = "";
+      Plane
+      {
+        Name = "Q7 target 314";
+        Index = 314;
+        LinkTrId = 315;
+        XPos = 315934.000;
+        YPos = 3050.000;
+        ZPos = 269477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 501;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 315;
+        Name = "Q7 target 315";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 315934.000;
+        YPos = 3050.000;
+        ZPos = 269477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 314;
+      }
+
+      
+      Plane
+      {
+        Name = "Q7 target 316";
+        Index = 316;
+        LinkTrId = 317;
+        XPos = 315881.500;
+        YPos = 3050.000;
+        ZPos = 269627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 501;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 317;
+        Name = "Q7 target 317";
+        Desc = "";
+        Targets = [315];
+        Objects = [];
+        XPos = 315881.500;
+        YPos = 3050.000;
+        ZPos = 269627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 316;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 318;
+      Name = "Q7 target ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [315,317];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 319;
+      Name = "Q7 target FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [315];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 320;
+      Name = "Q7 target ORBIT 1";
+      Desc = "";
+      Targets = [321];
+      Objects = [315];
+      XPos = 335934.000;
+      YPos = 3050.000;
+      ZPos = 267477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 321;
+      Name = "Q7 target ORBIT 2";
+      Desc = "";
+      Targets = [322];
+      Objects = [315];
+      XPos = 337348.214;
+      YPos = 3050.000;
+      ZPos = 268062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 322;
+      Name = "Q7 target ORBIT 3";
+      Desc = "";
+      Targets = [323];
+      Objects = [315];
+      XPos = 337934.000;
+      YPos = 3050.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 323;
+      Name = "Q7 target ORBIT 4";
+      Desc = "";
+      Targets = [324];
+      Objects = [315];
+      XPos = 337348.214;
+      YPos = 3050.000;
+      ZPos = 270891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 324;
+      Name = "Q7 target ORBIT 5";
+      Desc = "";
+      Targets = [325];
+      Objects = [315];
+      XPos = 335934.000;
+      YPos = 3050.000;
+      ZPos = 271477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 325;
+      Name = "Q7 target ORBIT 6";
+      Desc = "";
+      Targets = [326];
+      Objects = [315];
+      XPos = 334519.786;
+      YPos = 3050.000;
+      ZPos = 270891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 326;
+      Name = "Q7 target ORBIT 7";
+      Desc = "";
+      Targets = [327];
+      Objects = [315];
+      XPos = 333934.000;
+      YPos = 3050.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 327;
+      Name = "Q7 target ORBIT 8";
+      Desc = "";
+      Targets = [320];
+      Objects = [315];
+      XPos = 334519.786;
+      YPos = 3050.000;
+      ZPos = 268062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 328;
+      Name = "Q7 target ORDERS";
+      Desc = "";
+      Targets = [319,326];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 329;
+      Name = "Q7 target ACTIVATE AT";
+      Desc = "";
+      Targets = [318,328,330,390];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 60;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 330;
+      Name = "Q7 target activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 41;
+      }
+
+      
+    }
+
+    
+    Group
+    {
+      Index = 331;
+      Name = "Q7 hunter";
+      Desc = "";
+      Plane
+      {
+        Name = "Q7 hunter 332";
+        Index = 332;
+        LinkTrId = 333;
+        XPos = 315934.000;
+        YPos = 3550.000;
+        ZPos = 269477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 503;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 0;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%22";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 333;
+        Name = "Q7 hunter 333";
+        Desc = "";
+        Targets = [];
+        Objects = [];
+        XPos = 315934.000;
+        YPos = 3550.000;
+        ZPos = 269477.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 332;
+      }
+
+      
+      Plane
+      {
+        Name = "Q7 hunter 334";
+        Index = 334;
+        LinkTrId = 335;
+        XPos = 315881.500;
+        YPos = 3550.000;
+        ZPos = 269627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Script = "LuaScripts\WorldObjects\Planes\yak9p.txt";
+        Model = "graphics\planes\yak9p\yak9p.mgm";
+        Country = 503;
+        Desc = "";
+        Skin = "";
+        BotSkin = "";
+        AILevel = 2;
+        CoopStart = 0;
+        NumberInFormation = 1;
+        Vulnerable = 1;
+        Engageable = 1;
+        LimitAmmo = 1;
+        StartType = 0;
+        Callsign = 0;
+        Callnum = 0;
+        DamageReport = 50;
+        DamageThreshold = 1;
+        PayloadId = 0;
+        ModMask = 1;
+        AiRTBDecision = 0;
+        DeleteAfterDeath = 1;
+        DeleteAfterLand = 1;
+        Spotter = -1;
+        Fuel = 1;
+        TCode = "%22%23";
+        TCodeColor = "22";
+        GunLoad = [];
+        GunBelt = [];
+        VictoryCount = 0;
+        Emblem = 0;
+      }
+
+      
+      MCU_TR_Entity
+      {
+        Index = 335;
+        Name = "Q7 hunter 335";
+        Desc = "";
+        Targets = [333];
+        Objects = [];
+        XPos = 315881.500;
+        YPos = 3550.000;
+        ZPos = 269627.000;
+        XOri = 0;
+        YOri = 0;
+        ZOri = 0;
+        Enabled = 0;
+        MisObjID = 334;
+      }
+
+      
+    }
+
+    
+    MCU_Activate
+    {
+      Index = 336;
+      Name = "Q7 hunter ACTIVATE";
+      Desc = "";
+      Targets = [];
+      Objects = [333,335];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_CMD_Formation
+    {
+      Index = 337;
+      Name = "Q7 hunter FORMATION";
+      Desc = "";
+      Targets = [];
+      Objects = [333];
+      XPos = 39550.000;
+      YPos = 0.000;
+      ZPos = 39700.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      FormationType = 19;
+      FormationDensity = 2;
+      FlightSize = 1;
+      WaitForWingmen = 1;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 338;
+      Name = "Q7 hunter ORBIT 1";
+      Desc = "";
+      Targets = [339];
+      Objects = [333];
+      XPos = 335934.000;
+      YPos = 3550.000;
+      ZPos = 267477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 339;
+      Name = "Q7 hunter ORBIT 2";
+      Desc = "";
+      Targets = [340];
+      Objects = [333];
+      XPos = 337348.214;
+      YPos = 3550.000;
+      ZPos = 268062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 340;
+      Name = "Q7 hunter ORBIT 3";
+      Desc = "";
+      Targets = [341];
+      Objects = [333];
+      XPos = 337934.000;
+      YPos = 3550.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 341;
+      Name = "Q7 hunter ORBIT 4";
+      Desc = "";
+      Targets = [342];
+      Objects = [333];
+      XPos = 337348.214;
+      YPos = 3550.000;
+      ZPos = 270891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 342;
+      Name = "Q7 hunter ORBIT 5";
+      Desc = "";
+      Targets = [343];
+      Objects = [333];
+      XPos = 335934.000;
+      YPos = 3550.000;
+      ZPos = 271477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 343;
+      Name = "Q7 hunter ORBIT 6";
+      Desc = "";
+      Targets = [344];
+      Objects = [333];
+      XPos = 334519.786;
+      YPos = 3550.000;
+      ZPos = 270891.214;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 344;
+      Name = "Q7 hunter ORBIT 7";
+      Desc = "";
+      Targets = [345];
+      Objects = [333];
+      XPos = 333934.000;
+      YPos = 3550.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Waypoint
+    {
+      Index = 345;
+      Name = "Q7 hunter ORBIT 8";
+      Desc = "";
+      Targets = [338];
+      Objects = [333];
+      XPos = 334519.786;
+      YPos = 3550.000;
+      ZPos = 268062.786;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Area = 300;
+      Speed = 500;
+      Priority = 2;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 346;
+      Name = "Q7 hunter ORDERS";
+      Desc = "";
+      Targets = [337,344];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 0.50;
+      Random = 100;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 347;
+      Name = "Q7 hunter ACTIVATE AT";
+      Desc = "";
+      Targets = [336,346,348,391];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 120;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 348;
+      Name = "Q7 hunter activated";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 42;
+      }
+
+      
+    }
+
+    
+    MCU_CMD_AttackArea
+    {
+      Index = 349;
+      Name = "Q7 hunter HUNT";
+      Desc = "";
+      Targets = [];
+      Objects = [333];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      AttackGround = 0;
+      AttackAir = 1;
+      AttackGTargets = 0;
+      AttackArea = 5000;
+      Time = 260;
+      Priority = 1;
+    }
+
+    
+    MCU_Timer
+    {
+      Index = 350;
+      Name = "Q7 hunter HUNT AT";
+      Desc = "";
+      Targets = [349,351,392];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Time = 270;
+      Random = 100;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 351;
+      Name = "Q7 hunter hunting";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 43;
+      }
+
+      
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 352;
+      Name = "Q7 aircraft 1 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [315];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 353;
+      Name = "Q7 aircraft 2 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [317];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 354;
+      Name = "Q7 aircraft 3 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [333];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_Delete
+    {
+      Index = 355;
+      Name = "Q7 aircraft 4 CLOSE DELETE";
+      Desc = "";
+      Targets = [];
+      Objects = [335];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+    }
+
+    
+    MCU_TR_Subtitle
+    {
+      Index = 356;
+      Name = "Q7 safety close";
+      Desc = "";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      Coalitions = [0,1,2];
+      SubtitleInfo
+      {
+        Duration = 1;
+        FontSize = 20;
+        HAlign = 1;
+        VAlign = 2;
+        RColor = 0;
+        GColor = 100;
+        BColor = 0;
+        LCText = 44;
+      }
+
+      
+    }
+
+    
+    MCU_Icon
+    {
+      Index = 357;
+      Name = "Q7 map";
+      Targets = [];
+      Objects = [];
+      XPos = 335934.000;
+      YPos = 0.000;
+      ZPos = 269477.000;
+      XOri = 0;
+      YOri = 0;
+      ZOri = 0;
+      Enabled = 1;
+      LCName = 45;
+      LCDesc = 46;
+      IconId = 501;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LineType = 0;
+      Coalitions = [2];
+    }
+
+    
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 358;
+    Name = "Flight 2Q: spectate and press LCtrl+R. Leave the server at 09:30";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 47;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 359;
+    Name = "CUE 111";
+    Desc = "";
+    Targets = [358,393];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 0;
+    Random = 100;
+  }
+
+  
+  MCU_TR_Subtitle
+  {
+    Index = 360;
+    Name = "Flight 2Q closed. Every aircraft has a Delete. Leave the server";
+    Desc = "";
+    Targets = [];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    Coalitions = [0,1,2];
+    SubtitleInfo
+    {
+      Duration = 20;
+      FontSize = 20;
+      HAlign = 1;
+      VAlign = 2;
+      RColor = 0;
+      GColor = 100;
+      BColor = 0;
+      LCText = 48;
+    }
+
+    
+  }
+
+  
+  MCU_Timer
+  {
+    Index = 361;
+    Name = "CUE 112";
+    Desc = "";
+    Targets = [360,394];
+    Objects = [];
+    XPos = 105934.000;
+    YPos = 0.000;
+    ZPos = 269477.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Time = 540;
+    Random = 100;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 362;
+    Targets = [];
+    Objects = [];
+    XPos = 5000.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 363;
+    Targets = [];
+    Objects = [];
+    XPos = 5010.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 364;
+    Targets = [];
+    Objects = [];
+    XPos = 5020.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 365;
+    Targets = [];
+    Objects = [];
+    XPos = 5030.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 366;
+    Targets = [];
+    Objects = [];
+    XPos = 5040.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 367;
+    Targets = [];
+    Objects = [];
+    XPos = 5050.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 368;
+    Targets = [];
+    Objects = [];
+    XPos = 5060.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 369;
+    Targets = [];
+    Objects = [];
+    XPos = 5070.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 370;
+    Targets = [];
+    Objects = [];
+    XPos = 5080.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 371;
+    Targets = [];
+    Objects = [];
+    XPos = 5090.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 372;
+    Targets = [];
+    Objects = [];
+    XPos = 5100.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 373;
+    Targets = [];
+    Objects = [];
+    XPos = 5110.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 374;
+    Targets = [];
+    Objects = [];
+    XPos = 5120.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 375;
+    Targets = [];
+    Objects = [];
+    XPos = 5130.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 376;
+    Targets = [];
+    Objects = [];
+    XPos = 5140.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 377;
+    Targets = [];
+    Objects = [];
+    XPos = 5150.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 378;
+    Targets = [];
+    Objects = [];
+    XPos = 5160.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 379;
+    Targets = [];
+    Objects = [];
+    XPos = 5170.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 380;
+    Targets = [];
+    Objects = [];
+    XPos = 5180.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 381;
+    Targets = [];
+    Objects = [];
+    XPos = 5190.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 382;
+    Targets = [];
+    Objects = [];
+    XPos = 5200.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 383;
+    Targets = [];
+    Objects = [];
+    XPos = 5210.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 384;
+    Targets = [];
+    Objects = [];
+    XPos = 5220.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 385;
+    Targets = [];
+    Objects = [];
+    XPos = 5230.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 386;
+    Targets = [];
+    Objects = [];
+    XPos = 5240.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 387;
+    Targets = [];
+    Objects = [];
+    XPos = 5250.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 388;
+    Targets = [];
+    Objects = [];
+    XPos = 5260.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 389;
+    Targets = [];
+    Objects = [];
+    XPos = 5270.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 390;
+    Targets = [];
+    Objects = [];
+    XPos = 5280.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 391;
+    Targets = [];
+    Objects = [];
+    XPos = 5290.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 392;
+    Targets = [];
+    Objects = [];
+    XPos = 5300.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 393;
+    Targets = [];
+    Objects = [];
+    XPos = 5310.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+  MCU_TR_MissionObjective
+  {
+    Index = 394;
+    Targets = [];
+    Objects = [];
+    XPos = 5320.000;
+    YPos = 0.000;
+    ZPos = 5000.000;
+    XOri = 0;
+    YOri = 0;
+    ZOri = 0;
+    Enabled = 1;
+    LCName = 0;
+    LCDesc = 0;
+    TaskType = 0;
+    Coalition = 0;
+    Success = 0;
+    IconType = 0;
+  }
+
+  
+}

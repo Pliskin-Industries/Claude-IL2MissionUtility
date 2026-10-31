@@ -1,6 +1,6 @@
 # 0050. Watch players only: put Air Tasking's AI on sides of its own
 
-- **Status:** Proposed (stage 1 passed 2026-10-31; flight 2Q next)
+- **Status:** Proposed (stage 1 passed 2026-10-31; flight 2Q built, not flown)
 - **Date:** 2026-10-31
 - **Decided by:** open. The user raised the problem and asked for the probe ("Yes, plan the probe", "Yes, run stage 1").
 
@@ -31,11 +31,11 @@ Sides check S1 (`handoff/P14-probe-results.md`, "Sides check S1"; logs `real_56`
 - players see only Eastern Bloc and Western Bloc;
 - the editor and Tacview show sides 3 and 4 with no name, and the editor cannot set them.
 
-## Stage 2: flight 2Q (to build)
+## Stage 2: flight 2Q (built, not flown)
 
-No pilot, about 10 minutes, about 28 AI planes. Run sheet: `handoff/sessions/2026-10-31-p14-sides-probe.md`.
+No pilot, 9.5 minutes, 28 AI planes. Run sheet: `handoff/sessions/2026-10-31-p14-sides-probe.md`; files `handoff/p14-probes/flight2q/`.
 
-- **Q1, detection:** check zones watching side 2, side 3 and both, with a 602 pair inside and later a 601 pair. Passes if the side-2 zone sees only the 601 pair.
+- **Q1, detection:** check zones watching side 2, side 3 and both, armed while empty; a 602 pair comes in, and later a 601 pair. Passes if the side-2 zone fires only for the 601 pair.
 - **Q2 to Q7, fighting:** one hunter pair with an air attack order, one target pair orbiting.
 
   | Cell | Hunter | Target | Must |

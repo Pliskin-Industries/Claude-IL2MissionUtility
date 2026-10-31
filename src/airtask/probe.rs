@@ -125,13 +125,14 @@ pub(crate) enum Flight {
     TwoL,
     TwoM,
     TwoP,
+    TwoQ,
     Load,
 }
 
 impl Flight {
-    const ALL: [Self; 26] = [
+    const ALL: [Self; 27] = [
         Self::Zero, Self::OneA, Self::OneN, Self::OneD, Self::OneG, Self::OneH, Self::OneJ,
-        Self::OneK, Self::OneL, Self::OneM, Self::OneP, Self::Two, Self::TwoB, Self::TwoC, Self::TwoD, Self::TwoE, Self::TwoF, Self::TwoG, Self::TwoH, Self::TwoI, Self::TwoJ, Self::TwoK, Self::TwoL, Self::TwoM, Self::TwoP, Self::Load,
+        Self::OneK, Self::OneL, Self::OneM, Self::OneP, Self::Two, Self::TwoB, Self::TwoC, Self::TwoD, Self::TwoE, Self::TwoF, Self::TwoG, Self::TwoH, Self::TwoI, Self::TwoJ, Self::TwoK, Self::TwoL, Self::TwoM, Self::TwoP, Self::TwoQ, Self::Load,
     ];
 
     fn stem(self) -> &'static str {
@@ -161,6 +162,7 @@ impl Flight {
             Self::TwoL => "P14_Probe_2L",
             Self::TwoM => "P14_Probe_2M",
             Self::TwoP => "P14_Probe_2P",
+            Self::TwoQ => "P14_Probe_2Q",
             Self::Load => "P14_Load_Probe",
         }
     }
@@ -192,6 +194,7 @@ impl Flight {
             Self::TwoL => RUN_SHEET_2L,
             Self::TwoM => RUN_SHEET_2M,
             Self::TwoP => RUN_SHEET_2P,
+            Self::TwoQ => RUN_SHEET_2Q,
             Self::Load => &[],
         }
     }
@@ -262,7 +265,7 @@ impl Flight {
                 script: "f80c10",
             }],
             Self::Zero | Self::OneA | Self::OneG | Self::OneH | Self::OneJ | Self::OneK
-                | Self::OneL | Self::OneM | Self::OneP | Self::Two | Self::TwoB | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::TwoK | Self::TwoL | Self::TwoM | Self::TwoP | Self::Load => &[],
+                | Self::OneL | Self::OneM | Self::OneP | Self::Two | Self::TwoB | Self::TwoD | Self::TwoE | Self::TwoF | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::TwoK | Self::TwoL | Self::TwoM | Self::TwoP | Self::TwoQ | Self::Load => &[],
         }
     }
 }
@@ -981,6 +984,9 @@ struct ThresholdProbeCell {
     switches: &'static [TriggerSwitch],
     control_s: Option<f64>,
     threshold_prefix: Option<&'static str>,
+    /// Whether AI may attack the group (`Plane Engageable`). Stand-ins are not
+    /// engageable; flight 2Q's pairs must be.
+    engageable: bool,
 }
 
 impl ThresholdProbeCell {
@@ -994,12 +1000,12 @@ impl ThresholdProbeCell {
     }
 }
 const TWO_J_CELLS: &[ThresholdProbeCell] = &[
-    ThresholdProbeCell { cell: "KA", group: "KA pair", country: COUNTRY_USA, route: ThresholdProbeRoute::Orbit, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_LOOP_START_S, delete_s: TWO_J_CLOSE_S, removal: StandInRemoval::Delete, switches: TWO_J_KA_SWITCHES, control_s: Some(TWO_J_CONTROL_S), threshold_prefix: None },
-    ThresholdProbeCell { cell: "KB", group: "KB pair", country: COUNTRY_USA, route: ThresholdProbeRoute::Straight, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_KB_ACTIVATE_S, delete_s: TWO_J_POLL_END_S, removal: StandInRemoval::Delete, switches: TWO_J_KB_SWITCHES, control_s: Some(TWO_J_KB_CONTROL_S), threshold_prefix: None },
-    ThresholdProbeCell { cell: "KC", group: "KC pair", country: COUNTRY_NATO_AI, route: ThresholdProbeRoute::Orbit, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_LOOP_START_S, delete_s: TWO_J_CLOSE_S, removal: StandInRemoval::Delete, switches: TWO_J_KC_SWITCHES, control_s: Some(TWO_J_CONTROL_S), threshold_prefix: None },
-    ThresholdProbeCell { cell: "KD", group: "KD pair", country: COUNTRY_USA, route: ThresholdProbeRoute::Approach, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_APPROACH_START_S, delete_s: TWO_J_DELETE_S, removal: StandInRemoval::Delete, switches: &[], control_s: None, threshold_prefix: Some("THD01") },
-    ThresholdProbeCell { cell: "KE", group: "KE pair", country: COUNTRY_NATO_AI, route: ThresholdProbeRoute::Approach, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_APPROACH_START_S, delete_s: TWO_J_DELETE_S, removal: StandInRemoval::Delete, switches: &[], control_s: None, threshold_prefix: Some("THD02") },
-    ThresholdProbeCell { cell: "KF", group: "KF pair", country: COUNTRY_USA, route: ThresholdProbeRoute::Approach, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_APPROACH_START_S, delete_s: TWO_J_DELETE_S, removal: StandInRemoval::Delete, switches: &[], control_s: None, threshold_prefix: Some("THD03") },
+    ThresholdProbeCell { cell: "KA", group: "KA pair", country: COUNTRY_USA, route: ThresholdProbeRoute::Orbit, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_LOOP_START_S, delete_s: TWO_J_CLOSE_S, removal: StandInRemoval::Delete, switches: TWO_J_KA_SWITCHES, control_s: Some(TWO_J_CONTROL_S), threshold_prefix: None, engageable: false },
+    ThresholdProbeCell { cell: "KB", group: "KB pair", country: COUNTRY_USA, route: ThresholdProbeRoute::Straight, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_KB_ACTIVATE_S, delete_s: TWO_J_POLL_END_S, removal: StandInRemoval::Delete, switches: TWO_J_KB_SWITCHES, control_s: Some(TWO_J_KB_CONTROL_S), threshold_prefix: None, engageable: false },
+    ThresholdProbeCell { cell: "KC", group: "KC pair", country: COUNTRY_NATO_AI, route: ThresholdProbeRoute::Orbit, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_LOOP_START_S, delete_s: TWO_J_CLOSE_S, removal: StandInRemoval::Delete, switches: TWO_J_KC_SWITCHES, control_s: Some(TWO_J_CONTROL_S), threshold_prefix: None, engageable: false },
+    ThresholdProbeCell { cell: "KD", group: "KD pair", country: COUNTRY_USA, route: ThresholdProbeRoute::Approach, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_APPROACH_START_S, delete_s: TWO_J_DELETE_S, removal: StandInRemoval::Delete, switches: &[], control_s: None, threshold_prefix: Some("THD01"), engageable: false },
+    ThresholdProbeCell { cell: "KE", group: "KE pair", country: COUNTRY_NATO_AI, route: ThresholdProbeRoute::Approach, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_APPROACH_START_S, delete_s: TWO_J_DELETE_S, removal: StandInRemoval::Delete, switches: &[], control_s: None, threshold_prefix: Some("THD02"), engageable: false },
+    ThresholdProbeCell { cell: "KF", group: "KF pair", country: COUNTRY_USA, route: ThresholdProbeRoute::Approach, size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_APPROACH_START_S, delete_s: TWO_J_DELETE_S, removal: StandInRemoval::Delete, switches: &[], control_s: None, threshold_prefix: Some("THD03"), engageable: false },
 ];
 pub(crate) const RUN_SHEET_2J: &[Cell] = &[
     Cell { key: "KA", centre_km: (140.0, -90.0), arm_s: TWO_J_OFF_S, close_s: TWO_J_CLOSE_S },
@@ -1343,6 +1349,8 @@ pub(crate) const CUES: &[Cue] = &[
     Cue { flight: Flight::TwoM, time_s: TWO_M_CLOSE_S, text: "Flight 2M closed. Every aircraft has a Delete. Leave the server" },
     Cue { flight: Flight::TwoP, time_s: 0.0, text: "Flight 2P: spectate and press LCtrl+R. Leave the server at 09:00" },
     Cue { flight: Flight::TwoP, time_s: TWO_P_CLOSE_S, text: "Flight 2P closed. Every aircraft has a Delete. Leave the server" },
+    Cue { flight: Flight::TwoQ, time_s: 0.0, text: "Flight 2Q: spectate and press LCtrl+R. Leave the server at 09:30" },
+    Cue { flight: Flight::TwoQ, time_s: TWO_Q_CLOSE_S, text: "Flight 2Q closed. Every aircraft has a Delete. Leave the server" },
 ];
 
 const A1_START_KM: (f64, f64) = (-30.0, 60.0);
@@ -4995,7 +5003,7 @@ fn build_threshold_probe_pair(p: &mut Probe, row: &ThresholdProbeCell) {
                 node.set_name(&format!("{name} {index} {old}"));
             }
             if node.block_type == "Plane" {
-                node.set_property("Engageable", "0");
+                node.set_property("Engageable", if row.engageable { "1" } else { "0" });
                 node.set_property("AiRTBDecision", AiRtbDecision::Disabled.property());
             }
             if node.block_type == "MCU_Waypoint" {
@@ -5041,7 +5049,7 @@ fn build_threshold_probe_pair(p: &mut Probe, row: &ThresholdProbeCell) {
             node.set_property("Country", row.country.to_string());
             node.set_property("StartType", PlaneStart::Air.as_i32().to_string());
             node.set_property("AiRTBDecision", AiRtbDecision::Disabled.property());
-            node.set_property("Engageable", "0");
+            node.set_property("Engageable", if row.engageable { "1" } else { "0" });
         }
     });
     let (mut flight, _) = crate::duplicate::duplicate_template(&flight, &mut p.next_id);
@@ -5264,6 +5272,9 @@ fn build(flight: Flight) -> Probe {
     if flight == Flight::TwoP {
         return build_event_number_probe();
     }
+    if flight == Flight::TwoQ {
+        return build_sides_probe();
+    }
     if flight == Flight::Load {
         return build_load_probe();
     }
@@ -5436,7 +5447,7 @@ const TWO_K_PAIR: ThresholdProbeCell = ThresholdProbeCell {
     cell: "K5", group: "K5 pair", country: COUNTRY_NATO_AI, route: ThresholdProbeRoute::Approach,
     size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_K_T0_S, delete_s: TWO_K_CLOSE_S - 10.0,
     removal: StandInRemoval::Delete, switches: &[], control_s: None,
-    threshold_prefix: None,
+    threshold_prefix: None, engageable: false,
 };
 
 pub(crate) const RUN_SHEET_2K: &[Cell] = &[
@@ -6685,7 +6696,7 @@ const TWO_L_PAIR: ThresholdProbeCell = ThresholdProbeCell {
     cell: "L1", group: "L1 pair", country: super::threshold::DPRK_PLAYER_COUNTRY, route: ThresholdProbeRoute::Approach,
     size: TWO_J_PAIR_SIZE, altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_L_PAIR_ACTIVATE_S, delete_s: TWO_L_CLOSE_S - 10.0,
     removal: StandInRemoval::Delete, switches: &[], control_s: None,
-    threshold_prefix: None,
+    threshold_prefix: None, engageable: false,
 };
 
 /// Extra MCUs traced in 2L beyond the Air Tasking trace roles: the clock's
@@ -6900,14 +6911,14 @@ const TWO_M_ZONE_OUT_PULSES: &[(&str, f64)] = &[("MB1", 300.0), ("MB2", 300.0), 
 const fn two_m_yak(cell: &'static str, group: &'static str, size: usize, activate_s: f64, altitude_m: f64,
     delete_s: f64, removal: StandInRemoval) -> ThresholdProbeCell {
     ThresholdProbeCell { cell, group, country: COUNTRY_USA, route: ThresholdProbeRoute::Approach, size, altitude_m,
-        activate_s, delete_s, removal, switches: &[], control_s: None, threshold_prefix: None }
+        activate_s, delete_s, removal, switches: &[], control_s: None, threshold_prefix: None, engageable: false }
 }
 
 /// 2J's KB F-80C straight pass (activated at 400 s), a pair or a single.
 const fn two_m_f80(cell: &'static str, group: &'static str, size: usize) -> ThresholdProbeCell {
     ThresholdProbeCell { cell, group, country: COUNTRY_USA, route: ThresholdProbeRoute::Straight, size,
         altitude_m: TWO_J_ALTITUDE_M, activate_s: TWO_J_KB_ACTIVATE_S, delete_s: TWO_J_POLL_END_S,
-        removal: StandInRemoval::Delete, switches: &[], control_s: None, threshold_prefix: None }
+        removal: StandInRemoval::Delete, switches: &[], control_s: None, threshold_prefix: None, engageable: false }
 }
 
 /// The stand-in groups, in cell order. Cells D have no Delete before the safety close.
@@ -7348,6 +7359,246 @@ fn flight_2p_predictions() {
     assert_eq!(at("P1-CT EV 60"), [300.0, 360.0], "the walker's model, not 2M's finding");
 }
 
+// Flight 2Q (decision 0050, stage 2): no pilot. Does AI on a side of its own
+// fight the right enemy, and does a check zone on side 2 ignore it? The Group
+// cannot carry the side table: build the mission with
+// `--coalition 602:3 --coalition 503:4` (sides check S1).
+// Run sheet: handoff/sessions/2026-10-31-p14-sides-probe.md.
+const TWO_Q_CLOSE_S: f64 = 540.0;
+/// A `delete_s` past every 2Q cell's safety close (540 s): the shared pair
+/// builder gives a pair its own Delete only before `TWO_J_CLOSE_S`, so the
+/// pair stays until its cell's safety close deletes it.
+const TWO_Q_STAYS_S: f64 = TWO_J_CLOSE_S;
+const TWO_Q_Q1_DELETE_S: f64 = 300.0;
+/// The hunter (activated at 120 s) reaches its orbit at about 250 s.
+const TWO_Q_HUNT_S: f64 = 270.0;
+const TWO_Q_HUNT_TIME_S: f64 = 260.0; // The order runs to 530 s.
+const TWO_Q_HUNT_RADIUS_M: f64 = 5000.0;
+/// One pulse, with nobody inside yet, arms Q1's zones; an armed zone then fires
+/// when a plane of a side it watches comes in, and stays armed (flight 2K).
+const TWO_Q_ZONE_PULSE_S: f64 = 60.0;
+/// Q1's check zones, Closer 1, by the sides they watch.
+const TWO_Q_ZONES: &[(&str, &str)] = &[("Q1-Z2", "[2]"), ("Q1-Z3", "[3]"), ("Q1-Z23", "[2,3]")];
+
+pub(crate) const RUN_SHEET_2Q: &[Cell] = &[
+    Cell { key: "Q1", centre_km: (60.0, -90.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_Q_CLOSE_S },
+    Cell { key: "Q2", centre_km: (140.0, -90.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_Q_CLOSE_S },
+    Cell { key: "Q3", centre_km: (230.0, -90.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_Q_CLOSE_S },
+    Cell { key: "Q4", centre_km: (140.0, -45.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_Q_CLOSE_S },
+    Cell { key: "Q5", centre_km: (230.0, -45.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_Q_CLOSE_S },
+    Cell { key: "Q6", centre_km: (140.0, 0.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_Q_CLOSE_S },
+    Cell { key: "Q7", centre_km: (230.0, 0.0), arm_s: TWO_J_APPROACH_START_S, close_s: TWO_Q_CLOSE_S },
+];
+
+/// 2M's Yak pair on the approach route, with its own country.
+const fn two_q_pair(cell: &'static str, group: &'static str, country: i32, activate_s: f64, altitude_m: f64,
+    delete_s: f64) -> ThresholdProbeCell {
+    ThresholdProbeCell { cell, group, country, route: ThresholdProbeRoute::Approach, size: 2, altitude_m,
+        activate_s, delete_s, removal: StandInRemoval::Delete, switches: &[], control_s: None, threshold_prefix: None,
+        engageable: true }
+}
+
+/// In each fighting cell the target orbits at 3,050 m from 60 s and the hunter
+/// 500 m above it from 120 s; the hunter gets an air attack order at 270 s.
+const TWO_Q_GROUPS: &[ThresholdProbeCell] = &[
+    two_q_pair("Q1", "Q1 602 pair", COUNTRY_NATO_AI, 60.0, TWO_J_ALTITUDE_M, TWO_Q_Q1_DELETE_S),
+    two_q_pair("Q1", "Q1 601 pair", COUNTRY_USA, 300.0, TWO_M_HIGH_M, TWO_Q_STAYS_S),
+    two_q_pair("Q2", "Q2 target", COUNTRY_USSR, 60.0, TWO_J_ALTITUDE_M, TWO_Q_STAYS_S),
+    two_q_pair("Q2", "Q2 hunter", COUNTRY_NATO_AI, 120.0, TWO_M_HIGH_M, TWO_Q_STAYS_S),
+    two_q_pair("Q3", "Q3 target", COUNTRY_USA, 60.0, TWO_J_ALTITUDE_M, TWO_Q_STAYS_S),
+    two_q_pair("Q3", "Q3 hunter", COUNTRY_NATO_AI, 120.0, TWO_M_HIGH_M, TWO_Q_STAYS_S),
+    two_q_pair("Q4", "Q4 target", COUNTRY_NATO_AI, 60.0, TWO_J_ALTITUDE_M, TWO_Q_STAYS_S),
+    two_q_pair("Q4", "Q4 hunter", COUNTRY_USSR, 120.0, TWO_M_HIGH_M, TWO_Q_STAYS_S),
+    two_q_pair("Q5", "Q5 target", COUNTRY_NATO_AI, 60.0, TWO_J_ALTITUDE_M, TWO_Q_STAYS_S),
+    two_q_pair("Q5", "Q5 hunter", COUNTRY_USA, 120.0, TWO_M_HIGH_M, TWO_Q_STAYS_S),
+    two_q_pair("Q6", "Q6 target", COUNTRY_NATO_AI, 60.0, TWO_J_ALTITUDE_M, TWO_Q_STAYS_S),
+    two_q_pair("Q6", "Q6 hunter", COUNTRY_DPRK, 120.0, TWO_M_HIGH_M, TWO_Q_STAYS_S),
+    two_q_pair("Q7", "Q7 target", COUNTRY_USSR, 60.0, TWO_J_ALTITUDE_M, TWO_Q_STAYS_S),
+    two_q_pair("Q7", "Q7 hunter", COUNTRY_DPRK, 120.0, TWO_M_HIGH_M, TWO_Q_STAYS_S),
+];
+
+/// Each country's side in flight 2Q's mission. 501 and 601 keep the game's
+/// sides; the build moves the AI countries with `--coalition 602:3 --coalition 503:4`.
+const TWO_Q_SIDES: &[(i32, i32)] = &[(COUNTRY_USSR, 1), (COUNTRY_USA, 2), (COUNTRY_NATO_AI, 3), (COUNTRY_DPRK, 4)];
+
+fn two_q_side(country: i32) -> i32 {
+    TWO_Q_SIDES.iter().find(|(known, _)| *known == country).map(|(_, side)| *side)
+        .unwrap_or_else(|| panic!("flight 2Q: no side for country {country}"))
+}
+
+/// A hunter's air attack order (flight 2Q): the Yak source's AttackArea, moved
+/// to the cell centre with air targets only, given to the lead at `TWO_Q_HUNT_S`.
+fn add_two_q_hunt(p: &mut Probe, row: &ThresholdProbeCell) {
+    let cell = p.cell.expect("flight 2Q hunt cell");
+    let source = parse_group_file(TWO_B_ENEMY).expect("flight 2Q Yak source parses");
+    let attack = block_ids(&source, "MCU_CMD_AttackArea")[0];
+    let mut order = crate::recon::clone_named(by_id(&source, attack), &mut p.next_id, &format!("{} HUNT", row.group));
+    let (x, z) = world(cell.centre_km);
+    order.set_property("XPos", format!("{x:.3}"));
+    order.set_property("ZPos", format!("{z:.3}"));
+    for (key, value) in [("AttackGround", "0"), ("AttackAir", "1"), ("AttackGTargets", "0"), ("Priority", "1")] {
+        order.set_property(key, value);
+    }
+    order.set_property("AttackArea", format!("{TWO_Q_HUNT_RADIUS_M:.0}"));
+    order.set_property("Time", format!("{TWO_Q_HUNT_TIME_S:.0}"));
+    order.set_objects(vec![block_ids(named(&p.root, row.group), "MCU_TR_Entity")[0]]);
+    order.set_targets(vec![]);
+    let order = p.add(order);
+    let at = p.at(&format!("{} HUNT AT", row.group), TWO_Q_HUNT_S, &[order]);
+    p.observe(at, &format!("{} hunting", row.group));
+}
+
+/// The groups that get an air attack order: the second pair of each fighting cell.
+const TWO_Q_HUNTERS: &[&str] = &["Q2 hunter", "Q3 hunter", "Q4 hunter", "Q5 hunter", "Q6 hunter", "Q7 hunter"];
+
+fn two_q_group(name: &str) -> &'static ThresholdProbeCell {
+    TWO_Q_GROUPS.iter().find(|row| row.group == name).unwrap_or_else(|| panic!("flight 2Q: no group {name}"))
+}
+
+fn build_sides_probe() -> Probe {
+    let mut p = Probe::new(Flight::TwoQ);
+    for &cell in RUN_SHEET_2Q {
+        p.start_cell(cell);
+        for row in TWO_Q_GROUPS.iter().filter(|row| row.cell == cell.key) {
+            build_threshold_probe_pair(&mut p, row);
+            if TWO_Q_HUNTERS.contains(&row.group) {
+                add_two_q_hunt(&mut p, row);
+            }
+        }
+        if cell.key == "Q1" {
+            for &(name, sides) in TWO_Q_ZONES {
+                let zone = p.zone(name, TWO_J_RADIUS_M, true, sides, cell.centre_km);
+                p.at(&format!("{name} PULSE"), TWO_Q_ZONE_PULSE_S, &[zone]);
+                p.observe(zone, &format!("{name} fired"));
+            }
+        }
+        add_cell_safety_close(&mut p, cell);
+    }
+    p.cues(Flight::TwoQ);
+    p
+}
+
+pub(crate) fn generate_probe_2q() -> Il2Entity {
+    build(Flight::TwoQ).root
+}
+
+#[test]
+#[ignore = "writes target/p14 probe files"]
+fn write_p14_probe_2q() {
+    write_probe(Flight::TwoQ, TraceCarrier::default());
+}
+
+/// Flight 2Q as its run sheet describes it: engageable Yak pairs on their own
+/// countries, each hunter's air attack order, and Q1's three check zones.
+#[test]
+fn flight_2q_cells_match_the_run_sheet() {
+    let root = generate_probe_2q();
+    assert_eq!(root.count_block_type("Plane"), 28, "14 Yak pairs");
+    for (cell, group, country, activate_s, metres) in [
+        ("Q1", "Q1 602 pair", "602", 60.0, "3050.000"), ("Q1", "Q1 601 pair", "601", 300.0, "3550.000"),
+        ("Q2", "Q2 target", "501", 60.0, "3050.000"), ("Q2", "Q2 hunter", "602", 120.0, "3550.000"),
+        ("Q3", "Q3 target", "601", 60.0, "3050.000"), ("Q3", "Q3 hunter", "602", 120.0, "3550.000"),
+        ("Q4", "Q4 target", "602", 60.0, "3050.000"), ("Q4", "Q4 hunter", "501", 120.0, "3550.000"),
+        ("Q5", "Q5 target", "602", 60.0, "3050.000"), ("Q5", "Q5 hunter", "601", 120.0, "3550.000"),
+        ("Q6", "Q6 target", "602", 60.0, "3050.000"), ("Q6", "Q6 hunter", "503", 120.0, "3550.000"),
+        ("Q7", "Q7 target", "501", 60.0, "3050.000"), ("Q7", "Q7 hunter", "503", 120.0, "3550.000"),
+    ] {
+        let planes = block_ids(named(named(&root, cell), group), "Plane");
+        assert_eq!(planes.len(), 2, "{group}");
+        for plane in planes {
+            let plane = by_id(&root, plane);
+            assert_eq!((plane.property("Country"), plane.property("YPos")), (Some(country), Some(metres)), "{group}");
+            // 2M's stand-ins cannot be attacked; 2Q's must be.
+            assert_eq!(plane.property("Engageable"), Some("1"), "{group}");
+        }
+        assert_near(number(named(&root, &format!("{group} ACTIVATE AT")), "Time"), activate_s);
+    }
+
+    // Each hunter: one air attack order on its cell's centre, given to its lead at 270 s.
+    for &group in TWO_Q_HUNTERS {
+        let cell = two_q_group(group).cell;
+        let lead = block_ids(named(&root, group), "MCU_TR_Entity")[0];
+        let timer = named(&root, &format!("{group} HUNT AT"));
+        assert_near(number(timer, "Time"), TWO_Q_HUNT_S);
+        assert!(timer.targets.contains(&id(&root, &format!("{group} hunting"))), "{group}: observed");
+        let commands: Vec<_> = timer.targets.iter().map(|&target| by_id(&root, target))
+            .filter(|node| node.block_type.starts_with("MCU_CMD")).collect();
+        assert_eq!(commands.len(), 1, "{group}");
+        let order = commands[0];
+        assert_eq!((order.block_type.as_str(), order.name()), ("MCU_CMD_AttackArea", Some(format!("{group} HUNT").as_str())));
+        assert_eq!(order.objects, [lead], "{group}: the lead");
+        assert_eq!(order.pos_xz(), named(&root, cell).pos_xz(), "{group}: on the cell centre");
+        for (key, value) in [("AttackAir", "1"), ("AttackGround", "0"), ("AttackGTargets", "0"), ("AttackArea", "5000"),
+            ("Time", "260"), ("Priority", "1")] {
+            assert_eq!(order.property(key), Some(value), "{group} {key}");
+        }
+    }
+    assert_eq!(root.count_block_type("MCU_CMD_AttackArea"), TWO_Q_HUNTERS.len(), "only the hunters have orders");
+
+    // Removals: only Q1's 602 pair goes before the safety close.
+    let deletes = named(&root, "Q1 602 pair DELETE AT");
+    assert_near(number(deletes, "Time"), TWO_Q_Q1_DELETE_S);
+    let mut deleted: Vec<i32> = deletes.targets.iter().flat_map(|&target| by_id(&root, target).objects.clone()).collect();
+    deleted.sort_unstable();
+    let mut pair = block_ids(named(&root, "Q1 602 pair"), "MCU_TR_Entity");
+    pair.sort_unstable();
+    assert_eq!(deleted, pair);
+    for row in TWO_Q_GROUPS.iter().filter(|row| row.group != "Q1 602 pair") {
+        assert!(root.find_by_name(&format!("{} DELETE AT", row.group)).is_none(), "{}: only the safety close", row.group);
+    }
+
+    // Q1: three Closer 1 zones on the centre, pulsed once at 60 s, observed.
+    let q1 = named(&root, "Q1");
+    for &(name, sides) in TWO_Q_ZONES {
+        let zone = named(q1, name);
+        assert_eq!(zone.block_type, "MCU_CheckZone");
+        assert_eq!((zone.property("Closer"), zone.property("Zone"), zone.property("PlaneCoalitions")),
+            (Some("1"), Some("6000"), Some(sides)), "{name}");
+        assert_eq!(zone.pos_xz(), q1.pos_xz(), "{name}: centred on Q1");
+        assert_at(&root, &format!("{name} PULSE"), TWO_Q_ZONE_PULSE_S, &[zone.index.unwrap()]);
+        assert!(zone.targets.contains(&id(&root, &format!("{name} fired"))), "{name} observed");
+    }
+    assert_eq!(root.count_block_type("MCU_CheckZone"), TWO_Q_ZONES.len());
+}
+
+/// Q1's zones on the ideal tracks, each aircraft on its country's side under
+/// the moved table: the side-2 zone ignores the 602 pair (side 3).
+#[test]
+fn flight_2q_predictions() {
+    use super::shell::test_support::ticks;
+    use super::testkit::{ScriptedTrack, TICKS_PER_SECOND, WalkerConfig, WalkerInput, walk};
+    let root = generate_probe_2q();
+    let cell = *RUN_SHEET_2Q.iter().find(|cell| cell.key == "Q1").unwrap();
+    let input = WalkerInput {
+        until: ticks(TWO_Q_CLOSE_S),
+        tracks: TWO_Q_GROUPS.iter().filter(|row| row.cell == cell.key).flat_map(|row| (0..row.size).map(move |aircraft| {
+            ScriptedTrack {
+                coalition: two_q_side(row.country),
+                country: row.country,
+                samples: (row.activate_s as u32..=TWO_Q_CLOSE_S as u32).map(|second| {
+                    let point = threshold_probe_point(cell, row, aircraft, f64::from(second));
+                    (ticks(f64::from(second)), point.0, point.1)
+                }).collect(),
+            }
+        })).collect(),
+        ..WalkerInput::default()
+    };
+    let log = walk(&root, WalkerConfig::default().flown(), &input);
+    let at = |name: &str| -> Vec<f64> {
+        let index = id(&root, name);
+        log.pulses.iter().filter(|pulse| pulse.index == index)
+            .map(|pulse| pulse.t as f64 / TICKS_PER_SECOND as f64).collect()
+    };
+    // The 602 pair enters 6 km at 160.8 s and is deleted at 300 s; the 601
+    // pair enters at 400.8 s. The walker samples once a second.
+    assert!((threshold_probe_arrival_s(two_q_group("Q1 602 pair")) - 160.8).abs() < 0.05);
+    assert!((threshold_probe_arrival_s(two_q_group("Q1 601 pair")) - 400.8).abs() < 0.05);
+    assert_eq!(at("Q1-Z2"), [401.0], "side 2: the 601 pair only, not the 602 pair");
+    assert_eq!(at("Q1-Z3"), [161.0], "side 3: the 602 pair");
+    // The second firing is the walker's unflown re-entry rule (decision 0045).
+    assert_eq!(at("Q1-Z23"), [161.0, 401.0]);
+}
+
 fn build_load_probe() -> Probe {
     use super::assemble::{assemble_side, emit_side_logic};
     use super::library::builtin_library;
@@ -7514,8 +7765,8 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     // 2026-10-29, not yet flown) adds four: 44. 2L (built 2026-10-29) adds
     // four: 48. 2M (built 2026-10-31) adds four: 52. 2P (built 2026-10-31)
     // adds four: 56. 0049 freezes 2M as flown (its N = 2 trigger gains
-    // Killed), removing its four files: 52.
-    assert_eq!(compared, 52);
+    // Killed), removing its four files: 52. 2Q (built 2026-10-31) adds four: 56.
+    assert_eq!(compared, 56);
 }
 
 fn flown_formation_probe(flight: Flight) -> Il2Entity {
@@ -11509,6 +11760,7 @@ fn probe_files_parse_and_links_resolve() {
         (Flight::TwoL, generate_probe_2l()),
         (Flight::TwoM, generate_probe_2m()),
         (Flight::TwoP, generate_probe_2p()),
+        (Flight::TwoQ, generate_probe_2q()),
         (Flight::Load, build(Flight::Load).root),
     ] {
         let (traced, _) = build(flight).traced(TraceCarrier::default());
@@ -14435,6 +14687,13 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::TwoM, "MD3", (60.0, -45.0), 60.0, 900.0),
         (Flight::TwoM, "MD4", (60.0, -90.0), 60.0, 900.0),
         (Flight::TwoP, "P1", (140.0, 0.0), 60.0, 600.0),
+        (Flight::TwoQ, "Q1", (60.0, -90.0), 60.0, 540.0),
+        (Flight::TwoQ, "Q2", (140.0, -90.0), 60.0, 540.0),
+        (Flight::TwoQ, "Q3", (230.0, -90.0), 60.0, 540.0),
+        (Flight::TwoQ, "Q4", (140.0, -45.0), 60.0, 540.0),
+        (Flight::TwoQ, "Q5", (230.0, -45.0), 60.0, 540.0),
+        (Flight::TwoQ, "Q6", (140.0, 0.0), 60.0, 540.0),
+        (Flight::TwoQ, "Q7", (230.0, 0.0), 60.0, 540.0),
     ];
     let expected_cues = [
         (
@@ -14643,6 +14902,8 @@ fn probe_run_sheets_match_the_tables() {
         (Flight::TwoM, 900.0, "Flight 2M closed. Every aircraft has a Delete. Leave the server"),
         (Flight::TwoP, 0.0, "Flight 2P: spectate and press LCtrl+R. Leave the server at 09:00"),
         (Flight::TwoP, 600.0, "Flight 2P closed. Every aircraft has a Delete. Leave the server"),
+        (Flight::TwoQ, 0.0, "Flight 2Q: spectate and press LCtrl+R. Leave the server at 09:30"),
+        (Flight::TwoQ, 540.0, "Flight 2Q closed. Every aircraft has a Delete. Leave the server"),
     ];
     assert_eq!(CUES.len(), expected_cues.len());
     for (&cue, &(flight, time_s, text)) in CUES.iter().zip(&expected_cues) {

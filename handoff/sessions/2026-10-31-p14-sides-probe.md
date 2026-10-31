@@ -1,6 +1,6 @@
 # Sides probe: can Air Tasking's AI sit on sides of its own? (decision 0050)
 
-**Stage 1 flown 2026-10-31** (logs `real_56`): the game accepts countries on sides 3 and 4. Results: `handoff/P14-probe-results.md`, "Sides check S1". **Stage 2 (flight 2Q) is not built yet.**
+**Stage 1 flown 2026-10-31** (logs `real_56`): the game accepts countries on sides 3 and 4. Results: `handoff/P14-probe-results.md`, "Sides check S1". **Stage 2 (flight 2Q) is built, not flown:** `handoff/p14-probes/flight2q/`.
 
 ## Why
 
@@ -11,33 +11,43 @@ Check zones filter by side only, so AI holds a sortie's Zone IN / Zone Out and t
 - `tools/p14/build_probe_mission.py --coalition COUNTRY:SIDE` (repeatable) rewrites a row of the `Countries` table. It stops on a country not in the table, a malformed value, or a country named twice. Without the option the output is unchanged; with it, only the named rows change (checked by diff).
 - Built from a scratch copy of flight 2P's frozen group, with plane A on 602 and B on 503. The frozen files were not touched.
 
-## Stage 2: flight 2Q, no pilot
+## Stage 2: flight 2Q, no pilot (built)
 
-Cells are at least 40 km apart so that no hunter sees another cell. Pairs come from flight 2M's machinery (`add_threshold_probe_side` pairs and the 2 km orbit). The country is set per pair, and the side table comes from `--coalition 602:3 --coalition 503:4`.
+Seven cells, 45 km or more apart, 28 Yak-9P (armed with guns) in 14 pairs. Each pair is flight 2M's approach-route pair (20 km in from the west, then a 2 km orbit at 500 km/h) with its own country. Every plane has `Engageable = 1` (2M's stand-ins have 0). Code: `build_sides_probe` in `src/airtask/probe.rs`.
 
-- **Q1, detection.** Three plain check zones at one centre, Closer 1, 6 km, each pulsed every 30 s through its own relay, traced: `Q1-Z2` watches `[2]`, `Q1-Z3` watches `[3]`, `Q1-Z23` watches `[2,3]`. A 602 pair orbits from about 60 s to 240 s, then is deleted. A 601 pair orbits from about 270 s.
-  - **Passes if:** `Q1-Z2` fires only once the 601 pair is in, `Q1-Z3` fires for the 602 pair, and `Q1-Z23` fires for both.
-- **Q2 to Q7, fighting.** In each cell the target pair orbits the centre at 3,050 m from about 60 s. The hunter pair arrives about 120 s, with an `MCU_CMD_AttackArea` (`AttackAir 1`, `AttackGround 0`, about 5 km, `Time` 300 s) on the centre.
+**Build the mission with the side table moved:**
 
-  | Cell | Hunter | Target | Must |
-  |---|---|---|---|
-  | Q2 | 602 (side 3) | 501 (DPRK) | attack |
-  | Q3 | 602 (side 3) | 601 (NATO) | not attack |
-  | Q4 | 501 (DPRK) | 602 (side 3) | attack |
-  | Q5 | 601 (NATO) | 602 (side 3) | not attack |
-  | Q6 | 503 (side 4) | 602 (side 3) | attack |
-  | Q7 | 503 (side 4) | 501 (DPRK) | not attack |
+```
+python tools/p14/build_probe_mission.py --game "C:\Program Files\IL2Series\game" --probe handoff/p14-probes/flight2q/P14_Probe_2Q_traced.Group --name P14_Probe_2Q_20261031 --title "P14 probe 2Q (AI on sides 3 and 4, no pilot)" --out <folder> --no-resave --coalition 602:3 --coalition 503:4
+```
+
+Check that the log header reads `CNTRS:…503:4,…602:3…`. Without the table, every answer below is void.
+
+- **Q1, detection (60, -90) km.**
+  - The 602 pair activates at 60 s and orbits at 3,050 m. It enters 6 km at 160.8 s and is deleted at 300 s.
+  - The 601 pair activates at 300 s and orbits at 3,550 m. It enters at 400.8 s.
+  - Three Closer 1 check zones at the centre, 6 km, each armed by one pulse at 60 s while nobody is inside: `Q1-Z2` watches `[2]`, `Q1-Z3` watches `[3]`, `Q1-Z23` watches `[2,3]`. An armed zone fires when a plane of a side it watches comes in, and stays armed (flight 2K).
+  - **Predicted, if the idea works:** `Q1-Z2` at 401 only; `Q1-Z3` at 161; `Q1-Z23` at 161 and, by the walker's unflown re-entry rule, 401.
+  - **If `Q1-Z2` fires at about 161:** the side-2 zone still sees the 602 pair, and decision 0050 fails.
+  - **If `Q1-Z3` never fires:** suspect the zone's `[3]` filter (the editor cannot set side 3) before the idea.
+  - The test walker gets each track's side from `TWO_Q_SIDES` in `probe.rs`, which must match the build's `--coalition` arguments.
+- **Q2 to Q7, fighting.** The target pair activates at 60 s and orbits at 3,050 m. The hunter pair activates at 120 s and reaches its orbit, 500 m above the target, at about 250 s. At 270 s the hunter's lead gets `<cell> hunter HUNT`: the Yak source's `MCU_CMD_AttackArea` on the cell centre, `AttackAir 1`, `AttackGround 0`, `AttackGTargets 0`, 5,000 m, `Time` 260 s (to 530 s), `Priority` 1. Until then both pairs fly Priority 2 waypoints, which should keep them from engaging; the targets keep them throughout, so each cell tests one direction only.
+
+  | Cell | Centre km | Hunter | Target | Must |
+  |---|---|---|---|---|
+  | Q2 | (140, -90) | 602 (side 3) | 501 (DPRK) | attack |
+  | Q3 | (230, -90) | 602 (side 3) | 601 (NATO) | not attack |
+  | Q4 | (140, -45) | 501 (DPRK) | 602 (side 3) | attack |
+  | Q5 | (230, -45) | 601 (NATO) | 602 (side 3) | not attack |
+  | Q6 | (140, 0) | 503 (side 4) | 602 (side 3) | attack |
+  | Q7 | (230, 0) | 503 (side 4) | 501 (DPRK) | not attack |
 
   - **Evidence:** hit (`AType:1`) and kill (`AType:3`) lines naming the attacker, plus Tacview.
-  - **Reading:** a "not attack" cell fails on any hit. An "attack" cell passes on a hit by a hunter within the order's time; no hit means the side is not seen as an enemy, or the order did not engage (cell Q4 is the control for that: DPRK against side 3).
-  - **Note:** cell Q3's NATO pair are AI stand-ins for NATO players. Whether a human sees side-3 AI as a friend (icons, penalties) needs a pilot later.
-- Safety close at 540 s deletes every aircraft. Leave the server at 09:30 (570 s).
-- Aircraft type does not set the side (a Yak on 601 flew as NATO in 2J and 2M). Use the machinery's Yak-9P (armed with guns) for every pair.
+  - **Reading:** a "not attack" cell fails on any hit by its hunter. An "attack" cell passes on a hit by its hunter after 270 s. Read every hit by its attacker: cells are 45 km apart, and some cross-cell pairs are enemies (for example Q7's 503 hunter and Q5's 602 target), though both fly Priority 2 waypoints.
+  - **If no attack cell hits:** the order did not engage, and the flight says nothing about sides. Q4 (DPRK against side 3) is the control for this. An air `AttackArea` has not been flown before: over an empty area a flight circled about 5.7 km out (flight 2C), wider than the 5 km area.
+  - **Note:** Q3's and Q5's NATO pairs are AI stand-ins for NATO players. What a human sees (icons, penalties) needs a pilot later.
+- **Every cell's safety close at 540 s** deletes its aircraft. Leave the server at 09:30 (570 s).
 
-## To build (TDD, as for 2M and 2P)
+## After the flight
 
-1. `Flight::TwoQ`, a run sheet constant, and tests first:
-   - `flight_2q_cells_match_the_run_sheet`;
-   - `flight_2q_predictions` (walker: the Q1 zones by side, with the walker taught the side table);
-   - an ignored writer `write_p14_probe_2q`.
-2. Build with `--coalition 602:3 --coalition 503:4`. Fly, then record the results here, in the probe results, in the facts file and in 0050.
+Record the results here, in the probe results, in the facts file and in 0050. Freeze 2Q only if a later change alters its output.
