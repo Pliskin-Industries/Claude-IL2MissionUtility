@@ -38,6 +38,8 @@ mod parser;
 mod payloads;
 mod placement;
 mod recon;
+#[cfg(test)]
+mod repo_text_tests;
 mod serialize;
 mod shell;
 mod template;

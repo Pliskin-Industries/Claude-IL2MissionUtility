@@ -109,6 +109,15 @@ Builds the Map context and calls the public `airtask` API; owns presentation,
 undo snapshots and the standalone file dialog. `draw_slot_strip` also serves
 the future Map Air dock. **Air Tasking.**
 
+### `ui/replay.rs` — Replay window and the Map's Replay layer
+The **Replay…** window (its own OS window, like Help): pick a `.Group`, an
+optional `.trace.json` and a log folder, run the replay, and show the report's
+tabs (Dead links, Unobserved, Never fired, Fired, Never spawned, Timeline with
+a group filter). After a run, the Map legend's **Replay** layer draws spawns
+and kills. Presentation only: parsing and the replay are `missionlog.rs`, the
+sidecar is `trace.rs`. Its Help opens "Trace builds and replay". **All modes
+(header button), Map (layer).**
+
 ### `airtask/pool.rs` — targets and pool edits
 `target_choices`, `resolve_target` (50 m tolerance), `entry_status`, `add_entry`,
 `auto_fill` and `remove_library_item`, plus category edits and counts. Keeps
@@ -190,6 +199,90 @@ limits (0032), D41 locale conflicts. Tests pin `export_test_plan()` and
 the step 11 trace build (0034). `move_map_ai_off_player_countries` moves
 the Map's own AI planes from 601 / 501 to 602 / 503 when Map Generate adds
 Air Tasking (decision 0037 A). **Air Tasking generation, Map export.**
+
+### `airtask/mod.rs` — the Air Tasking data model and public API
+`AirPlan` (pool, library, budget, threshold, schedules, zone, stop and totals
+settings), `PoolEntry`, `AirSortie`, `TriggerMode`, `AirSide`, the strategy
+enums (the `// P14 step 12` variants wait for multi-player), and the
+re-exports the UI and Map export use. `weighted_random_pct` gives the
+waterfall's per-entry chances. Owns no MCU wiring. **Air Tasking.**
+
+### `airtask/library.rs` — the six built-ins and the template contract
+`builtin_library` (six curated sorties), `load_user_sortie`, `default_category`
+and `inspect_sortie`, which finds every part of a template by its wiring
+(Zone IN, bring-up timer, Zone Out, end timer, attack timers, RTB) and refuses
+shapes that are not tested (decision 0017, plan §3.2). **Air Tasking.**
+
+### `airtask/place.rs` — move and rotate a whole sortie
+`place_air_sortie` moves an inspected copy so its target is the pool entry's
+objective or arrow, its spawn at the zone or clock distance so that it flies
+in on the entry's heading, and its RTB at the given point; `spawn_point`
+computes the spawn alone.
+Aircraft and order graph are kept, not regenerated. **Air Tasking.**
+
+### `airtask/timing.rs` — transit and threshold timing
+`derived_timing` (dwell, HOLD, window and the inner ring from R),
+`f80_cruise_kmh` / `f80_transit_s`, and `hard_stop` (shown on each pool row).
+Shared by the builders and the UI. **Air Tasking.**
+
+### `airtask/threshold.rs` — one-player area threshold
+Per side and area: a Complex Trigger filtered to the players' country (601 or
+501) at r_in, and a pulsed coalition check zone for the presence check every
+HOLD, driving the area's HOT and COLD relays (decisions 0023, 0024, 0045).
+`ai_country` / `ai_country_for_player` give the AI countries 602 / 503.
+**Air Tasking generation.**
+
+### `airtask/clock.rs` — the mission clock
+Per side: FIRST / PERIOD ticks, the jitter steps and quiet roll behind a
+`SLOT OPEN` latch, the weighted waterfall draw (`waterfall_order`), rerolls
+until `SLOT CLOSE`, and the no back-to-back LAST rule (decision 0029 B; paused
+timers end through D11 relays, decision 0044). `validate_schedule` checks the
+settings. **Air Tasking generation.**
+
+### `airtask/zone.rs` — the zone trigger
+Per Zone / Both entry: one chance roll each time its area's presence check
+passes, `FIRE` into the next free copy, `DENY WAIT` on a budget refusal, then
+one cooldown before `ARM` (decisions 0030 C, 0044). `validate_zone` checks the
+settings. **Air Tasking generation.**
+
+### `airtask/testkit.rs` — test-only tree checks and the walker
+`#[cfg(test)]`. Link and index checks (`assert_links_resolve`,
+`assert_indexes_unique_and_links_resolve`, `assert_same_up_to_indexes` for an
+editor-renumbered import), frozen-file checks, and the dry-run walker that
+plays an air pack's timers, zones and counters against a scripted flight.
+**Tests.**
+
+### `airtask/probe.rs` — test-only probe mission generators
+`#[cfg(test)]`. Builds the in-game probe files of plan step 0 (flights 0
+to 2L) and checks them against the frozen copies in `handoff/p14-probes/`.
+Results are in `handoff/P14-probe-results.md`. **Tests.**
+
+### `airtask/export_acceptance_flights.rs` — test-only acceptance flights
+`#[cfg(test)]`. The acceptance flights after A0 (A1, A2, A3 and the
+standalone-file check L): their builds and the checks of every frozen
+acceptance file (parse, links, countries, `DONE HUB OFF`s, the editor's
+renumbered import). **Tests.**
+
+### `trace.rs` — trace builds (breadcrumbs and the sidecar)
+`instrument` adds a silent Mission Objective breadcrumb for each traced MCU
+(check zones, counters, spawners, Mission Begins, random timers, and the Air
+Tasking steps); switches get theirs from the MCUs that pulse them (decision
+0043). `write_trace_sidecar` / `read_trace_sidecar` / `check_sidecar` handle
+`<file>.trace.json`. Used by every Generate when **Trace build** is ticked.
+**All modes.**
+
+### `missionlog.rs` — mission-log replay
+Parses `missionReport*.txt` files (`parse_log_dir`, `parse_log_files`) and
+`replay`s them against a `.Group` and its optional trace sidecar: fired and
+never-fired breadcrumbs, unobserved successors, dead links, never-spawned
+names, and a timeline. `report_rows` feeds the Replay window,
+`report_markdown` the CLI (`run_cli`, `IL2MissionUtility.exe replay …`).
+**Replay window, CLI.**
+
+### `in_theatre.rs` — aircraft dates in the Korean theatre
+`for_model` / `valid_on`: when each plane model may fly in Korea, from the
+unit reference. The Map date uses it to decide which library sorties are
+valid. **Air Tasking.**
 
 ### `airfield.rs` — SP airfield → multiplayer
 `inspect_airfield` / `AirfieldInfo` (player planes, checkzones to
@@ -317,7 +410,8 @@ projection). **Map mode.** Distinct from `placement::MAP_MIN` (parking).
 Egui code outside `ui.rs`, like `shell.rs` and `theme.rs`. Embeds `USER_MANUAL.md`, splits it
 by `##` heading (`section_for`), and opens a decorated native viewport
 (`show_window`) with a topic combo. `HelpTopic` covers every mode plus
-Language / Import / Troubleshooting. Does not touch the AST.
+Trace builds and replay / Language / Import / Troubleshooting. Does not
+touch the AST.
 **All modes.**
 
 ### `locale.rs` — translation sidecars
@@ -654,6 +748,17 @@ open `& 4`. `TerrainMap` (`WaterMap` is a historical alias):
 `builtin()`, `is_water_xz` / `is_open_xz`. Used by ship placement
 (stay in water) and ground placement (stay on dry open land).
 **Map mode, Army Generator.**
+
+### `baseline_tests.rs` — Generate baselines
+`#[cfg(test)]`. Byte-for-byte baselines of what each Generate wrote before
+Air Tasking (`src/testdata/p14_baseline/`), so a change that alters existing
+output fails. **Tests.**
+
+### `repo_text_tests.rs` — repository-wide text checks
+`#[cfg(test)]`. Reads the sources and documents from disk: no tab-key range
+from the six-tab rail left outside the README §9 history, the design mockups
+and decision records,
+and no P14 dead-code allow left except those for step 12. **Tests.**
 
 ### `main.rs`
 Binary entry: declares every `src/*.rs` module (plus
