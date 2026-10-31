@@ -85,6 +85,6 @@ What this makes easier, harder or necessary.
 | [0047](0047-what-n-2-means.md) | N ≥ 2 players: the count resets when anyone leaves (no window); N 1 to 3, one N for both sides; N to start, 1 to hold | Accepted (E) |
 | [0048](0048-zone-out-with-several-players.md) | Zone Out with several players: keep the check zone if ALL-out; options if ANY-out (flight 2M: ALL-out) | Proposed |
 | [0049](0049-counted-plane-dies-inside.md) | A counted plane that dies or is removed inside an area raises no Left (flight 2M): a death inside zeroes the count (Killed → ZERO) | Accepted (B) |
-| [0050](0050-ai-on-sides-of-its-own.md) | Watch players only: put Air Tasking's AI (602, 503) on sides 3 and 4 so check zones ignore it, then widen Zone IN / Zone Out. Flight 2Q: such AI attacks its own side, so this fails; a wider zone that counts AI, or no change, waits for the user | Proposed |
+| [0050](0050-ai-on-sides-of-its-own.md) | Watch players only: put Air Tasking's AI (602, 503) on sides 3 and 4 so check zones ignore it, then widen Zone IN / Zone Out: fails (flight 2Q). Option D chosen for testing: a player count per area from Complex Trigger events, count to three then busy | Proposed |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

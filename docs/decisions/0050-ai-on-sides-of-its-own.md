@@ -1,6 +1,6 @@
 # 0050. Watch players only: put Air Tasking's AI on sides of its own
 
-- **Status:** Proposed. Flight 2Q (2026-10-31) shows option A fails; B or C waits for the user.
+- **Status:** Proposed. Option A fails (flight 2Q). The user chose option D for testing (2026-10-31); it is accepted or not after its probe flight (2R).
 - **Date:** 2026-10-31
 - **Decided by:** open. The user raised the problem and asked for the probe ("Yes, plan the probe", "Yes, run stage 1").
 
@@ -63,6 +63,32 @@ No pilot, 9.5 minutes, 28 AI planes. Run sheet: `handoff/sessions/2026-10-31-p14
 - **A. AI on sides 3 and 4, and a wider Zone IN / Zone Out.** **Fails (flight 2Q):** such AI attacks its own side. Export writes the two rows when the mission has Air Tasking. The wider radius is Air Tasking's own, not the shared `AIR_ZONE_OUT_M`, so the upstream Template Builder's output stays the same. No extra MCUs. Generate output changes for missions with Air Tasking.
 - **B. Keep the sides and widen the zone anyway.** AI counts, so near the front a sortie stays while anyone fights there; only time on station limits it.
 - **C. No change.**
+- **D. A player count per area, built from Complex Trigger events (chosen for testing).** See below.
+
+## Option D (the user's choices, 2026-10-31)
+
+Different countries on the same side is already Air Tasking's set-up: AI flies 602 and 503, players 601 and 501. Only the Complex Trigger filters by country, and it reports events, not who is inside. D builds "who is inside" from those events.
+
+- **One count per area** ("a zone for each section of the front": two assault areas, two counts). Each area's sorties listen only to their own area's count.
+- **The count circle and the number of areas are set in the Air Tasking tab** (step 12e). Default radius 50 km. Circles may overlap.
+- **No player spawn inside a count circle.** Generate refuses a mission with an airfield or air start inside any area's circle. The user: "A plane will not spawn in that zone." So the trigger never misses a player who appears inside it (flight A1).
+- **Counting.** A Complex Trigger filtered to the enemy players' country:
+  - Entered (58) moves the count up one step.
+  - Left (60), Killed (70) and Finished (62) move it down one step.
+- **Count to three, then busy** (the user). A fourth entry switches the area to busy. In busy mode leaves do not lower the count. Busy clears only when a side-only Closer 0 check zone over the same circle finds nobody, AI included: today's Zone Out behaviour (ALL-out, flight 2M).
+- **A sortie ends when its area empties while it is on station:** the count drops from 1 to 0, or busy clears.
+  - **An empty area at arrival:** the sortie carries on with its mission (the user; decision 0018 stands).
+  - **Replaces** the per-copy Zone IN and Zone Out, two check zones per copy.
+- **Rejected in the discussion:**
+  - **One count per side:** the user wants sections of the front tracked apart.
+  - **Busy at activation:** enemy AI near the front would hold every active area's sorties again.
+  - **A larger cap (10):** the user chose three.
+- **Still to fly:**
+  - whether the count chain works in the game;
+  - whether two entries or two leaves in one tick each move it one step;
+  - whether busy clears when the circle empties;
+  - what a player who quits in flight raises (flight 2N).
+- **Note:** the rejected "35 km Complex Trigger" below is a trigger with no count; D adds the count.
 
 ## Rejected (discussion of 0048, 2026-10-31)
 
@@ -72,7 +98,7 @@ The user judged that these do not solve either fault:
 - a 35 km Complex Trigger filtered to the players' country;
 - a shorter time on station.
 
-## Open before A could be accepted
+## Open items for A (moot after flight 2Q)
 
 - **Anti-aircraft fire:** does a side-2 anti-aircraft gun fire on a side-3 plane? The probe builder cannot place guns yet.
 - **What a human sees:** map icons and friendly-fire penalties for side-3 AI, which needs a pilot.
