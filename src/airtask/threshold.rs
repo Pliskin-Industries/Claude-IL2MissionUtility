@@ -466,6 +466,30 @@ mod tests {
         );
     }
 
+    /// Step 12a (decision 0046): the editor-saved reference survives the parser
+    /// and serializer unchanged, so the threshold's clone keeps its shape.
+    #[test]
+    fn complex_trigger_reference_round_trips() {
+        let text = include_str!("../../TemplateExamples/Reference/ComplexTrigger_reference.Group");
+        let original = parser::parse_il2_document(text).unwrap();
+        assert_eq!(original.children.len(), 2);
+        let written: Vec<_> = original
+            .children
+            .iter()
+            .map(crate::serialize::serialize_group)
+            .collect();
+        let reparsed = parser::parse_il2_document(&written.join("
+")).unwrap();
+        assert_eq!(original, reparsed);
+        let normalize = |text: &str| -> Vec<String> {
+            text.lines()
+                .map(|line| line.trim_end().to_owned())
+                .filter(|line| !line.is_empty())
+                .collect()
+        };
+        assert_eq!(normalize(&written.concat()), normalize(text));
+    }
+
     #[test]
     fn threshold_structure() {
         for side in [AirSide::Nato, AirSide::Dprk] {
