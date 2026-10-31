@@ -83,6 +83,7 @@ What this makes easier, harder or necessary.
 | [0045](0045-walker-armed-check-zones.md) | The walker models check zones as flown: a pulsed zone stays armed (supersedes 0044's "Armed" term) | Accepted |
 | [0046](0046-step-12-test-plan.md) | Step 12 test plan: AI stand-ins first (flight 2M, no pilot), two human pilots last (flight 2N); 12a done; `CounterResetImpl` removed | Accepted |
 | [0047](0047-what-n-2-means.md) | N ≥ 2 players: the count resets when anyone leaves (no window); N 1 to 3, one N for both sides; N to start, 1 to hold | Accepted (E) |
-| [0048](0048-zone-out-with-several-players.md) | Zone Out with several players: keep the check zone if ALL-out; options if ANY-out | Proposed |
+| [0048](0048-zone-out-with-several-players.md) | Zone Out with several players: keep the check zone if ALL-out; options if ANY-out (flight 2M: ALL-out) | Proposed |
+| [0049](0049-counted-plane-dies-inside.md) | A counted plane that dies or is removed inside an area raises no Left (flight 2M): accept, zero on Killed, or a safety window | Proposed |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

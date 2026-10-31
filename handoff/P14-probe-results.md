@@ -1137,6 +1137,52 @@ Risk l (`handoff/P14-air-tasking.md` §9): the Air Tasking tab's Generate File w
 - **Risk l is answered: no fallback is needed.** The standalone file can be imported into any mission; the editor renumbers it, keeps every link, and the result flies as the base-map path does.
 - **A Wedge at Safe can still collide in a long steady turn** (decision 0021). Flight 2E's "Wedge never under 20 m at Safe" came from shorter turns.
 
+## Flight 2M (Zone Out with two watched planes; the N = 2 threshold; does a death or a Delete raise Left?) — 2026-10-31, one run, no pilot, Tacview recorded
+
+Step 12, decision 0046. Run sheet, cells and predictions: `handoff/sessions/2026-10-31-p14-flight-2m.md`. Frozen: `handoff/p14-probes/flight2m/`. Built from `f2f814a` as `P14_Probe_2M_20261031` without the resaver, hosted by the game client on this PC (game `261013`), Claude spectating. Session `2026-10-31_12-49-45`, logs `real_54` (52 files). Tacview `handoff/tacview/P14_Probe_2M.zip.acmi`. Left the server at about 816 s. Replay: no dead links.
+
+**Stand-ins:** AI on NATO country 601 stand in for NATO players, as in flights 2J and 2L. There are 21 aircraft, and no aircraft was lost to anything but the scripted kill. Every scripted activation, Delete and kill logged at its exact time (60.00, 90.00, 120.00, 360.00, 400.00, 480.00, 560.00, 700.00).
+
+### Cells B: Zone Out with two watched groups
+
+Each cell had a Closer 0 check zone `MBn-Z0` (6 km, NATO coalition, one pulse at 300 s, or 560 s in MB3) and a Complex Trigger `MBn-CT` (6 km, country 601) observing Entered and Left.
+
+| Cell | First to go | Last to go | `MBn-Z0` fired | `MBn-CT` Left |
+|---|---|---|---|---|
+| MB1 | P pair deleted, 360.00 | Q pair deleted, 480.00 | **480.02** only | **none** (at 360 or 480) |
+| MB2 | P pair killed by Damage, 360.00 (both `AType:3` at 360.02) | Q pair deleted, 480.00 | **480.02** only | **none** |
+| MB3 | Q pair (F-80) flew out, Left at 596.22 and 596.78 | P pair deleted, 700.00 | **700.02** only | 596.22, 596.78 (fly-out only) |
+| MB4 | P's wingman deleted, 360.00 | P's lead deleted, 480.00 | **480.02** only | **none** |
+
+- Entries: MB1, MB2 and MB4 at 152.0 to 154.5 s (P) and 210.3 to 213.7 s (Q); MB3 at 150.3 and 153.8 (P), 537.40 and 539.46 (the F-80s).
+- The approach groups arrived about 9 s before the ideal track, as in 2J.
+
+### Cells D: the real N = 2 threshold (`THD01` to `THD04`, decision 0047 E)
+
+| Cell | Stand-ins | Flown | Walker |
+|---|---|---|---|
+| MD1 | one single | **no `ARM`**; COLD at all 37 polls | no `ARM` |
+| MD2 | two singles, 30 s apart | **`ARM` 179.82** (the second single's entry); `INNER` passes 239.92, 359.92, … every 120.00 s; HOT | `ARM` 191 |
+| MD3 | an F-80 single through, then a Yak single | **no `ARM`**; COLD throughout | no `ARM` |
+| MD4 | one pair | **`ARM` 154.56** (the wingman's entry); passes 214.66, 334.66, …; HOT | `ARM` 161 |
+
+MD3's count is not traced (the trigger feeds `COUNT` and `ZERO`), so Tacview checked the geometry:
+- The F-80 single passed 1.6 km from MD3's centre.
+- It was inside 6 km from about 537 to 590 s, and the Yak single entered about 70 s after it had left.
+- If the Left had not zeroed the count, the Yak's entry would have armed the area.
+
+### What this changes (reading)
+
+- **Risk b is answered with AI stand-ins: ALL-out.** A Closer 0 zone armed with two watched groups inside fired only when the last one was gone. It did not fire when the first went, whether that one was deleted, killed, flew out, or was a pair's wingman deleted alone. Decision 0048: keep the check zone; the Watchdog is not needed. Flight 2N checks it with players.
+- **A Complex Trigger raises no Left for a plane that is deleted or killed inside it.** It does for one that flies out (MB3, and flights 1N and 1D). So under 0047 E a plane that dies or is removed inside an area stays counted until someone leaves or the area closes. 0047's safety-net question goes back to the user. A player who leaves the server in flight is logged as destroyed (flight A3); whether that raises Left is not flown.
+- **The N = 2 threshold works in the game as built:**
+  - one plane alone does not arm;
+  - the second entry arms;
+  - each aircraft of a pair counts;
+  - a Left in between resets the count.
+- After `ARM` the cell runs as the one-player cell does: the dwell, then a pass every `HOLD` (120.00 s apart, decision 0045).
+- **Walker limit:** the walker scripts a Delete or a kill as the track moving outside, so it raises Left. The game does not. The 2M predictions for the B cells' Left rows were therefore wrong. The Zone Out times were right.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -1189,5 +1235,7 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | new | mouse movement in flight works the stick on this PC (a keyboard-only pilot spun in) | flight A3 |
 | l | **answered:** the editor's File › Import From File renumbers the standalone file, keeps every link and cuts group names to 31 characters; the saved `.msnbin` flies one clock slot at A3's times, and the file's own trace sidecar still reads the log | check L |
 | new | a 4-ship Wedge at Safe lost one aircraft to its own wingman in a long steady turn over an empty target (decision 0021) | check L |
+| b | **answered with AI stand-ins: ALL-out.** A Closer 0 zone with two watched groups inside fires only when the last is gone (deleted, killed, flown out, or a pair's wingman first) | flight 2M |
+| new | a Complex Trigger raises no Left for a plane deleted or killed inside it (it does for a fly-out); the N = 2 threshold (0047 E) arms on the second entry and resets on a Left, in the game | flight 2M |
 
-Not tested by any flight: two or more players (step 12), and a Complex Trigger with more than one `Country` line.
+Not tested by any flight: two or more human players (step 12, flight 2N), and a Complex Trigger with more than one `Country` line.

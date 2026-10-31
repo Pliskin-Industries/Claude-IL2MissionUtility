@@ -223,3 +223,13 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
   - **Over an area with no ground target the flight circles.** The HVAR AttackArea (`AttackGround 0`, `AttackAir 0`, `Time 600`) had nothing at A. After `Zone IN` (432.68) the lead flew a steady descending right turn at 30° bank: heading 311° to 172°, 3,050 m to 940 m, about 650 km/h and 1.8°/s (radius about 5.7 km).
   - **The collision.** Both left-side wingmen were on the outside of the turn, and their slots moved 100–150 m each way. The outboard one ("Red 14") slid inside the inner one ("Red 13") while that one rolled about 28° left against the turn. They closed from 53 m at 561.0 s to 5.2 m at 563.4 s, and both attitudes jumped at 563.2 s (the contact sign). The log has `AType:3 AID:-1` for Red 14 at 563.88, a bail-out at 570.14 and the crash at 578.14. Red 13 flew on to the end.
   - **Reading this Tacview:** mission seconds = `.acmi` seconds + 102 (its `ReferenceTime` 12:31:42 minus the mission's start time 12:30:00). Object ids are the log's `OBJID`s in hex. Tacview `handoff/tacview/P14_Standalone_L.zip.acmi`.
+
+## Found on 2026-10-31 (flight 2M, game 1.005)
+
+- **A Closer 0 check zone with two watched groups inside fires only when the last one is gone (ALL-out).** Armed by one pulse with both inside, it did not fire when the first group went, in any of four ways: deleted, killed by a Damage command, flown out, or a pair's wingman deleted alone. It fired 0.02 s after the last group was deleted (480.02, 700.02). AI on 601 stood in for players; flight 2N checks it with people.
+- **A Complex Trigger reports no Left for a plane that is deleted or killed inside it.** Only a plane that flies out raises Left (596.22, as in flights 1N and 1D). A count of Entered events (decision 0047) therefore keeps a plane that died or was removed inside.
+- **The N = 2 threshold works as built.**
+  - The second entry arms the area: MD2 at 179.82, MD4's pair at 154.56 on the wingman's entry.
+  - One plane alone never arms it.
+  - A Left between two entries resets the count (MD3, checked with Tacview).
+- 21 AI aircraft on this PC: every scripted activation, Delete and kill logged at its exact mission second.

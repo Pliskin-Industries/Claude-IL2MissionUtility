@@ -1,6 +1,6 @@
 # 0048. Zone Out with several players
 
-- **Status:** Proposed (decided by flight 2M's cells B, then by the user)
+- **Status:** Proposed (flight 2M flown: ALL-out; waits for the user)
 - **Date:** 2026-10-31
 - **Decided by:** open
 
@@ -24,9 +24,13 @@
 2. **End on the area's COLD.** After on station starts, the area's next COLD (the threshold's FAIL) ends the copy. Cost: about 1 MCU per copy. But it watches r_in (6 km), not 35 km, and it can be up to `HOLD` + 2 s (about 2 min) late.
 3. **Accept ANY-out.** No change; the manual says the first player to leave ends the sorties on that area. The area stays HOT while others remain, so the clock and the zone front end can launch again.
 
+## Flight 2M result (2026-10-31)
+
+**ALL-out.** In all four cells B the Closer 0 zone fired only when the last watched group was gone (480.02 s, and 700.02 s in MB3). It did not fire when the first group was deleted, killed, flown out, or was a pair's wingman deleted alone. Evidence: `handoff/P14-probe-results.md`, "Flight 2M"; logs `real_54`. AI on 601 stood in for players.
+
 ## Decision
 
-Not made. Claude fills in the result after flight 2M and recommends an option. The user decides.
+Not made yet. **Claude recommends: keep `ZoneOutImpl::CheckZone`.** Remove the unused `Watchdog` variant and its test in a mechanical commit, with no output change. Flight 2N checks ALL-out with two players. The user decides.
 
 ## Consequences
 
