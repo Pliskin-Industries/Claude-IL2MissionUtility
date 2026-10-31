@@ -5085,7 +5085,7 @@ fn build_threshold_probe_switches(p: &mut Probe, row: &ThresholdProbeCell) {
 }
 
 fn add_threshold_probe_side(p: &mut Probe, rows: &[ThresholdProbeCell]) {
-    use super::{AirSide, SideLogic, Strategies, ThresholdSpec};
+    use super::{AirSide, SideLogic, ThresholdSpec};
     let mut logic = SideLogic::default();
     let mut areas = Vec::new();
     for (index, row) in rows.iter().enumerate() {
@@ -5109,7 +5109,7 @@ fn add_threshold_probe_side(p: &mut Probe, rows: &[ThresholdProbeCell]) {
         }
     }
     let built = super::threshold::build_side(AirSide::Dprk, &areas, &ThresholdSpec::default(),
-        &Strategies::default(), &mut logic, &mut p.next_id)
+        &mut logic, &mut p.next_id)
         .unwrap_or_else(|error| panic!("flight 2J {}: {error}", rows[0].cell));
     for node in built {
         let prefix = node.name().unwrap().split_once(' ').unwrap().0;
@@ -8038,7 +8038,7 @@ fn flight2j_complex_triggers_equal_flight1n_shape() {
 
 #[test]
 fn flight2j_flown_zone_pulse_cell_matches_the_builder() {
-    use super::{AirSide, SideLogic, Strategies, ThresholdSpec};
+    use super::{AirSide, SideLogic, ThresholdSpec};
     use std::collections::BTreeMap;
 
     #[derive(Debug, PartialEq, Eq)]
@@ -8085,7 +8085,7 @@ fn flight2j_flown_zone_pulse_cell_matches_the_builder() {
     logic.init_off.push(1);
     let mut next = 4;
     let built = super::threshold::build_side(AirSide::Dprk, &[world((230.0, -45.0))],
-        &ThresholdSpec::default(), &Strategies::default(), &mut logic, &mut next).unwrap();
+        &ThresholdSpec::default(), &mut logic, &mut next).unwrap();
     assert_eq!(built.len(), 19, "flown ZonePulse cell MCU count");
     let mut built_labels = BTreeMap::new();
     let mut flown_labels = BTreeMap::new();

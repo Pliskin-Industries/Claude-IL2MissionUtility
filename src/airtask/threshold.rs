@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use super::timing::derived_timing;
-use super::{AirSide, SideLogic, Strategies, ThresholdImpl, ThresholdSpec};
+use super::{AirSide, SideLogic, ThresholdSpec};
 use crate::ast::Il2Entity;
 use crate::{parser, template};
 
@@ -50,15 +50,11 @@ pub(crate) fn build_side(
     side: AirSide,
     areas: &[(f64, f64)],
     spec: &ThresholdSpec,
-    strategies: &Strategies,
     logic: &mut SideLogic,
     next_id: &mut i32,
 ) -> Result<Vec<Il2Entity>, String> {
     if spec.players_n != 1 {
         return Err("Air Tasking threshold requires exactly one player in step 4".into());
-    }
-    if strategies.threshold == ThresholdImpl::Counted {
-        return Err("Air Tasking Counted threshold is reserved for step 12".into());
     }
     if !spec.radius_m.is_finite() || spec.radius_m <= 0.0 {
         return Err("Air Tasking threshold radius must be finite and greater than zero".into());
@@ -267,7 +263,6 @@ mod tests {
             side,
             areas,
             &spec,
-            &Strategies::default(),
             &mut logic,
             &mut next,
         )
@@ -591,7 +586,6 @@ mod tests {
                     players_n,
                     ..ThresholdSpec::default()
                 },
-                &Strategies::default(),
                 &mut logic,
                 &mut next,
             )
@@ -600,27 +594,6 @@ mod tests {
             assert_eq!(next, 42);
             assert_eq!(logic, SideLogic::default());
         }
-    }
-
-    #[test]
-    fn threshold_refuses_counted() {
-        let mut logic = SideLogic::default();
-        let mut next = 42;
-        let error = build_side(
-            AirSide::Nato,
-            &[CENTRE],
-            &ThresholdSpec::default(),
-            &Strategies {
-                threshold: ThresholdImpl::Counted,
-                ..Strategies::default()
-            },
-            &mut logic,
-            &mut next,
-        )
-        .unwrap_err();
-        assert!(error.contains("Counted") && error.contains("step 12"));
-        assert_eq!(next, 42);
-        assert_eq!(logic, SideLogic::default());
     }
 
     #[test]
@@ -638,7 +611,6 @@ mod tests {
                 AirSide::Nato,
                 areas,
                 &spec,
-                &Strategies::default(),
                 &mut logic,
                 &mut next,
             )
@@ -737,7 +709,6 @@ mod tests {
                 AirSide::Nato,
                 &[],
                 &ThresholdSpec::default(),
-                &Strategies::default(),
                 &mut logic,
                 &mut next
             )

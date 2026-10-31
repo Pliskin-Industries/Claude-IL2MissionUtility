@@ -272,14 +272,7 @@ impl Default for TotalsLimits {
 } // D36; decision 0032: the upstream author's idle load test
 
 // Strategy enums (§8 step 0d table). The Default is the primary design.
-// ThresholdImpl::Counted and CounterResetImpl are reserved for step 12 (§3.9); v1 builders accept only OnePlayer.
-#[allow(dead_code)] // P14 step 12
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ThresholdImpl {
-    #[default]
-    OnePlayer, // one Complex Trigger per area, N = 1 (decision 0023)
-    Counted, // N >= 2: trigger, counter and window (§3.9, step 12)
-}
+// The threshold's wiring follows ThresholdSpec.players_n (decision 0047), not a strategy.
 #[allow(dead_code)] // P14 step 12
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ZoneOutImpl {
@@ -292,13 +285,6 @@ pub enum LossesImpl {
     /// A lost aircraft raises OnEvent 13 once and never 4 (flight 1G, decision 0011).
     #[default]
     Type13,
-}
-#[allow(dead_code)] // P14 step 12
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CounterResetImpl {
-    #[default]
-    SetVal,
-    Ring,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BudgetImpl {
@@ -315,10 +301,8 @@ pub enum CensusImpl {
 } // §3.3, probe E7
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Strategies {
-    pub threshold: ThresholdImpl,
     pub zone_out: ZoneOutImpl,
     pub losses: LossesImpl,
-    pub counter_reset: CounterResetImpl,
     pub budget: BudgetImpl,
     pub census: CensusImpl,
     pub ai_counts: bool, // probe result a; true makes the D30 warning an error (§8 step 0d)

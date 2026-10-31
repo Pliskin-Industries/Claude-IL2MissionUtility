@@ -450,7 +450,6 @@ pub(crate) mod tests {
                 AirSide::Nato,
                 &copies.areas,
                 &plan.threshold,
-                &plan.strategies,
                 &mut logic,
                 &mut next,
             )

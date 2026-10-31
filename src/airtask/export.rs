@@ -233,7 +233,6 @@ fn build_side(
         side,
         &copies.areas,
         &plan.threshold,
-        &plan.strategies,
         &mut logic,
         next_id,
     )?);
@@ -368,7 +367,6 @@ fn evaluate(plan: &AirPlan, ctx: &AirContext<'_>) -> (Vec<MapAirPack>, Vec<AirIs
         AirSide::Dprk,
         &[],
         &plan.threshold,
-        &plan.strategies,
         &mut SideLogic::default(),
         &mut 1,
     ) {
@@ -1296,7 +1294,6 @@ mod tests {
             |p| p.budget.per_side = [0, 7],
             |p| p.strategies.budget = super::super::BudgetImpl::SingleSlot,
             |p| p.threshold.players_n = 0,
-            |p| p.strategies.threshold = super::super::ThresholdImpl::Counted,
             |p| p.threshold.radius_m = f64::NAN,
             |p| p.threshold.inner_ratio = 1.1,
             |p| p.threshold.dwell_s = Some(0.0),
