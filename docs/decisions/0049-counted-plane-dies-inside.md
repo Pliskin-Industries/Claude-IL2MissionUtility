@@ -1,8 +1,8 @@
 # 0049. A counted plane that dies or is removed inside an area
 
-- **Status:** Proposed
+- **Status:** Accepted (option B)
 - **Date:** 2026-10-31
-- **Decided by:** open; the user decides. Claude recommends B.
+- **Decided by:** the user, 2026-10-31 ("Yes, option B"), on Claude's recommendation. The Killed event's number is taken from a short no-pilot probe flight (2P), not from the editor. In that flight every Complex Trigger event number is wired to its own breadcrumb, and a kill, a Delete and a damage happen inside: the probe gives the number and the game behaviour together.
 
 ## Context
 
@@ -32,10 +32,10 @@
 
 ## Decision
 
-Not made.
+**B.** For N ≥ 2, the threshold's trigger also has its Killed filter on, and its Killed event goes to `ZERO`: a death inside resets the count. N = 1 is unchanged. Built after flight 2P confirms the event number.
 
 ## Consequences
 
-- B adds one editor read and one game check before step 12 ends, and changes the N ≥ 2 trigger output only (N = 1 output unchanged).
+- B adds one short no-pilot probe flight (2P) before step 12 ends, and changes the N ≥ 2 trigger output only (N = 1 output unchanged).
 - A changes nothing; the manual names the weakness.
 - C adds 2 MCUs per area for N ≥ 2.
