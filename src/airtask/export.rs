@@ -1294,6 +1294,7 @@ mod tests {
             |p| p.budget.per_side = [0, 7],
             |p| p.strategies.budget = super::super::BudgetImpl::SingleSlot,
             |p| p.threshold.players_n = 0,
+            |p| p.threshold.players_n = 4,
             |p| p.threshold.radius_m = f64::NAN,
             |p| p.threshold.inner_ratio = 1.1,
             |p| p.threshold.dwell_s = Some(0.0),
@@ -1431,6 +1432,42 @@ mod tests {
             assert_eq!(super::super::totals(&plan, &input.context()), counts);
             assert_eq!(counts, expected, "{label} D36 totals");
             println!("{label}: {counts:?}");
+        }
+    }
+
+    /// Decision 0047 E: N >= 2 adds a COUNT and a ZERO to each threshold cell
+    /// and changes nothing else in the totals.
+    #[test]
+    fn totals_for_two_or_three_players_add_two_mcus_per_area() {
+        for factory in [export_test_plan as fn() -> _, acceptance_test_plan] {
+            let (plan, input) = factory();
+            let one = super::super::totals(&plan, &input.context());
+            let root = pack(&plan, &input.context());
+            let cells = SIDES.map(|side| {
+                let mut cells = 0;
+                let trigger = format!("TH{}", side.letter());
+                root.for_each(&mut |node| {
+                    cells += u32::from(
+                        node.block_type == "MCU_TR_ComplexTrigger"
+                            && node.name().is_some_and(|name| name.starts_with(&trigger)),
+                    );
+                });
+                cells
+            });
+            assert!(cells.iter().all(|&cells| cells > 0));
+            for players_n in [2, 3] {
+                let mut counted = plan.clone();
+                counted.threshold.players_n = players_n;
+                assert!(blocking(&validate(&counted, &input.context())).is_none());
+                let totals = super::super::totals(&counted, &input.context());
+                assert_eq!(
+                    totals,
+                    AirTotals {
+                        mcus: [one.mcus[0] + 2 * cells[0], one.mcus[1] + 2 * cells[1]],
+                        ..one
+                    }
+                );
+            }
         }
     }
 

@@ -32,11 +32,17 @@ pub(crate) fn ai_country_for_player(country: i32) -> Option<i32> {
 /// Object Entered, confirmed in flights 1N and 1D. See docs/il2-loader-and-log-facts.md.
 pub(crate) const OBJECT_ENTERED: i32 = 58;
 /// Object Left, confirmed in flights 1N and 1D. See docs/il2-loader-and-log-facts.md.
-#[cfg(test)] // read by the test kit only
 pub(crate) const OBJECT_LEFT: i32 = 60;
+/// Players needed to arm an area (decision 0047): one N for both sides. The
+/// THRESHOLD control (step 12e) takes its bounds from here too.
+pub(crate) const PLAYERS_RANGE: std::ops::RangeInclusive<u8> = 1..=3;
 
-/// Build the 19-MCU cell: country-filtered Complex Trigger entry, then a pulsed
+/// Build the cell, 19 MCUs (21 for N >= 2): country-filtered Complex Trigger entry, then a pulsed
 /// coalition check zone at r_in for presence (decisions 0023 and 0024, flight 2J).
+/// For N >= 2 (decision 0047 E) Entered counts in `COUNT` (Counter = N, Dropcount
+/// 0) before `ARM`, and Left and the failed dwell pulse `ZERO`, so the area arms
+/// when N planes have entered and none has left since: 21 MCUs. Once HOT, one
+/// plane holds it. `ZERO` re-arms a fired counter (flight 0, E6).
 /// A plane already inside the area when the mission loads is not seen until it
 /// re-enters. Flight 2J showed a trigger does not report a plane already inside
 /// when switched on; the mission-load case itself is unflown.
@@ -53,9 +59,14 @@ pub(crate) fn build_side(
     logic: &mut SideLogic,
     next_id: &mut i32,
 ) -> Result<Vec<Il2Entity>, String> {
-    if spec.players_n != 1 {
-        return Err("Air Tasking threshold requires exactly one player in step 4".into());
+    if !PLAYERS_RANGE.contains(&spec.players_n) {
+        return Err(format!(
+            "Air Tasking threshold players (N) must be {} to {}",
+            PLAYERS_RANGE.start(),
+            PLAYERS_RANGE.end()
+        ));
     }
+    let counted = spec.players_n >= 2;
     if !spec.radius_m.is_finite() || spec.radius_m <= 0.0 {
         return Err("Air Tasking threshold radius must be finite and greater than zero".into());
     }
@@ -151,6 +162,17 @@ pub(crate) fn build_side(
             ids.insert(role, node.index.unwrap());
             cell.push(node);
         }
+        // Allocated after the 19, so a one-player cell keeps its ids.
+        if counted {
+            let count = i32::from(spec.players_n);
+            for (role, node) in [
+                ("COUNT", template::counter(&format!("{prefix} COUNT"), count, 0, next_id, x, z)),
+                ("ZERO", template::modifier_set_val(&format!("{prefix} ZERO"), next_id, x, z)),
+            ] {
+                ids.insert(role, node.index.unwrap());
+                cell.push(node);
+            }
+        }
         let consumers = |map: &BTreeMap<usize, Vec<i32>>| {
             let mut ids = map.get(&area).cloned().unwrap_or_default();
             ids.sort_unstable();
@@ -190,9 +212,21 @@ pub(crate) fn build_side(
             ("HOT OFF", hot.clone()),
             ("REARM ON", vec![ids["ARM"], ids["TRIGGER"]]),
         ]);
+        if counted {
+            edges.insert("COUNT", vec![ids["ARM"]]);
+            edges.insert("ZERO", vec![ids["COUNT"]]);
+            // A fresh count after every close. REARM ON is an Activate and only
+            // switches its targets, so CLOSE DELAY, which fires it, pulses ZERO.
+            edges.get_mut("CLOSE DELAY").unwrap().push(ids["ZERO"]);
+        }
         for node in &mut cell {
             if node.index == Some(ids["TRIGGER"]) {
-                template::attach_event(node, OBJECT_ENTERED, ids["ARM"]);
+                if counted {
+                    template::attach_event(node, OBJECT_ENTERED, ids["COUNT"]);
+                    template::attach_event(node, OBJECT_LEFT, ids["ZERO"]);
+                } else {
+                    template::attach_event(node, OBJECT_ENTERED, ids["ARM"]);
+                }
             } else {
                 let role = node.name().unwrap().strip_prefix(&prefix).unwrap().trim();
                 node.set_targets(edges.remove(role).expect("every cell MCU has its edges"));
@@ -575,24 +609,289 @@ mod tests {
     }
 
     #[test]
-    fn threshold_refuses_more_than_one_player() {
-        for players_n in [0, 2, 3, 255] {
+    fn threshold_refuses_players_outside_1_to_3() {
+        for players_n in [0, 4, 255] {
             let mut logic = SideLogic::default();
             let mut next = 42;
             let error = build_side(
                 AirSide::Nato,
                 &[CENTRE],
-                &ThresholdSpec {
-                    players_n,
-                    ..ThresholdSpec::default()
-                },
+                &spec_with_players(players_n),
                 &mut logic,
                 &mut next,
             )
             .unwrap_err();
-            assert!(error.contains("exactly one player"));
+            assert!(error.contains("1 to 3"), "{error}");
             assert_eq!(next, 42);
             assert_eq!(logic, SideLogic::default());
+        }
+        for players_n in 1..=3 {
+            build_side(
+                AirSide::Nato,
+                &[CENTRE],
+                &spec_with_players(players_n),
+                &mut SideLogic::default(),
+                &mut 42,
+            )
+            .unwrap();
+        }
+    }
+
+    fn spec_with_players(players_n: u8) -> ThresholdSpec {
+        ThresholdSpec {
+            players_n,
+            ..ThresholdSpec::default()
+        }
+    }
+
+    /// Decision 0047 E: N >= 2 adds COUNT and ZERO after the 19 cell MCUs,
+    /// so the one-player MCUs keep their ids, kinds and links. Entered counts,
+    /// Left zeroes, and the failed dwell (CLOSE DELAY) zeroes for a fresh count.
+    #[test]
+    fn threshold_counted_structure() {
+        for side in [AirSide::Nato, AirSide::Dprk] {
+            let one = harness(side, &[CENTRE], ThresholdSpec::default());
+            for players_n in [2u8, 3] {
+                let h = harness(side, &[CENTRE], spec_with_players(players_n));
+                let cells = named(&h.root, "Cells");
+                assert_eq!(mcus(cells), 21);
+                assert_eq!(cells.count_block_type("MCU_TR_ComplexTrigger"), 1);
+                assert_eq!(cells.count_block_type("MCU_CheckZone"), 1);
+                let count = cell(&h, 1, "COUNT");
+                let zero = cell(&h, 1, "ZERO");
+                assert_eq!(count.block_type, "MCU_Counter");
+                assert_eq!(
+                    count.property("Counter"),
+                    Some(players_n.to_string().as_str())
+                );
+                assert_eq!(count.property("Dropcount"), Some("0"));
+                assert_eq!(count.targets, [id(&h, "ARM")]);
+                assert_eq!(zero.block_type, "MCU_ModifierSetVal");
+                assert_eq!(zero.property("ParamIndex"), Some("0"));
+                assert_eq!(zero.property("Data0"), Some("0"));
+                assert_eq!(zero.targets, [id(&h, "COUNT")]);
+                for node in [count, zero] {
+                    assert_eq!(node.pos_xz(), Some(CENTRE));
+                    assert!(node.objects.is_empty() && node.children.is_empty());
+                }
+                let events: Vec<_> = cell(&h, 1, "TRIGGER").children[0]
+                    .children
+                    .iter()
+                    .map(|event| template::read_event(event).unwrap())
+                    .collect();
+                assert_eq!(
+                    events,
+                    [
+                        (OBJECT_ENTERED, id(&h, "COUNT")),
+                        (OBJECT_LEFT, id(&h, "ZERO"))
+                    ]
+                );
+                let mut fail = cell(&one, 1, "CLOSE DELAY").targets.clone();
+                fail.push(id(&h, "ZERO"));
+                assert_eq!(cell(&h, 1, "CLOSE DELAY").targets, fail);
+                for node in nodes(named(&one.root, "Cells")) {
+                    let Some(name) = node.name().filter(|name| name.starts_with("TH")) else {
+                        continue;
+                    };
+                    let counted_node = named(&h.root, name);
+                    assert_eq!(counted_node.index, node.index, "{name}");
+                    assert_eq!(counted_node.block_type, node.block_type, "{name}");
+                    let non_target_props = |e: &Il2Entity| {
+                        e.properties.iter().filter(|(k, _)| k != "Targets").cloned().collect::<Vec<_>>()
+                    };
+                    assert_eq!(non_target_props(counted_node), non_target_props(node), "{name}");
+                    if !name.ends_with("CLOSE DELAY") {
+                        assert_eq!(counted_node.targets, node.targets, "{name}");
+                    }
+                    if !name.ends_with("TRIGGER") {
+                        assert_eq!(counted_node.children, node.children, "{name}");
+                    }
+                }
+                assert_eq!(h.logic.init_off, one.logic.init_off);
+            }
+        }
+    }
+
+    fn arms(h: &Harness, log: &WalkerLog) -> Vec<u64> {
+        times(log, id(h, "ARM"))
+    }
+
+    fn orbit_from(start: u64) -> ScriptedTrack {
+        track(DPRK_PLAYER_COUNTRY, start, 600, orbit)
+    }
+
+    #[test]
+    fn threshold_n2_one_entry_does_not_arm() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        for config in flown_configs() {
+            let log = run(&h, config, 600.0, vec![orbit_from(1)]);
+            assert!(times(&log, id(&h, "COUNT")).is_empty(), "{config:?}");
+            assert!(arms(&h, &log).is_empty(), "{config:?}");
+            assert_passes(&h, &log, &[]);
+            assert_cold(&h, &log);
+        }
+    }
+
+    #[test]
+    fn threshold_n2_two_entries_arm() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        for config in flown_configs() {
+            let log = run(&h, config, 100.0, vec![orbit_from(1), orbit_from(21)]);
+            assert_eq!(arms(&h, &log), [ticks(21.0)], "{config:?}");
+            assert_passes(&h, &log, &[81.1]);
+        }
+    }
+
+    /// The walker has no formations: a pair is two tracks entering in one
+    /// second. Flight 2M's cell D4 flies a real 2-ship formation.
+    #[test]
+    fn threshold_n2_each_aircraft_of_a_pair_counts() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        let wingman = track(DPRK_PLAYER_COUNTRY, 1, 600, |s| orbit(s + 10));
+        for config in flown_configs() {
+            let log = run(&h, config, 100.0, vec![orbit_from(1), wingman.clone()]);
+            assert_eq!(arms(&h, &log), [ticks(1.0)], "{config:?}");
+            assert_passes(&h, &log, &[61.1]);
+        }
+    }
+
+    #[test]
+    fn threshold_n2_a_leave_between_entries_resets_the_count() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        // The first plane enters at 1 and leaves at 30; the second enters at 60.
+        // The Left zeroed the count, so one plane inside does not arm. The first
+        // comes back at 100: two inside with no Left between, so it arms.
+        let first = track(DPRK_PLAYER_COUNTRY, 1, 600, |s| {
+            if (30..100).contains(&s) {
+                outside()
+            } else {
+                orbit(s)
+            }
+        });
+        for config in flown_configs() {
+            let log = run(&h, config, 200.0, vec![first.clone(), orbit_from(60)]);
+            assert_eq!(times(&log, id(&h, "ZERO")), [ticks(30.0)], "{config:?}");
+            assert_eq!(arms(&h, &log), [ticks(100.0)], "{config:?}");
+            assert_passes(&h, &log, &[160.1]);
+        }
+    }
+
+    #[test]
+    fn threshold_n2_loiterer_and_later_arrival_arm() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        for config in flown_configs() {
+            let log = run(&h, config, 400.0, vec![orbit_from(1), orbit_from(300)]);
+            assert_eq!(arms(&h, &log), [ticks(300.0)], "{config:?}");
+            assert_passes(&h, &log, &[360.1]);
+        }
+    }
+
+    #[test]
+    fn threshold_n3_needs_three_entries() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(3));
+        for config in flown_configs() {
+            let log = run(
+                &h,
+                config,
+                300.0,
+                vec![orbit_from(1), orbit_from(20), orbit_from(200)],
+            );
+            assert_eq!(arms(&h, &log), [ticks(200.0)], "{config:?}");
+            assert_passes(&h, &log, &[260.1]);
+        }
+    }
+
+    #[test]
+    fn threshold_n2_fires_again_after_failed_dwell() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        // A pair enters at 1 and leaves at 30, while the trigger is off after
+        // ARM, so no Left reaches ZERO. The dwell fails at 63.05 s; CLOSE DELAY
+        // zeroes the fired counter (E6), so the pair's return at 200 arms again.
+        let pair = |offset: u64| {
+            track(DPRK_PLAYER_COUNTRY, 1, 600, move |s| {
+                if (30..200).contains(&s) {
+                    outside()
+                } else {
+                    orbit(s + offset)
+                }
+            })
+        };
+        for config in flown_configs() {
+            let log = run(&h, config, 300.0, vec![pair(0), pair(10)]);
+            assert_eq!(
+                times(&log, id(&h, "CLOSE DELAY")),
+                [ticks(63.05)],
+                "{config:?}"
+            );
+            assert_eq!(arms(&h, &log), [ticks(1.0), ticks(200.0)], "{config:?}");
+            // INNER is still armed from the first check, so CHECK ON is the
+            // check (flight 2K, decision 0045): entry + DWELL, not + 0.1 s.
+            assert_passes(&h, &log, &[260.0]);
+        }
+    }
+
+    /// Decision 0047: N = 1 keeps today's cell exactly (Entered straight to ARM,
+    /// no counter). The byte check of a whole N = 1 Generate against the frozen
+    /// flight A3 files is `ui_tests::a3_map_build_matches_the_frozen_files_and_the_run_sheet`.
+    #[test]
+    fn threshold_n1_output_is_unchanged() {
+        let h = default_harness();
+        let cells = named(&h.root, "Cells");
+        assert_eq!(mcus(cells), 19);
+        assert_eq!(cells.count_block_type("MCU_Counter"), 0);
+        assert_eq!(cells.count_block_type("MCU_ModifierSetVal"), 0);
+        let events: Vec<_> = cell(&h, 1, "TRIGGER").children[0]
+            .children
+            .iter()
+            .map(|event| template::read_event(event).unwrap())
+            .collect();
+        assert_eq!(events, [(OBJECT_ENTERED, id(&h, "ARM"))]);
+        assert_eq!(
+            cell(&h, 1, "CLOSE DELAY").targets,
+            [id(&h, "COLD ON"), id(&h, "HOT OFF DELAY"), id(&h, "REARM ON")]
+        );
+    }
+
+    /// Flight 2J and A1: a trigger does not report planes already inside, so
+    /// two players inside at load count for nothing; later arrivals count.
+    #[test]
+    fn threshold_n2_planes_inside_at_load_are_not_counted() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        let inside = |offset: u64| track(DPRK_PLAYER_COUNTRY, 0, 600, move |s| orbit(s + offset));
+        for config in flown_configs() {
+            let tracks = vec![inside(0), inside(10), orbit_from(100)];
+            let log = run(&h, config, 140.0, tracks.clone());
+            assert!(arms(&h, &log).is_empty(), "{config:?}");
+            let mut tracks = tracks;
+            tracks.push(orbit_from(150));
+            let log = run(&h, config, 220.0, tracks);
+            assert_eq!(arms(&h, &log), [ticks(150.0)], "{config:?}");
+            assert_passes(&h, &log, &[210.1]);
+        }
+    }
+
+    /// After a HOT period ends, the count starts again from zero: one plane
+    /// back is not enough, two are.
+    #[test]
+    fn threshold_n2_counts_afresh_after_a_hot_period() {
+        let h = harness(AirSide::Nato, &[CENTRE], spec_with_players(2));
+        let pair = |offset: u64, back: u64| {
+            track(DPRK_PLAYER_COUNTRY, 1, 600, move |s| {
+                if (200..back).contains(&s) {
+                    outside()
+                } else {
+                    orbit(s + offset)
+                }
+            })
+        };
+        for config in flown_configs() {
+            let log = run(&h, config, 500.0, vec![pair(0, 400), pair(10, 420)]);
+            assert_eq!(
+                times(&log, id(&h, "CLOSE DELAY")),
+                [ticks(303.15)],
+                "{config:?}"
+            );
+            assert_eq!(arms(&h, &log), [ticks(1.0), ticks(420.0)], "{config:?}");
         }
     }
 
