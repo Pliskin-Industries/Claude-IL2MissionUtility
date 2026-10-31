@@ -1183,6 +1183,28 @@ MD3's count is not traced (the trigger feeds `COUNT` and `ZERO`), so Tacview che
 - After `ARM` the cell runs as the one-player cell does: the dwell, then a pass every `HOLD` (120.00 s apart, decision 0045).
 - **Walker limit:** the walker scripts a Delete or a kill as the track moving outside, so it raises Left. The game does not. The 2M predictions for the B cells' Left rows were therefore wrong. The Zone Out times were right.
 
+## Flight 2P (which Complex Trigger event does a kill, a Delete or damage raise?) — 2026-10-31, one run, no pilot, Tacview recorded
+
+Decision 0049. Run sheet: `handoff/sessions/2026-10-31-p14-flight-2p.md`. Frozen: `handoff/p14-probes/flight2p/`. Built from `42e51c3` as `P14_Probe_2P_20261031`, hosted on this PC, Claude spectating. Session `2026-10-31_13-46-29`, logs `real_55` (19 files). Tacview `handoff/tacview/P14_Probe_2P.zip.acmi`. Left the server at about 460 s. Replay: no dead links.
+
+One Complex Trigger `P1-CT` (6 km, country 601, all 21 `EventsFilter…` keys set to 1). Each event type from 55 to 80 was wired to its own breadcrumb. Three Yak singles on 601 flew in and orbited.
+
+| Time s | What happened | Events raised |
+|---:|---|---|
+| 151.58, 179.86, 208.00 | each single entered | **58** and **59** |
+| 300.00 | A killed (Damage, Complete); `AType:3` at 300.02 | **67, 68, 70** at 300.04 |
+| 315.06 | (A's wreck, 15 s later) | **62** |
+| 360.00 | B deleted | **62, 63** at 360.02 |
+| 420.00 | C damaged (Damage level 1, not killed) | **68** at 420.02 |
+
+No other type in 55 to 80 fired; Left (60) never fired.
+
+### What this changes (reading)
+
+- **The event numbers follow the order of the `EventsFilter…` keys**, from 57 (`Spawned`) to 77. Flown: 58 Entered, 59 Entered alive, 60 Left (flights 1N and 1D), 62 Finished, 63 Finished alive, 67 Damaged, 68 Critically damaged, 70 Killed.
+- **Killed is 70.** It fires on a kill only: not on a Delete, and not on damage without a kill. Decision 0049 B wires it to the N ≥ 2 count's `ZERO`.
+- A Delete raises Finished (62) and Finished alive (63), and a kill raises Finished 15 s later; neither raises Left (flight 2M).
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -1237,5 +1259,6 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | new | a 4-ship Wedge at Safe lost one aircraft to its own wingman in a long steady turn over an empty target (decision 0021) | check L |
 | b | **answered with AI stand-ins: ALL-out.** A Closer 0 zone with two watched groups inside fires only when the last is gone (deleted, killed, flown out, or a pair's wingman first) | flight 2M |
 | new | a Complex Trigger raises no Left for a plane deleted or killed inside it (it does for a fly-out); the N = 2 threshold (0047 E) arms on the second entry and resets on a Left, in the game | flight 2M |
+| new | Complex Trigger event numbers follow the filter-key order: 58 Entered, 59 Entered alive, 62 Finished, 63 Finished alive, 67 Damaged, 68 Critically damaged, 70 Killed. A kill raises 67, 68, 70 (and 62 when the wreck lands), a Delete 62 and 63, level 1 damage 68 | flight 2P |
 
 Not tested by any flight: two or more human players (step 12, flight 2N), and a Complex Trigger with more than one `Country` line.

@@ -45,7 +45,7 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 
 - The block is `MCU_TR_ComplexTrigger`. The editor writes `Enabled = 1;` **twice**.
 - Filters are plain lines after the 21 `EventsFilter…` keys: `Country = 601;`, `ObjectScript = "luascripts\worldobjects\planes\f51d.txt";`, `ObjectName = "…";`. The sample has one of each; the shape for two or more is not known. A trigger with only the `Country` line, and one with no filter line at all, were written by the probe generator and **load in the resaver** (2026-10-12); neither shape was saved from the editor.
-- Outputs are an `OnEvents` block, not `Targets`. Event types seen: Object Entered = 58, Object Left = 60. The other 19 type numbers are not known.
+- Outputs are an `OnEvents` block, not `Targets`. Event types seen: Object Entered = 58, Object Left = 60. The other 19 type numbers were not known until flight 2P (see "Found on 2026-10-31 (flight 2P)": they follow the filter-key order, Killed = 70).
 - One key is misspelled in the game and must be written that way: `EventsFilterDropedBombs`.
 - The editor offers five countries by name: Neutral Country, USSR, PRC, DPRK and USA (601). A mission built on the dogfight test Options block also carries 602 and 603 on the NATO side (log header `CNTRS:…601:2,602:2,603:2`), but the editor shows no name for them, so a trigger cannot pick them from its list.
 
@@ -233,3 +233,26 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
   - One plane alone never arms it.
   - A Left between two entries resets the count (MD3, checked with Tacview).
 - 21 AI aircraft on this PC: every scripted activation, Delete and kill logged at its exact mission second.
+
+## Found on 2026-10-31 (flight 2P, game 1.005)
+
+- **Complex Trigger event numbers follow the order of the 21 `EventsFilter…` keys,** from 57 (`Spawned`) to 77 (`ParatrooperLandedAlive`). Flown with every filter on:
+
+  | Number | Event |
+  |---:|---|
+  | 58 | Entered |
+  | 59 | Entered alive |
+  | 60 | Left (flights 1N, 1D) |
+  | 62 | Finished |
+  | 63 | Finished alive |
+  | 67 | Damaged |
+  | 68 | Critically damaged |
+  | 70 | Killed |
+
+  The rest, by the key order (unflown): 57 Spawned, 61 Left alive, 64 Stationary and alive, 65 Finished stationary and alive, 66 Took off, 69 Repaired, 71 Dropped bombs, 72 Fired flare, 73 Fired rockets, 74 Dropped cargo containers, 75 Delivered cargo, 76 Paratrooper jumped, 77 Paratrooper landed alive.
+- **What raises what:**
+  - a kill raises 67, 68 and 70 at once, and 62 about 15 s later (the wreck);
+  - a Delete raises 62 and 63;
+  - damage that does not kill (Damage level 1) raises 68 only;
+  - none of them raises Left.
+- An event is raised only if its filter key is 1 and an `OnEvent` with its number exists. Flight 2P had every filter on; whether an event with its filter at 0 still fires was not flown.
