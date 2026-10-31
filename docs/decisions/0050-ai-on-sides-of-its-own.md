@@ -1,6 +1,6 @@
 # 0050. Watch players only: put Air Tasking's AI on sides of its own
 
-- **Status:** Proposed (stage 1 passed 2026-10-31; flight 2Q built, not flown)
+- **Status:** Proposed. Flight 2Q (2026-10-31) shows option A fails; B or C waits for the user.
 - **Date:** 2026-10-31
 - **Decided by:** open. The user raised the problem and asked for the probe ("Yes, plan the probe", "Yes, run stage 1").
 
@@ -47,9 +47,20 @@ No pilot, 9.5 minutes, 28 AI planes. Run sheet: `handoff/sessions/2026-10-31-p14
   | Q6 | 503 (side 4) | 602 (side 3) | attack |
   | Q7 | 503 (side 4) | 501 (DPRK) | not attack |
 
+## Flight 2Q result (flown 2026-10-31)
+
+`handoff/P14-probe-results.md`, "Flight 2Q"; logs `real_57`.
+
+- **AI on a side of its own is everyone's enemy.**
+  - 602 (side 3) fired on 601 (NATO), and 601 fired on 602.
+  - 503 (side 4) fired on 501 (DPRK).
+  - The attack cells fired too.
+- **Check zones did not see side-3 planes at all,** even zones watching `[3]`. A side-2 zone ignored them, but that does not help when they shoot their own side's players.
+- **Caveat:** no cell had a hunter and target on the same side, so 2Q alone cannot rule out that an air attack order fires at any aircraft. If the user wants option A kept alive, a same-side control cell is the next check: for example, 601 hunting 603, both on side 2.
+
 ## Options (for the user after flight 2Q)
 
-- **A. AI on sides 3 and 4, and a wider Zone IN / Zone Out** (if 2Q passes). Export writes the two rows when the mission has Air Tasking. The wider radius is Air Tasking's own, not the shared `AIR_ZONE_OUT_M`, so the upstream Template Builder's output stays the same. No extra MCUs. Generate output changes for missions with Air Tasking.
+- **A. AI on sides 3 and 4, and a wider Zone IN / Zone Out.** **Fails (flight 2Q):** such AI attacks its own side. Export writes the two rows when the mission has Air Tasking. The wider radius is Air Tasking's own, not the shared `AIR_ZONE_OUT_M`, so the upstream Template Builder's output stays the same. No extra MCUs. Generate output changes for missions with Air Tasking.
 - **B. Keep the sides and widen the zone anyway.** AI counts, so near the front a sortie stays while anyone fights there; only time on station limits it.
 - **C. No change.**
 

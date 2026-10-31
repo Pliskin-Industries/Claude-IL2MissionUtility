@@ -267,3 +267,18 @@ Built with `build_probe_mission.py --coalition 602:3 --coalition 503:4` on fligh
 - **Players see two sides only.** The briefing and results screens show Eastern Bloc and Western Bloc; nothing offers a third side.
 - Planes on 602 and 503 spawn on Activate, and a Damage command kills one (logged `COUNTRY:602`). A Complex Trigger filtered to country 601 does not see them; it saw the 601 plane as in flight 2P.
 - **Not known yet:** whether AI on sides 3 and 4 fights the right enemy and spares its own players, and whether a check zone watching side 1 or 2 ignores it (flight 2Q, decision 0050).
+
+## Found on 2026-10-31 (flight 2Q, game 1.005)
+
+The mission had 602 on side 3 and 503 on side 4 (`--coalition`). Logs `real_57`, Tacview `handoff/tacview/P14_Probe_2Q.zip.acmi`.
+
+- **A side of its own makes AI an enemy of both real sides.** Under an air attack order:
+  - a 602 pair (side 3) fired on a 601 pair (side 2), and a 601 pair fired on a 602 pair;
+  - a 503 pair (side 4) fired on a 501 pair (side 1).
+
+  No cell had both pairs on one side, so a same-side control is still missing.
+- **A check zone does not see planes on side 3.** A 602 pair orbited inside a 6 km Closer 1 zone for 140 s; zones watching `[3]` and `[2,3]` never fired for it. `[2]` and `[2,3]` fired for a 601 pair.
+- **An air `AttackArea` makes AI fighters engage:** `AttackAir 1`, `AttackGround 0`, `AttackGTargets 0`, `AttackArea` 5000, `Priority 1`, objects the lead. The lead was flying Priority 2 waypoints. The pairs came down to the target's height and fired 13 to 74 s after the order.
+- **AI-on-AI gunfire logged no `AType:1`, `2` or `3` line,** although Tacview shows shell bursts within 7 to 27 m of the targets. No aircraft was lost.
+- `AType:24 OBJID:<plane> POS(...)` was logged only for hunters after their attack order, about once per plane every 20 s. Its meaning is not known.
+- Tacview names every shell `Type=Projectile+Shell` (here `SHELL_20_RUS_HET`). An object's Tacview id is its log `OBJID` in hexadecimal (`5000` is 20480).

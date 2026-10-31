@@ -1,6 +1,6 @@
 # Sides probe: can Air Tasking's AI sit on sides of its own? (decision 0050)
 
-**Stage 1 flown 2026-10-31** (logs `real_56`): the game accepts countries on sides 3 and 4. Results: `handoff/P14-probe-results.md`, "Sides check S1". **Stage 2 (flight 2Q) is built, not flown:** `handoff/p14-probes/flight2q/`.
+**Stage 1 flown 2026-10-31** (logs `real_56`): the game accepts countries on sides 3 and 4. Results: `handoff/P14-probe-results.md`, "Sides check S1". **Flight 2Q flown 2026-10-31** (logs `real_57`): AI on sides 3 and 4 fights both real sides, and check zones do not see side 3 at all. Option A of decision 0050 fails. Results: `handoff/P14-probe-results.md`, "Flight 2Q".
 
 ## Why
 
@@ -48,6 +48,10 @@ Check that the log header reads `CNTRS:…503:4,…602:3…`. Without the table,
   - **Note:** Q3's and Q5's NATO pairs are AI stand-ins for NATO players. What a human sees (icons, penalties) needs a pilot later.
 - **Every cell's safety close at 540 s** deletes its aircraft. Leave the server at 09:30 (570 s).
 
-## After the flight
+## After the flight (2026-10-31)
 
-Record the results here, in the probe results, in the facts file and in 0050. Freeze 2Q only if a later change alters its output.
+Recorded in the probe results, the facts file and 0050. Still open:
+- **Same-side control:** if the user wants option A checked further, add a cell where hunter and target are on one side (601 hunting 603).
+- **The user's choice in 0050:** B (a wider zone that still counts AI) or C (no change).
+
+Freeze 2Q only if a later change alters its output.
