@@ -11,6 +11,9 @@ mod export;
 mod library;
 mod place;
 mod pool;
+// Decision 0050 D: wired into the shell only after flight 2R.
+#[cfg_attr(not(test), allow(dead_code))]
+mod presence;
 #[cfg(test)]
 mod probe;
 mod shell;
