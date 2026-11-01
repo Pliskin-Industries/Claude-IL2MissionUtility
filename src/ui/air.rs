@@ -65,8 +65,9 @@ impl Default for AirDock {
 /// Map's orange note when every pool entry is orphaned, off or out of date.
 pub(super) const AIR_LEFT_OUT: &str = "Air Tasking has no valid entries and will be left out";
 
-/// Everything the build reads: the plan, the Map inputs, and the user
-/// template files it re-reads from disk (their modified time, or none).
+/// Everything the build reads: the plan, the Map inputs (the player spawns
+/// included, decision 0051), and the user template files it re-reads from
+/// disk (their modified time, or none).
 fn air_eval_key(plan: &AirPlan, ctx: &AirContext) -> u64 {
     let files: Vec<_> = plan
         .library
@@ -76,9 +77,18 @@ fn air_eval_key(plan: &AirPlan, ctx: &AirContext) -> u64 {
             SortieSource::BuiltIn(_) => None,
         })
         .collect();
+    // No `..`: a new AirContext field does not compile until it joins the key.
+    let AirContext {
+        east_objectives,
+        nato_objectives,
+        arrows,
+        front,
+        aabb,
+        date,
+        player_spawns,
+    } = ctx;
     fingerprint(format!(
-        "{plan:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{files:?}",
-        ctx.east_objectives, ctx.nato_objectives, ctx.arrows, ctx.front, ctx.aabb, ctx.date
+        "{plan:?}|{east_objectives:?}|{nato_objectives:?}|{arrows:?}|{front:?}|{aabb:?}|{date:?}|{player_spawns:?}|{files:?}"
     ))
 }
 

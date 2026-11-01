@@ -3192,6 +3192,28 @@ fn air_tasking_threshold_n_is_fixed_at_1() {
     assert!(h.has("Two or more players comes with the multi-player phase."));
 }
 
+/// Decisions 0050 D and 0051: a Map air start inside a count circle that
+/// watches its side keeps Generate off, with the error as a Check, as soon as
+/// it is placed (the check's cache key holds the spawns).
+#[test]
+fn air_tasking_air_start_inside_a_count_circle_disables_generate() {
+    let mut h = Harness::new("air_count_spawn");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    assert!(!h.find("Generate File").disabled);
+    let area = h.app.with_air_context(|ctx| crate::airtask::preview(&h.app.air_plan, ctx))
+        .rings.iter().find(|r| r.side == crate::airtask::AirSide::Dprk && !r.inner).unwrap().centre;
+    h.app.placed_air_starts.push(crate::airstart::PlacedAirStart {
+        field: crate::airstart::default_field("NATO start", true),
+        x: area.0 + 20_000.0,
+        z: area.1,
+    });
+    h.settle();
+    assert!(h.find("Generate File").disabled);
+    let problem = h.app.air_idle_problem().unwrap();
+    assert!(problem.contains("\"NATO start\" is 20.0 km away, inside the 50.0 km player count circle"), "{problem}");
+}
+
 #[test]
 fn air_plan_first_entry_ticks_include_in_base_map() {
     let mut h = Harness::new("air_first");
