@@ -16,8 +16,11 @@ pub(crate) const COUNT_STEPS: usize = 3;
 /// reaches every step's relay in turn; switching the next step on at once would
 /// let the same event step the count again.
 const STEP_DELAY_S: f64 = 0.05;
+/// From busy to arming `CLEAR`: the fourth plane, just across the ring, is then
+/// about 280 m inside, so the zone does not miss it and clear at once.
+const CLEAR_DELAY_S: f64 = 2.0;
 
-/// Build one count per area: 25 MCUs, one of them a check zone. Returns the
+/// Build one count per area: 26 MCUs, one of them a check zone. Returns the
 /// nodes and each area's `EMPTY` relay, in area order.
 ///
 /// - Entered (58) moves the count up one step; Left (60) and Finished (62) move
@@ -26,11 +29,17 @@ const STEP_DELAY_S: f64 = 0.05;
 /// - Only the current step's `UP` and `DOWN` relays are on. A step change
 ///   switches the old step's pair off at once and the new one on a tick later
 ///   (`ON k DELAY`), so one event moves the count one step whatever order it
-///   reaches the relays in. A second event in the same tick is lost.
-/// - A fourth entry turns the area busy: every relay goes off and `CLEAR`, a
-///   Closer 0 check zone on the other side's coalition, is switched on and
-///   pulsed. It fires when nobody of that side is inside, AI included (ALL-out,
-///   flight 2M), switches itself off and returns the count to 0.
+///   reaches the relays in. An event that comes before the new step is on (the
+///   same tick, or the next one before `ON k DELAY` fires: about 0.05 to 0.1 s,
+///   7 to 14 m at 500 km/h) is lost. A lost entry leaves the count too low, so
+///   the area empties while a player is still inside; a lost leave leaves it too
+///   high, so the area does not empty (safe).
+/// - A fourth entry turns the area busy: every relay goes off. `CLEAR DELAY`
+///   (2 s, so the fourth plane is well inside) then switches on and pulses
+///   `CLEAR`, a Closer 0 check zone on the other side's coalition. It fires
+///   when nobody of that side is inside, AI included (ALL-out, flight 2M),
+///   switches itself off and returns the count to 0. The next busy period
+///   switches the armed zone on again, which is a check (flight 2K).
 /// - `EMPTY` fires on the step from 1 to 0 and when busy clears.
 ///
 /// Mission makers keep player spawns outside every circle (decision 0050): a
@@ -63,14 +72,18 @@ pub(crate) fn build_side(
         let prefix = format!("PC{}{:02}", side.letter(), index + 1);
         let mut cell = Vec::new();
         let mut ids: BTreeMap<String, i32> = BTreeMap::new();
-        let mut roles: Vec<(String, &str, f64)> = vec![("TRIGGER".into(), "MCU_TR_ComplexTrigger", 0.0)];
+        let mut roles: Vec<(String, &str, f64)> =
+            vec![("TRIGGER".into(), "MCU_TR_ComplexTrigger", 0.0)];
         roles.extend((1..=top).map(|k| (format!("UP {k}"), "MCU_Timer", 0.0)));
         roles.extend((1..=COUNT_STEPS).map(|k| (format!("DOWN {k}"), "MCU_Timer", 0.0)));
         roles.extend((0..=COUNT_STEPS).map(|k| (format!("ON {k}"), "MCU_Activate", 0.0)));
-        roles.extend((0..=COUNT_STEPS).map(|k| (format!("ON {k} DELAY"), "MCU_Timer", STEP_DELAY_S)));
+        roles.extend(
+            (0..=COUNT_STEPS).map(|k| (format!("ON {k} DELAY"), "MCU_Timer", STEP_DELAY_S)),
+        );
         roles.extend((0..=COUNT_STEPS).map(|k| (format!("OFF {k}"), "MCU_Deactivate", 0.0)));
         roles.extend([
             ("CLEAR".into(), "MCU_CheckZone", 0.0),
+            ("CLEAR DELAY".into(), "MCU_Timer", CLEAR_DELAY_S),
             ("CLEAR ON".into(), "MCU_Activate", 0.0),
             ("CLEAR PULSE".into(), "MCU_Timer", 0.1),
             ("CLEAR OFF".into(), "MCU_Deactivate", 0.0),
@@ -81,7 +94,9 @@ pub(crate) fn build_side(
             let node = match *kind {
                 "MCU_TR_ComplexTrigger" => threshold::place_trigger(&trigger, &name, next_id, x, z),
                 "MCU_Timer" => template::timer(&name, *time, next_id, x, z),
-                "MCU_CheckZone" => template::checkzone(&name, radius_m, false, coalitions, next_id, x, z),
+                "MCU_CheckZone" => {
+                    template::checkzone(&name, radius_m, false, coalitions, next_id, x, z)
+                }
                 _ => template::mcu(kind, &name, next_id, x, z),
             };
             ids.insert(role.clone(), node.index.unwrap());
@@ -97,7 +112,10 @@ pub(crate) fn build_side(
         };
         let mut edges: BTreeMap<String, Vec<i32>> = BTreeMap::new();
         for k in 1..=COUNT_STEPS {
-            edges.insert(format!("UP {k}"), vec![id(&format!("OFF {}", k - 1)), id(&format!("ON {k} DELAY"))]);
+            edges.insert(
+                format!("UP {k}"),
+                vec![id(&format!("OFF {}", k - 1)), id(&format!("ON {k} DELAY"))],
+            );
             let mut down = vec![id(&format!("OFF {k}")), id(&format!("ON {} DELAY", k - 1))];
             if k == 1 {
                 down.push(id("EMPTY"));
@@ -106,16 +124,23 @@ pub(crate) fn build_side(
         }
         edges.insert(
             format!("UP {top}"),
-            vec![id(&format!("OFF {COUNT_STEPS}")), id("CLEAR ON"), id("CLEAR PULSE")],
+            vec![id(&format!("OFF {COUNT_STEPS}")), id("CLEAR DELAY")],
         );
         for k in 0..=COUNT_STEPS {
             edges.insert(format!("ON {k} DELAY"), vec![id(&format!("ON {k}"))]);
             edges.insert(format!("ON {k}"), step_set(k));
             edges.insert(format!("OFF {k}"), step_set(k));
         }
+        edges.insert(
+            "CLEAR DELAY".into(),
+            vec![id("CLEAR ON"), id("CLEAR PULSE")],
+        );
         edges.insert("CLEAR ON".into(), vec![id("CLEAR")]);
         edges.insert("CLEAR PULSE".into(), vec![id("CLEAR")]);
-        edges.insert("CLEAR".into(), vec![id("CLEAR OFF"), id("ON 0 DELAY"), id("EMPTY")]);
+        edges.insert(
+            "CLEAR".into(),
+            vec![id("CLEAR OFF"), id("ON 0 DELAY"), id("EMPTY")],
+        );
         edges.insert("CLEAR OFF".into(), vec![id("CLEAR")]);
         edges.insert("EMPTY".into(), vec![]);
         for node in &mut cell {
@@ -129,13 +154,23 @@ pub(crate) fn build_side(
                     }
                 }
             } else {
-                let role = node.name().unwrap().strip_prefix(&prefix).unwrap().trim().to_string();
+                let role = node
+                    .name()
+                    .unwrap()
+                    .strip_prefix(&prefix)
+                    .unwrap()
+                    .trim()
+                    .to_string();
                 node.set_targets(edges.remove(&role).expect("every count MCU has its edges"));
             }
         }
         // Only step 0's UP 1 starts on (AT s INIT OFF switches the rest off).
-        logic.init_off.extend((2..=top).map(|k| id(&format!("UP {k}"))));
-        logic.init_off.extend((1..=COUNT_STEPS).map(|k| id(&format!("DOWN {k}"))));
+        logic
+            .init_off
+            .extend((2..=top).map(|k| id(&format!("UP {k}"))));
+        logic
+            .init_off
+            .extend((1..=COUNT_STEPS).map(|k| id(&format!("DOWN {k}"))));
         empties.push(id("EMPTY"));
         result.extend(cell);
     }
@@ -240,9 +275,12 @@ mod tests {
         flown_configs()
             .into_iter()
             .flat_map(|config| {
-                [SameTickDelivery::DepthFirst, SameTickDelivery::Batched].map(|same_tick_delivery| {
-                    WalkerConfig { same_tick_delivery, ..config }
-                })
+                [SameTickDelivery::DepthFirst, SameTickDelivery::Batched].map(
+                    |same_tick_delivery| WalkerConfig {
+                        same_tick_delivery,
+                        ..config
+                    },
+                )
             })
             .collect()
     }
@@ -269,12 +307,12 @@ mod tests {
                 ("UP 1", "MCU_Timer", ids(&["OFF 0", "ON 1 DELAY"])),
                 ("UP 2", "MCU_Timer", ids(&["OFF 1", "ON 2 DELAY"])),
                 ("UP 3", "MCU_Timer", ids(&["OFF 2", "ON 3 DELAY"])),
+                ("UP 4", "MCU_Timer", ids(&["OFF 3", "CLEAR DELAY"])),
                 (
-                    "UP 4",
+                    "DOWN 1",
                     "MCU_Timer",
-                    ids(&["OFF 3", "CLEAR ON", "CLEAR PULSE"]),
+                    ids(&["OFF 1", "ON 0 DELAY", "EMPTY"]),
                 ),
-                ("DOWN 1", "MCU_Timer", ids(&["OFF 1", "ON 0 DELAY", "EMPTY"])),
                 ("DOWN 2", "MCU_Timer", ids(&["OFF 2", "ON 1 DELAY"])),
                 ("DOWN 3", "MCU_Timer", ids(&["OFF 3", "ON 2 DELAY"])),
                 ("ON 0 DELAY", "MCU_Timer", ids(&["ON 0"])),
@@ -289,6 +327,11 @@ mod tests {
                 ("OFF 2", "MCU_Deactivate", ids(&["UP 3", "DOWN 2"])),
                 ("ON 3", "MCU_Activate", ids(&["UP 4", "DOWN 3"])),
                 ("OFF 3", "MCU_Deactivate", ids(&["UP 4", "DOWN 3"])),
+                (
+                    "CLEAR DELAY",
+                    "MCU_Timer",
+                    ids(&["CLEAR ON", "CLEAR PULSE"]),
+                ),
                 ("CLEAR ON", "MCU_Activate", ids(&["CLEAR"])),
                 ("CLEAR PULSE", "MCU_Timer", ids(&["CLEAR"])),
                 (
@@ -311,10 +354,17 @@ mod tests {
             assert_eq!(h.empties[area - 1], id(&h, area, "EMPTY"));
             for k in 0..=COUNT_STEPS {
                 assert_eq!(
-                    crate::airtask::library::number(node(&h, area, &format!("ON {k} DELAY")), "Time"),
+                    crate::airtask::library::number(
+                        node(&h, area, &format!("ON {k} DELAY")),
+                        "Time"
+                    ),
                     Ok(STEP_DELAY_S)
                 );
             }
+            assert_eq!(
+                crate::airtask::library::number(node(&h, area, "CLEAR DELAY"), "Time"),
+                Ok(CLEAR_DELAY_S)
+            );
             assert_eq!(
                 crate::airtask::library::number(node(&h, area, "CLEAR PULSE"), "Time"),
                 Ok(0.1)
@@ -384,7 +434,7 @@ mod tests {
                 .iter()
                 .filter(|n| n.name().is_some_and(|name| name.starts_with(&prefix)))
                 .count();
-            assert_eq!(count, 25, "{area}: 25 MCUs, one of them a check zone");
+            assert_eq!(count, 26, "{area}: 26 MCUs, one of them a check zone");
         }
         assert_eq!(h.logic.init_off.len(), 12);
     }
@@ -522,38 +572,37 @@ mod tests {
         }
     }
 
-    /// Two leaves in one tick, and two entries in one tick. The next step comes
-    /// on a tick later, so in either walker model the second event finds no
-    /// relay on and is lost. Two leaves leave the count too high (the area never
-    /// empties: safe); two entries leave it too low (it empties at the first
-    /// leave while one player is still inside). Flight 2R (cell R3) flies the
-    /// leaves; same-tick entries need two planes within about a metre of each
-    /// other along the track at the boundary.
+    /// Events close together. The next step comes on one tick after the old one
+    /// goes off, so a second event in the same tick or the next one is lost, in
+    /// either walker model; two ticks apart, both count. Two lost leaves leave
+    /// the count too high (the area never empties: safe); two lost entries leave
+    /// it too low (it empties at the first leave while one player is still
+    /// inside). Flight 2R (cell R3) flies two leaves in one tick.
     #[test]
-    fn two_events_in_one_tick() {
+    fn events_close_together() {
         let h = harness(&[CENTRE]);
-        for (same_tick_delivery, leaves, entries) in [
-            (SameTickDelivery::DepthFirst, vec![], vec![ticks(80.0)]),
-            (SameTickDelivery::Batched, vec![], vec![ticks(80.0)]),
-        ] {
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
             let config = WalkerConfig {
                 same_tick_delivery,
                 ..WalkerConfig::default()
             }
             .flown();
-            let input = WalkerInput {
-                track_ends: vec![
-                    (ticks(60.0), 0, TrackEnd::Deleted),
-                    (ticks(60.0), 1, TrackEnd::Deleted),
-                ],
-                ..tracks(vec![player(10..200, 200), player(20..200, 200)])
-            };
-            let log = run(&h, config, 200, input);
-            assert_eq!(
-                empties(&h, &log, 1),
-                leaves,
-                "{config:?}: two leaves in one tick"
-            );
+            for (apart, empties_at) in [(0, vec![]), (1, vec![]), (2, vec![ticks(60.0) + 2])] {
+                let input = WalkerInput {
+                    track_ends: vec![
+                        (ticks(60.0), 0, TrackEnd::Deleted),
+                        (ticks(60.0) + apart, 1, TrackEnd::Deleted),
+                    ],
+                    ..tracks(vec![player(10..200, 200), player(20..200, 200)])
+                };
+                let log = run(&h, config, 200, input);
+                assert_eq!(
+                    empties(&h, &log, 1),
+                    empties_at,
+                    "{config:?}: leaves {apart} ticks apart"
+                );
+            }
+            // Two entries in one second (the walker samples once a second).
             let log = run(
                 &h,
                 config,
@@ -562,8 +611,32 @@ mod tests {
             );
             assert_eq!(
                 empties(&h, &log, 1),
-                entries,
+                [ticks(80.0)],
                 "{config:?}: two entries in one tick"
+            );
+        }
+    }
+
+    /// A second busy period: the fired CLEAR zone is switched on again (a
+    /// check, flight 2K) and fires when the area empties again.
+    #[test]
+    fn busy_twice() {
+        let h = harness(&[CENTRE]);
+        for config in configs() {
+            let mut players: Vec<_> = (0..4)
+                .map(|i| player(10 + 10 * i..100 + 10 * i, 400))
+                .collect();
+            players.extend((0..4).map(|i| player(200 + 10 * i..300 + 10 * i, 400)));
+            let log = run(&h, config, 400, tracks(players));
+            assert_eq!(
+                times(&log, id(&h, 1, "UP 4")),
+                [ticks(40.0), ticks(230.0)],
+                "{config:?}"
+            );
+            assert_eq!(
+                empties(&h, &log, 1),
+                [ticks(130.0), ticks(330.0)],
+                "{config:?}"
             );
         }
     }

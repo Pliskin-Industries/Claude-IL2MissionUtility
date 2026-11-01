@@ -230,6 +230,16 @@ Per side and area: a Complex Trigger filtered to the players' country (601 or
 501) at r_in, and a pulsed coalition check zone for the presence check every
 HOLD, driving the area's HOT and COLD relays (decisions 0023, 0024, 0045).
 `ai_country` / `ai_country_for_player` give the AI countries 602 / 503.
+`player_country`, `enemy_coalitions`, `player_trigger` and `place_trigger` are
+shared with `presence.rs`.
+**Air Tasking generation.**
+
+### `airtask/presence.rs` — a player count per area
+Decision 0050 D, built for probe flight 2R and not yet wired into the shell. Per
+side and area: a Complex Trigger on the other side's player country steps a
+relay chain from 0 to 3 (Entered up; Left and Finished down), then busy; a
+Closer 0 `CLEAR` zone clears busy when nobody of that side is left. `EMPTY`
+fires when the area empties. 26 MCUs per area.
 **Air Tasking generation.**
 
 ### `airtask/clock.rs` — the mission clock
