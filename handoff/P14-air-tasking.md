@@ -1020,7 +1020,7 @@ The D30 AI-trigger check, the slot-window cap warning, the totals warning (D36) 
 - `ctrl_7_opens_air_tasking`.
 - `plain_7_on_map_does_not_panic`.
 - `air_tasking_undo_restores_weight_change` (a pool entry built with `PoolEntry::new`; edit a weight, Ctrl Z, pool equal to before).
-- `air_tasking_threshold_n_is_fixed_at_1`.
+- `air_tasking_threshold_n_is_fixed_at_1` (became `air_tasking_threshold_n_runs_from_1_to_3` in step 12e).
 - `air_plan_first_entry_ticks_include_in_base_map`.
 
 **New (step 8, part b: needs step 2's library and step 7's `validate` / `build_air_packs` / `totals` bodies):**
@@ -1985,7 +1985,7 @@ The original structural/walker checks remain `flight2_sorties_use_the_shell_life
 | 12c | **Threshold for N ≥ 2**: `ThresholdImpl::Counted`, decision 0047 E (Entered → `COUNT`, Left → `ZERO`); walker tests first; N = 1 output unchanged. `CounterResetImpl` removed (mechanical commit) | nothing |
 | 12b, part 1 | **Flight 2M**, no pilot, on this PC, about 20 min. AI of the players' country stand in for players. Cells B1 to B4 (risk b: two watched planes; one deleted, killed, flown out, or a pair's wingman; the other later). Cells D1 to D5 (the exported N = 2 cell). Cells L1 and L2 (does a plane killed or deleted inside raise Left? 0047) | 12c; the user's OK for the Dogfight folder and a free screen |
 | 12d | **Zone Out strategy** by 2M's cells B: decision 0048. ALL-out: remove the dead `Watchdog`. ANY-out: the option the user picks | 2M |
-| 12e | **UI.** THRESHOLD lets N go from 1 to 3 (one N for both sides); `readiness_checks`, `validate`, the manual | 12c |
+| 12e | **UI.** THRESHOLD lets N go from 1 to 3 (one N for both sides); the Player count section (count radius, areas per side; decision 0052); count circles on the Map; `readiness_checks`, `validate`, the manual. **Built 2026-11-01** | 12c |
 | 12f | **Flight 2N**: two human pilots on the real dedicated server, about 30 min (two halves of 15 min). Half 1: the N = 2 threshold. Half 2: Zone Out with two players leaving at different times. Step 11 item 5 (load time and tick delay) in the same session | 12c to 12e; a second pilot |
 
 Confirmed if (2M, cells B): Zone Out fires only when the last watched plane has gone (ALL-out). Confirmed if (2M, cells D): one entry does not arm; two entries arm; an entry, a leave and an entry do not; a loiterer and a later arrival arm; each aircraft of a pair counts; a failed dwell is followed by a fresh count. Flight 2N confirms both with players.
@@ -2184,3 +2184,4 @@ The repo does not prove any of these in game. The shipped files only show what t
 - **2026-10-31, step 12 scoped (decision 0046; 0047 and 0048 Proposed).** §8 step 12 rewritten: 12a done, T-d answered by flights 1N, 1D, 2J and A1, risk b flown first with AI stand-ins (flight 2M, no pilot), two human pilots last (flight 2N, with step 11 item 5). §3.9 opens with what changed: no window, the count resets on Left (0047 E), no counter ring (E6), the Watchdog options (0048). Risks b, d and e updated.
 - **2026-10-31, decision 0050 D wired (step 12).** Each copy ends on its area's player count, not its own Zone IN / Zone Out. `presence.rs` gives one count per area (26 MCUs, 1 check zone, default radius 50 km, `ThresholdSpec.count_radius_m`). The copy's `ON STATION IN` switches `EMPTY IN` on, and the count's `EMPTY` fires it. Per copy: 4 template zone MCUs and 2 check zones fewer, 2 MCUs more. `ZoneOutImpl` is `AreaCount` (default) or `CheckZone` (flown probes only); the Watchdog is removed, and decision 0048 is superseded. Flight 2L is frozen as flown. Still to do: Generate's no-spawn-inside check, and the radius control (12e).
 - **2026-10-31, decision 0050 D: the spawn check (decision 0051).** `AirContext.player_spawns` carries the Map's air starts and its reference groups' player spawns; the export errors on one inside a count circle that watches its side (`presence::spawns_inside`). UI tests whose air starts sit 20 to 26 km from an area set a smaller count radius until the 12e control exists.
+- **2026-11-01, step 12e built (decision 0052).** The THRESHOLD control's N runs from 1 to 3. A new Player count section holds the count radius (10 to 100 km, default 50 km) and each side's areas (one per target). Map's Air dock draws the count circles (`AirPreview.count_circles`). `validate` refuses a count radius outside 10 to 100 km and warns (orange) when it is below the threshold's inner ring. Generate output for the defaults is unchanged.

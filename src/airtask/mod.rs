@@ -28,6 +28,8 @@ mod zone;
 pub use library::{builtin_library, default_category, load_user_sortie, DEFAULT_CATEGORIES}; // fn builtin_library() -> Vec<AirSortie>; fn default_category(sortie: &AirSortie) -> String; fn load_user_sortie(path: &std::path::Path) -> Result<AirSortie, String>; const DEFAULT_CATEGORIES: [&str; 5]
 pub use timing::{derived_timing, f80_cruise_kmh, hard_stop}; // fn derived_timing(t: &ThresholdSpec) -> DerivedTiming; fn f80_cruise_kmh() -> F80Cruise; fn hard_stop(sortie: &AirSortie, plan: &AirPlan, mode: TriggerMode) -> Option<f64>; F80Cruise and f80_transit_s stay in timing.rs
 pub use pool::{add_category, add_entry, add_library_item, auto_fill, category_counts, default_categories, entry_status, pool_counts, remove_category, remove_library_item, rename_category, resolve_target, set_category, target_choices, EntryStatus, TargetChoice, TargetKind}; // fn add_category(plan: &mut AirPlan, name: &str) -> Result<(), String>; fn add_entry(plan: &mut AirPlan, entry: PoolEntry); fn add_library_item(plan: &mut AirPlan, sortie: AirSortie); fn auto_fill(plan: &mut AirPlan, ctx: &AirContext, side: AirSide, category: Option<&str>) -> usize; fn category_counts(plan: &AirPlan) -> Vec<(String, usize)>; fn default_categories() -> Vec<String>; fn entry_status(plan: &AirPlan, index: usize, ctx: &AirContext) -> EntryStatus; fn pool_counts(plan: &AirPlan) -> [usize; 2]; fn remove_category(plan: &mut AirPlan, name: &str) -> usize; fn remove_library_item(plan: &mut AirPlan, index: usize) -> Result<usize, String>; fn rename_category(plan: &mut AirPlan, old: &str, new: &str) -> Result<(), String>; fn resolve_target(target: &TargetRef, ctx: &AirContext) -> Option<TargetChoice>; fn set_category(plan: &mut AirPlan, sortie_index: usize, name: &str); fn target_choices(ctx: &AirContext, side: AirSide) -> Vec<TargetChoice>; enum EntryStatus { Ok, Orphaned, SideChanged, OutOfDate, MissingSortie }; struct TargetChoice { kind: TargetKind, number: usize, side: AirSide, target: TargetRef }; enum TargetKind { Objective, Arrow }
+pub(crate) use presence::COUNT_RADIUS_KM; // RangeInclusive<f64>: the count radius `validate` accepts and the slider offers (decision 0052)
+pub(crate) use threshold::PLAYERS_RANGE; // RangeInclusive<u8>: the THRESHOLD control's N bounds (decision 0047)
 pub(crate) use presence::player_spawns_in; // fn player_spawns_in(root: &Il2Entity) -> Vec<PlayerSpawn>: the Map reference groups' player spawns (decision 0051)
 pub use standalone::{build_air_group, sidecar_paths}; // fn build_air_group(plan: &AirPlan, ctx: &AirContext) -> Result<crate::ast::Il2Entity, String>; fn sidecar_paths(plan: &AirPlan) -> Vec<std::path::PathBuf>
 
@@ -383,7 +385,7 @@ pub struct AirRing {
     pub centre: (f64, f64),
     pub radius_m: f64,
     pub inner: bool,
-} // R, or r_in when inner
+} // R, or r_in when inner; a player count circle (`count_circles`) is never inner
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AirPoint {
     pub side: AirSide,
@@ -405,6 +407,7 @@ pub struct AirPreview {
     pub spawns: Vec<AirPoint>,
     pub rtbs: Vec<AirPoint>,
     pub slot_times: [Vec<SlotMark>; 2], // [DPRK, NATO], 0–3 h (D29)
+    pub count_circles: Vec<AirRing>, // decision 0050 D: one player count circle per area
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AirDrawCounts {
@@ -412,6 +415,7 @@ pub struct AirDrawCounts {
     pub rings: usize,
     pub spawns: usize,
     pub rtbs: usize,
+    pub count_circles: usize,
 }
 impl AirPreview {
     #[cfg(test)] // the Map draw tests compare `AirDock::drawn` with it
@@ -421,6 +425,7 @@ impl AirPreview {
             rings: self.rings.len(),
             spawns: self.spawns.len(),
             rtbs: self.rtbs.len(),
+            count_circles: self.count_circles.len(),
         }
     }
 }

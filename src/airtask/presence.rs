@@ -112,6 +112,10 @@ pub(crate) fn traced_role(role: &str) -> bool {
 ///
 /// Mission makers keep player spawns outside every circle (decision 0050): a
 /// player who appears inside a trigger is not reported as entering (flight A1).
+/// The count radius a plan may use, in km (decision 0052). `build_side` takes
+/// any positive radius, so the flown probes keep theirs (flight 2R: 6 km).
+pub(crate) const COUNT_RADIUS_KM: std::ops::RangeInclusive<f64> = 10.0..=100.0;
+
 pub(crate) fn build_side(
     side: AirSide,
     areas: &[(f64, f64)],

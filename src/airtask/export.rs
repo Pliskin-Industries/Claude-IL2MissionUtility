@@ -394,6 +394,28 @@ fn evaluate(plan: &AirPlan, ctx: &AirContext<'_>) -> (Vec<MapAirPack>, Vec<AirIs
         &mut 1,
     ) {
         issues.push(issue(IssueSeverity::Error, error));
+    } else if plan.strategies.zone_out == ZoneOutImpl::AreaCount {
+        let count_km = plan.threshold.count_radius_m / 1000.0;
+        let inner_m = timing::derived_timing(&plan.threshold).inner_m;
+        if !presence::COUNT_RADIUS_KM.contains(&count_km) {
+            issues.push(issue(
+                IssueSeverity::Error,
+                format!(
+                    "Air Tasking player count radius must be {} to {} km",
+                    presence::COUNT_RADIUS_KM.start(),
+                    presence::COUNT_RADIUS_KM.end()
+                ),
+            ));
+        } else if plan.threshold.count_radius_m < inner_m {
+            // The threshold's trigger and presence check sit on the inner ring.
+            issues.push(issue(
+                IssueSeverity::Warning,
+                format!(
+                    "Air Tasking player count radius ({count_km:.1} km) is smaller than the threshold's inner ring ({:.1} km). A player inside the ring but outside the count can start a sortie that finds its area empty and holds for its time on station.",
+                    inner_m / 1000.0
+                ),
+            ));
+        }
     }
     issues.extend(path_issues(plan, &eligible));
     let mut next_id = 1;
@@ -565,6 +587,14 @@ pub(super) fn preview(plan: &AirPlan, ctx: &AirContext<'_>) -> AirPreview {
                     centre,
                     radius_m,
                     inner,
+                });
+            }
+            if plan.strategies.zone_out == ZoneOutImpl::AreaCount {
+                preview.count_circles.push(AirRing {
+                    side,
+                    centre,
+                    radius_m: plan.threshold.count_radius_m,
+                    inner: false,
                 });
             }
         }
@@ -1543,6 +1573,49 @@ mod tests {
         assert!(refused(&[at(AirSide::Dprk, 20.0)]).is_empty(), "the area's own side is not watched");
     }
 
+    /// Step 12e: a count circle smaller than the threshold's inner ring (where
+    /// its trigger and presence check sit) lets a player start a sortie from
+    /// outside the count; the sortie then finds its area empty and holds for
+    /// its time on station. Orange, not blocking.
+    #[test]
+    fn validate_warns_when_the_count_radius_is_below_the_inner_ring() {
+        let warned = |count_km: f64, zone_out: ZoneOutImpl| {
+            let (mut plan, input) = export_test_plan();
+            plan.threshold.radius_m = 30_000.0; // inner ring 15 km
+            plan.threshold.count_radius_m = count_km * 1000.0;
+            plan.strategies.zone_out = zone_out;
+            super::super::validate(&plan, &input.context())
+                .into_iter()
+                .filter(|i| i.text.contains("smaller than the threshold's inner ring"))
+                .collect::<Vec<_>>()
+        };
+        let issues = warned(10.0, ZoneOutImpl::AreaCount);
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!(issues[0].severity, IssueSeverity::Warning);
+        assert_eq!(
+            issues[0].text,
+            "Air Tasking player count radius (10.0 km) is smaller than the threshold's inner ring (15.0 km). A player inside the ring but outside the count can start a sortie that finds its area empty and holds for its time on station."
+        );
+        assert!(warned(15.0, ZoneOutImpl::AreaCount).is_empty(), "equal is fine");
+        assert!(warned(10.0, ZoneOutImpl::CheckZone).is_empty(), "no count without AreaCount");
+    }
+
+    /// Decision 0052: the plan's count radius stays inside the slider's range.
+    #[test]
+    fn validate_refuses_a_count_radius_outside_10_to_100_km() {
+        for (km, refused) in [(9.9, true), (10.0, false), (100.0, false), (100.1, true)] {
+            let (mut plan, input) = export_test_plan();
+            plan.threshold.count_radius_m = km * 1000.0;
+            let issues = super::super::validate(&plan, &input.context());
+            assert_eq!(
+                issues.iter().any(|i| i.severity == IssueSeverity::Error
+                    && i.text == "Air Tasking player count radius must be 10 to 100 km"),
+                refused,
+                "{km}: {issues:?}"
+            );
+        }
+    }
+
     #[test]
     fn validate_flags_a_bad_count_radius() {
         for radius in [0.0, -1.0, f64::NAN] {
@@ -1644,9 +1717,20 @@ mod tests {
                     lines: expected.0,
                     rings: expected.1,
                     spawns: expected.0,
-                    rtbs: expected.0
+                    rtbs: expected.0,
+                    count_circles: expected.1 / 2,
                 }
             );
+            // Decision 0050 D: one count circle per area, on the threshold's centre.
+            for side in SIDES {
+                let outer: Vec<_> = preview.rings.iter().filter(|r| r.side == side && !r.inner).map(|r| r.centre).collect();
+                let counts: Vec<_> = preview.count_circles.iter().filter(|c| c.side == side).collect();
+                assert_eq!(counts.iter().map(|c| c.centre).collect::<Vec<_>>(), outer);
+                assert!(counts.iter().all(|c| c.radius_m == 50_000.0 && !c.inner));
+            }
+            let mut check_zone_plan = plan.clone();
+            check_zone_plan.strategies.zone_out = ZoneOutImpl::CheckZone;
+            assert!(super::super::preview(&check_zone_plan, &input.context()).count_circles.is_empty(), "no count without AreaCount");
             for side in SIDES {
                 assert_eq!(
                     preview.slot_times[side.idx()],

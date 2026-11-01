@@ -2516,7 +2516,18 @@ fn side_panel_controls_stay_inside_their_panel() {
             }
         }};
         check(&h, "initial");
-        if tab == "Air Tasking" { visit_air_category_controls(&mut h, check); }
+        if tab == "Air Tasking" {
+            // The settings panel scrolls: check each part, the Player count section included.
+            let mut count_radius = false;
+            air_scroll(&mut h, SCREEN.x - 100.0, 10000.0);
+            for _ in 0..10 {
+                check(&h, "settings");
+                count_radius |= h.all("Count radius").iter().any(|n| n.role == Role::Slider);
+                air_scroll(&mut h, SCREEN.x - 100.0, -220.0);
+            }
+            assert!(count_radius, "the Player count section was not reached");
+            visit_air_category_controls(&mut h, check);
+        }
     }
     assert!(
         out.is_empty(),
@@ -2819,16 +2830,21 @@ fn air_scroll(h: &mut Harness, x: f32, delta: f32) {
 }
 
 fn air_open_section(h: &mut Harness, title: &str) {
+    let header = air_settings_control(h, title, Role::Button);
+    h.click_at(header.rect.center());
+}
+
+/// Scrolls the settings panel from the top until a control is on screen.
+fn air_settings_control(h: &mut Harness, label: &str, role: Role) -> Node {
     air_scroll(h, SCREEN.x - 100.0, 10000.0);
     for _ in 0..12 {
-        if let Some(node) = h.nodes.iter().find(|n| n.label == title && n.role == Role::Button
+        if let Some(node) = h.nodes.iter().find(|n| n.label == label && n.role == role
             && n.rect.center().y > shell::HEADER_H && n.rect.center().y < SCREEN.y - shell::STATUS_H).cloned() {
-            h.click_at(node.rect.center());
-            return;
+            return node;
         }
         air_scroll(h, SCREEN.x - 100.0, -240.0);
     }
-    panic!("could not open Air Tasking section {title}: {:?}", h.labels());
+    panic!("no {role:?} {label:?} in the settings panel. Labels: {:?}", h.labels());
 }
 
 fn air_type(h: &mut Harness, field: &str, text: &str) {
@@ -3181,15 +3197,44 @@ fn air_tasking_undo_restores_weight_change() {
     assert_eq!(h.app.air_plan.pool, before, "one Undo restores the start of the drag");
 }
 
+/// Decision 0047 (step 12e): one N for both sides, from 1 to 3, with Undo.
 #[test]
-fn air_tasking_threshold_n_is_fixed_at_1() {
+fn air_tasking_threshold_n_runs_from_1_to_3() {
     let mut h = Harness::new("air_players");
     h.tab("Air Tasking");
-    let players = h.all("Players").into_iter().find(|n| n.role == Role::SpinButton).unwrap();
-    assert!(players.disabled);
-    h.drag(players.rect.center(), players.rect.center() + Vec2::new(100.0, 0.0));
-    assert_eq!(h.app.air_plan.threshold.players_n, 1);
-    assert!(h.has("Two or more players comes with the multi-player phase."));
+    let players = |h: &Harness| h.all("Players").into_iter().find(|n| n.role == Role::SpinButton).unwrap();
+    let at = players(&h).rect.center();
+    assert!(!players(&h).disabled);
+    assert!(h.has("1 player · 12 km"));
+    h.drag(at, at + Vec2::new(400.0, 0.0));
+    assert_eq!(h.app.air_plan.threshold.players_n, 3, "stops at 3");
+    assert!(h.has("3 players · 12 km"));
+    assert!(!h.has("Two or more players comes with the multi-player phase."));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan.threshold.players_n, 1, "one Undo restores the start of the drag");
+    h.drag(at, at - Vec2::new(400.0, 0.0));
+    assert_eq!(h.app.air_plan.threshold.players_n, 1, "stops at 1");
+}
+
+/// Decision 0050 D (step 12e): the count radius slider sets the plan, with
+/// Undo, and the section names each side's areas (one per target).
+#[test]
+fn air_tasking_count_radius_slider_sets_the_plan() {
+    let mut h = Harness::new("air_count_radius");
+    h.tab("Air Tasking");
+    assert!(h.has("Areas · DPRK 0 · NATO 0"));
+    fill_air_pool(&mut h);
+    assert!(h.has("Areas · DPRK 1 · NATO 1"), "{:?}", h.labels());
+    assert!(h.has("50 km · 2 areas"));
+    let slider = air_settings_control(&mut h, "Count radius", Role::Slider);
+    assert!(!slider.disabled);
+    h.drag(slider.rect.center(), Pos2::new(slider.rect.left() - 50.0, slider.rect.center().y));
+    assert_eq!(h.app.air_plan.threshold.count_radius_m, 10_000.0, "stops at 10 km");
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan.threshold.count_radius_m, 50_000.0);
+    let slider = air_settings_control(&mut h, "Count radius", Role::Slider);
+    h.drag(slider.rect.center(), Pos2::new(slider.rect.right() + 50.0, slider.rect.center().y));
+    assert_eq!(h.app.air_plan.threshold.count_radius_m, 100_000.0, "stops at 100 km");
 }
 
 /// Decisions 0050 D and 0051: a Map air start inside a count circle that
@@ -3212,6 +3257,11 @@ fn air_tasking_air_start_inside_a_count_circle_disables_generate() {
     assert!(h.find("Generate File").disabled);
     let problem = h.app.air_idle_problem().unwrap();
     assert!(problem.contains("\"NATO start\" is 20.0 km away, inside the 50.0 km player count circle"), "{problem}");
+    // Step 12e: lowering the radius in the tab turns Generate back on.
+    let slider = air_settings_control(&mut h, "Count radius", Role::Slider);
+    h.drag(slider.rect.center(), Pos2::new(slider.rect.left() - 50.0, slider.rect.center().y));
+    assert_eq!(h.app.air_plan.threshold.count_radius_m, 10_000.0);
+    assert!(!h.find("Generate File").disabled, "{:?}", h.app.air_idle_problem());
 }
 
 #[test]
@@ -3301,7 +3351,8 @@ fn air_tasking_widgets_are_28_px_with_a_filled_pool() {
     for field in ["Entry 6 weight", "Entry 6 runs", "Dwell D", "Hold H", "First slot", "Period", "Jitter steps", "× step", "Quiet", "Arrive in M", "Chance", "Cooldown", "Spawn distance", "Margin", "Extension", "Include in base map"] {
         assert!(seen.contains(field), "not checked: {field}; {seen:?}");
     }
-    assert!(disabled.contains("Players"));
+    assert!(seen.contains("Players") && !disabled.contains("Players"));
+    assert!(seen.contains("Count radius"));
     assert!(disabled.contains("Remove"));
     for field in ["Pool", "Categories", "Pool category filter", "Sortie category", "Rename Strike", "Remove category Strike", "New category", "Add category", "Rename category", "Save", "Cancel", "Interdiction"] {
         assert!(seen.contains(field), "category control not checked: {field}; {seen:?}");
@@ -3808,8 +3859,12 @@ fn air_dock_draws_preview() {
     let preview = h.app.with_air_context(|ctx| crate::airtask::preview(&h.app.air_plan, ctx));
     assert_eq!(h.app.air_dock.drawn, preview.counts());
     assert!(preview.counts().lines > 0 && preview.counts().rings > 0, "{:?}", preview.counts());
+    assert!(preview.counts().count_circles > 0, "{:?}", preview.counts());
     h.click("Approach lines");
     assert_eq!(h.app.air_dock.drawn.lines, 0, "SHOW hides the approach lines");
+    assert_eq!(h.app.air_dock.drawn.rings, preview.counts().rings);
+    h.click("Count circles");
+    assert_eq!(h.app.air_dock.drawn.count_circles, 0, "SHOW hides the count circles");
     assert_eq!(h.app.air_dock.drawn.rings, preview.counts().rings);
 }
 
@@ -4644,7 +4699,7 @@ fn map_air_dock_widgets_are_28_px_with_entries() {
         }
     }
     for label in ["DPRK", "NATO", "Auto-fill from objectives", "Entry 1 weight", "Entry 1 mode", "Remove entry 1",
-        "Entry 14 weight", "Entry 14 mode", "Remove entry 14", "Approach lines", "Threshold rings", "Spawn points", "RTB points"] {
+        "Entry 14 weight", "Entry 14 mode", "Remove entry 14", "Approach lines", "Threshold rings", "Count circles", "Spawn points", "RTB points"] {
         assert!(seen.contains(label), "not checked: {label}; {seen:?}");
     }
     small.sort();

@@ -104,7 +104,8 @@ Presentation only. **All modes.**
 
 ### `ui/air.rs` — Air Tasking rail tab
 The library, category editor and pool filter, target picker, editable pool,
-slot strip, plan checks and settings.
+slot strip, plan checks and settings (the threshold's N, and the Player count
+section: the count radius and each side's areas, from `AirPreview.count_circles`).
 Builds the Map context and calls the public `airtask` API; owns presentation,
 undo snapshots and the standalone file dialog. `draw_slot_strip` also serves
 the future Map Air dock. **Air Tasking.**
