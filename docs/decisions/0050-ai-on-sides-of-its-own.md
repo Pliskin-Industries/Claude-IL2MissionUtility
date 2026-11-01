@@ -1,8 +1,8 @@
 # 0050. Watch players only: put Air Tasking's AI on sides of its own
 
-- **Status:** Proposed. Option A fails (flight 2Q). The user chose option D for testing (2026-10-31). Flight 2R flew it as built, every cell as predicted; the user accepts D or not.
+- **Status:** Accepted (option D), 2026-10-31. Option A failed (flight 2Q). Flight 2R flew D as built, every cell as predicted.
 - **Date:** 2026-10-31
-- **Decided by:** open. The user raised the problem and asked for the probe ("Yes, plan the probe", "Yes, run stage 1").
+- **Decided by:** the user, 2026-10-31 ("Accept D, wire it"), after flight 2R. The user raised the problem, chose D's shape (one count per area, count to three then busy, no spawns inside, an empty area at arrival carries on) and asked for each probe.
 
 ## Context
 
