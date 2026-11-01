@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-11-01: Astra's review of steps 8 to 12 found 12 issues; fixes are on two unpushed branches (below). Flight 2S failed 0053 in the game (a wreck that crosses out raises Left, so a kill counted twice). The user chose **0058 A**: the count is back on Left and Finished. Both branches are ready to push when the user says so. Then flight 2N (12f) with two human pilots.
+> Last updated: 2026-11-01: Astra's review of steps 8 to 12 found 12 issues; fixes are on two unpushed branches (below). Flight 2S failed 0053 in the game (a wreck that crosses out raises Left, so a kill counted twice). The user chose **0058 A**: the count is back on Left and Finished. Both branches are pushed as stacked PRs #51 and #52, waiting for the user to merge. Then flight 2N (12f) with two human pilots.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -18,12 +18,12 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | Branch | Holds | State |
 |---|---|---|
 | `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); standalone check L (PR #45); step 10 docs (PR #47); L's F-80 collision note and STATE (PR #48); step 12 parts 12a to 12e with flights 2M, 2P, S1, 2Q, 2R (PR #49); decisions 0001 to 0052 | `origin/main` `6f02211` |
-| `codex/review-fixes-replay-trace` (worktree `.claude/worktrees/review-fixes`) | Review fixes 1 to 9: Replay one session at a time, rescan on Run, discarded lines shown, `(T - 3) / 50` fallback, stale-trace fingerprint; trace builds refuse a non-.Group name, check index room, separate breadcrumb bands; L's base map compared byte for byte again. Decisions 0056, 0057. Non-trace and Map trace output unchanged | committed `6d6187b`, not pushed; 1117 passed |
-| `codex/airtask-0053-0055` (worktree `.claude/worktrees/airtask-fixes`) | Review findings A to C: 0053 tried and rejected by flight 2S, so 0058 A keeps the count on Left and Finished (as on `main`); 0054 standalone base map moves Map AI; 0055 clock gates RANDOM through AVAILABLE. Air Tasking output changes on purpose for 0054 and 0055 only; flown probes 2R, 2L and 2S keep their wiring through test-only switches | committed, not pushed; 1112 passed |
+| `codex/review-fixes-replay-trace` (worktree `.claude/worktrees/review-fixes`) | Review fixes 1 to 9: Replay one session at a time, rescan on Run, discarded lines shown, `(T - 3) / 50` fallback, stale-trace fingerprint; trace builds refuse a non-.Group name, check index room, separate breadcrumb bands; L's base map compared byte for byte again. Decisions 0056, 0057. Non-trace and Map trace output unchanged | PR #51 (base `main`), open; 1117 passed |
+| `codex/airtask-0053-0055` (worktree `.claude/worktrees/airtask-fixes`) | Review findings A to C: 0053 tried and rejected by flight 2S, so 0058 A keeps the count on Left and Finished (as on `main`); 0054 standalone base map moves Map AI; 0055 clock gates RANDOM through AVAILABLE. Air Tasking output changes on purpose for 0054 and 0055 only; flown probes 2R, 2L and 2S keep their wiring through test-only switches | PR #52, stacked on #51 (rebased onto it; GitHub retargets it to `main` when #51's branch is deleted), open; 1127 passed |
 
 `upstream/main` has one commit not merged here (`571504a`, harvested coalition groups and ramp starts per country). Merged branches and their worktrees under `.claude/worktrees/` can be deleted once their idle sessions are archived.
 
-Last recorded test run: **1112 passed, 0 failed, 42 ignored** (`cargo test`, 2026-11-01) on `codex/airtask-0053-0055` after 0058 A; **1117 passed, 0 failed, 41 ignored** on `codex/review-fixes-replay-trace` `6d6187b`. Clippy 306, no new warnings. Record each new run on this line.
+Last recorded test run: **1127 passed, 0 failed, 42 ignored** (`cargo test`, 2026-11-01) on `codex/airtask-0053-0055` after 0058 A, rebased onto the review fixes; **1117 passed, 0 failed, 41 ignored** on `codex/review-fixes-replay-trace` `6d6187b`. Clippy 306, no new warnings. Record each new run on this line.
 
 ## P14 Air Tasking ("Wing Commander")
 
@@ -53,7 +53,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Waiting on the user
 
-**First: push the two review branches?** Both are committed and pass the suite; nothing is pushed.
+**First: merge PR #51, then PR #52.** Merge #51 with its branch deleted, so #52 retargets to `main`.
 1. **Send the Air Tasking proposal to eszyman?** Draft: `handoff/upstream-air-tasking-proposal-draft.md` (decision 0026). The bar was a working concept and UI; A2 and A3 now run end to end from the app's Map Generate. Where to post it (new issue or issue #1) and when is yours.
 2. **Merge `upstream/main` `571504a`?** It touches the airfield harvest that 0042 also changed.
 3. **Three game bug reports are drafted, not posted** (`handoff/il2-bug-report-drafts.md`). The paused-timer finding (2K) may be a fourth.
@@ -62,7 +62,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Next steps
 
-1. **Push and merge** the two review branches when the user says so (review fixes first). The two branches touch `ui_tests.rs`, `probe.rs` and `export.rs` in different places; rebase the second on the first and re-run the suite.
+1. **Merge** PR #51, then #52, when the user says so. After that, delete the `review-fixes`, `airtask-fixes` and `flight-2s` worktrees. The review-fixes worktree's uncommitted `STATE.md` is Astra's and can be discarded.
 2. **Flight 2N** (12f) and step 11 item 5, on the real host, once the user has a second pilot and a time. Claude first writes 2N's run sheet and mission from the step 12 note (§3). Build it as a trace build and check its logs for 0058's race (`CLEAR`, `UP 1`, then `DOWN 1` and `EMPTY` within about 12 s with no player leaving).
 3. Then the eszyman proposal, if the user wants it sent.
 
