@@ -4244,10 +4244,11 @@ fn replay_chain_group(h: &Harness) -> PathBuf {
         &mut 100,
         TraceCarrier::Objective(ObjectiveStyle::default()),
         &mut map,
-    );
+    ).expect("trace indexes fit");
     let path = h.out("chain.Group");
-    std::fs::write(&path, serialize_group(&group)).unwrap();
-    crate::trace::write_trace_sidecar(&path, &map).unwrap();
+    let text = serialize_group(&group);
+    std::fs::write(&path, &text).unwrap();
+    write_trace(&path, &text, Some(&map)).unwrap();
     path
 }
 
@@ -4269,6 +4270,206 @@ fn run_replay(h: &mut Harness, group: &Path, logs: &Path) {
 }
 
 const NO_SIDECAR: &str = "No .trace.json next to this .Group: the report has no breadcrumb sections.";
+
+#[test]
+fn review_replay_selects_one_session_newest_first() {
+    let mut h = Harness::new("review_sessions");
+    let group = replay_chain_group(&h);
+    let logs = h.out("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    let old = "2026-10-30_12-00-00";
+    let new = "2026-11-01_09-00-00";
+    for (session, n, lines) in [
+        (old, 0, "T:503 AType:8 POS(5000,0,5000)\nT:653 AType:8 POS(5010,0,5000)"),
+        (new, 0, "T:503 AType:8 POS(5000,0,5000)"),
+        (new, 10, "T:1503 AType:21 USERID:observer"),
+        (new, 2, "T:1003 AType:21 USERID:observer"),
+    ] {
+        std::fs::write(logs.join(format!("missionReport({session})[{n}].txt")), lines).unwrap();
+    }
+    run_replay(&mut h, &group, &logs);
+    let replay = &h.app.replay.loaded.as_ref().unwrap().replay;
+    assert_eq!(replay.dead_links.len(), 1, "the old session's B must not hide the new session's dead link");
+    assert_eq!(replay.dead_links[0].to, 101, "B is missing in the new session");
+    let names: Vec<_> = replay.files.iter().map(|p| p.file_name().unwrap().to_str().unwrap()).collect();
+    assert_eq!(names, [0, 2, 10].map(|n| format!("missionReport({new})[{n}].txt")));
+    assert!(h.find("Log session").rect.height() >= 27.5);
+    h.click("Log session");
+    h.click(old);
+    assert!(h.app.replay.loaded.is_none(), "changing sessions clears the old report");
+    h.click("Run replay");
+    assert!(h.app.replay.loaded.as_ref().unwrap().replay.dead_links.is_empty());
+}
+
+#[test]
+fn review_replay_rescans_after_picking_an_empty_folder() {
+    let mut h = Harness::new("review_rescan");
+    let group = replay_chain_group(&h);
+    let logs = h.out("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    h.click("Replay…");
+    dialog::answer(vec![group]);
+    h.click("Pick .Group…");
+    dialog::answer(vec![logs.clone()]);
+    h.click("Log folder…");
+    std::fs::write(logs.join("missionReport(rescan)[0].txt"), "T:503 AType:8 POS(5000,0,5000)").unwrap();
+    assert!(!h.find("Run replay").disabled, "Run can rescan an initially empty folder");
+    h.click("Run replay");
+    assert!(!h.has("Log session"), "one session needs no picker");
+    std::fs::write(logs.join("missionReport(rescan)[1].txt"), "T:653 AType:8 POS(5010,0,5000)\nT:1503 AType:21 USERID:observer").unwrap();
+    h.click("Run replay");
+    let replay = &h.app.replay.loaded.as_ref().unwrap().replay;
+    assert_eq!(replay.files.len(), 2);
+    assert_eq!(replay.firings[1].times_s.len(), 1, "Run reads the new [1] file");
+}
+
+#[test]
+fn review_replay_marks_discarded_lines_incomplete() {
+    let mut h = Harness::new("review_malformed");
+    let group = replay_chain_group(&h);
+    let logs = h.out("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(logs.join("missionReport(bad)[0].txt"), "T:503 AType:8 POS(5000,0,5000)\nbroken header\nT:no AType:8\nT:1503 AType:21 USERID:observer").unwrap();
+    run_replay(&mut h, &group, &logs);
+    assert!(h.labels().iter().any(|s| s.contains("incomplete") && s.contains("2 malformed lines")), "{:?}", h.labels());
+    for line in [2, 3] {
+        assert!(h.labels().iter().any(|s| s.contains(&format!("missionReport(bad)[0].txt:{line}"))), "{:?}", h.labels());
+    }
+    assert!(h.status().contains("incomplete"));
+}
+
+#[test]
+fn review_replay_refuses_logs_without_valid_records() {
+    let mut h = Harness::new("review_empty_records");
+    let group = replay_chain_group(&h);
+    let logs = h.out("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    let file = logs.join("missionReport(empty)[0].txt");
+    h.click("Replay…");
+    dialog::answer(vec![group]);
+    h.click("Pick .Group…");
+    dialog::answer(vec![logs]);
+    h.click("Log folder…");
+    for contents in ["", "malformed\nT:bad AType:8"] {
+        std::fs::write(&file, contents).unwrap();
+        h.click("Run replay");
+        assert!(h.app.replay.loaded.is_none(), "no success report without records");
+        assert!(!h.app.replay.layer);
+        assert!(matches!(h.app.status, Status::Error(_)), "{}", h.status());
+        assert!(h.app.replay.error.as_ref().is_some_and(|e| e.contains("no valid records")));
+    }
+}
+
+#[test]
+fn review_replay_empty_trace_has_no_breadcrumb_coverage() {
+    let mut h = Harness::new("review_empty_trace");
+    let group = h.out("empty.Group");
+    std::fs::copy(repo("src/testdata/missionlog/replay.Group"), &group).unwrap();
+    crate::trace::write_trace_sidecar(&group, &crate::trace::TraceMap::default()).unwrap();
+    run_replay(&mut h, &group, &repo("src/testdata/missionlog/chain"));
+    assert!(h.labels().iter().any(|s| s.contains("no breadcrumb coverage")), "{:?}", h.labels());
+}
+
+#[test]
+fn review_trace_overflow_shows_error_and_writes_nothing() {
+    let mut h = Harness::new("review_overflow_ui");
+    h.tab("Airfield");
+    let root = crate::parser::parse_group_file(&format!(
+        "Group {{ MCU_TR_MissionBegin {{ Index = {}; Targets = []; }} }}", i32::MAX
+    )).unwrap();
+    h.app.airfield_root = Some(root);
+    h.app.trace_build = true;
+    h.app.export_airfield();
+    h.settle();
+    assert!(matches!(h.app.status, Status::Error(_)) && h.status().contains("i32 index range"), "{}", h.status());
+    assert!(std::fs::read_dir(&h.dir).unwrap().next().is_none());
+    assert_eq!(dialog::pending(), 0, "refused before opening the save dialog");
+}
+
+#[test]
+fn review_replay_refuses_a_changed_timer() {
+    let mut h = Harness::new("review_changed_timer");
+    let group = replay_chain_group(&h);
+    run_replay(&mut h, &group, &repo("src/testdata/missionlog/chain"));
+    let text = std::fs::read_to_string(&group).unwrap();
+    assert!(text.contains("Time = 2;"));
+    std::fs::write(&group, text.replacen("Time = 2;", "Time = 3;", 1)).unwrap();
+    h.click("Run replay");
+    assert!(h.app.replay.loaded.is_none());
+    assert!(h.app.replay.error.as_ref().is_some_and(|e| e.contains("the .Group changed since its trace was written; regenerate the trace build")));
+    assert!(matches!(h.app.status, Status::Error(_)));
+}
+
+#[test]
+fn review_replay_legacy_trace_shows_cannot_verify() {
+    let mut h = Harness::new("review_legacy_trace");
+    run_replay(&mut h, &a1_group(), &repo("src/testdata/missionlog/real_46"));
+    assert!(h.labels().iter().any(|s| s.contains("cannot verify")), "{:?}", h.labels());
+}
+
+#[test]
+fn review_trace_save_refuses_non_group_paths_before_writing() {
+    for mode in ["Template", "Map", "Air Tasking", "Fighter Pack"] {
+        let mut h = Harness::new(&format!("review_save_{mode}"));
+        match mode {
+            "Template" => baseline_template_inputs(&mut h),
+            "Map" => baseline_map_inputs(&mut h),
+            "Air Tasking" => { h.tab(mode); fill_air_pool(&mut h); }
+            _ => h.tab(mode),
+        }
+        h.app.trace_build = true;
+        for name in ["mission", "mission.txt", "mission.trace.json"] {
+            let out = h.out(name);
+            std::fs::write(&out, b"keep this mission").unwrap();
+            let before = std::fs::read_dir(&h.dir).unwrap().count();
+            dialog::answer(vec![out.clone()]);
+            h.key_with(Key::G, CTRL);
+            assert_eq!(dialog::pending(), 0);
+            assert!(matches!(h.app.status, Status::Error(_)) && h.status().contains(".Group"), "{mode}: {}", h.status());
+            assert_eq!(std::fs::read(&out).unwrap(), b"keep this mission", "{mode}: {name}");
+            assert!(!out.with_extension("eng").exists());
+            assert_eq!(std::fs::read_dir(&h.dir).unwrap().count(), before, "no sidecars written");
+        }
+        let out = h.out("accepted.gRoUp");
+        dialog::answer(vec![out.clone()]);
+        h.key_with(Key::G, CTRL);
+        assert!(matches!(h.app.status, Status::Info(_)), "{mode}: {}", h.status());
+        assert!(out.is_file() && out.with_extension("trace.json").is_file());
+    }
+}
+
+#[test]
+fn review_trace_bands_are_disjoint() {
+    let mut h = Harness::new("review_trace_bands");
+    h.tab("Map");
+    fill_air_pool(&mut h);
+    h.app.terrain_apply = false;
+    h.app.trace_build = true;
+    let map_path = h.out("map.Group");
+    dialog::answer(vec![map_path.clone()]);
+    h.app.generate_front_file();
+    let map = crate::trace::read_trace_sidecar(&map_path).unwrap();
+    h.tab("Air Tasking");
+    let air_path = h.out("air.Group");
+    dialog::answer(vec![air_path.clone()]);
+    h.key_with(Key::G, CTRL);
+    let air = crate::trace::read_trace_sidecar(&air_path).unwrap();
+    assert_eq!(map.band, Some(crate::trace::TraceBand::Map));
+    assert_eq!(air.band, Some(crate::trace::TraceBand::AirTasking));
+    for (path, trace) in [(&map_path, &map), (&air_path, &air)] {
+        assert_eq!(trace.group_fingerprint, Some(crate::trace::fingerprint(&std::fs::read_to_string(path).unwrap())));
+    }
+    assert!(!map.entries.is_empty() && !air.entries.is_empty());
+    assert!(map.entries.iter().all(|m| air.entries.iter().all(|a| m.pos != a.pos)), "Map and standalone Air breadcrumbs collide");
+    baseline_template_inputs(&mut h);
+    let group_path = h.out("group.Group");
+    dialog::answer(vec![group_path.clone()]);
+    h.key_with(Key::G, CTRL);
+    let group = crate::trace::read_trace_sidecar(&group_path).unwrap();
+    assert_eq!(group.band, Some(crate::trace::TraceBand::Group));
+    assert!(!group.entries.is_empty());
+    assert!(group.entries.iter().all(|g| map.entries.iter().chain(&air.entries).all(|e| g.pos != e.pos)));
+}
 
 #[test]
 fn replay_panel_shows_dead_links_and_unobserved_successors() {
@@ -5318,8 +5519,8 @@ fn write_p14_standalone_l() {
 }
 
 /// The two files the editor check starts from, as the run sheet describes
-/// them: the frozen copies' file set (check L was flown on 2026-10-30; decision
-/// 0050 D changed the build, so the byte check is dropped, as for A3); the base
+/// them: the frozen copies' file set and every base file's bytes (check L was
+/// flown on 2026-10-30; decision 0050 D only changed the Air output); the base
 /// map has the air start and no Air Tasking; the standalone file is one `Air
 /// Tasking` group indexed from 1, so its indexes collide with the base map's;
 /// and, under that renumbering, it is A3's Air Tasking group as built now (same
@@ -5340,6 +5541,12 @@ fn standalone_l_build_matches_a3() {
         names
     };
     assert_eq!(stem_files(&h.dir), stem_files(&frozen), "the build writes the frozen file set");
+    for name in stem_files(&frozen).into_iter().filter(|n| n.starts_with(&format!("{L_BASE_STEM}."))) {
+        let expected = std::fs::read(frozen.join(&name)).unwrap();
+        let actual = std::fs::read(h.dir.join(&name)).unwrap();
+        let first = expected.iter().zip(&actual).position(|(a, b)| a != b);
+        assert!(actual == expected, "{name}: first differing byte {:?}; expected {} bytes, got {}", first.or(Some(expected.len().min(actual.len()))), expected.len(), actual.len());
+    }
 
     // The base map: the air start, no Air Tasking, indexes from 1.
     assert!(base.find_by_name("Air Tasking").is_none());
@@ -5362,9 +5569,15 @@ fn standalone_l_build_matches_a3() {
     let mut a3_h = Harness::new("p14_standalone_l_a3");
     let (a3, _) = build_a3(&mut a3_h);
     let mut a3_air = a3.find_by_name("Air Tasking").unwrap().clone();
-    let crumbs: Vec<_> = a3.children.iter().filter(|c| c.block_type == "MCU_TR_MissionObjective").cloned().collect();
+    let mut crumbs: Vec<_> = a3.children.iter().filter(|c| c.block_type == "MCU_TR_MissionObjective").cloned().collect();
     let a3_trace = crate::trace::read_trace_sidecar(&a3_h.out(&format!("{A3_STEM}.trace.json"))).unwrap();
     assert_eq!(crumbs.len(), a3_trace.entries.len(), "A3's breadcrumbs are its root objectives");
+    // Standalone Air uses its own X band; only that fixed offset differs
+    // from Map's unchanged breadcrumb grid. Everything else compares exactly.
+    for crumb in &mut crumbs {
+        let (x, _) = crumb.pos_xz().unwrap();
+        crumb.set_property("XPos", format!("{:.3}", x + crate::trace::TraceBand::AirTasking.x_offset()));
+    }
     a3_air.children.extend(crumbs);
     crate::airtask::testkit::assert_same_up_to_indexes(&a3_air, &air, crate::airtask::testkit::Renumbering::default());
 }
