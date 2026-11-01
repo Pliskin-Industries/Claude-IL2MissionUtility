@@ -242,6 +242,7 @@ fn build_side(
             side,
             &copies.areas,
             plan.threshold.count_radius_m,
+            presence::DownEvents::KilledAndFinishedAlive,
             &mut logic,
             next_id,
         )?;
@@ -390,6 +391,7 @@ fn evaluate(plan: &AirPlan, ctx: &AirContext<'_>) -> (Vec<MapAirPack>, Vec<AirIs
         AirSide::Dprk,
         &[],
         plan.threshold.count_radius_m,
+        presence::DownEvents::KilledAndFinishedAlive,
         &mut SideLogic::default(),
         &mut 1,
     ) {
