@@ -1,6 +1,6 @@
 # 0053. The player count steps down on Killed and Finished alive, not on Finished
 
-- **Status:** Accepted, to ship after no-pilot probe flight 2S
+- **Status:** Superseded by [0058](0058-count-down-events-after-flight-2s.md) (2026-11-01). Flight 2S failed the first merge check below: a wreck that crosses out of the circle raises Left, so a kill stepped the count down twice. Generate is back on Left and Finished; only the 2S probe builds this wiring.
 - **Date:** 2026-11-01
 - **Decided by:** the user, 2026-11-01 ("Fix 1–9, and A–C too"), on Claude's triage of Astra's review of `b5acb35..6f02211` (finding A, Astra job `20261101145549-c0f120bc`, item 1).
 

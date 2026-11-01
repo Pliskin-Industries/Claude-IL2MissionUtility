@@ -37,10 +37,10 @@ pub(crate) const OBJECT_LEFT: i32 = 60;
 /// and level 1 damage did not raise 70). Decision 0049.
 pub(crate) const OBJECT_KILLED: i32 = 70;
 /// Finished (flight 2P): a Delete raises it at once, a kill when the wreck
-/// lands about 15 s later. Only flown probes retain it for counting (0053).
-#[cfg(test)]
+/// lands about 15 s later. The player count (presence.rs) counts down on it.
 pub(crate) const OBJECT_FINISHED: i32 = 62;
 /// Finished alive, Damaged and Critically damaged (flight 2P).
+#[cfg(test)]
 pub(crate) const OBJECT_FINISHED_ALIVE: i32 = 63;
 #[cfg(test)]
 pub(crate) const OBJECT_DAMAGED: i32 = 67;

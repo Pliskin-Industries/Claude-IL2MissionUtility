@@ -1,8 +1,8 @@
-# 0058. Which events step the player count down, after flight 2S (supersedes 0053 when decided)
+# 0058. The player count steps down on Left and Finished again, after flight 2S (supersedes 0053)
 
-- **Status:** Proposed
+- **Status:** Accepted (A)
 - **Date:** 2026-11-01
-- **Decided by:** open; the user decides. Claude wrote this record from flight 2S, which 0053 named as its merge gate.
+- **Decided by:** the user, 2026-11-01 ("Agree, A for now. Add C later if logs show this"), on Claude's record from flight 2S, which 0053 named as its merge gate.
 
 ## Context
 
@@ -19,14 +19,14 @@
 
 ## Options
 
-**A. Go back to Left (60) and Finished (62), the wiring flight 2R flew (Claude recommends).** 0 MCUs.
+**A. Go back to Left (60) and Finished (62), the wiring flight 2R flew (chosen).** 0 MCUs.
 - Every removal 2R and 2S flew steps once: a wreck inside (Finished), a wreck that crosses out (Left), a Delete (Finished).
 - Keeps 0053's fault as a known limitation: a busy area (four or more players) empties completely, a new player enters within about 12 s, and an old wreck's late Finished then empties the count under that player. It needs all three, and S2 shows the wreck's Finished can also come with `CLEAR`, closing the window.
 - The `DownEvents::FlownFinished` wiring becomes the production wiring again. Output for missions with Air Tasking returns to `main`'s.
 
 **B. Keep 0053 (Left, Killed, Finished alive).** Rejected by flight 2S: an outbound wreck steps the count twice.
 
-**C. A, plus a gate that drops Finished for about 12 s after `CLEAR`.** About +3 to +4 MCUs per area (a relay timer that fans Finished out to the `DOWN k` steps, its Deactivate, an on-delay timer, its Activate).
+**C. A, plus a gate that drops Finished for about 12 s after `CLEAR`.** Held back: built only if logs show the race (see Consequences). About +3 to +4 MCUs per area (a relay timer that fans Finished out to the `DOWN k` steps, its Deactivate, an on-delay timer, its Activate).
 - Closes 0053's fault in the safe direction: a Finished lost in the window leaves the count too high, so the area does not empty early.
 - Costs MCUs in every area for a rare case (the MCU economy rule: fewest MCUs and the cleanest design win). Needs a walker test and a no-pilot flight. It also relies on 15.06 s being the longest delay before a wreck's Finished.
 
@@ -34,9 +34,11 @@
 
 ## Decision
 
-Open. If the user picks A: revert 0053's production wiring on `codex/airtask-0053-0055` (export and threshold select the old events), keep flight 2S's probe builder, re-run the suite, then merge with 0054 and 0055. 0053 is then superseded by this record.
+**A.** `presence::DownEvents::LeftAndFinished` is the wiring Generate builds (export and its readiness check). 0053's Left, Killed and Finished alive survive only as the test-only `KilledAndFinishedAlive`, which builds the flown 2S probe. This record supersedes 0053.
 
 ## Consequences
 
-- 0053 does not ship as built, whatever is decided here.
-- With A, Generate's output for missions with Air Tasking matches `main` for the count, so only 0054 and 0055 change it on that branch.
+- Generate's output for missions with Air Tasking matches `main` for the count; on `codex/airtask-0053-0055` only 0054 and 0055 change it.
+- The walker tests pin the known limit: `count_0058_known_limit_a_late_wreck_empties_a_new_entry` expects the late wreck's `EMPTY`. Building C would flip it. `a_kill_steps_down_once_at_the_wreck_finished` and `a_delete_steps_down_once` replace 0053's other two tests.
+- **When to build C.** Look for the race in every flight or server log that has the count in it (flight 2N first). In a trace build it shows as `CLEAR`, then `UP 1`, then `DOWN 1` and `EMPTY` within about 12 s, with no Left from a player and no Delete: the step comes from a wreck removed after `CLEAR`. Without a trace, the sign is a busy area that empties, then a player who enters within seconds and whose AI opponents are deleted while they are still inside. One such case is enough to propose C as a new record.
+- Not flown: a plane killed outside whose wreck falls into the circle. If the wreck raises Entered, A counts it up and then down on its Finished, so it does not stick (0053 would have left it counted).

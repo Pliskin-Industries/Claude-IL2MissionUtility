@@ -1307,7 +1307,7 @@ Three DPRK-side counts (`PCD01` to `PCD03`, 6 km) with 0053's wiring: Left, Kill
 
 ### What this changes (reading)
 
-- **0053 must not ship as built.** A wreck that crosses out of the circle after the kill raises Left about 2 s later, so Killed plus Left steps the count down twice. Decision 0058 (Proposed) sets out the options; Claude recommends going back to Left and Finished.
+- **0053 must not ship as built.** A wreck that crosses out of the circle after the kill raises Left about 2 s later, so Killed plus Left steps the count down twice. Decision 0058 (Accepted, A, 2026-11-01): back to Left and Finished; the gate after CLEAR (C) waits until logs show the race.
 - **Under the old wiring every removal 2R and 2S flew steps once:** a wreck inside (Finished), a wreck that crosses out (Left, then no Finished), a Delete inside (Finished).
 - **A wreck's Finished does not come at a fixed time after the kill:** 14.9 s in S1, 3.0 s in S2, 15.06 s in 2P and 2R. The cause is not known.
 - **Still unflown:** a new entry between CLEAR and an old wreck's late Finished (0053's fault itself), and what a player who quits in flight raises (flight 2N).

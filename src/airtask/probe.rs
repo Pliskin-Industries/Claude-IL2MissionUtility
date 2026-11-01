@@ -7730,8 +7730,8 @@ const TWO_R_GROUPS: &[ThresholdProbeCell] = &[
     two_m_yak("R4", "R4 H single", 1, 590.0, TWO_R_TOP_M, 820.0, StandInRemoval::Delete),
 ];
 
-/// One `presence::build_side(Dprk, ...)` call over `areas`: 2R explicitly keeps
-/// its flown Finished wiring; 2S uses 0053. Each count's trigger and CLEAR zone close with their cell, and every
+/// One `presence::build_side(Dprk, ...)` call over `areas`: 2R uses Generate's
+/// Left and Finished wiring; 2S flew 0053's, which 0058 rejected. Each count's trigger and CLEAR zone close with their cell, and every
 /// step relay, CLEAR and EMPTY leaves a breadcrumb.
 fn add_count_probe_side(p: &mut Probe, areas: &[(Cell, String)], begin_name: &str,
     down_events: super::presence::DownEvents) {
@@ -7763,7 +7763,7 @@ fn build_count_probe() -> Probe {
     }
     let areas: Vec<_> = RUN_SHEET_2R.iter().enumerate()
         .map(|(index, &cell)| (cell, format!("PCD{:02}", index + 1))).collect();
-    add_count_probe_side(&mut p, &areas, "R Translator Mission Begin", super::presence::DownEvents::FlownFinished);
+    add_count_probe_side(&mut p, &areas, "R Translator Mission Begin", super::presence::DownEvents::LeftAndFinished);
     p.cues(Flight::TwoR);
     p
 }
@@ -8142,7 +8142,7 @@ fn flight_2s_cells_match_the_run_sheet() {
             expected.extend((1..=COUNT_STEPS).map(|k| (event, id(root, &format!("{prefix} DOWN {k}")))));
         }
         let hooks: Vec<_> = trigger.children[0].children.iter().map(|event| read_event(event).unwrap()).collect();
-        assert_eq!(hooks, expected, "production count has no diagnostic links");
+        assert_eq!(hooks, expected, "the 2S count has no diagnostic links");
         let count_nodes = named(root, cell.key).children.iter()
             .filter(|node| node.name().is_some_and(|name| name.starts_with(&format!("{prefix} ")))).count();
         assert_eq!(count_nodes, 26, "0053 adds zero count MCUs");

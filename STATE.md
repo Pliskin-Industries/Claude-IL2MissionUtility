@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-11-01: Astra's review of steps 8 to 12 found 12 issues; fixes are on two unpushed branches (below). Flight 2S was flown: **0053's fix fails in the game** (a wreck that crosses out raises Left, so a kill counts twice). Decision 0058 (Proposed) waits on the user. Then flight 2N (12f) with two human pilots.
+> Last updated: 2026-11-01: Astra's review of steps 8 to 12 found 12 issues; fixes are on two unpushed branches (below). Flight 2S failed 0053 in the game (a wreck that crosses out raises Left, so a kill counted twice). The user chose **0058 A**: the count is back on Left and Finished. Both branches are ready to push when the user says so. Then flight 2N (12f) with two human pilots.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -19,11 +19,11 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 |---|---|---|
 | `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); standalone check L (PR #45); step 10 docs (PR #47); L's F-80 collision note and STATE (PR #48); step 12 parts 12a to 12e with flights 2M, 2P, S1, 2Q, 2R (PR #49); decisions 0001 to 0052 | `origin/main` `6f02211` |
 | `codex/review-fixes-replay-trace` (worktree `.claude/worktrees/review-fixes`) | Review fixes 1 to 9: Replay one session at a time, rescan on Run, discarded lines shown, `(T - 3) / 50` fallback, stale-trace fingerprint; trace builds refuse a non-.Group name, check index room, separate breadcrumb bands; L's base map compared byte for byte again. Decisions 0056, 0057. Non-trace and Map trace output unchanged | committed `6d6187b`, not pushed; 1117 passed |
-| `codex/airtask-0053-0055` (worktree `.claude/worktrees/airtask-fixes`) | Review findings A to C: 0053 count steps down on Killed (70) and Finished alive (63); 0054 standalone base map moves Map AI; 0055 clock gates RANDOM through AVAILABLE. Flight 2S built and flown (S1 failed 0053). Air Tasking output changes on purpose; flown probes 2R and 2L keep their wiring through test-only switches | committed to `fb889ba`, plus STATE and the 2S records, not pushed; 1112 passed. **Do not merge with 0053's wiring:** the user decides 0058 first |
+| `codex/airtask-0053-0055` (worktree `.claude/worktrees/airtask-fixes`) | Review findings A to C: 0053 tried and rejected by flight 2S, so 0058 A keeps the count on Left and Finished (as on `main`); 0054 standalone base map moves Map AI; 0055 clock gates RANDOM through AVAILABLE. Air Tasking output changes on purpose for 0054 and 0055 only; flown probes 2R, 2L and 2S keep their wiring through test-only switches | committed, not pushed; 1112 passed |
 
 `upstream/main` has one commit not merged here (`571504a`, harvested coalition groups and ramp starts per country). Merged branches and their worktrees under `.claude/worktrees/` can be deleted once their idle sessions are archived.
 
-Last recorded test run: **1112 passed, 0 failed, 42 ignored** (`cargo test --offline`, 2026-11-01) on `codex/airtask-0053-0055` `fb889ba`; **1117 passed, 0 failed, 41 ignored** on `codex/review-fixes-replay-trace` `6d6187b`. Clippy 306, no new warnings. Record each new run on this line.
+Last recorded test run: **1112 passed, 0 failed, 42 ignored** (`cargo test`, 2026-11-01) on `codex/airtask-0053-0055` after 0058 A; **1117 passed, 0 failed, 41 ignored** on `codex/review-fixes-replay-trace` `6d6187b`. Clippy 306, no new warnings. Record each new run on this line.
 
 ## P14 Air Tasking ("Wing Commander")
 
@@ -40,10 +40,10 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
   - L, the standalone-file check (risk l, logs `real_53`): the Air Tasking tab's standalone file, imported (File › Import From File) into a Map base map that already has groups, is **re-indexed cleanly by the Mission Editor** (no Index twice, every link kept; a test compares the frozen editor save with the file). The saved mission flew with A3's timings. Seen in passing: one F-80 HVAR lost at 563.88 s to its own wingman in a steady circling turn over the empty area (Tacview; the 0021 steady-turn crossing), and the briefing map's front-line icons may show the mission title (seen on screen once, not saved).
 - **Built: step 12, parts 12a to 12e** (PR #49):
   - **Threshold for 2 or 3 players** (0047 E): an area needs N players of the other side to go HOT; the count resets when any of them leaves (0047) or dies inside (0049 B; the Complex Trigger's Killed event is 70, flight 2P). N = 1 is wired as before.
-  - **A player count per area** (0050 D): each sortie copy ends on its area's count of players. Air Tasking's AI is not counted. Generate builds no Zone Out for Air Tasking (0048 superseded); `Watchdog`, `ThresholdImpl` and `CounterResetImpl` are removed. Generate output changed on purpose for missions with Air Tasking.
+  - **A player count per area** (0050 D): each sortie copy ends on its area's count of players. Air Tasking's AI is not counted. Known limit (0058): a wreck removed up to about 12 s after a busy area clears can empty the count under a player who has just entered; a gate (0058 C) is built only if logs show it. Generate builds no Zone Out for Air Tasking (0048 superseded); `Watchdog`, `ThresholdImpl` and `CounterResetImpl` are removed. Generate output changed on purpose for missions with Air Tasking.
   - **Generate refuses** a player spawn inside a count circle (0051).
   - **UI** (0052): N from 1 to 3; one count radius, 10 to 100 km (50 km default), one area per target; the Map draws the circles. Checked live.
-  - **Flown, no pilot:** 2M (Zone Out is ALL-out; a kill or a Delete raises no Left); 2P (Killed is event 70); S1 and 2Q (AI on sides 3 and 4 attacks both real sides, so 0050 A failed; check zones do not see side 3); 2R (0050 D's count works as built); 2S (a wreck that crosses out of the circle raises Left, so 0053 fails; a wreck's Finished comes 3 to 15 s after the kill).
+  - **Flown, no pilot:** 2M (Zone Out is ALL-out; a kill or a Delete raises no Left); 2P (Killed is event 70); S1 and 2Q (AI on sides 3 and 4 attacks both real sides, so 0050 A failed; check zones do not see side 3); 2R (0050 D's count works as built); 2S (a wreck that crosses out of the circle raises Left, so 0053 failed and 0058 A went back to Left and Finished; a wreck's Finished comes 3 to 15 s after the kill).
 - **Still open from the step 11 list** (plan §8 "Step 11"; items 1 to 3 done by A3, item 4 by L):
   5. Load time and tick delay next to `validate`'s totals: only on the real host, not this PC.
   - Also unseen: a Yak copy, a player who lands inside an area (0040: no change needed), a DPRK-side extension.
@@ -53,7 +53,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Waiting on the user
 
-**First: decision 0058:** which events step the player count down now that 0053 failed in 2S. Claude recommends A (back to Left and Finished, 0 MCUs, as flown in 2R), keeping the rare busy-area case as a known limitation.
+**First: push the two review branches?** Both are committed and pass the suite; nothing is pushed.
 1. **Send the Air Tasking proposal to eszyman?** Draft: `handoff/upstream-air-tasking-proposal-draft.md` (decision 0026). The bar was a working concept and UI; A2 and A3 now run end to end from the app's Map Generate. Where to post it (new issue or issue #1) and when is yours.
 2. **Merge `upstream/main` `571504a`?** It touches the airfield harvest that 0042 also changed.
 3. **Three game bug reports are drafted, not posted** (`handoff/il2-bug-report-drafts.md`). The paused-timer finding (2K) may be a fourth.
@@ -62,10 +62,9 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Next steps
 
-1. **Decision 0058** (the user). With A: revert 0053's production wiring on `codex/airtask-0053-0055` (keep the 2S probe builder), re-run the suite, mark 0058 accepted.
-2. **Push and merge** the two review branches when the user says so (review fixes first; they do not depend on 2S). The two branches touch `ui_tests.rs`, `probe.rs` and `export.rs` in different places; rebase the second on the first and re-run the suite.
-3. **Flight 2N** (12f) and step 11 item 5, on the real host, once the user has a second pilot and a time. Claude first writes 2N's run sheet and mission from the step 12 note (§3).
-4. Then the eszyman proposal, if the user wants it sent.
+1. **Push and merge** the two review branches when the user says so (review fixes first). The two branches touch `ui_tests.rs`, `probe.rs` and `export.rs` in different places; rebase the second on the first and re-run the suite.
+2. **Flight 2N** (12f) and step 11 item 5, on the real host, once the user has a second pilot and a time. Claude first writes 2N's run sheet and mission from the step 12 note (§3). Build it as a trace build and check its logs for 0058's race (`CLEAR`, `UP 1`, then `DOWN 1` and `EMPTY` within about 12 s with no player leaving).
+3. Then the eszyman proposal, if the user wants it sent.
 
 ## Traps
 
