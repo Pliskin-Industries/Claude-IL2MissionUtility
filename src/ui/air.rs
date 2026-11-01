@@ -123,6 +123,7 @@ impl GroupGeneratorApp {
     pub(super) fn with_air_context<R>(&self, read: impl FnOnce(&AirContext<'_>) -> R) -> R {
         let front = self.air_front();
         let mark = self.current_mark();
+        let spawns = self.air_player_spawns();
         read(&AirContext {
             east_objectives: &self.east_objectives,
             nato_objectives: &self.nato_objectives,
@@ -130,7 +131,27 @@ impl GroupGeneratorApp {
             front: &front,
             aabb: self.front_aabb,
             date: (mark.year, mark.month, mark.day),
+            player_spawns: &spawns,
         })
+    }
+
+    /// The player spawns Map Generate writes: the Map's air starts and the
+    /// spawns in its reference groups (decisions 0050 D and 0051 refuse one
+    /// inside a player count circle).
+    fn air_player_spawns(&self) -> Vec<airtask::PlayerSpawn> {
+        let mut spawns: Vec<_> = self
+            .placed_air_starts
+            .iter()
+            .map(|placed| airtask::PlayerSpawn {
+                name: placed.field.name.clone(),
+                side: if placed.field.nato { airtask::AirSide::Nato } else { airtask::AirSide::Dprk },
+                xz: (placed.x, placed.z),
+            })
+            .collect();
+        for group in &self.map_refs {
+            spawns.extend(airtask::player_spawns_in(&group.entity));
+        }
+        spawns
     }
 
     pub(super) fn air_header_label(&self) -> String {
@@ -395,6 +416,7 @@ impl GroupGeneratorApp {
         let nato_objectives = self.nato_objectives.clone();
         let arrows = self.attack_arrows.clone();
         let mark = self.current_mark();
+        let spawns = self.air_player_spawns();
         let air_ctx = AirContext {
             east_objectives: &east_objectives,
             nato_objectives: &nato_objectives,
@@ -402,6 +424,7 @@ impl GroupGeneratorApp {
             front: &front,
             aabb: self.front_aabb,
             date: (mark.year, mark.month, mark.day),
+            player_spawns: &spawns,
         };
         if !ctx.input(|i| i.pointer.any_down()) && !ctx.wants_keyboard_input() {
             self.air_editing = None;

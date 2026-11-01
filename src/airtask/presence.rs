@@ -20,6 +20,65 @@ const STEP_DELAY_S: f64 = 0.05;
 /// about 280 m inside, so the zone does not miss it and clear at once.
 const CLEAR_DELAY_S: f64 = 2.0;
 
+/// Decision 0050 D (0051): a player who appears inside a trigger is not
+/// reported as entering (flight A1), so a spawn of the side an area watches,
+/// inside its count circle, would go uncounted. One error per spawn and area.
+pub(crate) fn spawns_inside(
+    side: AirSide,
+    areas: &[(f64, f64)],
+    radius_m: f64,
+    spawns: &[super::PlayerSpawn],
+) -> Vec<super::AirIssue> {
+    let mut issues = Vec::new();
+    for spawn in spawns.iter().filter(|spawn| spawn.side == side.other()) {
+        for (index, &(x, z)) in areas.iter().enumerate() {
+            let distance_m = (spawn.xz.0 - x).hypot(spawn.xz.1 - z);
+            if distance_m < radius_m {
+                issues.push(super::AirIssue {
+                    severity: super::IssueSeverity::Error,
+                    text: format!(
+                        "Air Tasking {} area {} (target at {:.1}, {:.1} km): the {} spawn \"{}\" is {:.1} km away, inside the {:.1} km player count circle. A player who spawns there is never counted. Move the spawn, or lower the count radius.",
+                        side.label(),
+                        index + 1,
+                        x / 1000.0,
+                        z / 1000.0,
+                        spawn.side.label(),
+                        spawn.name,
+                        distance_m / 1000.0,
+                        radius_m / 1000.0
+                    ),
+                    rail_only: false,
+                });
+            }
+        }
+    }
+    issues
+}
+
+/// The player spawns a placed group holds (a Map reference group): every
+/// `Airfield` with a `Planes` list, and every `Plane` with `CoopStart` on (the
+/// spawns decision 0037 keeps on their country). Only 501 and 601, the
+/// countries Air Tasking watches, are returned.
+pub(crate) fn player_spawns_in(root: &Il2Entity) -> Vec<super::PlayerSpawn> {
+    let mut spawns = Vec::new();
+    root.for_each(&mut |node| {
+        let player = match node.block_type.as_str() {
+            "Airfield" => node.children.iter().any(|child| child.block_type == "Planes"),
+            "Plane" => node.property("CoopStart").is_some_and(|c| c != "0"),
+            _ => false,
+        };
+        let side = match node.property("Country").and_then(|c| c.parse::<i32>().ok()) {
+            Some(country) if country == threshold::player_country(AirSide::Nato) => Some(AirSide::Nato),
+            Some(country) if country == threshold::player_country(AirSide::Dprk) => Some(AirSide::Dprk),
+            _ => None,
+        };
+        if let (true, Some(side), Some(xz)) = (player, side, node.pos_xz()) {
+            spawns.push(super::PlayerSpawn { name: node.name().unwrap_or("unnamed").to_string(), side, xz });
+        }
+    });
+    spawns
+}
+
 /// The count roles a trace build breadcrumbs: every `UP k` and `DOWN k` (the
 /// count's path) and `EMPTY`.
 pub(crate) fn traced_role(role: &str) -> bool {
@@ -448,6 +507,73 @@ mod tests {
             assert_eq!(count, 26, "{area}: 26 MCUs, one of them a check zone");
         }
         assert_eq!(h.logic.init_off.len(), 12);
+    }
+
+    /// Airfields with a Planes list and CoopStart planes on 501 or 601; not AI
+    /// planes, airfields without planes, or other countries.
+    #[test]
+    fn player_spawns_in_a_group() {
+        let text = r#"Group
+{
+  Name = "Refs";
+  Airfield
+  {
+    Index = 1;
+    Name = "DPRK field";
+    XPos = 100.000;
+    ZPos = 200.000;
+    Country = 501;
+    Planes
+    {
+    }
+  }
+  Airfield
+  {
+    Index = 2;
+    Name = "Empty field";
+    XPos = 1.000;
+    ZPos = 2.000;
+    Country = 601;
+  }
+  Plane
+  {
+    Index = 3;
+    Name = "NATO coop";
+    XPos = 300.000;
+    ZPos = 400.000;
+    Country = 601;
+    CoopStart = 1;
+  }
+  Plane
+  {
+    Index = 4;
+    Name = "AI";
+    XPos = 5.000;
+    ZPos = 6.000;
+    Country = 601;
+    CoopStart = 0;
+  }
+  Plane
+  {
+    Index = 5;
+    Name = "PRC coop";
+    XPos = 7.000;
+    ZPos = 8.000;
+    Country = 502;
+    CoopStart = 1;
+  }
+}
+"#;
+        let root = crate::parser::parse_group_file(text).unwrap();
+        let spawns = player_spawns_in(&root);
+        let found: Vec<_> = spawns.iter().map(|s| (s.name.as_str(), s.side, s.xz)).collect();
+        assert_eq!(
+            found,
+            [
+                ("DPRK field", AirSide::Dprk, (100.0, 200.0)),
+                ("NATO coop", AirSide::Nato, (300.0, 400.0)),
+            ]
+        );
     }
 
     #[test]

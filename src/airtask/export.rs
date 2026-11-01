@@ -411,6 +411,14 @@ fn evaluate(plan: &AirPlan, ctx: &AirContext<'_>) -> (Vec<MapAirPack>, Vec<AirIs
                     &copies.entries,
                 ));
                 issues.extend(zone::validate_zone(side, plan, &copies.entries));
+                if plan.strategies.zone_out == ZoneOutImpl::AreaCount {
+                    issues.extend(presence::spawns_inside(
+                        side,
+                        &copies.areas,
+                        plan.threshold.count_radius_m,
+                        ctx.player_spawns,
+                    ));
+                }
                 assembled.push((side, copies, logic));
             }
             Err(error) => issues.push(side_error(side, error)),
@@ -631,6 +639,7 @@ mod tests {
                 front: &self.front,
                 aabb: self.opts.aabb,
                 date: self.date,
+                player_spawns: &[],
             }
         }
     }
@@ -1494,6 +1503,44 @@ mod tests {
                 assert_eq!(times(&log, done_hub), [ticks(done_s)], "{zone_out:?} {config:?}: player inside {inside:?}");
             }
         }
+    }
+
+    /// Decision 0050 D: an air start of the side an area watches, inside its
+    /// count circle, is an error; outside it, or of the area's own side, is not.
+    #[test]
+    fn validate_refuses_a_watched_air_start_inside_a_count_circle() {
+        let (plan, input) = export_test_plan();
+        let ctx = input.context();
+        let mut logic = SideLogic::default();
+        let copies = assemble_side(AirSide::Dprk, &plan, &ctx, &mut logic, &mut 1).unwrap();
+        let area = copies.areas[0];
+        use super::super::PlayerSpawn;
+        let at = |side: AirSide, km: f64| PlayerSpawn {
+            name: "Test field".into(),
+            side,
+            xz: (area.0 + km * 1000.0, area.1),
+        };
+        let refused = |spawns: &[PlayerSpawn]| -> Vec<String> {
+            let ctx = AirContext { player_spawns: spawns, ..input.context() };
+            super::super::validate(&plan, &ctx)
+                .into_iter()
+                .filter(|i| i.severity == IssueSeverity::Error && i.text.contains("spawn"))
+                .map(|i| i.text)
+                .collect()
+        };
+        // DPRK areas watch NATO players.
+        let inside = refused(&[at(AirSide::Nato, 20.0)]);
+        assert_eq!(inside.len(), 1, "{inside:?}");
+        assert_eq!(
+            inside[0],
+            format!(
+                "Air Tasking DPRK area 1 (target at {:.1}, {:.1} km): the NATO spawn \"Test field\" is 20.0 km away, inside the 50.0 km player count circle. A player who spawns there is never counted. Move the spawn, or lower the count radius.",
+                area.0 / 1000.0,
+                area.1 / 1000.0
+            )
+        );
+        assert!(refused(&[at(AirSide::Nato, 60.0)]).is_empty(), "outside the circle");
+        assert!(refused(&[at(AirSide::Dprk, 20.0)]).is_empty(), "the area's own side is not watched");
     }
 
     #[test]

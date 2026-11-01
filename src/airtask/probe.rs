@@ -6775,6 +6775,7 @@ fn build_paused_timer_fix_probe() -> Probe {
         front: &front,
         aabb: WorldAabb { x_min: 0.0, x_max: 450_000.0, z_min: 50_000.0, z_max: 500_000.0 },
         date: (1950, 11, 15),
+        player_spawns: &[],
     };
     let mut packs = super::build_air_packs(&two_l_plan(target), &ctx)
         .unwrap_or_else(|error| panic!("flight 2L Air Tasking: {error}"));

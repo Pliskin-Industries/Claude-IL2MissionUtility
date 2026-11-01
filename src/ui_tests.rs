@@ -4045,6 +4045,9 @@ fn map_generate_with_air_moves_map_ai_off_player_countries() {
         x: 215_000.0,
         z: 205_000.0,
     });
+    // The air start is 25.5 km from DPRK area 1: keep it outside the player
+    // count circle (decision 0050 D; the radius control comes in step 12e).
+    h.app.air_plan.threshold.count_radius_m = 15_000.0;
     h.app.map_refs = vec![crate::frontlines::MapRefGroup {
         path: PathBuf::from("Ref units.Group"),
         entity: crate::parser::parse_group_file(REF_UNITS_0037).unwrap(),
@@ -4127,6 +4130,9 @@ fn dprk_air_start_is_on_the_country_air_tasking_watches() {
         x: 230_000.0,
         z: 205_000.0,
     });
+    // The air start is 20.6 km from NATO area 1: keep it outside the player
+    // count circle (decision 0050 D; the radius control comes in step 12e).
+    h.app.air_plan.threshold.count_radius_m = 15_000.0;
     h.app.terrain_apply = false;
     let (root, _) = generate_map(&mut h, "base_map_0042.Group");
 
@@ -5032,6 +5038,9 @@ fn a3_inputs(h: &mut Harness) {
     }
     assert_eq!(h.app.air_plan.pool.len(), 2, "EN01 Zone, EN02 Clock");
     h.app.air_plan.threshold.radius_m = A3_RADIUS_M;
+    // A3's air start is 22 km from its area: the player count circle (decision
+    // 0050 D) must stay inside that. The radius control comes in step 12e.
+    h.app.air_plan.threshold.count_radius_m = 20_000.0;
     h.app.air_plan.zone.chance_pct = A3_CHANCE;
     h.app.air_plan.zone.cooldown_min = A3_COOLDOWN_MIN;
     let clock = &mut h.app.air_plan.schedule[AirSide::Nato.idx()];
@@ -5094,10 +5103,11 @@ fn a3_map_build_matches_the_run_sheet() {
         (Some("8000"), Some("501"))
     );
     assert!(air.find_by_name("THN02 TRIGGER").is_none());
-    // Decision 0050 D: the area's player count, 50 km, watching the same players.
+    // Decision 0050 D: the area's player count, 20 km (inside the air start's
+    // 22 km), watching the same players.
     let count = named("PCN01 TRIGGER");
     assert_eq!(count.pos_xz(), Some(A3_AREA));
-    assert_eq!((count.property("Radius"), count.property("Country")), (Some("50000"), Some("501")));
+    assert_eq!((count.property("Radius"), count.property("Country")), (Some("20000"), Some("501")));
     for (name, key, value) in [
         ("THN01 INNER", "Zone", "8000"),
         ("THN01 DWELL", "Time", "80"),

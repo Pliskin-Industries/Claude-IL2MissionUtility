@@ -86,5 +86,6 @@ What this makes easier, harder or necessary.
 | [0048](0048-zone-out-with-several-players.md) | Zone Out with several players: keep the check zone if ALL-out; options if ANY-out (flight 2M: ALL-out) | Superseded by 0050 |
 | [0049](0049-counted-plane-dies-inside.md) | A counted plane that dies or is removed inside an area raises no Left (flight 2M): a death inside zeroes the count (Killed → ZERO) | Accepted (B) |
 | [0050](0050-ai-on-sides-of-its-own.md) | Watch players only: put Air Tasking's AI (602, 503) on sides 3 and 4 so check zones ignore it, then widen Zone IN / Zone Out: fails (flight 2Q). Option D accepted (flight 2R): a player count per area from Complex Trigger events, count to three then busy | Accepted (D) |
+| [0051](0051-which-spawns-the-count-check-sees.md) | Generate refuses a watched player spawn inside a count circle: the Map's air starts and its reference groups' player airfields and coop planes; Airfield-tab and editor spawns cannot be seen | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

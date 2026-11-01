@@ -242,7 +242,10 @@ side and area: a Complex Trigger on the other side's player country steps a
 relay chain from 0 to 3 (Entered up; Left and Finished down), then busy; a
 Closer 0 `CLEAR` zone clears busy when nobody of that side is left. `EMPTY`
 fires when the area empties, into every copy's `EMPTY IN` registered for the
-area. 26 MCUs per area.
+area. 26 MCUs per area. `spawns_inside` gives the export's error for a player
+spawn (`AirContext.player_spawns`: the Map's air starts, and those
+`player_spawns_in` finds in its reference groups) inside a circle that watches
+its side (decision 0051).
 **Air Tasking generation.**
 
 ### `airtask/clock.rs` — the mission clock

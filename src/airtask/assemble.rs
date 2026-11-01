@@ -371,6 +371,7 @@ pub(crate) mod tests {
                 z_max: 400_000.0,
             },
             date: (1950, 11, 15),
+            player_spawns: &[],
         }
     }
 
