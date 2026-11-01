@@ -63,6 +63,7 @@ mod tests {
             front: &[(1000.0, 0.0), (1000.0, 1000.0)],
             aabb: WorldAabb::full_map(),
             date: (1950, 7, 1),
+            player_spawns: &[],
         };
         let plan = AirPlan::default();
         let before = plan.clone();

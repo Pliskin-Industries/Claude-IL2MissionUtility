@@ -2,7 +2,10 @@
 
 use std::collections::HashSet;
 
-use super::threshold::{OBJECT_ENTERED, OBJECT_LEFT};
+use super::threshold::{
+    OBJECT_CRITICALLY_DAMAGED, OBJECT_DAMAGED, OBJECT_ENTERED, OBJECT_FINISHED, OBJECT_FINISHED_ALIVE,
+    OBJECT_KILLED, OBJECT_LEFT,
+};
 use crate::ast::Il2Entity;
 use crate::template::{EntityEvent, read_event};
 
@@ -139,11 +142,49 @@ pub(crate) struct ScriptedTrack {
     pub samples: Vec<(Tick, f64, f64)>,
 }
 
+/// How a scripted track stops existing (flights 2M and 2P). Neither raises
+/// Left: a kill raises Damaged, CriticallyDamaged and Killed, a Delete raises
+/// Finished and FinishedAlive, in each trigger that holds the track.
+/// Not flown, and modelled this way:
+/// - an event whose `EventsFilter…` key is 0 stays silent (2P had every filter on);
+/// - a track inside since mission load is held, so its kill raises Killed
+///   (2J: the game does not report such a plane as entering);
+/// - a track that enters and ends between two one-second samples was never held.
+///
+/// A kill also raises Finished when the wreck lands, `WRECK_FINISHED_TICKS`
+/// later, in each trigger that held the plane and is still on (flight 2P).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrackEnd {
+    Killed,
+    Deleted,
+}
+
+impl TrackEnd {
+    fn events(self) -> &'static [(i32, &'static str)] {
+        match self {
+            Self::Killed => &[
+                (OBJECT_DAMAGED, "EventsFilterDamaged"),
+                (OBJECT_CRITICALLY_DAMAGED, "EventsFilterCriticallyDamaged"),
+                (OBJECT_KILLED, "EventsFilterKilled"),
+            ],
+            Self::Deleted => &[
+                (OBJECT_FINISHED, "EventsFilterFinishedSimple"),
+                (OBJECT_FINISHED_ALIVE, "EventsFilterFinishedAlive"),
+            ],
+        }
+    }
+}
+
+/// Flight 2P: a kill at 300.00 s raised Finished (62) at 315.06 s. 301 ticks is 15.05 s.
+pub(crate) const WRECK_FINISHED_TICKS: Tick = 301;
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct WalkerInput {
     pub until: Tick,
     pub seed: u64,
     pub tracks: Vec<ScriptedTrack>,
+    /// (tick, track index, how): the track is gone from that tick on.
+    pub track_ends: Vec<(Tick, usize, TrackEnd)>,
     pub pulses: Vec<(Tick, WalkerNode)>,
     /// A Plane or its linked MCU_TR_Entity. Scripted deaths do not simulate
     /// existence/spawning; each entity emits OnKilled (13) at most once per run.
@@ -215,6 +256,9 @@ struct Walker<'a> {
     scheduled: BTreeMap<Tick, VecDeque<WalkEvent>>,
     pending: VecDeque<WalkEvent>,
     track_updates: BTreeMap<Tick, Vec<TrackUpdate>>,
+    ended: BTreeSet<usize>,
+    /// (tick, trigger): a killed plane's wreck lands and raises Finished.
+    wrecks: Vec<(Tick, i32)>,
     positions: Vec<Option<(f64, f64)>>,
     switches: Vec<(i32, bool)>,
     killed: BTreeSet<i32>,
@@ -290,6 +334,8 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
         scheduled: BTreeMap::new(),
         pending: VecDeque::new(),
         track_updates: BTreeMap::new(),
+        ended: BTreeSet::new(),
+        wrecks: Vec::new(),
         positions: vec![None; input.tracks.len()],
         switches: Vec::new(),
         killed: BTreeSet::new(),
@@ -332,6 +378,13 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
             walker.track_updates.entry(t).or_default().push((i, (x, z)));
         }
     }
+    for &(t, i, how) in &input.track_ends {
+        assert!(i < input.tracks.len(), "track end names an unknown track");
+        walker.track_updates.entry(t).or_default();
+        if how == TrackEnd::Killed {
+            walker.track_updates.entry(t + WRECK_FINISHED_TICKS).or_default();
+        }
+    }
     for &t in walker.track_updates.keys() {
         walker
             .scheduled
@@ -348,9 +401,17 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
         walker.pending = events;
         if let Some(updates) = walker.track_updates.remove(&t) {
             for (i, xz) in updates {
-                walker.positions[i] = Some(xz);
+                if !walker.ended.contains(&i) {
+                    walker.positions[i] = Some(xz);
+                }
             }
         }
+        for &(end_t, i, how) in &input.track_ends {
+            if end_t == t {
+                walker.end_track(i, how);
+            }
+        }
+        walker.land_wrecks();
         if t == 0 {
             let triggers: Vec<_> = walker
                 .nodes
@@ -775,6 +836,55 @@ impl Walker<'_> {
             .collect()
     }
 
+    /// The track is gone (see `TrackEnd`): no trigger counts it from now on,
+    /// and no Left is raised for it.
+    fn end_track(&mut self, track: usize, how: TrackEnd) {
+        self.ended.insert(track);
+        self.positions[track] = None;
+        let triggers: Vec<_> = self.nodes.keys().copied().filter(|&id| self.is_trigger(id)).collect();
+        let mut pulses = Vec::new();
+        for id in triggers {
+            let held = self.states.get_mut(&id).expect("state link resolves").trigger_inside.remove(&track);
+            if !held || !self.states[&id].active {
+                continue;
+            }
+            if how == TrackEnd::Killed {
+                self.wrecks.push((self.now + WRECK_FINISHED_TICKS, id));
+            }
+            // One firing of the trigger per end, as check_trigger records one per crossing.
+            let fired: Vec<_> = how
+                .events()
+                .iter()
+                .filter(|(_, filter)| value(self.nodes[&id], filter, 0) == 1)
+                .flat_map(|&(event_type, _)| self.trigger_event_targets(id, event_type))
+                .collect();
+            if !fired.is_empty() {
+                self.record(id);
+                pulses.extend(fired);
+            }
+        }
+        self.enqueue_now(pulses);
+    }
+
+    /// A wreck due now raises Finished in its trigger, if that is still on and
+    /// its filter for Finished is on (see `TrackEnd`).
+    fn land_wrecks(&mut self) {
+        let now = self.now;
+        let (due, later): (Vec<_>, Vec<_>) = self.wrecks.iter().partition(|(t, _)| *t == now);
+        self.wrecks = later;
+        let mut pulses = Vec::new();
+        for (_, id) in due {
+            if self.states[&id].active && value(self.nodes[&id], "EventsFilterFinishedSimple", 0) == 1 {
+                let targets = self.trigger_event_targets(id, OBJECT_FINISHED);
+                if !targets.is_empty() {
+                    self.record(id);
+                    pulses.extend(targets);
+                }
+            }
+        }
+        self.enqueue_now(pulses);
+    }
+
     /// Flight 2J (KA, KB, KC): mission load and every switch-on take matching
     /// tracks already inside as known, without reporting them. While on, each
     /// later crossing reports Entered / Left once per track. While off, crossings
@@ -799,33 +909,38 @@ impl Walker<'_> {
             (OBJECT_ENTERED, inside.difference(&previous)),
             (OBJECT_LEFT, previous.difference(&inside)),
         ];
-        let node = self.nodes[&id];
         let mut pulses = Vec::new();
         for (event_type, tracks) in changes {
-            let mut targets: Vec<_> = node
-                .children
-                .iter()
-                .filter(|events| events.block_type == "OnEvents")
-                .flat_map(|events| &events.children)
-                .map(|event| read_event(event).expect("OnEvent needs Type and TarId"))
-                .filter(|&(kind, _)| kind == event_type)
-                .map(|(_, target)| {
-                    assert!(
-                        self.nodes.contains_key(&target),
-                        "trigger TarId {target} must resolve"
-                    );
-                    WalkEvent::Pulse(target)
-                })
-                .collect();
-            if self.config.reverse_targets {
-                targets.reverse();
-            }
+            let targets = self.trigger_event_targets(id, event_type);
             for _ in tracks {
                 self.record(id);
                 pulses.extend(targets.iter().copied());
             }
         }
         self.enqueue_now(pulses);
+    }
+
+    /// The `TarId`s of the trigger's `OnEvent`s of this type, as pulses.
+    fn trigger_event_targets(&self, id: i32, event_type: i32) -> Vec<WalkEvent> {
+        let mut targets: Vec<_> = self.nodes[&id]
+            .children
+            .iter()
+            .filter(|events| events.block_type == "OnEvents")
+            .flat_map(|events| &events.children)
+            .map(|event| read_event(event).expect("OnEvent needs Type and TarId"))
+            .filter(|&(kind, _)| kind == event_type)
+            .map(|(_, target)| {
+                assert!(
+                    self.nodes.contains_key(&target),
+                    "trigger TarId {target} must resolve"
+                );
+                WalkEvent::Pulse(target)
+            })
+            .collect();
+        if self.config.reverse_targets {
+            targets.reverse();
+        }
+        targets
     }
 
     fn kill(&mut self, id: i32) {
@@ -1275,6 +1390,81 @@ mod walker_tests {
             node("MCU_Deactivate", 5, "Off", &[1]),
             node("MCU_Activate", 6, "On", &[1]),
         ])
+    }
+
+    /// Flights 2M and 2P: a plane killed or deleted inside a trigger raises no
+    /// Left. A kill raises Damaged (67), CriticallyDamaged (68) and Killed (70);
+    /// a Delete raises Finished (62) and FinishedAlive (63); each only if the
+    /// trigger's filter for it is on. The plane then counts nowhere.
+    #[test]
+    fn walker_track_end_raises_flown_events_not_left() {
+        let mut root = trigger_tree(Some(601));
+        let trigger = root.children.iter_mut().find(|n| n.index == Some(1)).unwrap();
+        for (key, event, target) in [
+            ("EventsFilterKilled", OBJECT_KILLED, 7),
+            ("EventsFilterFinishedSimple", OBJECT_FINISHED, 8),
+        ] {
+            trigger.set_property(key, "1");
+            crate::template::attach_event(trigger, event, target);
+        }
+        // Wired but filtered off: silent under the walker's (unflown) filter rule.
+        crate::template::attach_event(trigger, OBJECT_DAMAGED, 9);
+        root.children.extend([
+            timer(7, "Killed", "0", &[]),
+            timer(8, "Finished", "0", &[]),
+            timer(9, "Damaged, filter off", "0", &[]),
+        ]);
+        let inside = (0.0, 0.0);
+        let mut killed = track(2, &[inside; 6]);
+        killed.country = 601;
+        let mut deleted = killed.clone();
+        deleted.samples.iter_mut().for_each(|s| s.0 += TICKS_PER_SECOND);
+        let input = WalkerInput {
+            until: 6 * TICKS_PER_SECOND,
+            tracks: vec![killed, deleted],
+            track_ends: vec![
+                (2 * TICKS_PER_SECOND, 0, TrackEnd::Killed),
+                (4 * TICKS_PER_SECOND, 1, TrackEnd::Deleted),
+            ],
+            ..WalkerInput::default()
+        };
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            let config = WalkerConfig { same_tick_delivery, ..WalkerConfig::default() };
+            let log = walk(&root, config, &input);
+            // The first plane is inside at load (taken as known); the second enters at 1 s.
+            assert_eq!(times(&log, 2), [TICKS_PER_SECOND], "{config:?}");
+            assert!(times(&log, 3).is_empty(), "no Left for a kill or a Delete");
+            assert_eq!(times(&log, 7), [2 * TICKS_PER_SECOND], "{config:?}");
+            assert_eq!(times(&log, 8), [4 * TICKS_PER_SECOND], "{config:?}");
+            assert!(times(&log, 9).is_empty(), "the walker's assumption: a filtered-off event stays silent");
+        }
+    }
+
+    /// Flight 2P: a kill also raises Finished (62) when the wreck lands,
+    /// 15.06 s later (300.00 to 315.06), in a trigger that held the plane and is
+    /// still on. Modelled as 301 ticks (15.05 s).
+    #[test]
+    fn walker_kill_raises_finished_when_the_wreck_lands() {
+        let mut root = trigger_tree(Some(601));
+        let trigger = root.children.iter_mut().find(|n| n.index == Some(1)).unwrap();
+        trigger.set_property("EventsFilterFinishedSimple", "1");
+        crate::template::attach_event(trigger, OBJECT_FINISHED, 8);
+        root.children.push(timer(8, "Finished", "0", &[]));
+        let inside = (0.0, 0.0);
+        let mut plane = track(2, &[inside; 3]);
+        plane.country = 601;
+        plane.samples.iter_mut().for_each(|s| s.0 += TICKS_PER_SECOND);
+        let input = WalkerInput {
+            until: 30 * TICKS_PER_SECOND,
+            tracks: vec![plane],
+            track_ends: vec![(3 * TICKS_PER_SECOND, 0, TrackEnd::Killed)],
+            ..WalkerInput::default()
+        };
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            let config = WalkerConfig { same_tick_delivery, ..WalkerConfig::default() };
+            let log = walk(&root, config, &input);
+            assert_eq!(times(&log, 8), [3 * TICKS_PER_SECOND + WRECK_FINISHED_TICKS], "{config:?}");
+        }
     }
 
     #[test]

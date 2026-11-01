@@ -2516,7 +2516,18 @@ fn side_panel_controls_stay_inside_their_panel() {
             }
         }};
         check(&h, "initial");
-        if tab == "Air Tasking" { visit_air_category_controls(&mut h, check); }
+        if tab == "Air Tasking" {
+            // The settings panel scrolls: check each part, the Player count section included.
+            let mut count_radius = false;
+            air_scroll(&mut h, SCREEN.x - 100.0, 10000.0);
+            for _ in 0..10 {
+                check(&h, "settings");
+                count_radius |= h.all("Count radius").iter().any(|n| n.role == Role::Slider);
+                air_scroll(&mut h, SCREEN.x - 100.0, -220.0);
+            }
+            assert!(count_radius, "the Player count section was not reached");
+            visit_air_category_controls(&mut h, check);
+        }
     }
     assert!(
         out.is_empty(),
@@ -2819,16 +2830,21 @@ fn air_scroll(h: &mut Harness, x: f32, delta: f32) {
 }
 
 fn air_open_section(h: &mut Harness, title: &str) {
+    let header = air_settings_control(h, title, Role::Button);
+    h.click_at(header.rect.center());
+}
+
+/// Scrolls the settings panel from the top until a control is on screen.
+fn air_settings_control(h: &mut Harness, label: &str, role: Role) -> Node {
     air_scroll(h, SCREEN.x - 100.0, 10000.0);
     for _ in 0..12 {
-        if let Some(node) = h.nodes.iter().find(|n| n.label == title && n.role == Role::Button
+        if let Some(node) = h.nodes.iter().find(|n| n.label == label && n.role == role
             && n.rect.center().y > shell::HEADER_H && n.rect.center().y < SCREEN.y - shell::STATUS_H).cloned() {
-            h.click_at(node.rect.center());
-            return;
+            return node;
         }
         air_scroll(h, SCREEN.x - 100.0, -240.0);
     }
-    panic!("could not open Air Tasking section {title}: {:?}", h.labels());
+    panic!("no {role:?} {label:?} in the settings panel. Labels: {:?}", h.labels());
 }
 
 fn air_type(h: &mut Harness, field: &str, text: &str) {
@@ -3181,15 +3197,71 @@ fn air_tasking_undo_restores_weight_change() {
     assert_eq!(h.app.air_plan.pool, before, "one Undo restores the start of the drag");
 }
 
+/// Decision 0047 (step 12e): one N for both sides, from 1 to 3, with Undo.
 #[test]
-fn air_tasking_threshold_n_is_fixed_at_1() {
+fn air_tasking_threshold_n_runs_from_1_to_3() {
     let mut h = Harness::new("air_players");
     h.tab("Air Tasking");
-    let players = h.all("Players").into_iter().find(|n| n.role == Role::SpinButton).unwrap();
-    assert!(players.disabled);
-    h.drag(players.rect.center(), players.rect.center() + Vec2::new(100.0, 0.0));
-    assert_eq!(h.app.air_plan.threshold.players_n, 1);
-    assert!(h.has("Two or more players comes with the multi-player phase."));
+    let players = |h: &Harness| h.all("Players").into_iter().find(|n| n.role == Role::SpinButton).unwrap();
+    let at = players(&h).rect.center();
+    assert!(!players(&h).disabled);
+    assert!(h.has("1 player · 12 km"));
+    h.drag(at, at + Vec2::new(400.0, 0.0));
+    assert_eq!(h.app.air_plan.threshold.players_n, 3, "stops at 3");
+    assert!(h.has("3 players · 12 km"));
+    assert!(!h.has("Two or more players comes with the multi-player phase."));
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan.threshold.players_n, 1, "one Undo restores the start of the drag");
+    h.drag(at, at - Vec2::new(400.0, 0.0));
+    assert_eq!(h.app.air_plan.threshold.players_n, 1, "stops at 1");
+}
+
+/// Decision 0050 D (step 12e): the count radius slider sets the plan, with
+/// Undo, and the section names each side's areas (one per target).
+#[test]
+fn air_tasking_count_radius_slider_sets_the_plan() {
+    let mut h = Harness::new("air_count_radius");
+    h.tab("Air Tasking");
+    assert!(h.has("Areas · DPRK 0 · NATO 0"));
+    fill_air_pool(&mut h);
+    assert!(h.has("Areas · DPRK 1 · NATO 1"), "{:?}", h.labels());
+    assert!(h.has("50 km · 2 areas"));
+    let slider = air_settings_control(&mut h, "Count radius", Role::Slider);
+    assert!(!slider.disabled);
+    h.drag(slider.rect.center(), Pos2::new(slider.rect.left() - 50.0, slider.rect.center().y));
+    assert_eq!(h.app.air_plan.threshold.count_radius_m, 10_000.0, "stops at 10 km");
+    h.key_with(Key::Z, CTRL);
+    assert_eq!(h.app.air_plan.threshold.count_radius_m, 50_000.0);
+    let slider = air_settings_control(&mut h, "Count radius", Role::Slider);
+    h.drag(slider.rect.center(), Pos2::new(slider.rect.right() + 50.0, slider.rect.center().y));
+    assert_eq!(h.app.air_plan.threshold.count_radius_m, 100_000.0, "stops at 100 km");
+}
+
+/// Decisions 0050 D and 0051: a Map air start inside a count circle that
+/// watches its side keeps Generate off, with the error as a Check, as soon as
+/// it is placed (the check's cache key holds the spawns).
+#[test]
+fn air_tasking_air_start_inside_a_count_circle_disables_generate() {
+    let mut h = Harness::new("air_count_spawn");
+    h.tab("Air Tasking");
+    fill_air_pool(&mut h);
+    assert!(!h.find("Generate File").disabled);
+    let area = h.app.with_air_context(|ctx| crate::airtask::preview(&h.app.air_plan, ctx))
+        .rings.iter().find(|r| r.side == crate::airtask::AirSide::Dprk && !r.inner).unwrap().centre;
+    h.app.placed_air_starts.push(crate::airstart::PlacedAirStart {
+        field: crate::airstart::default_field("NATO start", true),
+        x: area.0 + 20_000.0,
+        z: area.1,
+    });
+    h.settle();
+    assert!(h.find("Generate File").disabled);
+    let problem = h.app.air_idle_problem().unwrap();
+    assert!(problem.contains("\"NATO start\" is 20.0 km away, inside the 50.0 km player count circle"), "{problem}");
+    // Step 12e: lowering the radius in the tab turns Generate back on.
+    let slider = air_settings_control(&mut h, "Count radius", Role::Slider);
+    h.drag(slider.rect.center(), Pos2::new(slider.rect.left() - 50.0, slider.rect.center().y));
+    assert_eq!(h.app.air_plan.threshold.count_radius_m, 10_000.0);
+    assert!(!h.find("Generate File").disabled, "{:?}", h.app.air_idle_problem());
 }
 
 #[test]
@@ -3279,7 +3351,8 @@ fn air_tasking_widgets_are_28_px_with_a_filled_pool() {
     for field in ["Entry 6 weight", "Entry 6 runs", "Dwell D", "Hold H", "First slot", "Period", "Jitter steps", "× step", "Quiet", "Arrive in M", "Chance", "Cooldown", "Spawn distance", "Margin", "Extension", "Include in base map"] {
         assert!(seen.contains(field), "not checked: {field}; {seen:?}");
     }
-    assert!(disabled.contains("Players"));
+    assert!(seen.contains("Players") && !disabled.contains("Players"));
+    assert!(seen.contains("Count radius"));
     assert!(disabled.contains("Remove"));
     for field in ["Pool", "Categories", "Pool category filter", "Sortie category", "Rename Strike", "Remove category Strike", "New category", "Add category", "Rename category", "Save", "Cancel", "Interdiction"] {
         assert!(seen.contains(field), "category control not checked: {field}; {seen:?}");
@@ -3786,8 +3859,12 @@ fn air_dock_draws_preview() {
     let preview = h.app.with_air_context(|ctx| crate::airtask::preview(&h.app.air_plan, ctx));
     assert_eq!(h.app.air_dock.drawn, preview.counts());
     assert!(preview.counts().lines > 0 && preview.counts().rings > 0, "{:?}", preview.counts());
+    assert!(preview.counts().count_circles > 0, "{:?}", preview.counts());
     h.click("Approach lines");
     assert_eq!(h.app.air_dock.drawn.lines, 0, "SHOW hides the approach lines");
+    assert_eq!(h.app.air_dock.drawn.rings, preview.counts().rings);
+    h.click("Count circles");
+    assert_eq!(h.app.air_dock.drawn.count_circles, 0, "SHOW hides the count circles");
     assert_eq!(h.app.air_dock.drawn.rings, preview.counts().rings);
 }
 
@@ -4045,6 +4122,9 @@ fn map_generate_with_air_moves_map_ai_off_player_countries() {
         x: 215_000.0,
         z: 205_000.0,
     });
+    // The air start is 25.5 km from DPRK area 1: keep it outside the player
+    // count circle (decision 0050 D; the radius control comes in step 12e).
+    h.app.air_plan.threshold.count_radius_m = 15_000.0;
     h.app.map_refs = vec![crate::frontlines::MapRefGroup {
         path: PathBuf::from("Ref units.Group"),
         entity: crate::parser::parse_group_file(REF_UNITS_0037).unwrap(),
@@ -4127,6 +4207,9 @@ fn dprk_air_start_is_on_the_country_air_tasking_watches() {
         x: 230_000.0,
         z: 205_000.0,
     });
+    // The air start is 20.6 km from NATO area 1: keep it outside the player
+    // count circle (decision 0050 D; the radius control comes in step 12e).
+    h.app.air_plan.threshold.count_radius_m = 15_000.0;
     h.app.terrain_apply = false;
     let (root, _) = generate_map(&mut h, "base_map_0042.Group");
 
@@ -4616,7 +4699,7 @@ fn map_air_dock_widgets_are_28_px_with_entries() {
         }
     }
     for label in ["DPRK", "NATO", "Auto-fill from objectives", "Entry 1 weight", "Entry 1 mode", "Remove entry 1",
-        "Entry 14 weight", "Entry 14 mode", "Remove entry 14", "Approach lines", "Threshold rings", "Spawn points", "RTB points"] {
+        "Entry 14 weight", "Entry 14 mode", "Remove entry 14", "Approach lines", "Threshold rings", "Count circles", "Spawn points", "RTB points"] {
         assert!(seen.contains(label), "not checked: {label}; {seen:?}");
     }
     small.sort();
@@ -4890,9 +4973,9 @@ fn a2_map_build_watches_three_nato_areas_for_dprk_players() {
         "NATO budget 2"
     );
 
-    // Nine copies, three per entry, all AI on 602; each copy's Zone IN and
-    // Zone Out are at its area, and (decision 0038) its DONE HUB OFF quiets
-    // more than the hub.
+    // Nine copies, three per entry, all AI on 602. Decision 0050 D: no zones of
+    // their own; each area's player count fires its copies' EMPTY IN. Decision
+    // 0038: each DONE HUB OFF quiets more than the hub.
     let sorties = named("Air Tasking NATO Sorties");
     assert_eq!(sorties.children.len(), 9);
     for (j, copy) in sorties.children.iter().enumerate() {
@@ -4905,11 +4988,13 @@ fn a2_map_build_watches_three_nato_areas_for_dprk_players() {
                 assert!(node.property("Script").unwrap().contains(script), "{name}");
                 assert_eq!(node.property("Country"), Some("602"), "{name}");
             }
-            if node.block_type == "MCU_CheckZone" {
-                assert_eq!(node.pos_xz(), Some(A2_AREAS[j / 3]), "{name}");
-            }
+            assert_ne!(node.block_type, "MCU_CheckZone", "{name}: no zones of its own (0050 D)");
         });
         assert_eq!(planes, 4, "{name}");
+        let empty_in = copy.find_by_name(&format!("SN0{} EMPTY IN", j + 1)).unwrap().index.unwrap();
+        let count = named(&format!("PCN0{} EMPTY", j / 3 + 1));
+        assert!(count.targets.contains(&empty_in), "{name}");
+        assert_eq!(named(&format!("PCN0{} TRIGGER", j / 3 + 1)).pos_xz(), Some(A2_AREAS[j / 3]), "{name}");
         let off = copy
             .find_by_name(&format!("SN0{} DONE HUB OFF", j + 1))
             .unwrap();
@@ -5030,6 +5115,9 @@ fn a3_inputs(h: &mut Harness) {
     }
     assert_eq!(h.app.air_plan.pool.len(), 2, "EN01 Zone, EN02 Clock");
     h.app.air_plan.threshold.radius_m = A3_RADIUS_M;
+    // A3's air start is 22 km from its area: the player count circle (decision
+    // 0050 D) must stay inside that. The radius control comes in step 12e.
+    h.app.air_plan.threshold.count_radius_m = 20_000.0;
     h.app.air_plan.zone.chance_pct = A3_CHANCE;
     h.app.air_plan.zone.cooldown_min = A3_COOLDOWN_MIN;
     let clock = &mut h.app.air_plan.schedule[AirSide::Nato.idx()];
@@ -5067,22 +5155,13 @@ fn write_p14_acceptance_a3() {
 }
 
 /// The A3 build, as the run sheet describes it. A3 was flown on 2026-10-30, so
-/// its frozen files stay as flown. While the build still matches them byte for
-/// byte, this checks that; if the trace build changes, drop the byte check and
-/// keep the facts (as A2's check did).
+/// its frozen files stay as flown. Decision 0050 D changed the build (each copy
+/// ends on its area's player count, not its own Zone Out), so the byte check
+/// is dropped and the facts are kept, as A2's check did.
 #[test]
-fn a3_map_build_matches_the_frozen_files_and_the_run_sheet() {
+fn a3_map_build_matches_the_run_sheet() {
     let mut h = Harness::new("p14_acceptance_a3");
     let (root, countries) = build_a3(&mut h);
-    let frozen = repo("handoff/p14-probes/acceptance-a3");
-    for ext in ["Group", "eng", "trace.json"] {
-        let built = std::fs::read(h.out(&format!("{A3_STEM}.{ext}"))).unwrap();
-        let kept = std::fs::read(frozen.join(format!("{A3_STEM}.{ext}"))).unwrap();
-        assert!(
-            built == kept,
-            "{ext}: the build no longer matches the frozen A3 file"
-        );
-    }
 
     let air = root.find_by_name("Air Tasking").expect("Air Tasking group");
     let trees: Vec<_> = air.children.iter().filter_map(|c| c.name()).collect();
@@ -5101,6 +5180,11 @@ fn a3_map_build_matches_the_frozen_files_and_the_run_sheet() {
         (Some("8000"), Some("501"))
     );
     assert!(air.find_by_name("THN02 TRIGGER").is_none());
+    // Decision 0050 D: the area's player count, 20 km (inside the air start's
+    // 22 km), watching the same players.
+    let count = named("PCN01 TRIGGER");
+    assert_eq!(count.pos_xz(), Some(A3_AREA));
+    assert_eq!((count.property("Radius"), count.property("Country")), (Some("20000"), Some("501")));
     for (name, key, value) in [
         ("THN01 INNER", "Zone", "8000"),
         ("THN01 DWELL", "Time", "80"),
@@ -5147,12 +5231,16 @@ fn a3_map_build_matches_the_frozen_files_and_the_run_sheet() {
             }
         });
         assert_eq!(planes, 4, "{name}");
+        // 0050 D: no zones of its own; the area's count fires its EMPTY IN.
+        assert_eq!(copy.count_block_type("MCU_CheckZone"), 0, "{name}");
+        let empty_in = copy.find_by_name(&format!("SN0{} EMPTY IN", j + 1)).unwrap().index.unwrap();
+        assert!(named("PCN01 EMPTY").targets.contains(&empty_in), "{name}");
         let off = copy
             .find_by_name(&format!("SN0{} DONE HUB OFF", j + 1))
             .unwrap();
         assert!(
-            off.targets.len() > 1,
-            "{name}: DONE HUB OFF closes its timers and zones too"
+            off.targets.contains(&empty_in) && off.targets.len() > 1,
+            "{name}: DONE HUB OFF closes its timers and EMPTY IN too"
         );
     }
 
@@ -5230,12 +5318,14 @@ fn write_p14_standalone_l() {
 }
 
 /// The two files the editor check starts from, as the run sheet describes
-/// them: byte for byte the frozen copies; the base map has the air start and
-/// no Air Tasking; the standalone file is one `Air Tasking` group indexed from
-/// 1, so its indexes collide with the base map's; and, under that renumbering,
-/// it is A3's flown Air Tasking group (same inputs, same seed).
+/// them: the frozen copies' file set (check L was flown on 2026-10-30; decision
+/// 0050 D changed the build, so the byte check is dropped, as for A3); the base
+/// map has the air start and no Air Tasking; the standalone file is one `Air
+/// Tasking` group indexed from 1, so its indexes collide with the base map's;
+/// and, under that renumbering, it is A3's Air Tasking group as built now (same
+/// inputs, same seed).
 #[test]
-fn standalone_l_build_matches_the_frozen_files_and_a3() {
+fn standalone_l_build_matches_a3() {
     let mut h = Harness::new("p14_standalone_l");
     let (base, air) = build_standalone_l(&mut h);
     let frozen = repo("handoff/p14-probes/standalone-l");
@@ -5249,14 +5339,7 @@ fn standalone_l_build_matches_the_frozen_files_and_a3() {
         names.sort();
         names
     };
-    let built = stem_files(&h.dir);
-    assert_eq!(built, stem_files(&frozen), "the build writes the frozen file set");
-    for name in &built {
-        assert!(
-            std::fs::read(h.dir.join(name)).unwrap() == std::fs::read(frozen.join(name)).unwrap(),
-            "{name}: the build no longer matches the frozen file"
-        );
-    }
+    assert_eq!(stem_files(&h.dir), stem_files(&frozen), "the build writes the frozen file set");
 
     // The base map: the air start, no Air Tasking, indexes from 1.
     assert!(base.find_by_name("Air Tasking").is_none());
@@ -5273,15 +5356,14 @@ fn standalone_l_build_matches_the_frozen_files_and_a3() {
     let clashes = air_indexes.iter().filter(|i| base_indexes.contains(i)).count();
     assert_eq!(clashes, air_indexes.len(), "every standalone index is also used by the base map");
 
-    // A3's flown Air Tasking group, renumbered. The Map writes the trace
-    // breadcrumbs at the base map's root and the standalone file inside its
-    // one group, so A3's are moved into its group, in file order, first.
-    let a3_dir = repo("handoff/p14-probes/acceptance-a3");
-    let a3 = crate::parser::parse_group_file(&std::fs::read_to_string(a3_dir.join(format!("{A3_STEM}.Group"))).unwrap())
-        .unwrap();
+    // A3's Air Tasking group as built now, renumbered. The Map writes the
+    // trace breadcrumbs at the base map's root and the standalone file inside
+    // its one group, so A3's are moved into its group, in file order, first.
+    let mut a3_h = Harness::new("p14_standalone_l_a3");
+    let (a3, _) = build_a3(&mut a3_h);
     let mut a3_air = a3.find_by_name("Air Tasking").unwrap().clone();
     let crumbs: Vec<_> = a3.children.iter().filter(|c| c.block_type == "MCU_TR_MissionObjective").cloned().collect();
-    let a3_trace = crate::trace::read_trace_sidecar(&a3_dir.join(format!("{A3_STEM}.trace.json"))).unwrap();
+    let a3_trace = crate::trace::read_trace_sidecar(&a3_h.out(&format!("{A3_STEM}.trace.json"))).unwrap();
     assert_eq!(crumbs.len(), a3_trace.entries.len(), "A3's breadcrumbs are its root objectives");
     a3_air.children.extend(crumbs);
     crate::airtask::testkit::assert_same_up_to_indexes(&a3_air, &air, crate::airtask::testkit::Renumbering::default());

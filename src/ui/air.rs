@@ -4,7 +4,7 @@
 use super::*;
 use crate::frontlines::preview_front_xz;
 use crate::mapclip::apply_salients;
-use super::map::{draw_dashed_world_circle, faction_map_color, world_to_pos};
+use super::map::{draw_dashed_world_circle, draw_world_circle, faction_map_color, world_to_pos};
 use crate::airtask::{
     self, AirCheck, AirContext, AirDrawCounts, AirIssue, AirPlan, AirSide, AirSortie, BudgetImpl,
     EntryStatus, IssueSeverity, PoolEntry, SlotMark, SortieSource, TargetChoice, TargetKind,
@@ -31,6 +31,7 @@ pub(super) struct AirShow {
     pub(super) rings: bool,
     pub(super) spawns: bool,
     pub(super) rtbs: bool,
+    pub(super) count_circles: bool,
 }
 
 impl Default for AirShow {
@@ -40,6 +41,7 @@ impl Default for AirShow {
             rings: true,
             spawns: true,
             rtbs: true,
+            count_circles: true,
         }
     }
 }
@@ -65,8 +67,9 @@ impl Default for AirDock {
 /// Map's orange note when every pool entry is orphaned, off or out of date.
 pub(super) const AIR_LEFT_OUT: &str = "Air Tasking has no valid entries and will be left out";
 
-/// Everything the build reads: the plan, the Map inputs, and the user
-/// template files it re-reads from disk (their modified time, or none).
+/// Everything the build reads: the plan, the Map inputs (the player spawns
+/// included, decision 0051), and the user template files it re-reads from
+/// disk (their modified time, or none).
 fn air_eval_key(plan: &AirPlan, ctx: &AirContext) -> u64 {
     let files: Vec<_> = plan
         .library
@@ -76,9 +79,18 @@ fn air_eval_key(plan: &AirPlan, ctx: &AirContext) -> u64 {
             SortieSource::BuiltIn(_) => None,
         })
         .collect();
+    // No `..`: a new AirContext field does not compile until it joins the key.
+    let AirContext {
+        east_objectives,
+        nato_objectives,
+        arrows,
+        front,
+        aabb,
+        date,
+        player_spawns,
+    } = ctx;
     fingerprint(format!(
-        "{plan:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{files:?}",
-        ctx.east_objectives, ctx.nato_objectives, ctx.arrows, ctx.front, ctx.aabb, ctx.date
+        "{plan:?}|{east_objectives:?}|{nato_objectives:?}|{arrows:?}|{front:?}|{aabb:?}|{date:?}|{player_spawns:?}|{files:?}"
     ))
 }
 
@@ -123,6 +135,7 @@ impl GroupGeneratorApp {
     pub(super) fn with_air_context<R>(&self, read: impl FnOnce(&AirContext<'_>) -> R) -> R {
         let front = self.air_front();
         let mark = self.current_mark();
+        let spawns = self.air_player_spawns();
         read(&AirContext {
             east_objectives: &self.east_objectives,
             nato_objectives: &self.nato_objectives,
@@ -130,7 +143,27 @@ impl GroupGeneratorApp {
             front: &front,
             aabb: self.front_aabb,
             date: (mark.year, mark.month, mark.day),
+            player_spawns: &spawns,
         })
+    }
+
+    /// The player spawns Map Generate writes: the Map's air starts and the
+    /// spawns in its reference groups (decisions 0050 D and 0051 refuse one
+    /// inside a player count circle).
+    fn air_player_spawns(&self) -> Vec<airtask::PlayerSpawn> {
+        let mut spawns: Vec<_> = self
+            .placed_air_starts
+            .iter()
+            .map(|placed| airtask::PlayerSpawn {
+                name: placed.field.name.clone(),
+                side: if placed.field.nato { airtask::AirSide::Nato } else { airtask::AirSide::Dprk },
+                xz: (placed.x, placed.z),
+            })
+            .collect();
+        for group in &self.map_refs {
+            spawns.extend(airtask::player_spawns_in(&group.entity));
+        }
+        spawns
     }
 
     pub(super) fn air_header_label(&self) -> String {
@@ -395,6 +428,7 @@ impl GroupGeneratorApp {
         let nato_objectives = self.nato_objectives.clone();
         let arrows = self.attack_arrows.clone();
         let mark = self.current_mark();
+        let spawns = self.air_player_spawns();
         let air_ctx = AirContext {
             east_objectives: &east_objectives,
             nato_objectives: &nato_objectives,
@@ -402,6 +436,7 @@ impl GroupGeneratorApp {
             front: &front,
             aabb: self.front_aabb,
             date: (mark.year, mark.month, mark.day),
+            player_spawns: &spawns,
         };
         if !ctx.input(|i| i.pointer.any_down()) && !ctx.wants_keyboard_input() {
             self.air_editing = None;
@@ -1030,22 +1065,31 @@ impl GroupGeneratorApp {
                 }
             },
         );
+        let players_n = plan.threshold.players_n;
         shell::settings_section(
             ui,
             "air_threshold",
             "Threshold",
-            &format!("1 player · {} km", plan.threshold.radius_m / 1000.0),
+            &format!(
+                "{} · {} km",
+                plural(usize::from(players_n), "player"),
+                plan.threshold.radius_m / 1000.0
+            ),
             true,
             |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Players");
-                    let mut players = 1_u8;
-                    let r = ui.add_enabled(false, egui::DragValue::new(&mut players).range(1..=1));
-                    name_number(&r, "Players", 1.0);
+                    let r = ui.add(
+                        egui::DragValue::new(&mut plan.threshold.players_n)
+                            .range(airtask::PLAYERS_RANGE)
+                            .speed(0.05),
+                    );
+                    name_number(&r, "Players", f64::from(plan.threshold.players_n));
+                    note_edit(&mut edit, &r, "Changed threshold players");
                 });
                 shell::hint(
                     ui,
-                    "Two or more players comes with the multi-player phase.",
+                    "N players start an area, 1 keeps it. One N for both sides. Two or more is not yet flown with people.",
                     false,
                 );
                 ui.horizontal(|ui| {
@@ -1113,6 +1157,46 @@ impl GroupGeneratorApp {
                         );
                     }
                 }
+            },
+        );
+        let areas = self.air_eval(&plan, ctx).preview.count_circles.iter().fold(
+            [0_usize; 2],
+            |mut areas, circle| {
+                areas[circle.side.idx()] += 1;
+                areas
+            },
+        );
+        shell::settings_section(
+            ui,
+            "air_count",
+            "Player count",
+            &format!(
+                "{} km · {}",
+                plan.threshold.count_radius_m / 1000.0,
+                plural(areas.iter().sum(), "area")
+            ),
+            true,
+            |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Count radius");
+                    let mut km = plan.threshold.count_radius_m / 1000.0;
+                    let r = ui.add(
+                        egui::Slider::new(&mut km, airtask::COUNT_RADIUS_KM)
+                            .step_by(1.0)
+                            .suffix(" km"),
+                    );
+                    name_widget(&r, egui::WidgetType::Slider, "Count radius", km);
+                    if r.changed() {
+                        plan.threshold.count_radius_m = km * 1000.0;
+                    }
+                    note_edit(&mut edit, &r, "Changed count radius");
+                });
+                ui.label(format!("Areas · {}", side_counts(areas)));
+                shell::hint(
+                    ui,
+                    "One count per target. Keep player spawns outside every circle.",
+                    false,
+                );
             },
         );
         for side in AirSide::ALL {
@@ -1448,9 +1532,13 @@ fn note_edit(edit: &mut Edit, response: &egui::Response, label: &str) {
 }
 
 fn name_number(response: &egui::Response, label: &str, value: f64) {
+    name_widget(response, egui::WidgetType::DragValue, label, value);
+}
+
+/// Names a control for tests and screen readers, with its value.
+fn name_widget(response: &egui::Response, kind: egui::WidgetType, label: &str, value: f64) {
     response.widget_info(|| {
-        let mut info =
-            egui::WidgetInfo::labeled(egui::WidgetType::DragValue, response.enabled(), label);
+        let mut info = egui::WidgetInfo::labeled(kind, response.enabled(), label);
         info.value = Some(value);
         info
     });
@@ -1532,6 +1620,11 @@ fn remove_entry_button(ui: &mut egui::Ui, index: usize) -> bool {
 
 fn entry_word(n: usize) -> &'static str {
     if n == 1 { "entry" } else { "entries" }
+}
+
+/// "1 player", "3 players": a count and a noun that takes a plain "s".
+fn plural(n: usize, noun: &str) -> String {
+    if n == 1 { format!("1 {noun}") } else { format!("{n} {noun}s") }
 }
 struct SideStyle {
     label: &'static str,
@@ -1709,11 +1802,17 @@ impl GroupGeneratorApp {
                 if ring.inner {
                     draw_dashed_world_circle(painter, map_rect, x, z, ring.radius_m, color(ring.side));
                 } else {
-                    let centre = at(ring.centre);
-                    let r_px = centre.distance(at((x, z + ring.radius_m)));
-                    painter.circle_stroke(centre, r_px, Stroke::new(1.5_f32, color(ring.side)));
+                    let stroke = Stroke::new(1.5_f32, color(ring.side));
+                    draw_world_circle(painter, map_rect, ring.centre, ring.radius_m, stroke);
                 }
                 drawn.rings += 1;
+            }
+        }
+        if self.air_dock.show.count_circles {
+            for circle in &preview.count_circles {
+                let stroke = Stroke::new(1.0_f32, color(circle.side).gamma_multiply(0.6));
+                draw_world_circle(painter, map_rect, circle.centre, circle.radius_m, stroke);
+                drawn.count_circles += 1;
             }
         }
         if self.air_dock.show.spawns {
@@ -1768,6 +1867,7 @@ impl GroupGeneratorApp {
         shell::section_title(ui, "Show", None);
         ui.checkbox(&mut self.air_dock.show.lines, "Approach lines");
         ui.checkbox(&mut self.air_dock.show.rings, "Threshold rings");
+        ui.checkbox(&mut self.air_dock.show.count_circles, "Count circles");
         ui.checkbox(&mut self.air_dock.show.spawns, "Spawn points");
         ui.checkbox(&mut self.air_dock.show.rtbs, "RTB points");
         ui.add_space(8.0);

@@ -503,6 +503,7 @@ pub(crate) mod air_export_tests {
         AirContext {
             east_objectives: &[], nato_objectives: &[], arrows: &opts.user_attacks,
             front, aabb: opts.aabb, date: (1950, 9, 15),
+            player_spawns: &[],
         }
     }
 
@@ -625,6 +626,7 @@ pub(crate) mod air_export_tests {
             front: &front,
             aabb: opts.aabb,
             date: ctx.date,
+            player_spawns: &[],
         };
         // Arrow tips survive the Load round trip, so the arrow entry keeps
         // its target and the plan stays clean.

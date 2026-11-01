@@ -8,6 +8,8 @@ Combines, without the mission editor:
   * one or more reference groups (e.g. TemplateExamples/K14 AFB_mp.Group),
     renumbered past the probe's indexes, with their language tables merged,
   * optional --spawns JSON entries, copied as air starts from the test mission,
+  * optional --coalition COUNTRY:SIDE moves, which change the Options
+    Countries table (country -> coalition),
 then runs IL-2's MissionResaver to write the .msnbin, language files and
 .list the dedicated server loads. --no-resave writes only .Mission and .eng.
 
@@ -293,11 +295,35 @@ def add_airfield_planes(group_text, mission, scripts, label):
     return text, added
 
 
-def options_block(mission, title_ids):
+def parse_coalition(value):
+    """'602:3' -> (602, 3), for --coalition."""
+    m = re.fullmatch(r"\s*(\d+)\s*:\s*(\d+)\s*", value)
+    if m is None:
+        raise argparse.ArgumentTypeError(f"expected COUNTRY:SIDE, e.g. 602:3, got {value!r}")
+    return int(m.group(1)), int(m.group(2))
+
+
+def set_coalitions(options, coalitions, path):
+    """Move countries to another side in the Options Countries table, which
+    maps each country to its coalition (`602 : 2;`). Every country named must
+    already be in the table."""
+    start, end = required_block(options, "Countries", path, "  ", "Options")
+    for country, side in coalitions:
+        rows = [i for i in range(start + 2, end - 1)
+                if re.fullmatch(rf"    {country} : \d+;", options[i])]
+        if len(rows) != 1:
+            raise SystemExit(f"{path}: Options Countries block: no single row for country {country}")
+        options[rows[0]] = f"    {country} : {side};"
+        print(f"country {country} moved to side {side}")
+
+
+def options_block(mission, title_ids, coalitions=()):
     start, end = required_block(mission.lines, "Options", mission.path)
     options = mission.lines[start:end]
     for key, value in zip(("LCName", "LCDesc", "LCAuthor"), title_ids):
         set_block_value(options, key, value, mission.path)
+    if coalitions:
+        set_coalitions(options, coalitions, mission.path)
     block = "\n".join(mission.lines[:start] + options)
     assert "MissionType = 2;" in block and "landscape_korea" in block, "not a Korea dogfight Options block"
     return block
@@ -316,7 +342,12 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--spawn-planes", default="f80c10",
                     help="comma-separated plane scripts for reference airfields that have no Planes list")
+    ap.add_argument("--coalition", action="append", default=[], type=parse_coalition,
+                    metavar="COUNTRY:SIDE",
+                    help="move a country to another side in the Countries table (repeatable), e.g. 602:3")
     a = ap.parse_args()
+    if len({country for country, _ in a.coalition}) != len(a.coalition):
+        ap.error("--coalition names a country more than once")
     spawn_scripts = [s.strip() for s in a.spawn_planes.split(",") if s.strip()]
     shipped = ShippedMission(a.game)
 
@@ -356,7 +387,7 @@ def main():
         if os.path.exists(stale):
             os.remove(stale)
     mission = os.path.join(a.out, a.name + ".Mission")
-    body = options_block(shipped, (0, 1, 2)).replace("\n", "\r\n")
+    body = options_block(shipped, (0, 1, 2), a.coalition).replace("\n", "\r\n")
     for g in groups:
         body += "\r\n\r\n" + g.replace("\r\n", "\n").replace("\n", "\r\n").rstrip()
     body += "\r\n\r\n# end of file"

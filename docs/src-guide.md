@@ -104,7 +104,8 @@ Presentation only. **All modes.**
 
 ### `ui/air.rs` — Air Tasking rail tab
 The library, category editor and pool filter, target picker, editable pool,
-slot strip, plan checks and settings.
+slot strip, plan checks and settings (the threshold's N, and the Player count
+section: the count radius and each side's areas, from `AirPreview.count_circles`).
 Builds the Map context and calls the public `airtask` API; owns presentation,
 undo snapshots and the standalone file dialog. `draw_slot_strip` also serves
 the future Map Air dock. **Air Tasking.**
@@ -169,9 +170,11 @@ on-station timing, HOT/COLD extension, a FLYING budget flag, and one OnKilled
 with its own 0.5 s DELETE DELAY and entity-linked DELETE, then registers
 lifecycle events in `SideLogic`. `ShellSpec` supplies timing and strategy
 choices; `ShellIds` supplies cross-builder connection points. Decisions 0017/0018.
-WP 1 pulses the retained Zone IN at the target; only an enemy seen there arms
-Zone Out. Both zones use Zone Out's radius. Empty targets complete their
-on-station time, then COLD ends the sortie or HOT extends it once.
+By default (decision 0050 D) the template's Zone IN and Zone Out go: `ON
+STATION IN` switches the copy's `EMPTY IN` on, and its area's player count fires
+it. Empty targets complete their on-station time, then COLD ends the sortie or
+HOT extends it once. The `CheckZone` strategy keeps the zones (0018: WP 1
+pulses Zone IN, which arms Zone Out), only for the flown probe flights.
 **Air Tasking generation.**
 
 ### `airtask/budget.rs` — per-side live-copy census
@@ -230,6 +233,20 @@ Per side and area: a Complex Trigger filtered to the players' country (601 or
 501) at r_in, and a pulsed coalition check zone for the presence check every
 HOLD, driving the area's HOT and COLD relays (decisions 0023, 0024, 0045).
 `ai_country` / `ai_country_for_player` give the AI countries 602 / 503.
+`player_country`, `enemy_coalitions`, `player_trigger` and `place_trigger` are
+shared with `presence.rs`.
+**Air Tasking generation.**
+
+### `airtask/presence.rs` — a player count per area
+Decision 0050 D, flown as probe flight 2R; the export builds one per area. Per
+side and area: a Complex Trigger on the other side's player country steps a
+relay chain from 0 to 3 (Entered up; Left and Finished down), then busy; a
+Closer 0 `CLEAR` zone clears busy when nobody of that side is left. `EMPTY`
+fires when the area empties, into every copy's `EMPTY IN` registered for the
+area. 26 MCUs per area. `spawns_inside` gives the export's error for a player
+spawn (`AirContext.player_spawns`: the Map's air starts, and those
+`player_spawns_in` finds in its reference groups) inside a circle that watches
+its side (decision 0051).
 **Air Tasking generation.**
 
 ### `airtask/clock.rs` — the mission clock

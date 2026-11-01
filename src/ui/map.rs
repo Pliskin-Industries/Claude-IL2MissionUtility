@@ -1725,6 +1725,19 @@ fn draw_dashed_world_line(painter: &egui::Painter, rect: Rect, pts: &[(f64, f64)
 }
 
 /// A thin dashed circle in world metres. Dashes stay about 6 px on screen.
+/// A solid circle of `radius_m` world metres around `(x, z)`.
+pub(super) fn draw_world_circle(
+    painter: &egui::Painter,
+    rect: Rect,
+    (x, z): (f64, f64),
+    radius_m: f64,
+    stroke: Stroke,
+) {
+    let center = world_to_pos(rect, x, z);
+    let r_px = center.distance(world_to_pos(rect, x, z + radius_m));
+    painter.circle_stroke(center, r_px, stroke);
+}
+
 pub(super) fn draw_dashed_world_circle(
     painter: &egui::Painter,
     rect: Rect,

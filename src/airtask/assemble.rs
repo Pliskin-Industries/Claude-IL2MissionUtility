@@ -216,7 +216,7 @@ pub(crate) fn assemble_side(
                 extension_s: plan.stop.extension_min * 60.0,
                 target,
                 census_delay_s: census_delay(plan.strategies.census, registry.flags.len() + 1),
-                zone_out: plan.strategies.zone_out, // Flight 0, 0d: CheckZone remains default; J5 permits Watchdog.
+                zone_out: plan.strategies.zone_out, // Decision 0050 D: AreaCount by default.
                 losses: plan.strategies.losses,     // Flight 1G, decisions 0011/0017: losses use OnKilled (13).
             };
             let shell = wrap_sortie(&mut copy, &prefix, &shape, &spec, &mut alloc)?;
@@ -371,6 +371,7 @@ pub(crate) mod tests {
                 z_max: 400_000.0,
             },
             date: (1950, 11, 15),
+            player_spawns: &[],
         }
     }
 

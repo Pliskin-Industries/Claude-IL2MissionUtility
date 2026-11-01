@@ -9,8 +9,8 @@ use super::place::{SortiePlacement, spawn_point};
 use super::shell::group;
 use super::{
     AirCheck, AirContext, AirIssue, AirLine, AirPlan, AirPoint, AirPreview, AirRing, AirSide, AirTotals,
-    BudgetImpl, IssueSeverity, SideLogic, SlotMark, SortieSource, TriggerMode, budget, clock,
-    threshold, timing, zone,
+    BudgetImpl, IssueSeverity, SideLogic, SlotMark, SortieSource, TriggerMode, ZoneOutImpl, budget,
+    clock, presence, threshold, timing, zone,
 };
 use crate::ast::Il2Entity;
 use crate::frontlines::{AIR_TASKING_GROUP, MapAirPack};
@@ -233,10 +233,20 @@ fn build_side(
         side,
         &copies.areas,
         &plan.threshold,
-        &plan.strategies,
         &mut logic,
         next_id,
     )?);
+    if plan.strategies.zone_out == ZoneOutImpl::AreaCount {
+        // Decision 0050 D: after the copies registered their EMPTY IN relays.
+        let (counts, _) = presence::build_side(
+            side,
+            &copies.areas,
+            plan.threshold.count_radius_m,
+            &mut logic,
+            next_id,
+        )?;
+        copies.trees[0].children.extend(counts);
+    }
     copies.trees[0].children.extend(budget::build_side(
         side,
         plan.budget.per_side[side.idx()],
@@ -313,9 +323,12 @@ pub(super) fn trace_role_indexes(root: &Il2Entity) -> Vec<i32> {
                     | Some((
                         "SD" | "SN",
                         "START" | "ON STATION" | "EXTEND" | "COLD" | "LOSSES"
-                            | "HARD STOP" | "DONE HUB" | "DELETE DELAY"
+                            | "HARD STOP" | "DONE HUB" | "DELETE DELAY" | "EMPTY IN"
                     ))
-                    | Some(("Zone", "Out"))
+            ) || matches!(
+                // Decision 0050 D: the count's path, and when it empties.
+                role,
+                Some(("PCD" | "PCN", role)) if presence::traced_role(role)
             );
             if traced {
                 indexes.extend(node.index);
@@ -368,11 +381,41 @@ fn evaluate(plan: &AirPlan, ctx: &AirContext<'_>) -> (Vec<MapAirPack>, Vec<AirIs
         AirSide::Dprk,
         &[],
         &plan.threshold,
-        &plan.strategies,
         &mut SideLogic::default(),
         &mut 1,
     ) {
         issues.push(issue(IssueSeverity::Error, error));
+    }
+    if let Err(error) = presence::build_side(
+        AirSide::Dprk,
+        &[],
+        plan.threshold.count_radius_m,
+        &mut SideLogic::default(),
+        &mut 1,
+    ) {
+        issues.push(issue(IssueSeverity::Error, error));
+    } else if plan.strategies.zone_out == ZoneOutImpl::AreaCount {
+        let count_km = plan.threshold.count_radius_m / 1000.0;
+        let inner_m = timing::derived_timing(&plan.threshold).inner_m;
+        if !presence::COUNT_RADIUS_KM.contains(&count_km) {
+            issues.push(issue(
+                IssueSeverity::Error,
+                format!(
+                    "Air Tasking player count radius must be {} to {} km",
+                    presence::COUNT_RADIUS_KM.start(),
+                    presence::COUNT_RADIUS_KM.end()
+                ),
+            ));
+        } else if plan.threshold.count_radius_m < inner_m {
+            // The threshold's trigger and presence check sit on the inner ring.
+            issues.push(issue(
+                IssueSeverity::Warning,
+                format!(
+                    "Air Tasking player count radius ({count_km:.1} km) is smaller than the threshold's inner ring ({:.1} km). A player inside the ring but outside the count can start a sortie that finds its area empty and holds for its time on station.",
+                    inner_m / 1000.0
+                ),
+            ));
+        }
     }
     issues.extend(path_issues(plan, &eligible));
     let mut next_id = 1;
@@ -390,6 +433,14 @@ fn evaluate(plan: &AirPlan, ctx: &AirContext<'_>) -> (Vec<MapAirPack>, Vec<AirIs
                     &copies.entries,
                 ));
                 issues.extend(zone::validate_zone(side, plan, &copies.entries));
+                if plan.strategies.zone_out == ZoneOutImpl::AreaCount {
+                    issues.extend(presence::spawns_inside(
+                        side,
+                        &copies.areas,
+                        plan.threshold.count_radius_m,
+                        ctx.player_spawns,
+                    ));
+                }
                 assembled.push((side, copies, logic));
             }
             Err(error) => issues.push(side_error(side, error)),
@@ -538,6 +589,14 @@ pub(super) fn preview(plan: &AirPlan, ctx: &AirContext<'_>) -> AirPreview {
                     inner,
                 });
             }
+            if plan.strategies.zone_out == ZoneOutImpl::AreaCount {
+                preview.count_circles.push(AirRing {
+                    side,
+                    centre,
+                    radius_m: plan.threshold.count_radius_m,
+                    inner: false,
+                });
+            }
         }
         let schedule = &plan.schedule[side.idx()];
         if !schedule.enabled
@@ -610,6 +669,7 @@ mod tests {
                 front: &self.front,
                 aabb: self.opts.aabb,
                 date: self.date,
+                player_spawns: &[],
             }
         }
     }
@@ -1167,6 +1227,9 @@ mod tests {
     fn validate_warns_above_totals_limits() {
         let (mut plan, input) = export_test_plan();
         plan.pool = vec![plan.pool[0].clone(); 30];
+        // Decision 0050 D: copies carry no check zones, so 90 copies on one
+        // area do not reach the default 48; a low limit still exercises the warning.
+        plan.limits.check_zones = 1;
         assert!(plan.pool.iter().all(|entry| entry.runs == 3));
         let counts = super::super::totals(&plan, &input.context());
         let issues = super::super::validate(&plan, &input.context());
@@ -1296,7 +1359,7 @@ mod tests {
             |p| p.budget.per_side = [0, 7],
             |p| p.strategies.budget = super::super::BudgetImpl::SingleSlot,
             |p| p.threshold.players_n = 0,
-            |p| p.strategies.threshold = super::super::ThresholdImpl::Counted,
+            |p| p.threshold.players_n = 4,
             |p| p.threshold.radius_m = f64::NAN,
             |p| p.threshold.inner_ratio = 1.1,
             |p| p.threshold.dwell_s = Some(0.0),
@@ -1403,6 +1466,170 @@ mod tests {
         assert_eq!(check.totals, AirTotals::default(), "a plan that cannot build counts nothing");
     }
 
+    /// Decision 0050 D end to end: a NATO side built as Generate builds it. A
+    /// DPRK player inside area 1's 50 km count circle (45 km out: past the old
+    /// 35 km Zone Out and the threshold's 6 km) ends a copy on station when he
+    /// leaves, although DPRK AI stays 10 km from the target (it held the old
+    /// Zone Out). A player who comes and goes before the copy arrives does not.
+    #[test]
+    fn area_count_ends_a_copy_on_station() {
+        // The old Zone IN / Zone Out shell (0018), for contrast: the AI holds
+        // its Zone Out and the 45 km player is outside it, so only the end of
+        // time on station (902.5 s) ends the copy.
+        for (zone_out, ends) in [
+            (ZoneOutImpl::AreaCount, [400.0, 902.5]),
+            (ZoneOutImpl::CheckZone, [902.5, 902.5]),
+        ] {
+            area_count_case(zone_out, ends);
+        }
+    }
+
+    fn area_count_case(zone_out: ZoneOutImpl, ends: [f64; 2]) {
+        use super::super::assemble::tests::{context, test_plan};
+        use super::super::shell::test_support::{flown_configs, ticks, times};
+        use super::super::testkit::{ScriptedTrack, WalkerInput, walk};
+        let mut plan = test_plan();
+        plan.strategies.zone_out = zone_out;
+        let ctx = context();
+        let mut next = 1;
+        let mut logic = SideLogic::default();
+        let copies = assemble_side(AirSide::Nato, &plan, &ctx, &mut logic, &mut next).unwrap();
+        let entry = copies.entries.iter().find(|entry| entry.area == 1).unwrap();
+        let copy = &entry.copies[0];
+        let (pointer, done_hub, copy_root) = (copy.pointer, copy.shell.done_hub, copy.root);
+        let centre = copies.areas[0];
+        let trees = build_side(AirSide::Nato, &plan, copies, logic, &mut next).unwrap();
+        let mut root = group("Air Tasking", &mut next);
+        root.children = vec![trees.logic, trees.sorties];
+        assert_links_resolve(&root);
+        let triggers = if zone_out == ZoneOutImpl::AreaCount { 2 * 2 } else { 2 };
+        assert_eq!(root.count_block_type("MCU_TR_ComplexTrigger"), triggers, "a threshold (and a count) per area");
+        let wp = by_id(&root, copy_root).find_by_name("WP 1").unwrap().index.unwrap();
+        let player = |inside: std::ops::Range<u32>| ScriptedTrack {
+            coalition: 1,
+            country: threshold::DPRK_PLAYER_COUNTRY,
+            samples: (1..=1200)
+                .map(|second| {
+                    let away = if inside.contains(&second) { 45_000.0 } else { 100_000.0 };
+                    (ticks(f64::from(second)), centre.0 + away, centre.1)
+                })
+                .collect(),
+        };
+        let ai = ScriptedTrack {
+            coalition: 1,
+            country: threshold::DPRK_AI_COUNTRY,
+            samples: (1..=1200).map(|second| (ticks(f64::from(second)), centre.0 + 10_000.0, centre.1)).collect(),
+        };
+        for (inside, done_s) in [(320..400, ends[0]), (100..200, ends[1])] {
+            let input = WalkerInput {
+                until: ticks(1200.0),
+                pulses: vec![(ticks(2.0), pointer.into())],
+                arrivals: vec![(ticks(302.0), wp.into())],
+                tracks: vec![player(inside.clone()), ai.clone()],
+                ..WalkerInput::default()
+            };
+            for config in flown_configs() {
+                let log = walk(&root, config, &input);
+                assert_eq!(times(&log, done_hub), [ticks(done_s)], "{zone_out:?} {config:?}: player inside {inside:?}");
+            }
+        }
+    }
+
+    /// Decision 0050 D: an air start of the side an area watches, inside its
+    /// count circle, is an error; outside it, or of the area's own side, is not.
+    #[test]
+    fn validate_refuses_a_watched_air_start_inside_a_count_circle() {
+        let (plan, input) = export_test_plan();
+        let ctx = input.context();
+        let mut logic = SideLogic::default();
+        let copies = assemble_side(AirSide::Dprk, &plan, &ctx, &mut logic, &mut 1).unwrap();
+        let area = copies.areas[0];
+        use super::super::PlayerSpawn;
+        let at = |side: AirSide, km: f64| PlayerSpawn {
+            name: "Test field".into(),
+            side,
+            xz: (area.0 + km * 1000.0, area.1),
+        };
+        let refused = |spawns: &[PlayerSpawn]| -> Vec<String> {
+            let ctx = AirContext { player_spawns: spawns, ..input.context() };
+            super::super::validate(&plan, &ctx)
+                .into_iter()
+                .filter(|i| i.severity == IssueSeverity::Error && i.text.contains("spawn"))
+                .map(|i| i.text)
+                .collect()
+        };
+        // DPRK areas watch NATO players.
+        let inside = refused(&[at(AirSide::Nato, 20.0)]);
+        assert_eq!(inside.len(), 1, "{inside:?}");
+        assert_eq!(
+            inside[0],
+            format!(
+                "Air Tasking DPRK area 1 (target at {:.1}, {:.1} km): the NATO spawn \"Test field\" is 20.0 km away, inside the 50.0 km player count circle. A player who spawns there is never counted. Move the spawn, or lower the count radius.",
+                area.0 / 1000.0,
+                area.1 / 1000.0
+            )
+        );
+        assert!(refused(&[at(AirSide::Nato, 60.0)]).is_empty(), "outside the circle");
+        assert!(refused(&[at(AirSide::Dprk, 20.0)]).is_empty(), "the area's own side is not watched");
+    }
+
+    /// Step 12e: a count circle smaller than the threshold's inner ring (where
+    /// its trigger and presence check sit) lets a player start a sortie from
+    /// outside the count; the sortie then finds its area empty and holds for
+    /// its time on station. Orange, not blocking.
+    #[test]
+    fn validate_warns_when_the_count_radius_is_below_the_inner_ring() {
+        let warned = |count_km: f64, zone_out: ZoneOutImpl| {
+            let (mut plan, input) = export_test_plan();
+            plan.threshold.radius_m = 30_000.0; // inner ring 15 km
+            plan.threshold.count_radius_m = count_km * 1000.0;
+            plan.strategies.zone_out = zone_out;
+            super::super::validate(&plan, &input.context())
+                .into_iter()
+                .filter(|i| i.text.contains("smaller than the threshold's inner ring"))
+                .collect::<Vec<_>>()
+        };
+        let issues = warned(10.0, ZoneOutImpl::AreaCount);
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!(issues[0].severity, IssueSeverity::Warning);
+        assert_eq!(
+            issues[0].text,
+            "Air Tasking player count radius (10.0 km) is smaller than the threshold's inner ring (15.0 km). A player inside the ring but outside the count can start a sortie that finds its area empty and holds for its time on station."
+        );
+        assert!(warned(15.0, ZoneOutImpl::AreaCount).is_empty(), "equal is fine");
+        assert!(warned(10.0, ZoneOutImpl::CheckZone).is_empty(), "no count without AreaCount");
+    }
+
+    /// Decision 0052: the plan's count radius stays inside the slider's range.
+    #[test]
+    fn validate_refuses_a_count_radius_outside_10_to_100_km() {
+        for (km, refused) in [(9.9, true), (10.0, false), (100.0, false), (100.1, true)] {
+            let (mut plan, input) = export_test_plan();
+            plan.threshold.count_radius_m = km * 1000.0;
+            let issues = super::super::validate(&plan, &input.context());
+            assert_eq!(
+                issues.iter().any(|i| i.severity == IssueSeverity::Error
+                    && i.text == "Air Tasking player count radius must be 10 to 100 km"),
+                refused,
+                "{km}: {issues:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_flags_a_bad_count_radius() {
+        for radius in [0.0, -1.0, f64::NAN] {
+            let (mut plan, input) = export_test_plan();
+            plan.threshold.count_radius_m = radius;
+            let issues = super::super::validate(&plan, &input.context());
+            assert!(
+                issues.iter().any(|i| i.severity == IssueSeverity::Error
+                    && i.text == "Air Tasking player count radius must be finite and greater than zero"),
+                "{radius}: {issues:?}"
+            );
+        }
+    }
+
     #[test]
     fn totals_match_the_generated_pack() {
         for (label, factory, expected) in [
@@ -1412,8 +1639,10 @@ mod tests {
                 AirTotals {
                     copies: [3, 3],
                     aircraft: [24, 12],
-                    mcus: [242, 199],
-                    check_zones: [7, 7],
+                    // 0050 D: each copy -2 MCUs and -2 check zones, each area
+                    // +26 MCUs and +1 check zone (one area per side).
+                    mcus: [262, 219],
+                    check_zones: [2, 2],
                 },
             ),
             (
@@ -1422,8 +1651,9 @@ mod tests {
                 AirTotals {
                     copies: [6, 12],
                     aircraft: [36, 48],
-                    mcus: [422, 678],
-                    check_zones: [14, 26],
+                    // 0050 D, two areas per side: 422 - 2 x 6 + 52, 678 - 2 x 12 + 52.
+                    mcus: [462, 706],
+                    check_zones: [4, 4],
                 },
             ),
         ] {
@@ -1434,6 +1664,42 @@ mod tests {
             assert_eq!(super::super::totals(&plan, &input.context()), counts);
             assert_eq!(counts, expected, "{label} D36 totals");
             println!("{label}: {counts:?}");
+        }
+    }
+
+    /// Decision 0047 E: N >= 2 adds a COUNT and a ZERO to each threshold cell
+    /// and changes nothing else in the totals.
+    #[test]
+    fn totals_for_two_or_three_players_add_two_mcus_per_area() {
+        for factory in [export_test_plan as fn() -> _, acceptance_test_plan] {
+            let (plan, input) = factory();
+            let one = super::super::totals(&plan, &input.context());
+            let root = pack(&plan, &input.context());
+            let cells = SIDES.map(|side| {
+                let mut cells = 0;
+                let trigger = format!("TH{}", side.letter());
+                root.for_each(&mut |node| {
+                    cells += u32::from(
+                        node.block_type == "MCU_TR_ComplexTrigger"
+                            && node.name().is_some_and(|name| name.starts_with(&trigger)),
+                    );
+                });
+                cells
+            });
+            assert!(cells.iter().all(|&cells| cells > 0));
+            for players_n in [2, 3] {
+                let mut counted = plan.clone();
+                counted.threshold.players_n = players_n;
+                assert!(blocking(&validate(&counted, &input.context())).is_none());
+                let totals = super::super::totals(&counted, &input.context());
+                assert_eq!(
+                    totals,
+                    AirTotals {
+                        mcus: [one.mcus[0] + 2 * cells[0], one.mcus[1] + 2 * cells[1]],
+                        ..one
+                    }
+                );
+            }
         }
     }
 
@@ -1451,9 +1717,20 @@ mod tests {
                     lines: expected.0,
                     rings: expected.1,
                     spawns: expected.0,
-                    rtbs: expected.0
+                    rtbs: expected.0,
+                    count_circles: expected.1 / 2,
                 }
             );
+            // Decision 0050 D: one count circle per area, on the threshold's centre.
+            for side in SIDES {
+                let outer: Vec<_> = preview.rings.iter().filter(|r| r.side == side && !r.inner).map(|r| r.centre).collect();
+                let counts: Vec<_> = preview.count_circles.iter().filter(|c| c.side == side).collect();
+                assert_eq!(counts.iter().map(|c| c.centre).collect::<Vec<_>>(), outer);
+                assert!(counts.iter().all(|c| c.radius_m == 50_000.0 && !c.inner));
+            }
+            let mut check_zone_plan = plan.clone();
+            check_zone_plan.strategies.zone_out = ZoneOutImpl::CheckZone;
+            assert!(super::super::preview(&check_zone_plan, &input.context()).count_circles.is_empty(), "no count without AreaCount");
             for side in SIDES {
                 assert_eq!(
                     preview.slot_times[side.idx()],
@@ -1824,6 +2101,9 @@ mod tests {
                             .unwrap(),
                     );
                 }
+                for role in ["UP 1", "UP 2", "UP 3", "UP 4", "DOWN 1", "DOWN 2", "DOWN 3", "EMPTY"] {
+                    expected.insert(named(logic, &format!("PC{letter}{area:02} {role}")).index.unwrap());
+                }
             }
             let sorties = named(air, &format!("Air Tasking {} Sorties", side.label()));
             assert_eq!(sorties.children.len(), copies);
@@ -1837,6 +2117,7 @@ mod tests {
                     "HARD STOP",
                     "DONE HUB",
                     "DELETE DELAY",
+                    "EMPTY IN",
                 ] {
                     expected.insert(
                         named(copy, &format!("S{letter}{:02} {role}", i + 1))
@@ -1844,10 +2125,11 @@ mod tests {
                             .unwrap(),
                     );
                 }
-                expected.insert(named(copy, "Zone Out").index.unwrap());
             }
         }
-        assert_eq!(expected.len(), 200, "every named breadcrumb, on every copy");
+        // 0050 D: a copy's EMPTY IN replaces its Zone Out; each of the two
+        // areas per side adds its count's eight relays.
+        assert_eq!(expected.len(), 200 + 2 * 2 * 8, "every named breadcrumb, on every copy");
         air.for_each(&mut |node| {
             if matches!(
                 node.block_type.as_str(),

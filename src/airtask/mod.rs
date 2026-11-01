@@ -11,6 +11,7 @@ mod export;
 mod library;
 mod place;
 mod pool;
+mod presence;
 #[cfg(test)]
 mod probe;
 mod shell;
@@ -27,6 +28,9 @@ mod zone;
 pub use library::{builtin_library, default_category, load_user_sortie, DEFAULT_CATEGORIES}; // fn builtin_library() -> Vec<AirSortie>; fn default_category(sortie: &AirSortie) -> String; fn load_user_sortie(path: &std::path::Path) -> Result<AirSortie, String>; const DEFAULT_CATEGORIES: [&str; 5]
 pub use timing::{derived_timing, f80_cruise_kmh, hard_stop}; // fn derived_timing(t: &ThresholdSpec) -> DerivedTiming; fn f80_cruise_kmh() -> F80Cruise; fn hard_stop(sortie: &AirSortie, plan: &AirPlan, mode: TriggerMode) -> Option<f64>; F80Cruise and f80_transit_s stay in timing.rs
 pub use pool::{add_category, add_entry, add_library_item, auto_fill, category_counts, default_categories, entry_status, pool_counts, remove_category, remove_library_item, rename_category, resolve_target, set_category, target_choices, EntryStatus, TargetChoice, TargetKind}; // fn add_category(plan: &mut AirPlan, name: &str) -> Result<(), String>; fn add_entry(plan: &mut AirPlan, entry: PoolEntry); fn add_library_item(plan: &mut AirPlan, sortie: AirSortie); fn auto_fill(plan: &mut AirPlan, ctx: &AirContext, side: AirSide, category: Option<&str>) -> usize; fn category_counts(plan: &AirPlan) -> Vec<(String, usize)>; fn default_categories() -> Vec<String>; fn entry_status(plan: &AirPlan, index: usize, ctx: &AirContext) -> EntryStatus; fn pool_counts(plan: &AirPlan) -> [usize; 2]; fn remove_category(plan: &mut AirPlan, name: &str) -> usize; fn remove_library_item(plan: &mut AirPlan, index: usize) -> Result<usize, String>; fn rename_category(plan: &mut AirPlan, old: &str, new: &str) -> Result<(), String>; fn resolve_target(target: &TargetRef, ctx: &AirContext) -> Option<TargetChoice>; fn set_category(plan: &mut AirPlan, sortie_index: usize, name: &str); fn target_choices(ctx: &AirContext, side: AirSide) -> Vec<TargetChoice>; enum EntryStatus { Ok, Orphaned, SideChanged, OutOfDate, MissingSortie }; struct TargetChoice { kind: TargetKind, number: usize, side: AirSide, target: TargetRef }; enum TargetKind { Objective, Arrow }
+pub(crate) use presence::COUNT_RADIUS_KM; // RangeInclusive<f64>: the count radius `validate` accepts and the slider offers (decision 0052)
+pub(crate) use threshold::PLAYERS_RANGE; // RangeInclusive<u8>: the THRESHOLD control's N bounds (decision 0047)
+pub(crate) use presence::player_spawns_in; // fn player_spawns_in(root: &Il2Entity) -> Vec<PlayerSpawn>: the Map reference groups' player spawns (decision 0051)
 pub use standalone::{build_air_group, sidecar_paths}; // fn build_air_group(plan: &AirPlan, ctx: &AirContext) -> Result<crate::ast::Il2Entity, String>; fn sidecar_paths(plan: &AirPlan) -> Vec<std::path::PathBuf>
 
 /// Index convention for every per-side array (`schedule`, `AirBudget::per_side`, preview slot rows).
@@ -178,6 +182,7 @@ pub struct ThresholdSpec {
     pub window_s: Option<f64>,
     pub dwell_s: Option<f64>,
     pub hold_s: Option<f64>, // None = derived (§4.2)
+    pub count_radius_m: f64, // decision 0050 D: each area's player count circle
 }
 impl Default for ThresholdSpec {
     fn default() -> Self {
@@ -188,6 +193,7 @@ impl Default for ThresholdSpec {
             window_s: None,
             dwell_s: None,
             hold_s: None,
+            count_radius_m: 50_000.0,
         }
     }
 } // D1, D2, D3, D4
@@ -272,33 +278,24 @@ impl Default for TotalsLimits {
 } // D36; decision 0032: the upstream author's idle load test
 
 // Strategy enums (§8 step 0d table). The Default is the primary design.
-// ThresholdImpl::Counted and CounterResetImpl are reserved for step 12 (§3.9); v1 builders accept only OnePlayer.
-#[allow(dead_code)] // P14 step 12
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ThresholdImpl {
-    #[default]
-    OnePlayer, // one Complex Trigger per area, N = 1 (decision 0023)
-    Counted, // N >= 2: trigger, counter and window (§3.9, step 12)
-}
-#[allow(dead_code)] // P14 step 12
+// The threshold's wiring follows ThresholdSpec.players_n (decision 0047), not a strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ZoneOutImpl {
+    /// Decision 0050 D: a copy ends when its area's player count empties while
+    /// it is on station (presence.rs).
     #[default]
+    AreaCount,
+    /// Decision 0018: the template's Zone IN and Zone Out check zones. Kept so
+    /// the flown probe flights' generators (flights 2 to 2I) still build what
+    /// was flown; Generate never selects it.
+    #[cfg_attr(not(test), allow(dead_code))]
     CheckZone,
-    Watchdog,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LossesImpl {
     /// A lost aircraft raises OnEvent 13 once and never 4 (flight 1G, decision 0011).
     #[default]
     Type13,
-}
-#[allow(dead_code)] // P14 step 12
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CounterResetImpl {
-    #[default]
-    SetVal,
-    Ring,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BudgetImpl {
@@ -315,10 +312,8 @@ pub enum CensusImpl {
 } // §3.3, probe E7
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Strategies {
-    pub threshold: ThresholdImpl,
     pub zone_out: ZoneOutImpl,
     pub losses: LossesImpl,
-    pub counter_reset: CounterResetImpl,
     pub budget: BudgetImpl,
     pub census: CensusImpl,
     pub ai_counts: bool, // probe result a; true makes the D30 warning an error (§8 step 0d)
@@ -336,6 +331,7 @@ pub(crate) struct SideLogic {
     pub(crate) budget_events: Vec<i32>, // SNjj START relays and the copies' delete timers; each gets BUD s MARK and BUD s CHECK
     pub(crate) links: Vec<(i32, i32)>, // (from, to): emit_side_logic adds `to` to the Targets of `from` (§3.0)
     pub(crate) pass_subscribers: BTreeMap<usize, Vec<i32>>, // area index → ZNii PASS IN relays (targets of THsaa INNER, the PASS event; 0030, 0044)
+    pub(crate) empty_consumers: BTreeMap<usize, Vec<i32>>, // area index → SNjj EMPTY IN relays (targets of PCsaa EMPTY; decision 0050 D)
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -355,6 +351,15 @@ pub struct AirPlan {
     pub debug_subtitles: bool, // false; not in the UI; set only by the step 11 test mission writer
 }
 
+/// A player spawn the mission writes (the Map's air starts). Decision 0050 D:
+/// Generate refuses one inside a player count circle that watches its side.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerSpawn {
+    pub name: String,
+    pub side: AirSide,
+    pub xz: (f64, f64),
+}
+
 pub struct AirContext<'a> {
     // supplied by the UI from Map state; no derives needed
     pub east_objectives: &'a [(f64, f64)],
@@ -364,6 +369,7 @@ pub struct AirContext<'a> {
     pub front: &'a [(f64, f64)], // the polyline the Map preview colours arrows with (see below)
     pub aabb: WorldAabb,
     pub date: Ymd,
+    pub player_spawns: &'a [PlayerSpawn], // the Map's air starts (decision 0050 D)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -379,7 +385,7 @@ pub struct AirRing {
     pub centre: (f64, f64),
     pub radius_m: f64,
     pub inner: bool,
-} // R, or r_in when inner
+} // R, or r_in when inner; a player count circle (`count_circles`) is never inner
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AirPoint {
     pub side: AirSide,
@@ -401,6 +407,7 @@ pub struct AirPreview {
     pub spawns: Vec<AirPoint>,
     pub rtbs: Vec<AirPoint>,
     pub slot_times: [Vec<SlotMark>; 2], // [DPRK, NATO], 0–3 h (D29)
+    pub count_circles: Vec<AirRing>, // decision 0050 D: one player count circle per area
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AirDrawCounts {
@@ -408,6 +415,7 @@ pub struct AirDrawCounts {
     pub rings: usize,
     pub spawns: usize,
     pub rtbs: usize,
+    pub count_circles: usize,
 }
 impl AirPreview {
     #[cfg(test)] // the Map draw tests compare `AirDock::drawn` with it
@@ -417,6 +425,7 @@ impl AirPreview {
             rings: self.rings.len(),
             spawns: self.spawns.len(),
             rtbs: self.rtbs.len(),
+            count_circles: self.count_circles.len(),
         }
     }
 }

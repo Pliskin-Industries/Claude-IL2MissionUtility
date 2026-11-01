@@ -45,7 +45,7 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
 
 - The block is `MCU_TR_ComplexTrigger`. The editor writes `Enabled = 1;` **twice**.
 - Filters are plain lines after the 21 `EventsFilter…` keys: `Country = 601;`, `ObjectScript = "luascripts\worldobjects\planes\f51d.txt";`, `ObjectName = "…";`. The sample has one of each; the shape for two or more is not known. A trigger with only the `Country` line, and one with no filter line at all, were written by the probe generator and **load in the resaver** (2026-10-12); neither shape was saved from the editor.
-- Outputs are an `OnEvents` block, not `Targets`. Event types seen: Object Entered = 58, Object Left = 60. The other 19 type numbers are not known.
+- Outputs are an `OnEvents` block, not `Targets`. Event types seen: Object Entered = 58, Object Left = 60. The other 19 type numbers were not known until flight 2P (see "Found on 2026-10-31 (flight 2P)": they follow the filter-key order, Killed = 70).
 - One key is misspelled in the game and must be written that way: `EventsFilterDropedBombs`.
 - The editor offers five countries by name: Neutral Country, USSR, PRC, DPRK and USA (601). A mission built on the dogfight test Options block also carries 602 and 603 on the NATO side (log header `CNTRS:…601:2,602:2,603:2`), but the editor shows no name for them, so a trigger cannot pick them from its list.
 
@@ -223,3 +223,78 @@ Read from a block saved by the editor on 2026-10-12 (game `261002`): `TemplateEx
   - **Over an area with no ground target the flight circles.** The HVAR AttackArea (`AttackGround 0`, `AttackAir 0`, `Time 600`) had nothing at A. After `Zone IN` (432.68) the lead flew a steady descending right turn at 30° bank: heading 311° to 172°, 3,050 m to 940 m, about 650 km/h and 1.8°/s (radius about 5.7 km).
   - **The collision.** Both left-side wingmen were on the outside of the turn, and their slots moved 100–150 m each way. The outboard one ("Red 14") slid inside the inner one ("Red 13") while that one rolled about 28° left against the turn. They closed from 53 m at 561.0 s to 5.2 m at 563.4 s, and both attitudes jumped at 563.2 s (the contact sign). The log has `AType:3 AID:-1` for Red 14 at 563.88, a bail-out at 570.14 and the crash at 578.14. Red 13 flew on to the end.
   - **Reading this Tacview:** mission seconds = `.acmi` seconds + 102 (its `ReferenceTime` 12:31:42 minus the mission's start time 12:30:00). Object ids are the log's `OBJID`s in hex. Tacview `handoff/tacview/P14_Standalone_L.zip.acmi`.
+
+## Found on 2026-10-31 (flight 2M, game 1.005)
+
+- **A Closer 0 check zone with two watched groups inside fires only when the last one is gone (ALL-out).** Armed by one pulse with both inside, it did not fire when the first group went, in any of four ways: deleted, killed by a Damage command, flown out, or a pair's wingman deleted alone. It fired 0.02 s after the last group was deleted (480.02, 700.02). AI on 601 stood in for players; flight 2N checks it with people.
+- **A Complex Trigger reports no Left for a plane that is deleted or killed inside it.** Only a plane that flies out raises Left (596.22, as in flights 1N and 1D). A count of Entered events (decision 0047) therefore keeps a plane that died or was removed inside.
+- **The N = 2 threshold works as built.**
+  - The second entry arms the area: MD2 at 179.82, MD4's pair at 154.56 on the wingman's entry.
+  - One plane alone never arms it.
+  - A Left between two entries resets the count (MD3, checked with Tacview).
+- 21 AI aircraft on this PC: every scripted activation, Delete and kill logged at its exact mission second.
+
+## Found on 2026-10-31 (flight 2P, game 1.005)
+
+- **Complex Trigger event numbers follow the order of the 21 `EventsFilter…` keys,** from 57 (`Spawned`) to 77 (`ParatrooperLandedAlive`). Flown with every filter on:
+
+  | Number | Event |
+  |---:|---|
+  | 58 | Entered |
+  | 59 | Entered alive |
+  | 60 | Left (flights 1N, 1D) |
+  | 62 | Finished |
+  | 63 | Finished alive |
+  | 67 | Damaged |
+  | 68 | Critically damaged |
+  | 70 | Killed |
+
+  The rest, by the key order (unflown): 57 Spawned, 61 Left alive, 64 Stationary and alive, 65 Finished stationary and alive, 66 Took off, 69 Repaired, 71 Dropped bombs, 72 Fired flare, 73 Fired rockets, 74 Dropped cargo containers, 75 Delivered cargo, 76 Paratrooper jumped, 77 Paratrooper landed alive.
+- **What raises what:**
+  - a kill raises 67, 68 and 70 at once, and 62 about 15 s later (the wreck);
+  - a Delete raises 62 and 63;
+  - damage that does not kill (Damage level 1) raises 68 only;
+  - none of them raises Left.
+- An event is raised only if its filter key is 1 and an `OnEvent` with its number exists. Flight 2P had every filter on; whether an event with its filter at 0 still fires was not flown.
+
+## Found on 2026-10-31 (sides check S1, game 1.005)
+
+Built with `build_probe_mission.py --coalition 602:3 --coalition 503:4` on flight 2P's group, with plane A moved to 602 and plane B to 503 (plane C stayed on 601). Logs `real_56`, Tacview `handoff/tacview/P14_Sides_S1.zip.acmi`.
+
+- **The `Countries` table in `Options` takes sides other than 0, 1 and 2.** With `602 : 3;` and `503 : 4;` the editor opens the file and the game hosts it. The log header reads `CNTRS:0:0,501:1,502:1,503:4,601:2,602:3,603:2`.
+- **The editor knows only three sides.** Its Mission Countries dialog (Mission Properties, Countries…) offers Neutral, Eastern Bloc and Western Bloc, and lists a country on side 3 or 4 with an empty side. In that dialog 503 is named DPRK, and 602 and 603 have no name. Whether an editor Save keeps sides 3 and 4 was not tried.
+- **Tacview writes an empty side for them:** `Coalition=` for the planes on 602 and 503, `Coalition=Western Bloc` for the plane on 601.
+- **Players see two sides only.** The briefing and results screens show Eastern Bloc and Western Bloc; nothing offers a third side.
+- Planes on 602 and 503 spawn on Activate, and a Damage command kills one (logged `COUNTRY:602`). A Complex Trigger filtered to country 601 does not see them; it saw the 601 plane as in flight 2P.
+- **Not known yet:** whether AI on sides 3 and 4 fights the right enemy and spares its own players, and whether a check zone watching side 1 or 2 ignores it (flight 2Q, decision 0050).
+
+## Found on 2026-10-31 (flight 2Q, game 1.005)
+
+The mission had 602 on side 3 and 503 on side 4 (`--coalition`). Logs `real_57`, Tacview `handoff/tacview/P14_Probe_2Q.zip.acmi`.
+
+- **A side of its own makes AI an enemy of both real sides.** Under an air attack order:
+  - a 602 pair (side 3) fired on a 601 pair (side 2), and a 601 pair fired on a 602 pair;
+  - a 503 pair (side 4) fired on a 501 pair (side 1).
+
+  No cell had both pairs on one side, so a same-side control is still missing.
+- **A check zone does not see planes on side 3.** A 602 pair orbited inside a 6 km Closer 1 zone for 140 s; zones watching `[3]` and `[2,3]` never fired for it. `[2]` and `[2,3]` fired for a 601 pair.
+- **An air `AttackArea` makes AI fighters engage:** `AttackAir 1`, `AttackGround 0`, `AttackGTargets 0`, `AttackArea` 5000, `Priority 1`, objects the lead. The lead was flying Priority 2 waypoints. The pairs came down to the target's height and fired 13 to 74 s after the order.
+- **AI-on-AI gunfire logged no `AType:1`, `2` or `3` line,** although Tacview shows shell bursts within 7 to 27 m of the targets. No aircraft was lost.
+- `AType:24 OBJID:<plane> POS(...)` was logged only for hunters after their attack order, about once per plane every 20 s. Its meaning is not known.
+- Tacview names every shell `Type=Projectile+Shell` (here `SHELL_20_RUS_HET`). An object's Tacview id is its log `OBJID` in hexadecimal (`5000` is 20480).
+
+## Found on 2026-10-31 (flight 2R, game 1.005)
+
+Four player counts per area (`presence.rs`, decision 0050 D) with 601 AI stand-ins. Logs `real_58`, Tacview `handoff/tacview/P14_Probe_2R.zip.acmi`.
+
+- **A Complex Trigger raises nothing for a plane it no longer holds.**
+  - A plane that flew out (Left) and was then killed far outside raised no Finished when its wreck landed.
+  - Another that flew out and was then deleted far outside raised none either.
+  - Removals in one cell raised nothing in the other triggers.
+- **Finished from a kill came 15.06 s after the Damage command, again** (315.06 after 300.00), as in flight 2P.
+- **One Delete of a pair raises two Finished in the same tick (360.02):** a relay switched off by the first one did not fire for the second.
+- **Switch-off then switch-on of a fired, armed Closer 0 zone works as a repeated check:**
+  - it fired at 450.02 when the circle emptied;
+  - it was switched off, then switched on again at about 678.2 (2 s after the busy entry at 676.16; the switch-on itself is not traced);
+  - it fired again at 820.02 when the circle emptied.
+- **A one-tick (0.05 s) delay timer between a Deactivate and the next Activate kept one event to one step,** across a fan-out of four relays.
