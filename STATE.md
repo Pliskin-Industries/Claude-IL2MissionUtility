@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-11-01: Astra's review of steps 8 to 12 found 12 issues; all are fixed on two unpushed branches (below). 0053 waits for no-pilot flight 2S, which the IL-2 launcher could not start today (its update server failed DNS, then SSL). Then flight 2N (12f) with two human pilots.
+> Last updated: 2026-11-01: Astra's review of steps 8 to 12 found 12 issues; fixes are on two unpushed branches (below). Flight 2S was flown: **0053's fix fails in the game** (a wreck that crosses out raises Left, so a kill counts twice). Decision 0058 (Proposed) waits on the user. Then flight 2N (12f) with two human pilots.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -19,7 +19,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 |---|---|---|
 | `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); standalone check L (PR #45); step 10 docs (PR #47); L's F-80 collision note and STATE (PR #48); step 12 parts 12a to 12e with flights 2M, 2P, S1, 2Q, 2R (PR #49); decisions 0001 to 0052 | `origin/main` `6f02211` |
 | `codex/review-fixes-replay-trace` (worktree `.claude/worktrees/review-fixes`) | Review fixes 1 to 9: Replay one session at a time, rescan on Run, discarded lines shown, `(T - 3) / 50` fallback, stale-trace fingerprint; trace builds refuse a non-.Group name, check index room, separate breadcrumb bands; L's base map compared byte for byte again. Decisions 0056, 0057. Non-trace and Map trace output unchanged | committed `6d6187b`, not pushed; 1117 passed |
-| `codex/airtask-0053-0055` (worktree `.claude/worktrees/airtask-fixes`) | Review findings A to C: 0053 count steps down on Killed (70) and Finished alive (63); 0054 standalone base map moves Map AI; 0055 clock gates RANDOM through AVAILABLE. Flight 2S built. Air Tasking output changes on purpose; flown probes 2R and 2L keep their wiring through test-only switches | committed to `fb889ba` plus this STATE, not pushed; 1112 passed. **Do not merge before flight 2S passes** (0053) |
+| `codex/airtask-0053-0055` (worktree `.claude/worktrees/airtask-fixes`) | Review findings A to C: 0053 count steps down on Killed (70) and Finished alive (63); 0054 standalone base map moves Map AI; 0055 clock gates RANDOM through AVAILABLE. Flight 2S built and flown (S1 failed 0053). Air Tasking output changes on purpose; flown probes 2R and 2L keep their wiring through test-only switches | committed to `fb889ba`, plus STATE and the 2S records, not pushed; 1112 passed. **Do not merge with 0053's wiring:** the user decides 0058 first |
 
 `upstream/main` has one commit not merged here (`571504a`, harvested coalition groups and ramp starts per country). Merged branches and their worktrees under `.claude/worktrees/` can be deleted once their idle sessions are archived.
 
@@ -27,7 +27,7 @@ Last recorded test run: **1112 passed, 0 failed, 42 ignored** (`cargo test --off
 
 ## P14 Air Tasking ("Wing Commander")
 
-Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user decisions U1 to U24). Flight results: `handoff/P14-probe-results.md` (flights 0 to 2R, A0 to A3, L, S1); step 12's scope and run sheets: `handoff/sessions/2026-10-31-p14-step12-scope.md` and the `2026-10-31-p14-flight-*` notes; run sheets for A3 and L: `handoff/sessions/2026-10-30-p14-acceptance-a3.md` and `2026-10-30-p14-standalone-l.md`. End-user manual for Air Tasking: `USER_MANUAL.md` (step 10). Facts that cost a flight: `docs/il2-loader-and-log-facts.md`. Step and flight notes: `handoff/sessions/`.
+Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user decisions U1 to U24). Flight results: `handoff/P14-probe-results.md` (flights 0 to 2S, A0 to A3, L, S1); step 12's scope and run sheets: `handoff/sessions/2026-10-31-p14-step12-scope.md` and the `2026-10-31-p14-flight-*` notes; run sheets for A3 and L: `handoff/sessions/2026-10-30-p14-acceptance-a3.md` and `2026-10-30-p14-standalone-l.md`. End-user manual for Air Tasking: `USER_MANUAL.md` (step 10). Facts that cost a flight: `docs/il2-loader-and-log-facts.md`. Step and flight notes: `handoff/sessions/`.
 
 - **Built (on `main`):** steps 1a to 9T: the sortie shell, budget, threshold, clock, zone, export, the Air Tasking rail tab, the Map dock's Air tab and Map Generate, the Trace build checkbox, the Replay window and the Map's Replay layer. Also: a used copy goes quiet at `DONE HUB` (0038); the Map's own AI planes leave the player countries when Air Tasking is in the mission (0037 A); zone and clock end their timers through D11 relays, because a switched-off running timer is paused, not cancelled (0044, flight 2K); the DPRK air start and field spawns write 501 (0042 A).
 - **Flown and seen in the game:**
@@ -43,7 +43,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
   - **A player count per area** (0050 D): each sortie copy ends on its area's count of players. Air Tasking's AI is not counted. Generate builds no Zone Out for Air Tasking (0048 superseded); `Watchdog`, `ThresholdImpl` and `CounterResetImpl` are removed. Generate output changed on purpose for missions with Air Tasking.
   - **Generate refuses** a player spawn inside a count circle (0051).
   - **UI** (0052): N from 1 to 3; one count radius, 10 to 100 km (50 km default), one area per target; the Map draws the circles. Checked live.
-  - **Flown, no pilot:** 2M (Zone Out is ALL-out; a kill or a Delete raises no Left); 2P (Killed is event 70); S1 and 2Q (AI on sides 3 and 4 attacks both real sides, so 0050 A failed; check zones do not see side 3); 2R (0050 D's count works as built).
+  - **Flown, no pilot:** 2M (Zone Out is ALL-out; a kill or a Delete raises no Left); 2P (Killed is event 70); S1 and 2Q (AI on sides 3 and 4 attacks both real sides, so 0050 A failed; check zones do not see side 3); 2R (0050 D's count works as built); 2S (a wreck that crosses out of the circle raises Left, so 0053 fails; a wreck's Finished comes 3 to 15 s after the kill).
 - **Still open from the step 11 list** (plan §8 "Step 11"; items 1 to 3 done by A3, item 4 by L):
   5. Load time and tick delay next to `validate`'s totals: only on the real host, not this PC.
   - Also unseen: a Yak copy, a player who lands inside an area (0040: no change needed), a DPRK-side extension.
@@ -53,6 +53,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Waiting on the user
 
+**First: decision 0058:** which events step the player count down now that 0053 failed in 2S. Claude recommends A (back to Left and Finished, 0 MCUs, as flown in 2R), keeping the rare busy-area case as a known limitation.
 1. **Send the Air Tasking proposal to eszyman?** Draft: `handoff/upstream-air-tasking-proposal-draft.md` (decision 0026). The bar was a working concept and UI; A2 and A3 now run end to end from the app's Map Generate. Where to post it (new issue or issue #1) and when is yours.
 2. **Merge `upstream/main` `571504a`?** It touches the airfield harvest that 0042 also changed.
 3. **Three game bug reports are drafted, not posted** (`handoff/il2-bug-report-drafts.md`). The paused-timer finding (2K) may be a fourth.
@@ -61,7 +62,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Next steps
 
-1. **Fly 2S** (no pilot, this PC, about 13 min): mission built at `.claude/worktrees/flight-2s/target/p14/` (from `bedc703`) and already copied into `game\data\Multiplayer\Dogfight`; run sheet `handoff/sessions/2026-11-01-p14-flight-2s.md`. If S1 shows a Left from the outbound wreck, supersede 0053 before merging.
+1. **Decision 0058** (the user). With A: revert 0053's production wiring on `codex/airtask-0053-0055` (keep the 2S probe builder), re-run the suite, mark 0058 accepted.
 2. **Push and merge** the two review branches when the user says so (review fixes first; they do not depend on 2S). The two branches touch `ui_tests.rs`, `probe.rs` and `export.rs` in different places; rebase the second on the first and re-run the suite.
 3. **Flight 2N** (12f) and step 11 item 5, on the real host, once the user has a second pilot and a time. Claude first writes 2N's run sheet and mission from the step 12 note (§3).
 4. Then the eszyman proposal, if the user wants it sent.
@@ -70,8 +71,8 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 - **Send nothing to the upstream author** (`eszyman/IL2MissionUtility`: issues, comments, files, load tests, patches) until the user says so. Pulling and merging his commits is fine. `gh` here may default to upstream: always pass `--repo Pliskin-Industries/Claude-IL2MissionUtility`.
 - **Astra writes `STATE.md` and decision records when not told otherwise:** say in every brief that Claude owns `STATE.md`. The review-fixes worktree still holds an uncommitted Astra rewrite of `STATE.md`; discard it (a hook stops Claude from doing so).
-- **IL-2 launcher:** it needs `s3.il2korea.com` (a CDN). On 2026-11-01 that host first had no IPv4 address, then failed SSL; the game cannot start without the launcher. Retry later; do not change this PC's DNS.
-- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0057 (0053 to 0055 on `codex/airtask-0053-0055`, 0056 and 0057 on `codex/review-fixes-replay-trace`). Next free: **0058**.
+- **IL-2 launcher:** it needs `s3.il2korea.com` (a CDN). On 2026-11-01 that host first had no IPv4 address, then failed SSL, and worked again a few hours later; the game cannot start without the launcher. Retry later; do not change this PC's DNS.
+- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0058 (0053 to 0055 and 0058 on `codex/airtask-0053-0055`, 0056 and 0057 on `codex/review-fixes-replay-trace`). Next free: **0059**.
 - Before generating any probe or mission file, read `docs/il2-loader-and-log-facts.md`. Each item there cost a flight attempt.
 - **Editor saves:** the Mission Editor cuts Group names to 31 characters, and the host loads a `.msnbin` that sits next to the `.Mission` (L).
 - **Timers:** switching off a running timer pauses it; switching it on resumes it (2K). Stop a timer only through a D11 relay (0044).
@@ -82,6 +83,6 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 - Nothing is pushed or merged to `main` without the user (`docs/decisions/0005`). A hook blocks `git push` (even a branch delete) while the checkout is on `main`.
 - The game here is 1.005 (`261013`). Its `MissionResaver.exe` crashes: build missions with `--no-resave`. This PC is a test bed: its load times and tick delay are not used. It allows one spawn per game session.
 - **Flying on this PC:** an air start may begin with the level-flight helper on; pressing LShift+A then switches it off (A2 run 1 crashed this way). **Never move the mouse or click in the cockpit**: it works the stick (A3 run 1 spun in). To regain keyboard focus, use PowerShell `AppActivate`. Tacview: `tacviewrecord = 1` with the game closed, then LCtrl+R in the mission.
-- Flown probe flights regenerate byte for byte from frozen inputs (`src/testdata/p14_probe_inputs/`, `handoff/p14-probes/`), except those frozen as flown (2F, 2H, 2I, A0, A1, A2, A3, L; since 0050 D changed Generate's output, the A3 and L build tests check the run-sheet facts, not a byte-for-byte match): those are checked by parse-and-links tests only. Never edit those files or re-run their writers. Flight names are never reused. The next free log folder is `src/testdata/missionlog/real_59`.
+- Flown probe flights regenerate byte for byte from frozen inputs (`src/testdata/p14_probe_inputs/`, `handoff/p14-probes/`), except those frozen as flown (2F, 2H, 2I, A0, A1, A2, A3, L; since 0050 D changed Generate's output, the A3 and L build tests check the run-sheet facts, not a byte-for-byte match): those are checked by parse-and-links tests only. Never edit those files or re-run their writers. Flight names are never reused. The next free log folder is `src/testdata/missionlog/real_60` (`real_59` is flight 2S, on `codex/airtask-0053-0055`).
 - Only one session writes `STATE.md` at a time; other sessions put their facts in a session note in `handoff/sessions/`.
 - Stage is not declared yet (the session-start check treats the repo as `prototype`); `/promote` sets it.

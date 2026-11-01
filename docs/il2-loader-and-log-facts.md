@@ -298,3 +298,13 @@ Four player counts per area (`presence.rs`, decision 0050 D) with 601 AI stand-i
   - it was switched off, then switched on again at about 678.2 (2 s after the busy entry at 676.16; the switch-on itself is not traced);
   - it fired again at 820.02 when the circle emptied.
 - **A one-tick (0.05 s) delay timer between a Deactivate and the next Activate kept one event to one step,** across a fan-out of four relays.
+
+## Found on 2026-11-01 (flight 2S, game 1.005)
+
+Player counts with 0053's wiring and a diagnostic Complex Trigger per cell, 601 AI stand-ins. Logs `real_59`, Tacview `handoff/tacview/P14_Probe_2S.zip.acmi`.
+
+- **A wreck that crosses out of a Complex Trigger's zone after a kill raises Left (60).** A Yak killed about 300 m inside a 6 km ring while flying outward raised Killed (70) 0.02 s after the kill and Left 2.1 s later, when its wreck crossed the ring. It raised no Finished afterwards: it was outside when it was removed.
+- **The wreck's removal (and its Finished, 62) does not come at a fixed time after a Damage kill:** 14.9 s (S1, removed in the air at about 3,000 m), 3.0 s (S2, a Yak orbiting at 4,550 m). Flights 2P and 2R measured 15.06 s. The cause is not known.
+- **When the last plane in a check zone dies, the zone's ALL-out check can fire in the same tick as the wreck's Finished** (S2: both at 607.68, 3.1 s after the kill).
+- **A Delete inside raises Finished (62) and Finished alive (63) in the same tick** (S3, and the Deletes in S2), as in flight 2P.
+- Tacview: the recording's `ReferenceTime` is the mission time when LCtrl+R was pressed (here 42 s after the start).
