@@ -23,6 +23,11 @@ impl AirSortie {
 }
 
 impl AirPlan {
+    /// A populated pool kept out of the base map is the standalone workflow (0054).
+    pub fn is_standalone(&self) -> bool {
+        !self.pool.is_empty() && !self.include_in_base_map
+    }
+
     pub fn sortie(&self, id: &str) -> Option<&AirSortie> {
         self.library.iter().find(|sortie| sortie.id == id)
     }

@@ -7754,8 +7754,9 @@ impl super::GroupGeneratorApp {
         };
         self.stamp_air_starts(&mut pack.root);
         let strike_notes = self.stamp_missions(&mut pack.root);
-        // Decision 0037 A: the Map's own AI must not start Air Tasking cycles.
-        if with_air {
+        // Decisions 0037 A and 0054: Map AI must not start embedded or
+        // standalone Air Tasking cycles.
+        if with_air || self.air_plan.is_standalone() {
             crate::airtask::move_map_ai_off_player_countries(&mut pack.root);
         }
         let terrain_note = self.apply_terrain(&mut pack.root);

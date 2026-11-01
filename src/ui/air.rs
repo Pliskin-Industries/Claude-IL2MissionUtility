@@ -1862,7 +1862,7 @@ impl GroupGeneratorApp {
             self.dock_auto_fill_air_pool();
         }
         self.map_air_entries(ui);
-        if !self.air_plan.pool.is_empty() && !self.air_plan.include_in_base_map {
+        if self.air_plan.is_standalone() {
             shell::hint(
                 ui,
                 "Not in the base map: tick Include in base map on the Air Tasking tab.",

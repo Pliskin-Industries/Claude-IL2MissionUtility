@@ -4108,15 +4108,12 @@ fn place_nato_fighters(h: &mut Harness) {
     assert!(h.app.map_fighters.as_ref().is_some_and(|l| !l.eastern), "{}", h.status());
 }
 
-/// Decision 0037 A: with Air Tasking in the base map, the Map's own AI aircraft
-/// are written on 602 / 503. Player spawns and ground units keep their countries.
-#[test]
-fn map_generate_with_air_moves_map_ai_off_player_countries() {
-    let mut h = Harness::new("air_map_0037");
+/// Map AI on both player countries, plus an Airfield, a co-op plane and a truck.
+fn map_ai_inputs(h: &mut Harness) {
     h.tab("Map");
     h.wait_for_map();
-    fill_air_pool(&mut h);
-    place_nato_fighters(&mut h);
+    fill_air_pool(h);
+    place_nato_fighters(h);
     h.app.placed_air_starts.push(crate::airstart::PlacedAirStart {
         field: crate::airstart::default_field("NATO start", true),
         x: 215_000.0,
@@ -4144,9 +4141,18 @@ fn map_generate_with_air_moves_map_ai_off_player_countries() {
         attacks: Vec::new(),
     }];
     h.app.terrain_apply = false;
+}
 
+/// Decision 0037 A: with Air Tasking in the base map, the Map's own AI aircraft
+/// are written on 602 / 503. Player spawns and ground units keep their countries.
+#[test]
+fn map_generate_with_air_moves_map_ai_off_player_countries() {
+    let mut h = Harness::new("air_map_0037");
+    map_ai_inputs(&mut h);
+    let pool = std::mem::take(&mut h.app.air_plan.pool);
     h.app.air_plan.include_in_base_map = false;
     let (plain_root, plain) = generate_map(&mut h, "base_map_0037_plain.Group");
+    h.app.air_plan.pool = pool;
     h.app.air_plan.include_in_base_map = true;
     let (air_root, air) = generate_map(&mut h, "base_map_0037_air.Group");
 
@@ -4191,6 +4197,73 @@ fn map_generate_with_air_moves_map_ai_off_player_countries() {
         }
     });
     assert!(watched.contains("601") && watched.contains("501"), "{watched:?}");
+}
+
+fn generate_map_from_button(h: &mut Harness, file: &str) -> (crate::ast::Il2Entity, Vec<(String, String)>) {
+    h.settle();
+    let out = h.out(file);
+    dialog::answer(vec![out.clone()]);
+    h.click("Generate Base Map");
+    assert!(matches!(h.app.status, Status::Info(_)), "{}", h.status());
+    let root = crate::parser::parse_group_file(&std::fs::read_to_string(out).unwrap()).unwrap();
+    let mut countries = Vec::new();
+    map_countries(&root, &mut countries);
+    (root, countries)
+}
+
+/// Decision 0054: the companion base map moves Map AI even though the Air
+/// Tasking group will be generated separately. Decision 0037's spawns stay.
+#[test]
+fn map_generate_0054_standalone_moves_map_ai_off_player_countries() {
+    let mut h = Harness::new("air_map_standalone_0054");
+    map_ai_inputs(&mut h);
+    h.app.air_plan.include_in_base_map = false;
+    let pool = std::mem::take(&mut h.app.air_plan.pool);
+    let (_, plain) = generate_map_from_button(&mut h, "base_map_0054_plain.Group");
+    h.app.air_plan.pool = pool;
+    assert!(!h.app.air_plan.pool.is_empty());
+    let (root, countries) = generate_map_from_button(&mut h, "base_map_0054_standalone.Group");
+
+    assert!(root.find_by_name("Air Tasking").is_none());
+    assert_eq!(country_of(&root, "Ref AI"), Some("503"));
+    assert_eq!(country_of(&root, "Strike AI lead"), Some("503"));
+    assert!(countries.contains(&("Plane".into(), "602".into())), "the NATO fighter pack");
+    for block in ["Vehicle", "Airfield", "Plane coop"] {
+        assert!(countries.contains(&(block.into(), "601".into())), "{block} stays on 601");
+    }
+    // Exactly the mapping in threshold::ai_country_for_player, and no other
+    // country changes: Airfields, co-op planes and ground units stay as built.
+    let expected: Vec<_> = plain
+        .into_iter()
+        .map(|(block, country)| {
+            let country = match (block.as_str(), country.as_str()) {
+                ("Plane", "501") => "503".into(),
+                ("Plane", "601") => "602".into(),
+                _ => country,
+            };
+            (block, country)
+        })
+        .collect();
+    assert_eq!(countries, expected);
+}
+
+#[test]
+fn map_generate_0054_empty_pool_keeps_map_ai_on_player_countries() {
+    let mut h = Harness::new("air_map_empty_0054");
+    map_ai_inputs(&mut h);
+    h.app.air_plan.pool.clear();
+    for include in [false, true] {
+        h.app.air_plan.include_in_base_map = include;
+        let (root, countries) = generate_map_from_button(&mut h, "base_map_0054_empty.Group");
+        assert!(root.find_by_name("Air Tasking").is_none());
+        assert_eq!(country_of(&root, "Ref AI"), Some("501"));
+        assert_eq!(country_of(&root, "Strike AI lead"), Some("501"));
+        assert_eq!(country_of(&root, "Ref coop"), Some("601"));
+        for block in ["Plane", "Vehicle", "Airfield", "Plane coop"] {
+            assert!(countries.contains(&(block.into(), "601".into())), "{block} stays on 601");
+        }
+        assert!(countries.iter().all(|(block, c)| block != "Plane" || c == "501" || c == "601"), "{countries:?}");
+    }
 }
 
 /// Decision 0042 A: a DPRK air start placed on the Map is written on the
@@ -5486,6 +5559,28 @@ fn a3_map_build_matches_the_run_sheet() {
 const L_BASE_STEM: &str = "P14_Standalone_L_Base";
 /// The Air Tasking tab's standalone file.
 const L_AIR_STEM: &str = "P14_Standalone_L_Air";
+
+/// Decision 0054 does not change L's base map: A3's inputs have no Map AI.
+#[test]
+fn map_generate_0054_standalone_l_base_bytes_unchanged() {
+    let mut h = Harness::new("air_map_standalone_l_0054");
+    a3_inputs(&mut h);
+    h.app.air_plan.include_in_base_map = false;
+    generate_map_from_button(&mut h, &format!("{L_BASE_STEM}.Group"));
+    let frozen = repo("handoff/p14-probes/standalone-l");
+    let mut compared = 0;
+    for file in std::fs::read_dir(frozen).unwrap() {
+        let file = file.unwrap();
+        let name = file.file_name().to_string_lossy().into_owned();
+        if name.starts_with(&format!("{L_BASE_STEM}.")) {
+            let actual = std::fs::read(h.out(&name)).unwrap();
+            let expected = std::fs::read(file.path()).unwrap();
+            assert!(actual == expected, "{name}: L's base map bytes changed");
+            compared += 1;
+        }
+    }
+    assert_eq!(compared, 8, "Group, six locales and trace sidecar");
+}
 
 /// A3's inputs (`a3_inputs`) with "Include in base map" off. Map Generate
 /// writes the base map, which then has no Air Tasking group; the Air Tasking
