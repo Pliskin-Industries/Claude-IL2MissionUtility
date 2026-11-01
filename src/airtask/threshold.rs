@@ -50,13 +50,17 @@ pub(crate) const OBJECT_CRITICALLY_DAMAGED: i32 = 68;
 /// THRESHOLD control (step 12e) takes its bounds from here too.
 pub(crate) const PLAYERS_RANGE: std::ops::RangeInclusive<u8> = 1..=3;
 
-/// The other side's player coalition, as a check zone's `PlaneCoalitions`.
-pub(crate) fn enemy_coalitions(side: AirSide) -> &'static str {
-    let own_country = match side {
+/// A side's player country: 601 for NATO, 501 for DPRK.
+pub(crate) fn player_country(side: AirSide) -> i32 {
+    match side {
         AirSide::Nato => NATO_PLAYER_COUNTRY,
         AirSide::Dprk => DPRK_PLAYER_COUNTRY,
-    };
-    crate::aircraft::plane_coalitions_for_country(own_country)
+    }
+}
+
+/// The other side's coalition, as a check zone's `PlaneCoalitions`.
+pub(crate) fn enemy_coalitions(side: AirSide) -> &'static str {
+    crate::aircraft::plane_coalitions_for_country(player_country(side))
 }
 
 /// An unindexed, unnamed Complex Trigger cylinder that watches the other
@@ -75,15 +79,24 @@ pub(crate) fn player_trigger(side: AirSide, radius_m: f64) -> Il2Entity {
         .properties
         .retain(|(key, _)| !matches!(key.as_str(), "ObjectScript" | "ObjectName"));
     trigger.children.clear();
-    let watched_country = match side {
-        AirSide::Nato => DPRK_PLAYER_COUNTRY,
-        AirSide::Dprk => NATO_PLAYER_COUNTRY,
-    };
-    trigger.set_property("Country", watched_country.to_string());
+    trigger.set_property("Country", player_country(side.other()).to_string());
     trigger.set_property("Radius", format!("{radius_m:.0}"));
     trigger.set_property("Cylinder", "1");
     trigger.set_property("CheckPlanes", "1");
     trigger
+}
+
+/// A copy of `trigger` (see `player_trigger`) with the next index, `name` and
+/// position.
+pub(crate) fn place_trigger(trigger: &Il2Entity, name: &str, next_id: &mut i32, x: f64, z: f64) -> Il2Entity {
+    let mut node = trigger.clone();
+    node.index = Some(*next_id);
+    node.set_property("Index", next_id.to_string());
+    *next_id += 1;
+    node.set_name(name);
+    node.set_property("XPos", format!("{x:.3}"));
+    node.set_property("ZPos", format!("{z:.3}"));
+    node
 }
 
 /// Build the cell, 19 MCUs (21 for N >= 2): country-filtered Complex Trigger entry, then a pulsed
@@ -173,16 +186,7 @@ pub(crate) fn build_side(
         ] {
             let name = format!("{prefix} {role}");
             let node = match kind {
-                "MCU_TR_ComplexTrigger" => {
-                    let mut node = trigger.clone();
-                    node.index = Some(*next_id);
-                    node.set_property("Index", next_id.to_string());
-                    *next_id += 1;
-                    node.set_name(&name);
-                    node.set_property("XPos", format!("{x:.3}"));
-                    node.set_property("ZPos", format!("{z:.3}"));
-                    node
-                }
+                "MCU_TR_ComplexTrigger" => place_trigger(&trigger, &name, next_id, x, z),
                 "MCU_Timer" => template::timer(&name, time, next_id, x, z),
                 "MCU_CheckZone" => {
                     template::checkzone(&name, timing.inner_m, true, coalition, next_id, x, z)

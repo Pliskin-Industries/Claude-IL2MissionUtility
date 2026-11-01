@@ -79,16 +79,7 @@ pub(crate) fn build_side(
         for (role, kind, time) in &roles {
             let name = format!("{prefix} {role}");
             let node = match *kind {
-                "MCU_TR_ComplexTrigger" => {
-                    let mut node = trigger.clone();
-                    node.index = Some(*next_id);
-                    node.set_property("Index", next_id.to_string());
-                    *next_id += 1;
-                    node.set_name(&name);
-                    node.set_property("XPos", format!("{x:.3}"));
-                    node.set_property("ZPos", format!("{z:.3}"));
-                    node
-                }
+                "MCU_TR_ComplexTrigger" => threshold::place_trigger(&trigger, &name, next_id, x, z),
                 "MCU_Timer" => template::timer(&name, *time, next_id, x, z),
                 "MCU_CheckZone" => template::checkzone(&name, radius_m, false, coalitions, next_id, x, z),
                 _ => template::mcu(kind, &name, next_id, x, z),
