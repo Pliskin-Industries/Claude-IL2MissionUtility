@@ -49,6 +49,42 @@ pub(crate) const OBJECT_CRITICALLY_DAMAGED: i32 = 68;
 /// THRESHOLD control (step 12e) takes its bounds from here too.
 pub(crate) const PLAYERS_RANGE: std::ops::RangeInclusive<u8> = 1..=3;
 
+/// The other side's player coalition, as a check zone's `PlaneCoalitions`.
+pub(crate) fn enemy_coalitions(side: AirSide) -> &'static str {
+    let own_country = match side {
+        AirSide::Nato => NATO_PLAYER_COUNTRY,
+        AirSide::Dprk => DPRK_PLAYER_COUNTRY,
+    };
+    crate::aircraft::plane_coalitions_for_country(own_country)
+}
+
+/// An unindexed, unnamed Complex Trigger cylinder that watches the other
+/// side's player country: the flown 1N shape, cloned from the editor
+/// reference with both Enabled keys and its key order.
+pub(crate) fn player_trigger(side: AirSide, radius_m: f64) -> Il2Entity {
+    let reference = parser::parse_il2_document(include_str!(
+        "../../TemplateExamples/Reference/ComplexTrigger_reference.Group"
+    ))
+    .expect("the Complex Trigger reference parses");
+    let mut trigger = reference
+        .find_by_name("Translator Complex Trigger")
+        .expect("the reference contains a Complex Trigger")
+        .clone();
+    trigger
+        .properties
+        .retain(|(key, _)| !matches!(key.as_str(), "ObjectScript" | "ObjectName"));
+    trigger.children.clear();
+    let watched_country = match side {
+        AirSide::Nato => DPRK_PLAYER_COUNTRY,
+        AirSide::Dprk => NATO_PLAYER_COUNTRY,
+    };
+    trigger.set_property("Country", watched_country.to_string());
+    trigger.set_property("Radius", format!("{radius_m:.0}"));
+    trigger.set_property("Cylinder", "1");
+    trigger.set_property("CheckPlanes", "1");
+    trigger
+}
+
 /// Build the cell, 19 MCUs (21 for N >= 2): country-filtered Complex Trigger entry, then a pulsed
 /// coalition check zone at r_in for presence (decisions 0023 and 0024, flight 2J).
 /// For N >= 2 (decision 0047 E) Entered counts in `COUNT` (Counter = N, Dropcount
@@ -105,28 +141,8 @@ pub(crate) fn build_side(
     if areas.is_empty() {
         return Ok(Vec::new());
     }
-    // Clone the flown 1N shape, including both Enabled keys and key order.
-    let reference = parser::parse_il2_document(include_str!(
-        "../../TemplateExamples/Reference/ComplexTrigger_reference.Group"
-    ))
-    .expect("the Complex Trigger reference parses");
-    let mut trigger = reference
-        .find_by_name("Translator Complex Trigger")
-        .expect("the reference contains a Complex Trigger")
-        .clone();
-    trigger
-        .properties
-        .retain(|(key, _)| !matches!(key.as_str(), "ObjectScript" | "ObjectName"));
-    trigger.children.clear();
-    let (own_country, watched_country) = match side {
-        AirSide::Nato => (NATO_PLAYER_COUNTRY, DPRK_PLAYER_COUNTRY),
-        AirSide::Dprk => (DPRK_PLAYER_COUNTRY, NATO_PLAYER_COUNTRY),
-    };
-    let coalition = crate::aircraft::plane_coalitions_for_country(own_country);
-    trigger.set_property("Country", watched_country.to_string());
-    trigger.set_property("Radius", format!("{:.0}", timing.inner_m));
-    trigger.set_property("Cylinder", "1");
-    trigger.set_property("CheckPlanes", "1");
+    let trigger = player_trigger(side, timing.inner_m);
+    let coalition = enemy_coalitions(side);
     let mut result = Vec::new();
     for (index, &(x, z)) in areas.iter().enumerate() {
         let area = index + 1;
