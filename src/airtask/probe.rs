@@ -6760,6 +6760,10 @@ fn two_l_plan(target: (f64, f64)) -> super::AirPlan {
     use super::library::builtin_library;
     use super::{AirPlan, AirSide, PoolEntry, TargetRef, TriggerMode, NATO};
     let mut plan = AirPlan { library: builtin_library(), seed: 7, ..AirPlan::default() };
+    // Frozen as flown: 2L predates both the area's player count (0050 D)
+    // and the clock's AVAILABLE gate (0055). Generate uses neither override.
+    plan.strategies.zone_out = super::ZoneOutImpl::CheckZone;
+    plan.clock_draw_wiring = super::clock::DrawWiring::FlownPausedRandom;
     plan.budget.per_side = [1, 1];
     plan.threshold.dwell_s = Some(60.0);
     plan.threshold.hold_s = Some(TWO_L_HOLD_S);
@@ -6810,7 +6814,9 @@ fn build_paused_timer_fix_probe() -> Probe {
             node.set_name("Air Tasking Translator Mission Begin");
         }
     });
-    let mut traced: BTreeSet<i32> = super::trace_role_indexes(&pack).into_iter().collect();
+    let mut traced: BTreeSet<i32> = super::export::trace_role_indexes_with_clock(
+        &pack, super::clock::DrawWiring::FlownPausedRandom,
+    ).into_iter().collect();
     let decisions = trace::TraceSelect::decision_points();
     pack.for_each(&mut |node| {
         let random = node.block_type == "MCU_Timer"
@@ -7019,9 +7025,7 @@ pub(crate) fn generate_probe_2m() -> Il2Entity {
     build(Flight::TwoM).root
 }
 
-/// Flight 2L is frozen as flown (decision 0050 D): its Air Tasking copies end
-/// on their own Zone Out there; the generator now ends them on the area's
-/// player count.
+/// Flight 2L explicitly keeps its flown shell, clock links and trace selection.
 #[test]
 fn flight2l_frozen_files_keep_the_flown_zone_shell() {
     assert!(Flight::TwoL.is_frozen());
@@ -7035,8 +7039,27 @@ fn flight2l_frozen_files_keep_the_flown_zone_shell() {
         count
     };
     assert!(names(&flown, "Zone Out") > 0 && flown.find_by_name("PCN01 EMPTY").is_none(), "as flown");
-    assert_eq!(names(&generated, "Zone Out"), 0, "generator after 0050 D");
-    assert!(generated.find_by_name("PCN01 EMPTY").is_some(), "generator after 0050 D");
+    assert_eq!(names(&generated, "Zone Out"), names(&flown, "Zone Out"), "test-only flown shell");
+    assert!(generated.find_by_name("PCN01 EMPTY").is_none(), "test-only flown shell");
+}
+
+#[test]
+fn flight2l_0055_clock_and_trace_regenerate_flown_bytes() {
+    let probe = build(Flight::TwoL);
+    let (traced, map) = probe.traced(TraceCarrier::default());
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/flight2l");
+    let stem = "P14_Probe_2L_traced";
+    let group = serialize_probe(&traced);
+    let flown = std::fs::read_to_string(directory.join(format!("{stem}.Group"))).unwrap();
+    assert!(group == flown, "2L Group must stay byte-identical to the flown artifact");
+    let english = crate::locale::encode_locale_utf16le(&crate::locale::serialize_locale(&p14_probe_locale(&traced)));
+    assert_eq!(english, std::fs::read(directory.join(format!("{stem}.eng"))).unwrap());
+    assert_eq!(spawn_json(Flight::TwoL), std::fs::read_to_string(directory.join(format!("{stem}.spawns.json"))).unwrap());
+    let scratch = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/p14/clock-0055-byte-check");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let sidecar = scratch.join(format!("{stem}.trace.json"));
+    trace::write_trace_sidecar(&sidecar, &map).unwrap();
+    assert_eq!(std::fs::read(sidecar).unwrap(), std::fs::read(directory.join(format!("{stem}.trace.json"))).unwrap());
 }
 
 /// Flight 2M is frozen as flown (decision 0049): its N = 2 triggers count on

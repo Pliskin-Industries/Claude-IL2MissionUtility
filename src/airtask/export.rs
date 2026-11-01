@@ -295,9 +295,17 @@ pub(super) fn move_map_ai_off_player_countries(node: &mut Il2Entity) {
 }
 
 /// The indexes of the Air Tasking nodes a trace build follows by name (the
-/// sortie cycle's decision points: slot opens, GO, the zone and threshold
+/// sortie cycle's decision points: clock draws and gates, the zone and threshold
 /// steps, and each sortie's START to DELETE DELAY). Sorted, no repeats.
 pub(super) fn trace_role_indexes(root: &Il2Entity) -> Vec<i32> {
+    trace_role_indexes_with_clock(root, clock::DrawWiring::AvailableGate)
+}
+
+/// Frozen probes select their flown clock roles as well as their flown links.
+pub(super) fn trace_role_indexes_with_clock(
+    root: &Il2Entity,
+    wiring: clock::DrawWiring,
+) -> Vec<i32> {
     let mut indexes = BTreeSet::new();
     root.for_each(&mut |group| {
         if group.block_type != "Group" || group.name() != Some(AIR_TASKING_GROUP) {
@@ -310,12 +318,10 @@ pub(super) fn trace_role_indexes(root: &Il2Entity) -> Vec<i32> {
             });
             let traced = matches!(
                 role,
-                Some(("CLK", "D SLOT OPEN" | "N SLOT OPEN"))
-                    | Some(("ED" | "EN", "GO"))
-                    | Some((
-                        "ZD" | "ZN",
-                        "CHANCE" | "MISS WAIT OUT" | "FIRE" | "DENY WAIT" | "COOLDOWN" | "ARM"
-                    ))
+                Some((
+                    "ZD" | "ZN",
+                    "CHANCE" | "MISS WAIT OUT" | "FIRE" | "DENY WAIT" | "COOLDOWN" | "ARM"
+                ))
                     // MISS WAIT runs out after every pass that PASS IN lets
                     // through; only MISS WAIT OUT means a miss (0044). INNER is PASS. PASS OFF switches
                     // CLOSE DELAY off on success, so CLOSE's pulse is dropped
@@ -326,11 +332,12 @@ pub(super) fn trace_role_indexes(root: &Il2Entity) -> Vec<i32> {
                         "START" | "ON STATION" | "EXTEND" | "COLD" | "LOSSES"
                             | "HARD STOP" | "DONE HUB" | "DELETE DELAY" | "EMPTY IN"
                     ))
-            ) || matches!(
-                // Decision 0050 D: the count's path, and when it empties.
-                role,
-                Some(("PCD" | "PCN", role)) if presence::traced_role(role)
-            );
+            ) || role.is_some_and(|(prefix, role)| clock::traced_role(prefix, role, wiring))
+                || matches!(
+                    // Decision 0050 D: the count's path, and when it empties.
+                    role,
+                    Some(("PCD" | "PCN", role)) if presence::traced_role(role)
+                );
             if traced {
                 indexes.extend(node.index);
             }
@@ -1897,7 +1904,7 @@ mod tests {
     }
 
     /// The P14 names a trace build adds on the Air Tasking and Map tabs:
-    /// only nodes inside Air Tasking, and the roles the A1 build traced.
+    /// only nodes inside Air Tasking, including each draw's 0055 gate.
     #[test]
     fn trace_role_indexes_name_p14_roles_inside_air_tasking() {
         let (plan, mut input) = acceptance_test_plan();
@@ -1919,6 +1926,23 @@ mod tests {
         for name in ["CLK D SLOT OPEN", "SD01 START", "SD01 DONE HUB", "ZD01 FIRE", "THD01 INNER"] {
             assert!(names.contains(name), "{name} missing from {names:?}");
         }
+        for side in ["D", "N"] {
+            for role in ["SLOT OPEN", "NO REPEAT", "DRAW", "Randomizer:INPUT",
+                "ATTEMPT END", "REROLL", "SLOT CLOSE", "WIN"] {
+                let name = format!("CLK {side} {role}");
+                assert!(names.contains(&name), "{name} missing from trace");
+            }
+        }
+        let mut gates = 0;
+        named(&mission.root, "Air Tasking").for_each(&mut |node| {
+            let Some(name) = node.name() else { return };
+            let Some((entry, "AVAILABLE")) = name.split_once(' ') else { return };
+            gates += 1;
+            for role in ["RANDOM", "AVAILABLE", "OUT", "LAST", "HOT", "COLD", "GO"] {
+                assert!(names.contains(&format!("{entry} {role}")), "{entry} {role} missing from trace");
+            }
+        });
+        assert!(gates > 0, "exercise clock gates");
         assert!(!names.iter().any(|n| n.ends_with("JITTER 1")), "jitter timers are not roles");
     }
 
@@ -2067,17 +2091,22 @@ mod tests {
                 );
             }
             let logic = named(air, &format!("Air Tasking {} Logic", side.label()));
-            expected.insert(
-                named(logic, &format!("CLK {letter} SLOT OPEN"))
-                    .index
-                    .unwrap(),
-            );
-            for entry in clock_entries {
+            for role in ["SLOT OPEN", "NO REPEAT", "DRAW", "Randomizer:INPUT",
+                "ATTEMPT END", "REROLL", "SLOT CLOSE", "WIN"] {
                 expected.insert(
-                    named(logic, &format!("E{letter}{entry:02} GO"))
+                    named(logic, &format!("CLK {letter} {role}"))
                         .index
                         .unwrap(),
                 );
+            }
+            for entry in clock_entries {
+                for role in ["RANDOM", "AVAILABLE", "OUT", "LAST", "HOT", "COLD", "GO"] {
+                    expected.insert(
+                        named(logic, &format!("E{letter}{entry:02} {role}"))
+                            .index
+                            .unwrap(),
+                    );
+                }
             }
             for entry in zone_entries {
                 for role in [
@@ -2131,7 +2160,8 @@ mod tests {
         }
         // 0050 D: a copy's EMPTY IN replaces its Zone Out; each of the two
         // areas per side adds its count's eight relays.
-        assert_eq!(expected.len(), 200 + 2 * 2 * 8, "every named breadcrumb, on every copy");
+        // 0055: seven more clock roles per side and six per clock entry.
+        assert_eq!(expected.len(), 200 + 2 * 2 * 8 + 2 * 7 + 4 * 6, "every named breadcrumb, on every copy");
         air.for_each(&mut |node| {
             if matches!(
                 node.block_type.as_str(),
