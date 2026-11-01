@@ -9,8 +9,8 @@ use super::place::{SortiePlacement, spawn_point};
 use super::shell::group;
 use super::{
     AirCheck, AirContext, AirIssue, AirLine, AirPlan, AirPoint, AirPreview, AirRing, AirSide, AirTotals,
-    BudgetImpl, IssueSeverity, SideLogic, SlotMark, SortieSource, TriggerMode, budget, clock,
-    threshold, timing, zone,
+    BudgetImpl, IssueSeverity, SideLogic, SlotMark, SortieSource, TriggerMode, ZoneOutImpl, budget,
+    clock, presence, threshold, timing, zone,
 };
 use crate::ast::Il2Entity;
 use crate::frontlines::{AIR_TASKING_GROUP, MapAirPack};
@@ -236,6 +236,17 @@ fn build_side(
         &mut logic,
         next_id,
     )?);
+    if plan.strategies.zone_out == ZoneOutImpl::AreaCount {
+        // Decision 0050 D: after the copies registered their EMPTY IN relays.
+        let (counts, _) = presence::build_side(
+            side,
+            &copies.areas,
+            plan.threshold.count_radius_m,
+            &mut logic,
+            next_id,
+        )?;
+        copies.trees[0].children.extend(counts);
+    }
     copies.trees[0].children.extend(budget::build_side(
         side,
         plan.budget.per_side[side.idx()],
@@ -312,9 +323,12 @@ pub(super) fn trace_role_indexes(root: &Il2Entity) -> Vec<i32> {
                     | Some((
                         "SD" | "SN",
                         "START" | "ON STATION" | "EXTEND" | "COLD" | "LOSSES"
-                            | "HARD STOP" | "DONE HUB" | "DELETE DELAY"
+                            | "HARD STOP" | "DONE HUB" | "DELETE DELAY" | "EMPTY IN"
                     ))
-                    | Some(("Zone", "Out"))
+            ) || matches!(
+                // Decision 0050 D: the count's path, and when it empties.
+                role,
+                Some(("PCD" | "PCN", role)) if presence::traced_role(role)
             );
             if traced {
                 indexes.extend(node.index);
@@ -367,6 +381,15 @@ fn evaluate(plan: &AirPlan, ctx: &AirContext<'_>) -> (Vec<MapAirPack>, Vec<AirIs
         AirSide::Dprk,
         &[],
         &plan.threshold,
+        &mut SideLogic::default(),
+        &mut 1,
+    ) {
+        issues.push(issue(IssueSeverity::Error, error));
+    }
+    if let Err(error) = presence::build_side(
+        AirSide::Dprk,
+        &[],
+        plan.threshold.count_radius_m,
         &mut SideLogic::default(),
         &mut 1,
     ) {
@@ -1165,6 +1188,9 @@ mod tests {
     fn validate_warns_above_totals_limits() {
         let (mut plan, input) = export_test_plan();
         plan.pool = vec![plan.pool[0].clone(); 30];
+        // Decision 0050 D: copies carry no check zones, so 90 copies on one
+        // area do not reach the default 48; a low limit still exercises the warning.
+        plan.limits.check_zones = 1;
         assert!(plan.pool.iter().all(|entry| entry.runs == 3));
         let counts = super::super::totals(&plan, &input.context());
         let issues = super::super::validate(&plan, &input.context());
@@ -1401,6 +1427,89 @@ mod tests {
         assert_eq!(check.totals, AirTotals::default(), "a plan that cannot build counts nothing");
     }
 
+    /// Decision 0050 D end to end: a NATO side built as Generate builds it. A
+    /// DPRK player inside area 1's 50 km count circle (45 km out: past the old
+    /// 35 km Zone Out and the threshold's 6 km) ends a copy on station when he
+    /// leaves, although DPRK AI stays 10 km from the target (it held the old
+    /// Zone Out). A player who comes and goes before the copy arrives does not.
+    #[test]
+    fn area_count_ends_a_copy_on_station() {
+        // The old Zone IN / Zone Out shell (0018), for contrast: the AI holds
+        // its Zone Out and the 45 km player is outside it, so only the end of
+        // time on station (902.5 s) ends the copy.
+        for (zone_out, ends) in [
+            (ZoneOutImpl::AreaCount, [400.0, 902.5]),
+            (ZoneOutImpl::CheckZone, [902.5, 902.5]),
+        ] {
+            area_count_case(zone_out, ends);
+        }
+    }
+
+    fn area_count_case(zone_out: ZoneOutImpl, ends: [f64; 2]) {
+        use super::super::assemble::tests::{context, test_plan};
+        use super::super::shell::test_support::{flown_configs, ticks, times};
+        use super::super::testkit::{ScriptedTrack, WalkerInput, walk};
+        let mut plan = test_plan();
+        plan.strategies.zone_out = zone_out;
+        let ctx = context();
+        let mut next = 1;
+        let mut logic = SideLogic::default();
+        let copies = assemble_side(AirSide::Nato, &plan, &ctx, &mut logic, &mut next).unwrap();
+        let entry = copies.entries.iter().find(|entry| entry.area == 1).unwrap();
+        let copy = &entry.copies[0];
+        let (pointer, done_hub, copy_root) = (copy.pointer, copy.shell.done_hub, copy.root);
+        let centre = copies.areas[0];
+        let trees = build_side(AirSide::Nato, &plan, copies, logic, &mut next).unwrap();
+        let mut root = group("Air Tasking", &mut next);
+        root.children = vec![trees.logic, trees.sorties];
+        assert_links_resolve(&root);
+        let triggers = if zone_out == ZoneOutImpl::AreaCount { 2 * 2 } else { 2 };
+        assert_eq!(root.count_block_type("MCU_TR_ComplexTrigger"), triggers, "a threshold (and a count) per area");
+        let wp = by_id(&root, copy_root).find_by_name("WP 1").unwrap().index.unwrap();
+        let player = |inside: std::ops::Range<u32>| ScriptedTrack {
+            coalition: 1,
+            country: threshold::DPRK_PLAYER_COUNTRY,
+            samples: (1..=1200)
+                .map(|second| {
+                    let away = if inside.contains(&second) { 45_000.0 } else { 100_000.0 };
+                    (ticks(f64::from(second)), centre.0 + away, centre.1)
+                })
+                .collect(),
+        };
+        let ai = ScriptedTrack {
+            coalition: 1,
+            country: threshold::DPRK_AI_COUNTRY,
+            samples: (1..=1200).map(|second| (ticks(f64::from(second)), centre.0 + 10_000.0, centre.1)).collect(),
+        };
+        for (inside, done_s) in [(320..400, ends[0]), (100..200, ends[1])] {
+            let input = WalkerInput {
+                until: ticks(1200.0),
+                pulses: vec![(ticks(2.0), pointer.into())],
+                arrivals: vec![(ticks(302.0), wp.into())],
+                tracks: vec![player(inside.clone()), ai.clone()],
+                ..WalkerInput::default()
+            };
+            for config in flown_configs() {
+                let log = walk(&root, config, &input);
+                assert_eq!(times(&log, done_hub), [ticks(done_s)], "{zone_out:?} {config:?}: player inside {inside:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn validate_flags_a_bad_count_radius() {
+        for radius in [0.0, -1.0, f64::NAN] {
+            let (mut plan, input) = export_test_plan();
+            plan.threshold.count_radius_m = radius;
+            let issues = super::super::validate(&plan, &input.context());
+            assert!(
+                issues.iter().any(|i| i.severity == IssueSeverity::Error
+                    && i.text == "Air Tasking player count radius must be finite and greater than zero"),
+                "{radius}: {issues:?}"
+            );
+        }
+    }
+
     #[test]
     fn totals_match_the_generated_pack() {
         for (label, factory, expected) in [
@@ -1410,8 +1519,10 @@ mod tests {
                 AirTotals {
                     copies: [3, 3],
                     aircraft: [24, 12],
-                    mcus: [242, 199],
-                    check_zones: [7, 7],
+                    // 0050 D: each copy -2 MCUs and -2 check zones, each area
+                    // +26 MCUs and +1 check zone (one area per side).
+                    mcus: [262, 219],
+                    check_zones: [2, 2],
                 },
             ),
             (
@@ -1420,8 +1531,9 @@ mod tests {
                 AirTotals {
                     copies: [6, 12],
                     aircraft: [36, 48],
-                    mcus: [422, 678],
-                    check_zones: [14, 26],
+                    // 0050 D, two areas per side: 422 - 2 x 6 + 52, 678 - 2 x 12 + 52.
+                    mcus: [462, 706],
+                    check_zones: [4, 4],
                 },
             ),
         ] {
@@ -1858,6 +1970,9 @@ mod tests {
                             .unwrap(),
                     );
                 }
+                for role in ["UP 1", "UP 2", "UP 3", "UP 4", "DOWN 1", "DOWN 2", "DOWN 3", "EMPTY"] {
+                    expected.insert(named(logic, &format!("PC{letter}{area:02} {role}")).index.unwrap());
+                }
             }
             let sorties = named(air, &format!("Air Tasking {} Sorties", side.label()));
             assert_eq!(sorties.children.len(), copies);
@@ -1871,6 +1986,7 @@ mod tests {
                     "HARD STOP",
                     "DONE HUB",
                     "DELETE DELAY",
+                    "EMPTY IN",
                 ] {
                     expected.insert(
                         named(copy, &format!("S{letter}{:02} {role}", i + 1))
@@ -1878,10 +1994,11 @@ mod tests {
                             .unwrap(),
                     );
                 }
-                expected.insert(named(copy, "Zone Out").index.unwrap());
             }
         }
-        assert_eq!(expected.len(), 200, "every named breadcrumb, on every copy");
+        // 0050 D: a copy's EMPTY IN replaces its Zone Out; each of the two
+        // areas per side adds its count's eight relays.
+        assert_eq!(expected.len(), 200 + 2 * 2 * 8, "every named breadcrumb, on every copy");
         air.for_each(&mut |node| {
             if matches!(
                 node.block_type.as_str(),

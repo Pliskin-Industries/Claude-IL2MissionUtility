@@ -11,8 +11,6 @@ mod export;
 mod library;
 mod place;
 mod pool;
-// Decision 0050 D: wired into the shell only after flight 2R.
-#[cfg_attr(not(test), allow(dead_code))]
 mod presence;
 #[cfg(test)]
 mod probe;
@@ -181,6 +179,7 @@ pub struct ThresholdSpec {
     pub window_s: Option<f64>,
     pub dwell_s: Option<f64>,
     pub hold_s: Option<f64>, // None = derived (§4.2)
+    pub count_radius_m: f64, // decision 0050 D: each area's player count circle
 }
 impl Default for ThresholdSpec {
     fn default() -> Self {
@@ -191,6 +190,7 @@ impl Default for ThresholdSpec {
             window_s: None,
             dwell_s: None,
             hold_s: None,
+            count_radius_m: 50_000.0,
         }
     }
 } // D1, D2, D3, D4
@@ -276,12 +276,17 @@ impl Default for TotalsLimits {
 
 // Strategy enums (§8 step 0d table). The Default is the primary design.
 // The threshold's wiring follows ThresholdSpec.players_n (decision 0047), not a strategy.
-#[allow(dead_code)] // P14 step 12
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ZoneOutImpl {
+    /// Decision 0050 D: a copy ends when its area's player count empties while
+    /// it is on station (presence.rs).
     #[default]
+    AreaCount,
+    /// Decision 0018: the template's Zone IN and Zone Out check zones. Kept so
+    /// the flown probe flights' generators (flights 2 to 2I) still build what
+    /// was flown; Generate never selects it.
+    #[cfg_attr(not(test), allow(dead_code))]
     CheckZone,
-    Watchdog,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LossesImpl {
@@ -323,6 +328,7 @@ pub(crate) struct SideLogic {
     pub(crate) budget_events: Vec<i32>, // SNjj START relays and the copies' delete timers; each gets BUD s MARK and BUD s CHECK
     pub(crate) links: Vec<(i32, i32)>, // (from, to): emit_side_logic adds `to` to the Targets of `from` (§3.0)
     pub(crate) pass_subscribers: BTreeMap<usize, Vec<i32>>, // area index → ZNii PASS IN relays (targets of THsaa INNER, the PASS event; 0030, 0044)
+    pub(crate) empty_consumers: BTreeMap<usize, Vec<i32>>, // area index → SNjj EMPTY IN relays (targets of PCsaa EMPTY; decision 0050 D)
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

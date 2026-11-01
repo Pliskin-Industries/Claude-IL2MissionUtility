@@ -559,25 +559,31 @@ An entry starts sorties from the clock (**Clock**), from its zone trigger (**Zon
 
 ### How a sortie flies and ends
 
-A started copy activates its aircraft at its spawn point and flies to the target. Zone starts spawn 30 km from the target; clock starts spawn as far out as the type flies in 5 min. The copy's own check zones, `Zone IN` and **Zone Out**, sit on the target with a 35 km radius. They see aircraft of the other side, AI and players alike.
-- **On arrival,** or later once an aircraft of the other side comes within 35 km, `Zone IN` arms Zone Out. When none is left within 35 km (the player flew away, or the last one was shot down), Zone Out ends the sortie within a few seconds. An empty target is held until the on-station time ends.
+A started copy activates its aircraft at its spawn point and flies to the target. Zone starts spawn 30 km from the target; clock starts spawn as far out as the type flies in 5 min.
+
+Each area also has a **player count**: a 50 km circle on the area that counts the other side's players as they fly in and out (decision 0050). AI is not counted.
+- **While on station** (from its arrival on the target), the sortie ends when its area's count drops to nobody. That happens when the last player flies out, is shot down, or lands and leaves the server. A shot-down player is counted out when the wreck lands, about 15 s later.
+- **An empty area at arrival** holds the sortie until the on-station time ends.
 - **At the end of the on-station time** the copy looks at its area. COLD ends the sortie. HOT gives **one extension** (10 min by default); the sortie ends after it, HOT or not.
 - **Losses:** the sortie ends when all its aircraft are lost. Losses are counted from the game's **kill events**, one per lost aircraft.
 - **Hard stop:** a last timer from the start ends the sortie whatever happened; the pool row shows it. It is final.
 
-Every end goes through the copy's `DONE HUB` once. It switches off the copy's other timers and zones (decision 0038), sends the aircraft home, and deletes them 60.6 s later. The copy then leaves the head count. Each copy flies once.
+Every end goes through the copy's `DONE HUB` once. It switches off the copy's other timers (decision 0038), sends the aircraft home, and deletes them 60.6 s later. The copy then leaves the head count. Each copy flies once.
 
 ### Approximations and limits
 
-- **One player:** v1 counts one player per area. Two or more players are not counted apart (multi-player comes later).
-- **AI may count** in two places. An AI aircraft of the other side inside the inner ring at a presence check keeps a HOT area HOT, as a player would; Generate warns (orange) when a sortie's path crosses such a ring. And `Zone IN` / Zone Out count AI aircraft as seen. AI cannot make an area HOT: the entry trigger counts the players' countries only, and the Map moves its own AI off those countries.
+- **One player (the threshold):** v1 makes an area HOT on one player; the threshold does not count two or more players apart (multi-player comes later). The player count that ends sorties (below) does.
+- **AI may count** in two places. An AI aircraft of the other side inside the inner ring at a presence check keeps a HOT area HOT, as a player would; Generate warns (orange) when a sortie's path crosses such a ring. And a **busy** count (below) clears only when no aircraft of the other side is inside, AI included. AI cannot make an area HOT: the entry trigger counts the players' countries only, and the Map moves its own AI off those countries.
+- **The player count** counts up to three players exactly. A fourth makes the area **busy**: leaves are no longer counted, and the sortie ends only when the circle is empty of the other side's aircraft, AI included.
+  - Two players who cross the circle within about 0.1 s of each other count once. On the way in, that can end the sorties while one of them is still inside.
+  - A player who spawns inside the circle is not counted. Keep player spawns outside every count circle.
 - **The one way over budget:** **two requests in the same tick** that each find their start open (the clock and a zone, or zones on different areas) both start (seen in probe flight 2). The next recount shuts the starts again, so the side is back within budget once a copy is deleted.
 - **One copy can be started twice in one tick** if the clock and the zone pick the same Both entry in the same 0.02 s tick. The copy then gets its orders twice.
 - **No back-to-back can leave a slot quiet** when only the last winner's area is HOT.
 - **A slot can stay quiet with an entry available:** draws that pick nobody are random, and the slot is open for a limited time. In the worst simple case (three entries, the only one that can pass first in the waterfall) about 0.5 % of slots go quiet; more can with many entries.
 - **Zone re-arm for a Both entry:** a clock copy that ends first can re-arm the zone while the zone's own copy is still flying.
 - **The totals** Air Tasking adds (aircraft, MCUs, check zones) are shown in the right panel. Generate warns above 240 aircraft, 2,300 MCUs or 48 check zones: the size that loaded and ran idle at 50 SPS on the upstream author's dedicated server (decision 0032).
-- **UNVERIFIED:** the mission's load time and the tick delay on a real dedicated server with sorties flying; whether the 20 % quiet roll leaves about one slot in five quiet in the game (flight A1 saw one quiet slot, too few to measure a rate); and anything with two or more players.
+- **UNVERIFIED:** the mission's load time and the tick delay on a real dedicated server with sorties flying; whether the 20 % quiet roll leaves about one slot in five quiet in the game (flight A1 saw one quiet slot, too few to measure a rate); and anything with two or more players, including the player count with people (what a player who quits in flight counts as).
 
 ### What has been flown
 

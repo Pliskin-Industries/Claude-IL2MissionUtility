@@ -1,6 +1,6 @@
 # 0048. Zone Out with several players
 
-- **Status:** Proposed (flight 2M flown: ALL-out; waits for the user)
+- **Status:** Superseded by [0050](0050-ai-on-sides-of-its-own.md) (2026-10-31). Option D there ends each copy on its area's player count. Generate builds no Zone Out, so the question here is moot; the Watchdog variant is removed. The flown probe flights keep their Zone Out shell (the `CheckZone` strategy) only to build what was flown.
 - **Date:** 2026-10-31
 - **Decided by:** open
 

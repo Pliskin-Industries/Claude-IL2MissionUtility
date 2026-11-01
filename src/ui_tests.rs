@@ -4890,9 +4890,9 @@ fn a2_map_build_watches_three_nato_areas_for_dprk_players() {
         "NATO budget 2"
     );
 
-    // Nine copies, three per entry, all AI on 602; each copy's Zone IN and
-    // Zone Out are at its area, and (decision 0038) its DONE HUB OFF quiets
-    // more than the hub.
+    // Nine copies, three per entry, all AI on 602. Decision 0050 D: no zones of
+    // their own; each area's player count fires its copies' EMPTY IN. Decision
+    // 0038: each DONE HUB OFF quiets more than the hub.
     let sorties = named("Air Tasking NATO Sorties");
     assert_eq!(sorties.children.len(), 9);
     for (j, copy) in sorties.children.iter().enumerate() {
@@ -4905,11 +4905,13 @@ fn a2_map_build_watches_three_nato_areas_for_dprk_players() {
                 assert!(node.property("Script").unwrap().contains(script), "{name}");
                 assert_eq!(node.property("Country"), Some("602"), "{name}");
             }
-            if node.block_type == "MCU_CheckZone" {
-                assert_eq!(node.pos_xz(), Some(A2_AREAS[j / 3]), "{name}");
-            }
+            assert_ne!(node.block_type, "MCU_CheckZone", "{name}: no zones of its own (0050 D)");
         });
         assert_eq!(planes, 4, "{name}");
+        let empty_in = copy.find_by_name(&format!("SN0{} EMPTY IN", j + 1)).unwrap().index.unwrap();
+        let count = named(&format!("PCN0{} EMPTY", j / 3 + 1));
+        assert!(count.targets.contains(&empty_in), "{name}");
+        assert_eq!(named(&format!("PCN0{} TRIGGER", j / 3 + 1)).pos_xz(), Some(A2_AREAS[j / 3]), "{name}");
         let off = copy
             .find_by_name(&format!("SN0{} DONE HUB OFF", j + 1))
             .unwrap();
@@ -5067,22 +5069,13 @@ fn write_p14_acceptance_a3() {
 }
 
 /// The A3 build, as the run sheet describes it. A3 was flown on 2026-10-30, so
-/// its frozen files stay as flown. While the build still matches them byte for
-/// byte, this checks that; if the trace build changes, drop the byte check and
-/// keep the facts (as A2's check did).
+/// its frozen files stay as flown. Decision 0050 D changed the build (each copy
+/// ends on its area's player count, not its own Zone Out), so the byte check
+/// is dropped and the facts are kept, as A2's check did.
 #[test]
-fn a3_map_build_matches_the_frozen_files_and_the_run_sheet() {
+fn a3_map_build_matches_the_run_sheet() {
     let mut h = Harness::new("p14_acceptance_a3");
     let (root, countries) = build_a3(&mut h);
-    let frozen = repo("handoff/p14-probes/acceptance-a3");
-    for ext in ["Group", "eng", "trace.json"] {
-        let built = std::fs::read(h.out(&format!("{A3_STEM}.{ext}"))).unwrap();
-        let kept = std::fs::read(frozen.join(format!("{A3_STEM}.{ext}"))).unwrap();
-        assert!(
-            built == kept,
-            "{ext}: the build no longer matches the frozen A3 file"
-        );
-    }
 
     let air = root.find_by_name("Air Tasking").expect("Air Tasking group");
     let trees: Vec<_> = air.children.iter().filter_map(|c| c.name()).collect();
@@ -5101,6 +5094,10 @@ fn a3_map_build_matches_the_frozen_files_and_the_run_sheet() {
         (Some("8000"), Some("501"))
     );
     assert!(air.find_by_name("THN02 TRIGGER").is_none());
+    // Decision 0050 D: the area's player count, 50 km, watching the same players.
+    let count = named("PCN01 TRIGGER");
+    assert_eq!(count.pos_xz(), Some(A3_AREA));
+    assert_eq!((count.property("Radius"), count.property("Country")), (Some("50000"), Some("501")));
     for (name, key, value) in [
         ("THN01 INNER", "Zone", "8000"),
         ("THN01 DWELL", "Time", "80"),
@@ -5147,12 +5144,16 @@ fn a3_map_build_matches_the_frozen_files_and_the_run_sheet() {
             }
         });
         assert_eq!(planes, 4, "{name}");
+        // 0050 D: no zones of its own; the area's count fires its EMPTY IN.
+        assert_eq!(copy.count_block_type("MCU_CheckZone"), 0, "{name}");
+        let empty_in = copy.find_by_name(&format!("SN0{} EMPTY IN", j + 1)).unwrap().index.unwrap();
+        assert!(named("PCN01 EMPTY").targets.contains(&empty_in), "{name}");
         let off = copy
             .find_by_name(&format!("SN0{} DONE HUB OFF", j + 1))
             .unwrap();
         assert!(
-            off.targets.len() > 1,
-            "{name}: DONE HUB OFF closes its timers and zones too"
+            off.targets.contains(&empty_in) && off.targets.len() > 1,
+            "{name}: DONE HUB OFF closes its timers and EMPTY IN too"
         );
     }
 
@@ -5230,12 +5231,14 @@ fn write_p14_standalone_l() {
 }
 
 /// The two files the editor check starts from, as the run sheet describes
-/// them: byte for byte the frozen copies; the base map has the air start and
-/// no Air Tasking; the standalone file is one `Air Tasking` group indexed from
-/// 1, so its indexes collide with the base map's; and, under that renumbering,
-/// it is A3's flown Air Tasking group (same inputs, same seed).
+/// them: the frozen copies' file set (check L was flown on 2026-10-30; decision
+/// 0050 D changed the build, so the byte check is dropped, as for A3); the base
+/// map has the air start and no Air Tasking; the standalone file is one `Air
+/// Tasking` group indexed from 1, so its indexes collide with the base map's;
+/// and, under that renumbering, it is A3's Air Tasking group as built now (same
+/// inputs, same seed).
 #[test]
-fn standalone_l_build_matches_the_frozen_files_and_a3() {
+fn standalone_l_build_matches_a3() {
     let mut h = Harness::new("p14_standalone_l");
     let (base, air) = build_standalone_l(&mut h);
     let frozen = repo("handoff/p14-probes/standalone-l");
@@ -5249,14 +5252,7 @@ fn standalone_l_build_matches_the_frozen_files_and_a3() {
         names.sort();
         names
     };
-    let built = stem_files(&h.dir);
-    assert_eq!(built, stem_files(&frozen), "the build writes the frozen file set");
-    for name in &built {
-        assert!(
-            std::fs::read(h.dir.join(name)).unwrap() == std::fs::read(frozen.join(name)).unwrap(),
-            "{name}: the build no longer matches the frozen file"
-        );
-    }
+    assert_eq!(stem_files(&h.dir), stem_files(&frozen), "the build writes the frozen file set");
 
     // The base map: the air start, no Air Tasking, indexes from 1.
     assert!(base.find_by_name("Air Tasking").is_none());
@@ -5273,15 +5269,14 @@ fn standalone_l_build_matches_the_frozen_files_and_a3() {
     let clashes = air_indexes.iter().filter(|i| base_indexes.contains(i)).count();
     assert_eq!(clashes, air_indexes.len(), "every standalone index is also used by the base map");
 
-    // A3's flown Air Tasking group, renumbered. The Map writes the trace
-    // breadcrumbs at the base map's root and the standalone file inside its
-    // one group, so A3's are moved into its group, in file order, first.
-    let a3_dir = repo("handoff/p14-probes/acceptance-a3");
-    let a3 = crate::parser::parse_group_file(&std::fs::read_to_string(a3_dir.join(format!("{A3_STEM}.Group"))).unwrap())
-        .unwrap();
+    // A3's Air Tasking group as built now, renumbered. The Map writes the
+    // trace breadcrumbs at the base map's root and the standalone file inside
+    // its one group, so A3's are moved into its group, in file order, first.
+    let mut a3_h = Harness::new("p14_standalone_l_a3");
+    let (a3, _) = build_a3(&mut a3_h);
     let mut a3_air = a3.find_by_name("Air Tasking").unwrap().clone();
     let crumbs: Vec<_> = a3.children.iter().filter(|c| c.block_type == "MCU_TR_MissionObjective").cloned().collect();
-    let a3_trace = crate::trace::read_trace_sidecar(&a3_dir.join(format!("{A3_STEM}.trace.json"))).unwrap();
+    let a3_trace = crate::trace::read_trace_sidecar(&a3_h.out(&format!("{A3_STEM}.trace.json"))).unwrap();
     assert_eq!(crumbs.len(), a3_trace.entries.len(), "A3's breadcrumbs are its root objectives");
     a3_air.children.extend(crumbs);
     crate::airtask::testkit::assert_same_up_to_indexes(&a3_air, &air, crate::airtask::testkit::Renumbering::default());

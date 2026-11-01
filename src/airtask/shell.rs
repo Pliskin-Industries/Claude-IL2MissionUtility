@@ -29,8 +29,9 @@ pub struct ShellIds {
     pub flying: i32,
     pub landed: i32,
     pub delete_timer: i32,
-    /// D11 exemptions, restricted to deactivated zero-second OUT relays.
-    pub single_use_outs: Vec<i32>,
+    /// `EMPTY IN` (decision 0050 D): fired by the area's player count. None for
+    /// the CheckZone shell.
+    pub empty_in: Option<i32>,
 }
 
 impl ShellIds {
@@ -45,6 +46,10 @@ impl ShellIds {
         logic.flags.push(self.flying);
         logic.budget_events.extend([self.start, self.delete_timer]);
         logic.init_off.extend([self.hot, self.flying]);
+        if let Some(empty_in) = self.empty_in {
+            logic.empty_consumers.entry(area).or_default().push(empty_in);
+            logic.init_off.push(empty_in);
+        }
     }
 }
 
@@ -94,15 +99,26 @@ fn remove_ids(root: &mut Il2Entity, removed: &BTreeSet<i32>) {
     }
 }
 
+/// The template's Zone IN, Zone Out and Zone Out's switch-on and pulse.
+fn zone_ids(shape: &SortieShape) -> [i32; 4] {
+    [shape.zone_in, shape.zone_out, shape.zone_out_activate, shape.zone_out_pulse]
+}
+
 /// Cut first, then compute transitive reachability (including state links).
 /// This removes unreachable cycles too, unlike an incoming-degree sweep.
-fn strip(root: &mut Il2Entity, shape: &SortieShape) {
+/// `keep_zones` (the CheckZone shell, decision 0018) keeps Zone IN and Zone Out;
+/// otherwise they go (decision 0050 D).
+fn strip(root: &mut Il2Entity, shape: &SortieShape, keep_zones: bool) {
     recon::silence_clone_starts(root);
-    // Decision 0018: keep the enemy-seen check, but cut its template start
-    // and self-deactivation links before the orphan sweep.
-    by_id_mut(root, shape.zone_in).unwrap()
-        .set_targets(vec![shape.zone_out_activate, shape.zone_out_pulse]);
-    by_id_mut(root, shape.zone_out).unwrap().set_targets(vec![]);
+    if keep_zones {
+        // Decision 0018: keep the enemy-seen check, but cut its template start
+        // and self-deactivation links before the orphan sweep.
+        by_id_mut(root, shape.zone_in).unwrap()
+            .set_targets(vec![shape.zone_out_activate, shape.zone_out_pulse]);
+        by_id_mut(root, shape.zone_out).unwrap().set_targets(vec![]);
+    } else {
+        remove_ids(root, &zone_ids(shape).into_iter().collect());
+    }
     root.for_each_mut(&mut |node| {
         if node.index.is_some_and(|id| shape.planes.contains(&id)) {
             node.children.retain(|child| !matches!(child.block_type.as_str(), "OnEvents" | "OnReports"));
@@ -117,14 +133,10 @@ fn strip(root: &mut Il2Entity, shape: &SortieShape) {
         .into_iter()
         .filter_map(|node| node.index.map(|id| (id, node)))
         .collect();
-    let mut pending = vec![
-        shape.bring_up_timer,
-        shape.zone_in,
-        shape.zone_out,
-        shape.zone_out_activate,
-        shape.zone_out_pulse,
-        shape.end_timer,
-    ];
+    let mut pending = vec![shape.bring_up_timer, shape.end_timer];
+    if keep_zones {
+        pending.extend(zone_ids(shape));
+    }
     pending.extend(
         all.values()
             .filter(|node| node.block_type == "MCU_Waypoint")
@@ -159,6 +171,8 @@ fn strip(root: &mut Il2Entity, shape: &SortieShape) {
 
 /// Wrap an inspected, placed copy. RTB insertion belongs to place_air_sortie;
 /// this adds 17 MCUs, and assembly adds COPY r (19 including the new RTB timer).
+/// By default (decision 0050 D) it also adds EMPTY ON and EMPTY IN and drops
+/// the template's four zone MCUs; the CheckZone shell keeps them (0018).
 /// A rejected wrap leaves both the input tree and the allocator unchanged.
 pub fn wrap_sortie(
     root: &mut Il2Entity,
@@ -205,8 +219,9 @@ pub fn wrap_sortie(
     {
         return Err(format!("Air Tasking {prefix}: shell shape does not match this copy's indexes"));
     }
+    let keep_zones = spec.zone_out == ZoneOutImpl::CheckZone;
     let mut copy = root.clone();
-    strip(&mut copy, shape);
+    strip(&mut copy, shape, keep_zones);
     if nodes(&copy).iter().any(|node| {
         node.targets.contains(&shape.end_timer) || node.objects.contains(&shape.end_timer)
     }) {
@@ -246,6 +261,14 @@ pub fn wrap_sortie(
         };
         ids.insert(name, node.index.unwrap());
         added.push(node);
+    }
+    if !keep_zones {
+        // Decision 0050 D: ON STATION IN switches EMPTY IN on; the area's count fires it.
+        let empty_on = template::mcu("MCU_Activate", &format!("{prefix} EMPTY ON"), &mut alloc, x, z);
+        let empty_in = template::timer(&format!("{prefix} EMPTY IN"), 0.0, &mut alloc, x, z);
+        ids.insert("EMPTY ON", empty_on.index.unwrap());
+        ids.insert("EMPTY IN", empty_in.index.unwrap());
+        added.extend([empty_on, empty_in]);
     }
     // Use Template Builder's Spawn-mode Delete shapes, flown in flight 1L.
     let delay = template::timer(
@@ -303,11 +326,13 @@ pub fn wrap_sortie(
                 ids["ON STATION"],
                 ids["EXTEND"],
                 ids["LOSSES"],
-                shape.zone_in,
-                shape.zone_out,
-                shape.zone_out_pulse,
             ]
             .into_iter()
+            .chain(if keep_zones {
+                vec![shape.zone_in, shape.zone_out, shape.zone_out_pulse]
+            } else {
+                vec![ids["EMPTY IN"]]
+            })
             .chain(attack_timers)
             .collect(),
         ),
@@ -321,57 +346,28 @@ pub fn wrap_sortie(
     by_id_mut(&mut copy, shape.delayed_end_timer)
         .unwrap()
         .append_target(ids["DELETE DELAY"]);
-    let wp = by_id_mut(&mut copy, shape.path_waypoints[&shape.navigation_lead]).unwrap();
-    wp.append_target(shape.zone_in);
-    let radius = by_id(&copy, shape.zone_out).property("Zone")
-        .ok_or_else(|| format!("Air Tasking {prefix}: Zone Out has no Zone radius"))?
-        .to_owned();
-    for zone_id in [shape.zone_in, shape.zone_out] {
-        let zone = by_id_mut(&mut copy, zone_id).unwrap();
-        placement::set_coord(zone, "XPos", spec.target.0);
-        placement::set_coord(zone, "ZPos", spec.target.1);
-    }
-    // Keep the template name, as for Zone Out: this is the same retained MCU.
-    let zone_in = by_id_mut(&mut copy, shape.zone_in).unwrap();
-    zone_in.set_property("Zone", radius);
-    let zone = by_id_mut(&mut copy, shape.zone_out).unwrap();
-    zone.set_targets(vec![ids["DONE HUB"]]);
-    let mut single_use_outs = Vec::new();
     match spec.zone_out {
-        ZoneOutImpl::CheckZone => {} // Flight 0, 0d: CheckZone remains default; J5 permits Watchdog.
-        ZoneOutImpl::Watchdog => {
-            // Reuse Zone Out as an inside check. A 5 s poll refreshes a 10 s
-            // watchdog. This variant requires J5 = Restart; it is not selected
-            // automatically. DONE HUB OFF stops both timers and their OUT gates.
-            zone.set_property("Closer", "1");
-            let mut watchdog =
-                template::timer(&format!("{prefix} WATCHDOG"), 10.0, &mut alloc, x, z);
-            let mut out = template::timer(&format!("{prefix} WATCHDOG OUT"), 0.0, &mut alloc, x, z);
-            let mut poll =
-                template::timer(&format!("{prefix} WATCHDOG POLL"), 5.0, &mut alloc, x, z);
-            let mut poll_out = template::timer(
-                &format!("{prefix} WATCHDOG POLL OUT"),
-                0.0,
-                &mut alloc,
-                x,
-                z,
-            );
-            zone.set_targets(vec![watchdog.index.unwrap()]);
-            watchdog.set_targets(vec![out.index.unwrap()]);
-            out.set_targets(vec![ids["DONE HUB"]]);
-            poll.set_targets(vec![poll_out.index.unwrap()]);
-            poll_out.set_targets(vec![shape.zone_out, poll.index.unwrap()]);
-            single_use_outs.extend([out.index.unwrap(), poll_out.index.unwrap()]);
-            targets.get_mut(&ids["DONE HUB OFF"]).unwrap().extend([
-                watchdog.index.unwrap(),
-                poll.index.unwrap(),
-                out.index.unwrap(),
-                poll_out.index.unwrap(),
-            ]);
+        ZoneOutImpl::AreaCount => {
+            // ON STATION IN fires once, on arrival, then switches itself off, so a
+            // late WP 1 (flight A1) cannot arm a used copy again (0038).
+            targets.get_mut(&ids["ON STATION IN"]).unwrap().push(ids["EMPTY ON"]);
+            targets.insert(ids["EMPTY ON"], vec![ids["EMPTY IN"]]);
+            targets.insert(ids["EMPTY IN"], vec![ids["DONE HUB"]]);
+        }
+        ZoneOutImpl::CheckZone => {
             let wp = by_id_mut(&mut copy, shape.path_waypoints[&shape.navigation_lead]).unwrap();
-            wp.append_target(watchdog.index.unwrap());
-            wp.append_target(poll.index.unwrap());
-            added.extend([watchdog, out, poll, poll_out]);
+            wp.append_target(shape.zone_in);
+            let radius = by_id(&copy, shape.zone_out).property("Zone")
+                .ok_or_else(|| format!("Air Tasking {prefix}: Zone Out has no Zone radius"))?
+                .to_owned();
+            for zone_id in [shape.zone_in, shape.zone_out] {
+                let zone = by_id_mut(&mut copy, zone_id).unwrap();
+                placement::set_coord(zone, "XPos", spec.target.0);
+                placement::set_coord(zone, "ZPos", spec.target.1);
+            }
+            // Keep the template name, as for Zone Out: this is the same retained MCU.
+            by_id_mut(&mut copy, shape.zone_in).unwrap().set_property("Zone", radius);
+            by_id_mut(&mut copy, shape.zone_out).unwrap().set_targets(vec![ids["DONE HUB"]]);
         }
     }
     // Flight 1G and decisions 0011/0017: one OnKilled (13) per aircraft.
@@ -416,7 +412,7 @@ pub fn wrap_sortie(
         flying: ids["FLYING"],
         landed: ids["LANDED"],
         delete_timer: ids["DELETE DELAY"],
-        single_use_outs,
+        empty_in: ids.get("EMPTY IN").copied(),
     })
 }
 
@@ -506,6 +502,22 @@ mod tests {
         (0..6)
             .map(|i| fixture(builtin(i), Strategies::default()))
             .collect()
+    }
+
+    /// The CheckZone shell (decision 0018), which the flown probe flights built.
+    fn zones() -> Strategies {
+        Strategies {
+            zone_out: ZoneOutImpl::CheckZone,
+            ..Strategies::default()
+        }
+    }
+
+    fn zone_fixtures() -> Vec<Fixture> {
+        (0..6).map(|i| fixture(builtin(i), zones())).collect()
+    }
+
+    fn empty_in(f: &Fixture) -> i32 {
+        f.ids.empty_in.expect("the area-count shell has EMPTY IN")
     }
 
     pub(crate) fn configs() -> Vec<WalkerConfig> {
@@ -615,7 +627,7 @@ mod tests {
 
     #[test]
     fn shell_keeps_zone_in_and_strips_start() {
-        for f in fixtures() {
+        for f in zone_fixtures() {
             assert_eq!(by_id(&f.root, f.shape.zone_in).name(), Some("Zone IN"));
             for name in [
                 "ENABLE / PULSE IN",
@@ -651,13 +663,19 @@ mod tests {
     fn shell_done_hub_inputs() {
         // Every timer that gives an attack order, per bundled template.
         let attack_timers: [&[i32]; 6] = [&[37, 39], &[37], &[37], &[37], &[37, 43], &[45, 51]];
-        for (f, attack_timers) in fixtures().into_iter().zip(attack_timers) {
+        let all = fixtures().into_iter().zip(attack_timers).chain(zone_fixtures().into_iter().zip(attack_timers));
+        for (f, attack_timers) in all {
+            // The area-count shell's EMPTY IN, or the zone shell's Zone Out (0018).
+            let (end, quiet_zones) = match f.ids.empty_in {
+                Some(empty_in) => (empty_in, vec![empty_in]),
+                None => (f.shape.zone_out, vec![f.shape.zone_in, f.shape.zone_out, f.shape.zone_out_pulse]),
+            };
             let expected = [
                 shell_id(&f, "HARD STOP"),
                 f.ids.cold,
                 shell_id(&f, "EXTEND"),
                 shell_id(&f, "LOSSES"),
-                f.shape.zone_out,
+                end,
             ];
             assert_eq!(
                 incoming(&f.root, f.ids.done_hub),
@@ -672,11 +690,9 @@ mod tests {
                 shell_id(&f, "ON STATION"),
                 shell_id(&f, "EXTEND"),
                 shell_id(&f, "LOSSES"),
-                f.shape.zone_in,
-                f.shape.zone_out,
-                f.shape.zone_out_pulse,
             ]
             .into_iter()
+            .chain(quiet_zones)
             .chain(attack_timers.iter().copied())
             .collect();
             assert_eq!(by_id(&f.root, off).targets, quiet);
@@ -740,7 +756,7 @@ mod tests {
 
     #[test]
     fn shell_wp1_pulses_zone_in() {
-        for f in fixtures() {
+        for f in zone_fixtures() {
             let wp = by_id(&f.root, f.shape.path_waypoints[&f.shape.navigation_lead]);
             assert!(wp.targets.contains(&f.shape.zone_in));
             assert!(!wp.targets.contains(&f.shape.zone_out_activate));
@@ -807,7 +823,7 @@ mod tests {
             }
             assert_eq!(f.logic.hot_consumers[&1], [f.ids.hot]);
             assert_eq!(f.logic.cold_consumers[&1], [f.ids.cold]);
-            assert_eq!(f.root.count_block_type("MCU_CheckZone"), 2);
+            assert_eq!(f.root.count_block_type("MCU_CheckZone"), 0, "decision 0050 D");
         }
     }
 
@@ -867,9 +883,9 @@ mod tests {
         let original = builtin(1);
         let shape = inspect_sortie(&original).unwrap();
         let mut stripped = original.clone();
-        strip(&mut stripped, &shape);
+        strip(&mut stripped, &shape, true);
         assert_eq!(mcus(&original) - mcus(&stripped), 8);
-        let f = fixture(original, Strategies::default());
+        let f = fixture(original, zones());
         assert_eq!(mcus(&f.root) - mcus(&stripped), 19 + 1);
         assert_eq!(mcus(&f.root), 43);
         let mut without_zone_in = f.root.clone();
@@ -884,9 +900,9 @@ mod tests {
         let shape = inspect_sortie(&original).unwrap();
         let rtb = shape.rtb_timer.unwrap();
         let mut stripped = original.clone();
-        strip(&mut stripped, &shape);
+        strip(&mut stripped, &shape, true);
         assert_eq!(mcus(&original) - mcus(&stripped), 7);
-        let f = fixture(original, Strategies::default());
+        let f = fixture(original, zones());
         assert_eq!(f.shape.rtb_timer, Some(rtb));
         assert_eq!(mcus(&f.root) - mcus(&stripped), 18 + 1); // one lead lacked RTB
         assert_eq!(mcus(&f.root), 47);
@@ -949,7 +965,7 @@ mod tests {
         crate::duplicate::reconnect_pointers(&mut root, &remap);
         let shape = inspect_sortie(&root).unwrap();
         let mut retained = root.clone();
-        strip(&mut retained, &shape);
+        strip(&mut retained, &shape, true);
         let retained: BTreeSet<_> = nodes(&retained).iter().filter_map(|node| node.index).collect();
         let mut next = 1;
         wrap_sortie(&mut root, "SN01", &shape, &ShellSpec {
@@ -1025,10 +1041,21 @@ mod tests {
     fn shell_orphan_sweep_keeps_everything_reachable() {
         for i in 0..6 {
             let original = builtin(i);
+            let shape = inspect_sortie(&original).unwrap();
+            // The area-count shell drops the template's zones (0050 D).
             let f = fixture(original.clone(), Strategies::default());
+            let mut stripped = original.clone();
+            strip(&mut stripped, &shape, false);
+            for node in nodes(&stripped).into_iter().filter(|n| n.block_type.starts_with("MCU_")) {
+                assert!(nodes(&f.root).iter().any(|n| n.index == node.index));
+            }
+            for id in zone_ids(&shape) {
+                assert!(!nodes(&f.root).iter().any(|n| n.index == Some(id)), "zone MCU {id} kept");
+            }
+            assert_links_resolve(&f.root);
+            let f = fixture(original.clone(), zones());
             let mut stripped = original;
-            let shape = inspect_sortie(&stripped).unwrap();
-            strip(&mut stripped, &shape);
+            strip(&mut stripped, &shape, true);
             for node in nodes(&stripped)
                 .into_iter()
                 .filter(|n| n.block_type.starts_with("MCU_"))
@@ -1081,93 +1108,8 @@ mod tests {
     }
 
     #[test]
-    fn shell_zone_out_watchdog_structure() {
-        let f = fixture(
-            builtin(1),
-            Strategies {
-                zone_out: ZoneOutImpl::Watchdog,
-                ..Strategies::default()
-            },
-        );
-        assert_eq!(
-            by_id(&f.root, f.shape.zone_out).property("Closer"),
-            Some("1")
-        );
-        assert_eq!(f.root.count_block_type("MCU_CheckZone"), 2);
-        assert_eq!(
-            by_id(&f.root, f.shape.zone_out).targets,
-            [shell_id(&f, "WATCHDOG")]
-        );
-        // Decision 0038: DONE HUB OFF stops both timers and their OUT gates,
-        // so the variant has no WATCHDOG OFF and adds 4 MCUs, not 5.
-        let off = &by_id(&f.root, shell_id(&f, "DONE HUB OFF")).targets;
-        for name in ["WATCHDOG", "WATCHDOG OUT", "WATCHDOG POLL", "WATCHDOG POLL OUT"] {
-            assert!(off.contains(&shell_id(&f, name)), "DONE HUB OFF misses {name}");
-        }
-        let letter = f.shape.side.letter();
-        assert!(f.root.find_by_name(&format!("S{letter}01 WATCHDOG OFF")).is_none());
-        assert_eq!(mcus(&f.root), 43 + 4);
-        let runtime = runtime(&f, false);
-        testkit::walker_every_deactivated_out_has_a_rearm_or_is_single_use(
-            &runtime,
-            &f.ids.single_use_outs,
-        )
-        .unwrap();
-        for reverse_targets in [false, true] {
-            // Watchdog is explicitly gated on J5=Restart, unlike the primary shell.
-            let mut script = input(&f, 60.0, Some(10.0));
-            script.tracks[0].samples = (0..=30)
-                .map(|s| {
-                    (
-                        ticks(f64::from(s)),
-                        TARGET.0 + if s >= 30 { 40000.0 } else { 0.0 },
-                        TARGET.1,
-                    )
-                })
-                .collect();
-            let log = walk(
-                &runtime,
-                WalkerConfig {
-                    reverse_targets,
-                    ..WalkerConfig::default()
-                },
-                &script,
-            );
-            assert_eq!(times(&log, f.ids.done_hub), [ticks(35.0)]);
-            assert!(!active(
-                &log,
-                shell_id(&f, "WATCHDOG POLL OUT"),
-                ticks(60.0)
-            ));
-        }
-        // With the flown timer facts, neither timer fires after DONE HUB. The
-        // check-zone model stays Once: this variant re-pulses an armed zone,
-        // which the game ignores (flight 2K, K5A), so with the flown Armed
-        // model it ends the copy 10 s after the first poll. It is unused
-        // (step 12); plan section 3.9, risk b, records the redesign it needs.
-        let mut script = input(&f, 60.0, Some(10.0));
-        script.tracks[0].samples = (0..=30)
-            .map(|s| (ticks(f64::from(s)), TARGET.0 + if s >= 30 { 40000.0 } else { 0.0 }, TARGET.1))
-            .collect();
-        let config = WalkerConfig {
-            check_zone: CheckZoneMode::Once,
-            ..WalkerConfig::default().flown()
-        };
-        let log = walk(&runtime, config, &script);
-        assert_eq!(times(&log, f.ids.done_hub), [ticks(35.0)]);
-        for name in ["WATCHDOG", "WATCHDOG POLL"] {
-            let late: Vec<_> = times(&log, shell_id(&f, name)).into_iter().filter(|&t| t > ticks(35.0)).collect();
-            assert!(late.is_empty(), "{name} fired after DONE HUB at {late:?}");
-        }
-        // The finding itself: under the flown check-zone model the copy ends
-        // about 10 s after its first watch, with the plane still inside.
-        let log = walk(&runtime, WalkerConfig::default().flown(), &script);
-        assert!(times(&log, f.ids.done_hub)[0] < ticks(25.0));
-    }
-
-    #[test]
     fn shell_done_fires_once_when_on_station_end_and_zone_out_coincide() {
-        let f = fixture(builtin(1), Strategies::default());
+        let f = fixture(builtin(1), zones());
         let mut script = input(&f, 800.0, None);
         script
             .pulses
@@ -1217,7 +1159,7 @@ mod tests {
 
     #[test]
     fn shell_empty_target_stays_on_station() {
-        let f = fixture(builtin(1), Strategies::default());
+        let f = fixture(builtin(1), zones());
         let mut script = input(&f, 2200.0, Some(302.0));
         script.tracks.clear();
         for config in configs() {
@@ -1242,7 +1184,7 @@ mod tests {
 
     #[test]
     fn shell_enemy_present_at_arrival_then_leaves() {
-        let f = fixture(builtin(1), Strategies::default());
+        let f = fixture(builtin(1), zones());
         let script = enemy_window(&f, 0, 482);
         for config in flown_configs() {
             let log = walk(&runtime(&f, false), config, &script);
@@ -1257,7 +1199,7 @@ mod tests {
 
     #[test]
     fn shell_enemy_arrives_after_then_leaves() {
-        let f = fixture(builtin(1), Strategies::default());
+        let f = fixture(builtin(1), zones());
         let script = enemy_window(&f, 422, 602);
         for config in flown_configs() {
             let log = walk(&runtime(&f, false), config, &script);
@@ -1272,7 +1214,7 @@ mod tests {
 
     #[test]
     fn shell_hot_empty_target_extends_once() {
-        let f = fixture(builtin(1), Strategies::default());
+        let f = fixture(builtin(1), zones());
         let mut script = input(&f, 2200.0, Some(302.0));
         script.tracks.clear();
         for config in flown_configs() {
@@ -1357,7 +1299,7 @@ mod tests {
         // STATION, in a COLD area), and AirAlert, whose WP 1 starts two
         // attack timers.
         for (template, hot_leave_s) in [(5, 1000), (0, 1500)] {
-            let f = fixture(builtin(template), Strategies::default());
+            let f = fixture(builtin(template), zones());
             // The end chain and the budget census are the only copy timers,
             // zones or counters that may still fire after DONE HUB.
             let allowed: BTreeSet<i32> = [
@@ -1422,15 +1364,164 @@ mod tests {
         }
     }
 
+    /// Decision 0050 D: the copy keeps none of the template's zones; ON STATION
+    /// IN switches EMPTY IN on, and EMPTY IN fires DONE HUB.
+    #[test]
+    fn shell_area_count_replaces_the_zones() {
+        for f in fixtures() {
+            let empty_in = empty_in(&f);
+            let empty_on = shell_id(&f, "EMPTY ON");
+            assert_eq!(f.root.count_block_type("MCU_CheckZone"), 0);
+            for id in zone_ids(&f.shape) {
+                assert!(!nodes(&f.root).iter().any(|n| n.index == Some(id)), "zone MCU {id} kept");
+            }
+            let wp = by_id(&f.root, f.shape.path_waypoints[&f.shape.navigation_lead]);
+            assert!(!wp.targets.contains(&empty_on), "not WP 1: it fires again after DONE HUB (A1)");
+            let on_station_in = by_id(&f.root, shell_id(&f, "ON STATION IN"));
+            assert!(on_station_in.targets.contains(&empty_on));
+            assert_eq!(by_id(&f.root, empty_on).block_type, "MCU_Activate");
+            assert_eq!(by_id(&f.root, empty_on).targets, [empty_in]);
+            assert_eq!(by_id(&f.root, empty_in).block_type, "MCU_Timer");
+            assert_eq!(number(by_id(&f.root, empty_in), "Time").unwrap(), 0.0);
+            assert_eq!(by_id(&f.root, empty_in).targets, [f.ids.done_hub]);
+            assert_eq!(incoming(&f.root, empty_in), BTreeSet::new(), "only the area count fires it");
+            // Registered for its area, and off until WP 1.
+            assert_eq!(f.logic.empty_consumers[&1], [empty_in]);
+            assert!(f.logic.init_off.contains(&empty_in));
+            assert!(by_id(&f.root, shell_id(&f, "DONE HUB OFF")).targets.contains(&empty_in));
+            assert_links_resolve(&f.root);
+        }
+    }
+
+    #[test]
+    fn shell_area_count_mcus_per_copy() {
+        // 0017's 19 shell MCUs, plus EMPTY ON and EMPTY IN, minus the template's
+        // four zone MCUs, which strip() now removes with the start chain.
+        let original = builtin(1);
+        let shape = inspect_sortie(&original).unwrap();
+        let mut stripped = original.clone();
+        strip(&mut stripped, &shape, false);
+        assert_eq!(mcus(&original) - mcus(&stripped), 8 + 4);
+        let f = fixture(original, Strategies::default());
+        assert_eq!(mcus(&f.root) - mcus(&stripped), 19 + 1 + 2);
+        assert_eq!(mcus(&f.root), 43 - 4 + 2);
+    }
+
+    /// A copy ends when its area empties while it is on station (from WP 1),
+    /// and not when the area empties before it arrives.
+    #[test]
+    fn shell_area_empty_ends_the_copy_on_station_only() {
+        let f = fixture(builtin(1), Strategies::default());
+        for (empty_s, done_s) in [(200.0, 902.5), (482.0, 482.0)] {
+            let mut script = input(&f, 2200.0, Some(302.0));
+            script.tracks.clear();
+            script.pulses.push((ticks(empty_s), empty_in(&f).into()));
+            for config in flown_configs() {
+                let log = walk(&runtime(&f, false), config, &script);
+                assert_eq!(times(&log, f.ids.done_hub), [ticks(done_s)], "{config:?}: empty at {empty_s}");
+                if done_s < 900.0 {
+                    // 0038: ON STATION is cancelled, so no late COLD.
+                    assert!(times(&log, f.ids.cold).is_empty(), "{config:?}");
+                }
+            }
+        }
+    }
+
+    /// An empty area at arrival: the copy carries on until its time on station
+    /// ends (the user, decision 0050 D; as 0018).
+    #[test]
+    fn shell_area_count_empty_target_stays_on_station() {
+        let f = fixture(builtin(1), Strategies::default());
+        let mut script = input(&f, 2200.0, Some(302.0));
+        script.tracks.clear();
+        for config in flown_configs() {
+            let log = walk(&runtime(&f, false), config, &script);
+            assert_eq!(times(&log, f.ids.cold), [ticks(902.5)]);
+            assert_eq!(times(&log, f.ids.done_hub), [ticks(902.5)]);
+        }
+    }
+
+    /// The area empties in the tick its time on station ends: DONE HUB fires once.
+    #[test]
+    fn shell_done_fires_once_when_on_station_end_and_area_empty_coincide() {
+        let f = fixture(builtin(1), Strategies::default());
+        let mut script = input(&f, 800.0, None);
+        script.pulses.push((ticks(10.0), f.shape.navigation_attack_timer.into()));
+        script.tracks.clear();
+        script.pulses.push((ticks(610.5), empty_in(&f).into()));
+        for config in configs() {
+            let log = walk(&runtime(&f, false), config, &script);
+            assert_eq!(times(&log, f.ids.done_hub), [ticks(610.5)], "{config:?}");
+            assert_eq!(times(&log, f.shape.end_timer), [ticks(610.6)], "{config:?}");
+        }
+    }
+
+    /// Flight A1's late inputs on the area-count shell: the area empties at
+    /// `leave_s` and again 50 s later; WP 1 fires again after DONE HUB; every
+    /// plane is killed. Nothing of the copy but its end chain and census fires
+    /// after DONE HUB (0038).
+    #[test]
+    fn shell_area_count_used_copy_is_quiet_after_done_hub() {
+        for (template, hot_leave_s) in [(5, 1000), (0, 1500)] {
+            let f = fixture(builtin(template), Strategies::default());
+            let allowed: BTreeSet<i32> = [
+                f.shape.end_timer,
+                f.shape.end_orders_timer,
+                f.shape.delayed_end_timer,
+                f.ids.delete_timer,
+                f.ids.flying,
+            ]
+            .into_iter()
+            .chain(f.shape.rtb_timer)
+            .collect();
+            let watched: BTreeSet<i32> = nodes(&f.root)
+                .into_iter()
+                .filter(|node| matches!(node.block_type.as_str(), "MCU_Timer" | "MCU_CheckZone" | "MCU_Counter"))
+                .filter_map(|node| node.index)
+                .collect();
+            for (hot, leave_s) in [(true, hot_leave_s), (false, 600)] {
+                let mut script = a1_replay(&f, leave_s, leave_s + 100);
+                script.tracks.clear();
+                for empty_s in [leave_s, leave_s + 50] {
+                    script.pulses.push((ticks(f64::from(empty_s)), empty_in(&f).into()));
+                }
+                for config in flown_configs() {
+                    let log = walk(&runtime(&f, hot), config, &script);
+                    let done = ticks(f64::from(leave_s));
+                    assert_eq!(times(&log, f.ids.done_hub), [done], "builtin {template}");
+                    assert_eq!(times(&log, empty_in(&f)), [done], "builtin {template}: EMPTY IN stays off");
+                    let late: Vec<_> = log
+                        .pulses
+                        .iter()
+                        .filter(|p| p.t > done && watched.contains(&p.index) && !allowed.contains(&p.index))
+                        .map(|p| format!("{} ({}) at {} s", p.name, p.index, p.t as f64 / 20.0))
+                        .collect();
+                    assert!(late.is_empty(), "builtin {template}, hot {hot}: fired after DONE HUB: {late:?}");
+                }
+            }
+        }
+    }
+
+    /// A used copy ignores a later EMPTY from its area (0038).
+    #[test]
+    fn shell_used_copy_ignores_a_later_empty() {
+        let f = fixture(builtin(1), Strategies::default());
+        let mut script = input(&f, 2200.0, Some(302.0));
+        script.tracks.clear();
+        script.pulses.extend([(ticks(482.0), empty_in(&f).into()), (ticks(700.0), empty_in(&f).into())]);
+        for config in flown_configs() {
+            let log = walk(&runtime(&f, false), config, &script);
+            assert_eq!(times(&log, f.ids.done_hub), [ticks(482.0)], "{config:?}");
+            assert_eq!(times(&log, empty_in(&f)), [ticks(482.0)], "{config:?}: off after DONE HUB");
+        }
+    }
+
     #[test]
     fn shell_and_budget_pass_the_rearm_rule() {
         for f in fixtures() {
             let root = runtime(&f, false);
-            testkit::walker_every_deactivated_out_has_a_rearm_or_is_single_use(
-                &root,
-                &f.ids.single_use_outs,
-            )
-            .unwrap();
+            testkit::walker_every_deactivated_out_has_a_rearm_or_is_single_use(&root, &[])
+                .unwrap();
         }
         for n in 1..=3 {
             let h =

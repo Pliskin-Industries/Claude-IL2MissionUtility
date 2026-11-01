@@ -919,15 +919,8 @@ pub(crate) mod tests {
             }
         }
         assert_links_resolve(&h.root);
-        let single_use: Vec<_> = h
-            .copies
-            .entries
-            .iter()
-            .flat_map(|entry| &entry.copies)
-            .flat_map(|copy| copy.shell.single_use_outs.iter().copied())
-            .collect();
         assert_eq!(
-            walker_every_deactivated_out_has_a_rearm_or_is_single_use(&h.root, &single_use),
+            walker_every_deactivated_out_has_a_rearm_or_is_single_use(&h.root, &[]),
             Ok(())
         );
     }

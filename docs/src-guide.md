@@ -169,9 +169,11 @@ on-station timing, HOT/COLD extension, a FLYING budget flag, and one OnKilled
 with its own 0.5 s DELETE DELAY and entity-linked DELETE, then registers
 lifecycle events in `SideLogic`. `ShellSpec` supplies timing and strategy
 choices; `ShellIds` supplies cross-builder connection points. Decisions 0017/0018.
-WP 1 pulses the retained Zone IN at the target; only an enemy seen there arms
-Zone Out. Both zones use Zone Out's radius. Empty targets complete their
-on-station time, then COLD ends the sortie or HOT extends it once.
+By default (decision 0050 D) the template's Zone IN and Zone Out go: `ON
+STATION IN` switches the copy's `EMPTY IN` on, and its area's player count fires
+it. Empty targets complete their on-station time, then COLD ends the sortie or
+HOT extends it once. The `CheckZone` strategy keeps the zones (0018: WP 1
+pulses Zone IN, which arms Zone Out), only for the flown probe flights.
 **Air Tasking generation.**
 
 ### `airtask/budget.rs` — per-side live-copy census
@@ -235,11 +237,12 @@ shared with `presence.rs`.
 **Air Tasking generation.**
 
 ### `airtask/presence.rs` — a player count per area
-Decision 0050 D, built for probe flight 2R and not yet wired into the shell. Per
+Decision 0050 D, flown as probe flight 2R; the export builds one per area. Per
 side and area: a Complex Trigger on the other side's player country steps a
 relay chain from 0 to 3 (Entered up; Left and Finished down), then busy; a
 Closer 0 `CLEAR` zone clears busy when nobody of that side is left. `EMPTY`
-fires when the area empties. 26 MCUs per area.
+fires when the area empties, into every copy's `EMPTY IN` registered for the
+area. 26 MCUs per area.
 **Air Tasking generation.**
 
 ### `airtask/clock.rs` — the mission clock

@@ -20,6 +20,15 @@ const STEP_DELAY_S: f64 = 0.05;
 /// about 280 m inside, so the zone does not miss it and clear at once.
 const CLEAR_DELAY_S: f64 = 2.0;
 
+/// The count roles a trace build breadcrumbs: every `UP k` and `DOWN k` (the
+/// count's path) and `EMPTY`.
+pub(crate) fn traced_role(role: &str) -> bool {
+    let step = |prefix: &str| role.strip_prefix(prefix).and_then(|k| k.parse::<usize>().ok());
+    role == "EMPTY"
+        || step("UP ").is_some_and(|k| (1..=COUNT_STEPS + 1).contains(&k))
+        || step("DOWN ").is_some_and(|k| (1..=COUNT_STEPS).contains(&k))
+}
+
 /// Build one count per area: 26 MCUs, one of them a check zone. Returns the
 /// nodes and each area's `EMPTY` relay, in area order.
 ///
@@ -142,7 +151,9 @@ pub(crate) fn build_side(
             vec![id("CLEAR OFF"), id("ON 0 DELAY"), id("EMPTY")],
         );
         edges.insert("CLEAR OFF".into(), vec![id("CLEAR")]);
-        edges.insert("EMPTY".into(), vec![]);
+        let mut consumers = logic.empty_consumers.get(&(index + 1)).cloned().unwrap_or_default();
+        consumers.sort_unstable();
+        edges.insert("EMPTY".into(), consumers);
         for node in &mut cell {
             if node.index == Some(id("TRIGGER")) {
                 for k in 1..=top {

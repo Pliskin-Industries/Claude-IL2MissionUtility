@@ -209,8 +209,9 @@ impl Flight {
         // 0025 removed the trigger-reactivation cell that KD and KE flew in 2J.
         // 0038 extends every copy's DONE HUB OFF in 2F, 2H and 2I.
         // 0049 adds Killed to the N = 2 threshold trigger that 2M flew.
+        // 0050 D replaces the Zone IN / Zone Out of 2L's Air Tasking copies.
         matches!(self, Self::OneM | Self::Two | Self::TwoB | Self::TwoC | Self::TwoD | Self::TwoE | Self::TwoF
-            | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::TwoM)
+            | Self::TwoG | Self::TwoH | Self::TwoI | Self::TwoJ | Self::TwoL | Self::TwoM)
     }
 
     fn regenerates_flown_files(self) -> bool {
@@ -4504,7 +4505,8 @@ fn add_sortie_probe_source(
     let (mut copy, _) = crate::duplicate::duplicate_template(&copy, &mut p.next_id);
     copy.set_name(&format!("{} sortie", cell.key));
     let shape = inspect_sortie(&copy).unwrap_or_else(|e| panic!("{context}: placed shape: {e:?}"));
-    let strategies = Strategies::default();
+    // The flown sortie probes (flights 2 to 2I) flew the Zone IN / Zone Out shell (0018).
+    let strategies = Strategies { zone_out: super::ZoneOutImpl::CheckZone, ..Strategies::default() };
     let shell = wrap_sortie(&mut copy, row.prefix, &shape, &ShellSpec {
         attack_time_s: shape.attack_time_s,
         final_time_s: TWO_TRANSIT_S + shape.attack_time_s + TWO_MARGIN_S + TWO_EXTENSION_S,
@@ -6993,6 +6995,26 @@ pub(crate) fn generate_probe_2m() -> Il2Entity {
     build(Flight::TwoM).root
 }
 
+/// Flight 2L is frozen as flown (decision 0050 D): its Air Tasking copies end
+/// on their own Zone Out there; the generator now ends them on the area's
+/// player count.
+#[test]
+fn flight2l_frozen_files_keep_the_flown_zone_shell() {
+    assert!(Flight::TwoL.is_frozen());
+    assert!(!Flight::TwoL.regenerates_flown_files());
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/flight2l/P14_Probe_2L_traced");
+    let flown = super::testkit::assert_frozen_files_resolve(&path);
+    let generated = generate_probe_2l();
+    let names = |root: &Il2Entity, wanted: &str| -> usize {
+        let mut count = 0;
+        root.for_each(&mut |node| count += usize::from(node.name() == Some(wanted)));
+        count
+    };
+    assert!(names(&flown, "Zone Out") > 0 && flown.find_by_name("PCN01 EMPTY").is_none(), "as flown");
+    assert_eq!(names(&generated, "Zone Out"), 0, "generator after 0050 D");
+    assert!(generated.find_by_name("PCN01 EMPTY").is_some(), "generator after 0050 D");
+}
+
 /// Flight 2M is frozen as flown (decision 0049): its N = 2 triggers count on
 /// Entered and zero on Left only; the generator now also zeroes on Killed.
 #[test]
@@ -8049,8 +8071,9 @@ fn flown_probes_regenerate_byte_for_byte_except_flight2() {
     // four: 48. 2M (built 2026-10-31) adds four: 52. 2P (built 2026-10-31)
     // adds four: 56. 0049 freezes 2M as flown (its N = 2 trigger gains
     // Killed), removing its four files: 52. 2Q (built 2026-10-31) adds four: 56.
-    // 2R (built 2026-10-31) adds four: 60.
-    assert_eq!(compared, 60);
+    // 2R (built 2026-10-31) adds four: 60. 0050 D freezes 2L as flown
+    // (its Air Tasking copies change), removing its four files: 56.
+    assert_eq!(compared, 56);
 }
 
 fn flown_formation_probe(flight: Flight) -> Il2Entity {

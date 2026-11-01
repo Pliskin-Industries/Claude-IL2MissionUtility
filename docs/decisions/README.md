@@ -83,7 +83,7 @@ What this makes easier, harder or necessary.
 | [0045](0045-walker-armed-check-zones.md) | The walker models check zones as flown: a pulsed zone stays armed (supersedes 0044's "Armed" term) | Accepted |
 | [0046](0046-step-12-test-plan.md) | Step 12 test plan: AI stand-ins first (flight 2M, no pilot), two human pilots last (flight 2N); 12a done; `CounterResetImpl` removed | Accepted |
 | [0047](0047-what-n-2-means.md) | N ≥ 2 players: the count resets when anyone leaves (no window); N 1 to 3, one N for both sides; N to start, 1 to hold | Accepted (E) |
-| [0048](0048-zone-out-with-several-players.md) | Zone Out with several players: keep the check zone if ALL-out; options if ANY-out (flight 2M: ALL-out) | Proposed |
+| [0048](0048-zone-out-with-several-players.md) | Zone Out with several players: keep the check zone if ALL-out; options if ANY-out (flight 2M: ALL-out) | Superseded by 0050 |
 | [0049](0049-counted-plane-dies-inside.md) | A counted plane that dies or is removed inside an area raises no Left (flight 2M): a death inside zeroes the count (Killed → ZERO) | Accepted (B) |
 | [0050](0050-ai-on-sides-of-its-own.md) | Watch players only: put Air Tasking's AI (602, 503) on sides 3 and 4 so check zones ignore it, then widen Zone IN / Zone Out: fails (flight 2Q). Option D accepted (flight 2R): a player count per area from Complex Trigger events, count to three then busy | Accepted (D) |
 
