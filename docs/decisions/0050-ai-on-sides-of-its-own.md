@@ -74,7 +74,7 @@ Different countries on the same side is already Air Tasking's set-up: AI flies 6
 - **No player spawn inside a count circle.** Generate refuses a mission with an airfield or air start inside any area's circle. The user: "A plane will not spawn in that zone." So the trigger never misses a player who appears inside it (flight A1).
 - **Counting.** A Complex Trigger filtered to the enemy players' country:
   - Entered (58) moves the count up one step.
-  - Left (60), Killed (70) and Finished (62) move it down one step.
+  - Left (60) and Finished (62) move it down one step. Correction (2026-10-31, while building): not Killed (70). A kill raises 70 at once and 62 when the wreck lands, about 15 s later (flight 2P), so counting both would take two steps. A kill therefore counts down about 15 s late.
 - **Count to three, then busy** (the user). A fourth entry switches the area to busy. In busy mode leaves do not lower the count. Busy clears only when a side-only Closer 0 check zone over the same circle finds nobody, AI included: today's Zone Out behaviour (ALL-out, flight 2M).
 - **A sortie ends when its area empties while it is on station:** the count drops from 1 to 0, or busy clears.
   - **An empty area at arrival:** the sortie carries on with its mission (the user; decision 0018 stands).
@@ -83,11 +83,19 @@ Different countries on the same side is already Air Tasking's set-up: AI flies 6
   - **One count per side:** the user wants sections of the front tracked apart.
   - **Busy at activation:** enemy AI near the front would hold every active area's sorties again.
   - **A larger cap (10):** the user chose three.
+- **Built for testing (2026-10-31):** `src/airtask/presence.rs`, 26 MCUs per area; probe flight 2R (`handoff/sessions/2026-10-31-p14-flight-2r.md`).
+  - Each step comes on one tick after the old one goes off, so an event within about 0.05 to 0.1 s of a step change is lost. A lost entry ends the count low (the area empties early); a lost leave ends it high (safe).
+  - `CLEAR` is armed 2 s after busy, so the fourth plane is well inside first.
 - **Still to fly:**
-  - whether the count chain works in the game;
-  - whether two entries or two leaves in one tick each move it one step;
-  - whether busy clears when the circle empties;
+  - whether the count chain works in the game (2R);
+  - whether two leaves in one tick are lost, as built (2R, cell R3);
+  - whether busy clears when the circle empties, twice (2R, cell R4);
+  - whether a plane that has left still raises Finished when it is killed or deleted outside (2R, cells R1 and R2);
   - what a player who quits in flight raises (flight 2N).
+- **After 2R, if it passes:**
+  - wire `EMPTY` into the sorties in place of Zone IN and Zone Out;
+  - add Generate's no-spawn-inside check;
+  - add the 50 km default and the Air Tasking tab settings.
 - **Note:** the rejected "35 km Complex Trigger" below is a trigger with no count; D adds the count.
 
 ## Rejected (discussion of 0048, 2026-10-31)
