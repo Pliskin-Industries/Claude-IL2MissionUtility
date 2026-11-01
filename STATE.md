@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-11-01: step 12 parts 12a to 12e merged (PR #49), flown with AI stand-ins and solo probe flights. Next: flight 2N (12f) with two human pilots on the real server, with step 11 item 5.
+> Last updated: 2026-11-01: Astra's review of steps 8 to 12 found 12 issues; all are fixed on two unpushed branches (below). 0053 waits for no-pilot flight 2S, which the IL-2 launcher could not start today (its update server failed DNS, then SSL). Then flight 2N (12f) with two human pilots.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -17,11 +17,13 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 
 | Branch | Holds | State |
 |---|---|---|
-| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); standalone check L (PR #45); step 10 docs (PR #47); L's F-80 collision note and STATE (PR #48); step 12 parts 12a to 12e with flights 2M, 2P, S1, 2Q, 2R (PR #49); decisions 0001 to 0052 | the merge of this refresh, equal to `origin/main` |
+| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); standalone check L (PR #45); step 10 docs (PR #47); L's F-80 collision note and STATE (PR #48); step 12 parts 12a to 12e with flights 2M, 2P, S1, 2Q, 2R (PR #49); decisions 0001 to 0052 | `origin/main` `6f02211` |
+| `codex/review-fixes-replay-trace` (worktree `.claude/worktrees/review-fixes`) | Review fixes 1 to 9: Replay one session at a time, rescan on Run, discarded lines shown, `(T - 3) / 50` fallback, stale-trace fingerprint; trace builds refuse a non-.Group name, check index room, separate breadcrumb bands; L's base map compared byte for byte again. Decisions 0056, 0057. Non-trace and Map trace output unchanged | committed `6d6187b`, not pushed; 1117 passed |
+| `codex/airtask-0053-0055` (worktree `.claude/worktrees/airtask-fixes`) | Review findings A to C: 0053 count steps down on Killed (70) and Finished alive (63); 0054 standalone base map moves Map AI; 0055 clock gates RANDOM through AVAILABLE. Flight 2S built. Air Tasking output changes on purpose; flown probes 2R and 2L keep their wiring through test-only switches | committed to `fb889ba` plus this STATE, not pushed; 1112 passed. **Do not merge before flight 2S passes** (0053) |
 
 `upstream/main` has one commit not merged here (`571504a`, harvested coalition groups and ramp starts per country). Merged branches and their worktrees under `.claude/worktrees/` can be deleted once their idle sessions are archived.
 
-Last recorded test run: **1102 passed, 0 failed, 41 ignored** (`cargo test --offline`, 2026-11-01), on step 12's `161f5db` (the same tree as `main` `68b85a6`) and again on this refresh's branch (STATE only on top). Clippy 306 (PR #49). Record each new run on this line.
+Last recorded test run: **1112 passed, 0 failed, 42 ignored** (`cargo test --offline`, 2026-11-01) on `codex/airtask-0053-0055` `fb889ba`; **1117 passed, 0 failed, 41 ignored** on `codex/review-fixes-replay-trace` `6d6187b`. Clippy 306, no new warnings. Record each new run on this line.
 
 ## P14 Air Tasking ("Wing Commander")
 
@@ -59,13 +61,17 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Next steps
 
-1. **Flight 2N** (12f) and step 11 item 5, on the real host, once the user has a second pilot and a time. Claude first writes 2N's run sheet and mission from the step 12 note (§3).
-2. Then the eszyman proposal, if the user wants it sent.
+1. **Fly 2S** (no pilot, this PC, about 13 min): mission built at `.claude/worktrees/flight-2s/target/p14/` (from `bedc703`) and already copied into `game\data\Multiplayer\Dogfight`; run sheet `handoff/sessions/2026-11-01-p14-flight-2s.md`. If S1 shows a Left from the outbound wreck, supersede 0053 before merging.
+2. **Push and merge** the two review branches when the user says so (review fixes first; they do not depend on 2S). The two branches touch `ui_tests.rs`, `probe.rs` and `export.rs` in different places; rebase the second on the first and re-run the suite.
+3. **Flight 2N** (12f) and step 11 item 5, on the real host, once the user has a second pilot and a time. Claude first writes 2N's run sheet and mission from the step 12 note (§3).
+4. Then the eszyman proposal, if the user wants it sent.
 
 ## Traps
 
 - **Send nothing to the upstream author** (`eszyman/IL2MissionUtility`: issues, comments, files, load tests, patches) until the user says so. Pulling and merging his commits is fine. `gh` here may default to upstream: always pass `--repo Pliskin-Industries/Claude-IL2MissionUtility`.
-- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0052. Next free: **0053**.
+- **Astra writes `STATE.md` and decision records when not told otherwise:** say in every brief that Claude owns `STATE.md`. The review-fixes worktree still holds an uncommitted Astra rewrite of `STATE.md`; discard it (a hook stops Claude from doing so).
+- **IL-2 launcher:** it needs `s3.il2korea.com` (a CDN). On 2026-11-01 that host first had no IPv4 address, then failed SSL; the game cannot start without the launcher. Retry later; do not change this PC's DNS.
+- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0057 (0053 to 0055 on `codex/airtask-0053-0055`, 0056 and 0057 on `codex/review-fixes-replay-trace`). Next free: **0058**.
 - Before generating any probe or mission file, read `docs/il2-loader-and-log-facts.md`. Each item there cost a flight attempt.
 - **Editor saves:** the Mission Editor cuts Group names to 31 characters, and the host loads a `.msnbin` that sits next to the `.Mission` (L).
 - **Timers:** switching off a running timer pauses it; switching it on resumes it (2K). Stop a timer only through a D11 relay (0044).
