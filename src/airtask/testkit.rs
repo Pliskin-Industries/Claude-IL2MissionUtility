@@ -151,7 +151,8 @@ pub(crate) struct ScriptedTrack {
 ///   (2J: the game does not report such a plane as entering);
 /// - a track that enters and ends between two one-second samples was never held.
 ///
-/// The game also raises Finished about 15 s after a kill (the wreck); not modelled.
+/// A kill also raises Finished when the wreck lands, `WRECK_FINISHED_TICKS`
+/// later, in each trigger that held the plane and is still on (flight 2P).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TrackEnd {
     Killed,
@@ -173,6 +174,9 @@ impl TrackEnd {
         }
     }
 }
+
+/// Flight 2P: a kill at 300.00 s raised Finished (62) at 315.06 s. 301 ticks is 15.05 s.
+pub(crate) const WRECK_FINISHED_TICKS: Tick = 301;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct WalkerInput {
@@ -253,6 +257,8 @@ struct Walker<'a> {
     pending: VecDeque<WalkEvent>,
     track_updates: BTreeMap<Tick, Vec<TrackUpdate>>,
     ended: BTreeSet<usize>,
+    /// (tick, trigger): a killed plane's wreck lands and raises Finished.
+    wrecks: Vec<(Tick, i32)>,
     positions: Vec<Option<(f64, f64)>>,
     switches: Vec<(i32, bool)>,
     killed: BTreeSet<i32>,
@@ -329,6 +335,7 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
         pending: VecDeque::new(),
         track_updates: BTreeMap::new(),
         ended: BTreeSet::new(),
+        wrecks: Vec::new(),
         positions: vec![None; input.tracks.len()],
         switches: Vec::new(),
         killed: BTreeSet::new(),
@@ -371,9 +378,12 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
             walker.track_updates.entry(t).or_default().push((i, (x, z)));
         }
     }
-    for &(t, i, _) in &input.track_ends {
+    for &(t, i, how) in &input.track_ends {
         assert!(i < input.tracks.len(), "track end names an unknown track");
         walker.track_updates.entry(t).or_default();
+        if how == TrackEnd::Killed {
+            walker.track_updates.entry(t + WRECK_FINISHED_TICKS).or_default();
+        }
     }
     for &t in walker.track_updates.keys() {
         walker
@@ -401,6 +411,7 @@ pub(crate) fn walk(root: &Il2Entity, config: WalkerConfig, input: &WalkerInput) 
                 walker.end_track(i, how);
             }
         }
+        walker.land_wrecks();
         if t == 0 {
             let triggers: Vec<_> = walker
                 .nodes
@@ -837,6 +848,9 @@ impl Walker<'_> {
             if !held || !self.states[&id].active {
                 continue;
             }
+            if how == TrackEnd::Killed {
+                self.wrecks.push((self.now + WRECK_FINISHED_TICKS, id));
+            }
             // One firing of the trigger per end, as check_trigger records one per crossing.
             let fired: Vec<_> = how
                 .events()
@@ -847,6 +861,25 @@ impl Walker<'_> {
             if !fired.is_empty() {
                 self.record(id);
                 pulses.extend(fired);
+            }
+        }
+        self.enqueue_now(pulses);
+    }
+
+    /// A wreck due now raises Finished in its trigger, if that is still on and
+    /// its filter for Finished is on (see `TrackEnd`).
+    fn land_wrecks(&mut self) {
+        let now = self.now;
+        let (due, later): (Vec<_>, Vec<_>) = self.wrecks.iter().partition(|(t, _)| *t == now);
+        self.wrecks = later;
+        let mut pulses = Vec::new();
+        for (_, id) in due {
+            if self.states[&id].active && value(self.nodes[&id], "EventsFilterFinishedSimple", 0) == 1 {
+                let targets = self.trigger_event_targets(id, OBJECT_FINISHED);
+                if !targets.is_empty() {
+                    self.record(id);
+                    pulses.extend(targets);
+                }
             }
         }
         self.enqueue_now(pulses);
@@ -1404,6 +1437,33 @@ mod walker_tests {
             assert_eq!(times(&log, 7), [2 * TICKS_PER_SECOND], "{config:?}");
             assert_eq!(times(&log, 8), [4 * TICKS_PER_SECOND], "{config:?}");
             assert!(times(&log, 9).is_empty(), "the walker's assumption: a filtered-off event stays silent");
+        }
+    }
+
+    /// Flight 2P: a kill also raises Finished (62) when the wreck lands,
+    /// 15.06 s later (300.00 to 315.06), in a trigger that held the plane and is
+    /// still on. Modelled as 301 ticks (15.05 s).
+    #[test]
+    fn walker_kill_raises_finished_when_the_wreck_lands() {
+        let mut root = trigger_tree(Some(601));
+        let trigger = root.children.iter_mut().find(|n| n.index == Some(1)).unwrap();
+        trigger.set_property("EventsFilterFinishedSimple", "1");
+        crate::template::attach_event(trigger, OBJECT_FINISHED, 8);
+        root.children.push(timer(8, "Finished", "0", &[]));
+        let inside = (0.0, 0.0);
+        let mut plane = track(2, &[inside; 3]);
+        plane.country = 601;
+        plane.samples.iter_mut().for_each(|s| s.0 += TICKS_PER_SECOND);
+        let input = WalkerInput {
+            until: 30 * TICKS_PER_SECOND,
+            tracks: vec![plane],
+            track_ends: vec![(3 * TICKS_PER_SECOND, 0, TrackEnd::Killed)],
+            ..WalkerInput::default()
+        };
+        for same_tick_delivery in [SameTickDelivery::DepthFirst, SameTickDelivery::Batched] {
+            let config = WalkerConfig { same_tick_delivery, ..WalkerConfig::default() };
+            let log = walk(&root, config, &input);
+            assert_eq!(times(&log, 8), [3 * TICKS_PER_SECOND + WRECK_FINISHED_TICKS], "{config:?}");
         }
     }
 
