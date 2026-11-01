@@ -88,5 +88,7 @@ What this makes easier, harder or necessary.
 | [0050](0050-ai-on-sides-of-its-own.md) | Watch players only: put Air Tasking's AI (602, 503) on sides 3 and 4 so check zones ignore it, then widen Zone IN / Zone Out: fails (flight 2Q). Option D accepted (flight 2R): a player count per area from Complex Trigger events, count to three then busy | Accepted (D) |
 | [0051](0051-which-spawns-the-count-check-sees.md) | Generate refuses a watched player spawn inside a count circle: the Map's air starts and its reference groups' player airfields and coop planes; Airfield-tab and editor spawns cannot be seen | Accepted |
 | [0052](0052-how-many-count-areas.md) | The Air Tasking tab's player count: one count radius (10 to 100 km) for every area; the number of areas follows the pool's targets; count circles on the Map; orange warning below the threshold's inner ring | Accepted |
+| [0056](0056-review-replay-and-trace-safety.md) | Replay reads one log session and rescans on Run, shows discarded lines, falls back to (T - 3) / 50, refuses a .Group changed since its trace; trace builds check the name and index room first and give each file its own breadcrumb band | Accepted |
+| [0057](0057-empty-trace-metadata.md) | An empty trace keeps its old metadata format, so L's frozen base files stay byte-identical | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.
