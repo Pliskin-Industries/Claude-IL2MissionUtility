@@ -282,3 +282,19 @@ The mission had 602 on side 3 and 503 on side 4 (`--coalition`). Logs `real_57`,
 - **AI-on-AI gunfire logged no `AType:1`, `2` or `3` line,** although Tacview shows shell bursts within 7 to 27 m of the targets. No aircraft was lost.
 - `AType:24 OBJID:<plane> POS(...)` was logged only for hunters after their attack order, about once per plane every 20 s. Its meaning is not known.
 - Tacview names every shell `Type=Projectile+Shell` (here `SHELL_20_RUS_HET`). An object's Tacview id is its log `OBJID` in hexadecimal (`5000` is 20480).
+
+## Found on 2026-10-31 (flight 2R, game 1.005)
+
+Four player counts per area (`presence.rs`, decision 0050 D) with 601 AI stand-ins. Logs `real_58`, Tacview `handoff/tacview/P14_Probe_2R.zip.acmi`.
+
+- **A Complex Trigger raises nothing for a plane it no longer holds.**
+  - A plane that flew out (Left) and was then killed far outside raised no Finished when its wreck landed.
+  - Another that flew out and was then deleted far outside raised none either.
+  - Removals in one cell raised nothing in the other triggers.
+- **Finished from a kill came 15.06 s after the Damage command, again** (315.06 after 300.00), as in flight 2P.
+- **One Delete of a pair raises two Finished in the same tick (360.02):** a relay switched off by the first one did not fire for the second.
+- **Switch-off then switch-on of a fired, armed Closer 0 zone works as a repeated check:**
+  - it fired at 450.02 when the circle emptied;
+  - it was switched off, then switched on again at about 678.2 (2 s after the busy entry at 676.16; the switch-on itself is not traced);
+  - it fired again at 820.02 when the circle emptied.
+- **A one-tick (0.05 s) delay timer between a Deactivate and the next Activate kept one event to one step,** across a fan-out of four relays.

@@ -1,6 +1,6 @@
 # 0050. Watch players only: put Air Tasking's AI on sides of its own
 
-- **Status:** Proposed. Option A fails (flight 2Q). The user chose option D for testing (2026-10-31); it is accepted or not after its probe flight (2R).
+- **Status:** Proposed. Option A fails (flight 2Q). The user chose option D for testing (2026-10-31). Flight 2R flew it as built, every cell as predicted; the user accepts D or not.
 - **Date:** 2026-10-31
 - **Decided by:** open. The user raised the problem and asked for the probe ("Yes, plan the probe", "Yes, run stage 1").
 
@@ -86,11 +86,13 @@ Different countries on the same side is already Air Tasking's set-up: AI flies 6
 - **Built for testing (2026-10-31):** `src/airtask/presence.rs`, 26 MCUs per area; probe flight 2R (`handoff/sessions/2026-10-31-p14-flight-2r.md`).
   - Each step comes on one tick after the old one goes off, so an event within about 0.05 to 0.1 s of a step change is lost. A lost entry ends the count low (the area empties early); a lost leave ends it high (safe).
   - `CLEAR` is armed 2 s after busy, so the fourth plane is well inside first.
+- **Flight 2R (2026-10-31, logs `real_58`):** the count chain works in the game.
+  - One step per entry; Left and Finished down; a kill counts down when the wreck lands.
+  - Busy cleared by an empty circle twice in a row.
+  - Two leaves in one tick count once (safe).
+  - A plane killed or deleted outside after its Left raises nothing.
 - **Still to fly:**
-  - whether the count chain works in the game (2R);
-  - whether two leaves in one tick are lost, as built (2R, cell R3);
-  - whether busy clears when the circle empties, twice (2R, cell R4);
-  - whether a plane that has left still raises Finished when it is killed or deleted outside (2R, cells R1 and R2);
+  - two entries close together (the unsafe direction);
   - what a player who quits in flight raises (flight 2N).
 - **After 2R, if it passes:**
   - wire `EMPTY` into the sorties in place of Zone IN and Zone Out;

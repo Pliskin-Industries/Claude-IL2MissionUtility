@@ -1262,6 +1262,34 @@ The order was given at 270.00 in every cell. Each hunter then came down from 3,5
 - **Check zones do not see planes on side 3,** even with `PlaneCoalitions [3]` or `[2,3]`.
 - **An air `AttackArea` engages:** `AttackAir 1`, `AttackGround 0`, `AttackGTargets 0`, 5 km, `Priority 1`, given to a lead on Priority 2 orbit waypoints. Hunters fired 13 to 74 s after the order.
 
+## Flight 2R (does the player count per area count in the game?) — 2026-10-31, one run, no pilot, Tacview recorded
+
+Decision 0050, option D. Run sheet: `handoff/sessions/2026-10-31-p14-flight-2r.md`. Files: `handoff/p14-probes/flight2r/` (built at `99e3483`) as `P14_Probe_2R_20261031`. Hosted on this PC, Claude spectating. Session `2026-10-31_20-32-23`, logs `real_58` (40 files). Tacview `handoff/tacview/P14_Probe_2R.zip.acmi`. Left the server at about 875 s. Replay: no dead links.
+
+Four DPRK-side counts (`PCD01` to `PCD04`, 6 km) watched 601 Yak and F-80 stand-ins. Every step relay, `CLEAR` and `EMPTY` left a breadcrumb.
+
+| Cell | Count path in the log | Predicted | Result |
+|---|---|---|---|
+| R1 | UP 1, 2, 3 at 151.62, 179.86, 208.00. DOWN 3 at 315.06 (A's wreck, 15.06 s after the kill). DOWN 2 at 360.02 (B's Delete). F-80: UP 2 at 525.64, DOWN 2 at 582.40 (Left). Its kill at 780.00 far outside: nothing (wreck gone from Tacview at 794.9). DOWN 1 and **EMPTY at 840.02** (C's Delete). | EMPTY at 840 only | as predicted |
+| R2 | UP 1 at 151.48. F-80: UP 2 at 529.82, DOWN 2 at 586.58. Its Delete at 780 far outside (Tacview 779.9): nothing. DOWN 1 and **EMPTY at 840.02**. | EMPTY at 840 only | as predicted |
+| R3 | UP 1 at 152.04, UP 2 at 154.06 (the wingman 2 s behind). One Delete for both at 360.00: **one DOWN 2 at 360.02, then nothing**; no EMPTY. | no EMPTY | as predicted: the second leave in the same tick was lost |
+| R4 | UP 1 to 4 at 151.46, 179.84, 207.98, 236.22 (busy). No DOWN for the Deletes at 360, 390 and 420. **CLEAR and EMPTY at 450.02.** UP 1 to 4 again at 591.54, 619.74, 647.98, 676.16 (busy again). No DOWN for 760, 780 and 800. **CLEAR and EMPTY at 820.02.** | EMPTY at about 450 and 820 | as predicted |
+
+- No count stepped on another cell's removals.
+- Entries came 9 to 10 s before the walker's ideal times, as in flights 2J and 2Q.
+
+### What this changes (reading)
+
+- **Option D's count works in the game as built.**
+  - Each entry moves it up one step; Left and Finished move it down.
+  - A kill counts down when the wreck lands.
+  - Busy holds through leaves and clears when the circle is empty, also a second time: a fired zone switched on again is a check, and it fires again.
+- **A plane that has left the circle raises nothing there** when it is later killed or deleted outside. So a player shot down after leaving does not take the count down twice.
+- **Two leaves in one tick count as one,** as built. The count stays high, which is safe.
+- **Still unflown:**
+  - two entries close together (the unsafe direction);
+  - what a player who quits in flight raises (flight 2N).
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.
@@ -1318,6 +1346,7 @@ Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUti
 | new | a Complex Trigger raises no Left for a plane deleted or killed inside it (it does for a fly-out); the N = 2 threshold (0047 E) arms on the second entry and resets on a Left, in the game | flight 2M |
 | new | Complex Trigger event numbers follow the filter-key order: 58 Entered, 59 Entered alive, 62 Finished, 63 Finished alive, 67 Damaged, 68 Critically damaged, 70 Killed. A kill raises 67, 68, 70 (and 62 when the wreck lands), a Delete 62 and 63, level 1 damage 68 | flight 2P |
 | new | a mission's `Countries` table can put countries on sides 3 and 4: the game hosts it and logs them, planes on them spawn and die normally, players see only two sides, and the editor and Tacview show those sides with no name | sides check S1 |
+| new | the player count per area (0050 D) counts in the game: one step per entry, Left and Finished down (a kill when its wreck lands), busy at the fourth entry, cleared by an empty circle twice in a row; a plane killed or deleted outside after its Left raises nothing; two leaves in one tick count once | flight 2R |
 | new | AI on side 3 or 4 attacks, and is attacked by, both real sides (602 on side 3 against 601, and 601 against it; 503 on side 4 against 501); check zones do not see side-3 planes even with `PlaneCoalitions [3]`; an air `AttackArea` makes AI fighters engage; AI-on-AI fire logs no hit lines | flight 2Q |
 
 Not tested by any flight: two or more human players (step 12, flight 2N), and a Complex Trigger with more than one `Country` line.
