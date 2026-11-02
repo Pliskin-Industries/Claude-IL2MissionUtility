@@ -1427,7 +1427,13 @@ impl GroupGeneratorApp {
                 return;
             }
         };
-        let trace = self.trace_generated(&mut root);
+        let trace = match self.trace_generated(&mut root).transpose() {
+            Ok(trace) => trace,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
         let text = serialize_group(&root);
         let Some(path) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group"])

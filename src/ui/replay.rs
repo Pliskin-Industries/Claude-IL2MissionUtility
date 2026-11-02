@@ -9,7 +9,7 @@ use eframe::egui::{
     self, Color32, Pos2, Rect, RichText, Stroke, Vec2, ViewportBuilder, ViewportId,
 };
 
-use super::{dialog, load_group, seat_side, GroupGeneratorApp, Status};
+use super::{dialog, seat_side, GroupGeneratorApp, Status};
 use crate::help::HelpTopic;
 use crate::missionlog::{self, group_label, MapMarker, MarkerKind, Replay, ReportRows};
 use crate::shell::{self, Check};
@@ -48,6 +48,8 @@ pub(super) struct ReplayPanel {
     pub(super) trace_pick: Option<PathBuf>,
     pub(super) log_dir: Option<PathBuf>,
     pub(super) log_files: Vec<PathBuf>,
+    pub(super) sessions: Vec<missionlog::LogSession>,
+    pub(super) session: Option<String>,
     pub(super) loaded: Option<LoadedReplay>,
     /// The last pick or run that failed, shown in the window.
     pub(super) error: Option<String>,
@@ -78,13 +80,13 @@ impl ReplayPanel {
             .or_else(|| self.group.as_deref().map(crate::trace::sidecar_path))
     }
 
-    /// What Run replay needs: a .Group and at least one log file.
+    /// Run rescans the folder, including one that was empty when picked.
     fn checks(&self) -> Vec<Check> {
         vec![
             Check::new(self.group.is_some(), "A .Group file"),
             Check::new(
-                !self.log_files.is_empty(),
-                "At least one log file (missionReport*.txt)",
+                self.log_dir.is_some(),
+                "A log folder (rescanned on Run)",
             ),
         ]
     }
@@ -95,6 +97,20 @@ impl ReplayPanel {
         self.group_filter = None;
         self.layer = false;
         self.error = None;
+    }
+
+    fn rescan(&mut self) -> Result<(), String> {
+        self.log_files.clear();
+        self.sessions.clear();
+        let dir = self.log_dir.as_deref().ok_or("Pick a log folder first.")?;
+        self.sessions = missionlog::find_log_sessions(dir)?;
+        let selected = self.sessions.iter().find(|s| Some(&s.timestamp) == self.session.as_ref())
+            .or_else(|| self.sessions.first());
+        self.session = selected.map(|s| s.timestamp.clone());
+        if let Some(selected) = selected {
+            self.log_files = selected.files.clone();
+        }
+        Ok(())
     }
 }
 
@@ -147,14 +163,12 @@ impl GroupGeneratorApp {
         };
         let panel = &mut self.replay;
         panel.clear_report();
-        match missionlog::find_log_files(&dir) {
-            Ok(files) => panel.log_files = files,
-            Err(err) => {
-                panel.log_files.clear();
-                panel.error = Some(err);
-            }
-        }
         panel.log_dir = Some(dir);
+        panel.session = None;
+        if let Err(err) = panel.rescan() {
+            self.status = Status::Error(err.clone());
+            panel.error = Some(err);
+        }
     }
 
     fn replay_run(&mut self) {
@@ -164,11 +178,15 @@ impl GroupGeneratorApp {
         };
         let trace_path = panel.trace_path();
         let result = (|| -> Result<LoadedReplay, String> {
-            let group = load_group(&group_path)?;
+            panel.rescan()?;
+            let text = std::fs::read_to_string(&group_path).map_err(|e| format!("{}: {e}", group_path.display()))?;
+            let group = crate::parser::parse_group_file(&text).map_err(|e| format!("{}: {e}", group_path.display()))?;
             let trace = match trace_path.filter(|p| p.is_file() || panel.trace_pick.is_some()) {
                 Some(path) => {
                     let trace = crate::trace::read_trace_sidecar(&path)?;
                     crate::trace::check_sidecar(&group, &trace)
+                        .map_err(|e| format!("{}: {e}", file_name(&path)))?;
+                    crate::trace::check_group_text(&text, &trace)
                         .map_err(|e| format!("{}: {e}", file_name(&path)))?;
                     Some(trace)
                 }
@@ -186,6 +204,7 @@ impl GroupGeneratorApp {
             Ok(loaded) => loaded,
             Err(err) => {
                 panel.clear_report();
+                self.status = Status::Error(err.clone());
                 panel.error = Some(err);
                 return;
             }
@@ -201,10 +220,11 @@ impl GroupGeneratorApp {
             "no trace, so no breadcrumb sections".into()
         };
         self.status = Status::Info(format!(
-            "Replay of {}: {} log files, {found}, {} names with fewer spawns than objects.",
+            "Replay of {}: {} log files, {found}, {} names with fewer spawns than objects. {}",
             file_name(&group_path),
             replay.files.len(),
-            r.never_spawned.len()
+            r.never_spawned.len(),
+            replay.evidence_notes().join(" ")
         ));
         if replay.trace_supplied {
             panel.section = ReplaySection::DeadLinks;
@@ -313,6 +333,26 @@ impl GroupGeneratorApp {
             PanelAction::PickLogs,
             logs,
         );
+        if panel.sessions.len() > 1 {
+            let previous = panel.session.clone();
+            ui.horizontal(|ui| {
+                ui.label("Session");
+                egui::ComboBox::from_id_salt("replay_log_session")
+                    .width(260.0)
+                    .selected_text(panel.session.as_deref().unwrap_or("Choose a session"))
+                    .show_ui(ui, |ui| {
+                        for session in &panel.sessions {
+                            ui.selectable_value(&mut panel.session, Some(session.timestamp.clone()), &session.timestamp);
+                        }
+                    })
+                    .response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "Log session"));
+            });
+            if previous != panel.session {
+                panel.clear_report();
+                panel.log_files = panel.sessions.iter().find(|s| Some(&s.timestamp) == panel.session.as_ref())
+                    .map(|s| s.files.clone()).unwrap_or_default();
+            }
+        }
         if panel.group.is_some() && panel.trace_path().is_none_or(|p| !p.is_file()) {
             shell::warning(ui, NO_SIDECAR);
         }
@@ -346,6 +386,9 @@ impl GroupGeneratorApp {
             return action;
         };
         let replay = &loaded.replay;
+        for note in replay.evidence_notes() {
+            shell::warning(ui, &note);
+        }
         let rate = &replay.tick_rate;
         ui.label(
             RichText::new(format!(
@@ -361,7 +404,7 @@ impl GroupGeneratorApp {
                 if rate.fitted {
                     "fitted"
                 } else {
-                    "50 ticks/s fallback"
+                    "50 ticks/s fallback, offset +3 ticks"
                 },
                 replay.unknown_records
             ))

@@ -7759,7 +7759,13 @@ impl super::GroupGeneratorApp {
             crate::airtask::move_map_ai_off_player_countries(&mut pack.root);
         }
         let terrain_note = self.apply_terrain(&mut pack.root);
-        let trace = self.trace_generated(&mut pack.root);
+        let trace = match self.trace_generated(&mut pack.root).transpose() {
+            Ok(trace) => trace,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
         let text = serialize_group(&pack.root);
         let suggested = format!("Korea_BaseMap_{}.Group", self.current_mark().date_label());
         let Some(save_path) = dialog::FileDialog::new()
@@ -7769,11 +7775,11 @@ impl super::GroupGeneratorApp {
         else {
             return;
         };
-        if let Err(err) = std::fs::write(&save_path, text) {
-            self.status = Status::Error(format!("Could not write file: {err}"));
+        if let Err(err) = super::write_group(&save_path, &text, trace.as_ref()) {
+            self.status = Status::Error(err);
             return;
         }
-        let trace_note = match super::write_trace(&save_path, trace.as_ref()) {
+        let trace_note = match super::write_trace(&save_path, &text, trace.as_ref()) {
             Ok(note) => note,
             Err(err) => {
                 self.status = Status::Error(err);

@@ -4259,7 +4259,13 @@ impl super::GroupGeneratorApp {
             }
         };
         let terrain_note = self.apply_terrain(&mut pack);
-        let trace = self.trace_generated(&mut pack);
+        let trace = match self.trace_generated(&mut pack).transpose() {
+            Ok(trace) => trace,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
         let text = serialize_group(&pack);
         let default_name = self
             .tpl_loaded_path

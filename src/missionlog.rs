@@ -340,9 +340,40 @@ pub fn find_log_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
+#[derive(Debug, Clone)]
+pub struct LogSession {
+    pub timestamp: String,
+    pub files: Vec<PathBuf>,
+}
+
+fn session_timestamp(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(|s| s.split_once('('))
+        .and_then(|(_, s)| s.split_once(')'))
+        .map_or_else(String::new, |(stamp, _)| stamp.to_string())
+}
+
+/// Game timestamps sort chronologically. Newest session first; chunks within
+/// each session are numeric, so [10] follows [9], not [1].
+pub fn find_log_sessions(dir: &Path) -> Result<Vec<LogSession>, String> {
+    let mut sessions = BTreeMap::<String, Vec<(u64, PathBuf)>>::new();
+    for path in find_log_files(dir)? {
+        sessions.entry(session_timestamp(&path)).or_default().push((file_number(&path)?, path));
+    }
+    Ok(sessions.into_iter().rev().map(|(timestamp, mut files)| {
+        files.sort();
+        LogSession { timestamp, files: files.into_iter().map(|(_, path)| path).collect() }
+    }).collect())
+}
+
 pub fn parse_log_files(files: &[PathBuf]) -> Result<MissionLog, String> {
     if files.is_empty() {
         return Err("no missionReport files supplied or found".into());
+    }
+    let session = session_timestamp(&files[0]);
+    if files.iter().any(|p| session_timestamp(p) != session) {
+        return Err("Multiple log sessions supplied; select one session to replay.".into());
     }
     let mut ordered: Vec<_> = files
         .iter()
@@ -357,7 +388,17 @@ pub fn parse_log_files(files: &[PathBuf]) -> Result<MissionLog, String> {
         append_log(&mut log, &path, &text);
         log.files.push(path);
     }
+    if log.records.is_empty() {
+        return Err(format!("The selected log session has no valid records. {}", malformed_note(&log.malformed_lines)));
+    }
     Ok(log)
+}
+
+fn malformed_note(lines: &[MalformedLine]) -> String {
+    let locations = lines.iter().take(3).map(|line| {
+        format!("{}:{}", line.file.file_name().unwrap_or_default().to_string_lossy(), line.line)
+    }).collect::<Vec<_>>().join(", ");
+    format!("{} malformed lines discarded{}{}.", lines.len(), if locations.is_empty() { "" } else { ": " }, locations)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -377,7 +418,7 @@ impl TickRate {
 fn fit_tick_rate(pairs: &[(f64, f64)]) -> TickRate {
     let fallback = TickRate {
         rate: 50.0,
-        offset: 0.0,
+        offset: 3.0,
         samples: pairs.len(),
         fitted: false,
     };
@@ -482,12 +523,29 @@ pub struct Replay {
     pub unknown_fields: usize,
     pub malformed_lines: Vec<MalformedLine>,
     pub trace_supplied: bool,
+    pub trace_unverified: bool,
     pub firings: Vec<Firing>,
     pub timeline: Vec<TimelineEvent>,
     pub unobserved_successors: Vec<UnobservedSuccessor>,
     pub dead_links: Vec<DeadLink>,
     pub spawn_counts: Vec<SpawnCount>,
     pub markers: Vec<MapMarker>,
+}
+
+impl Replay {
+    pub fn evidence_notes(&self) -> Vec<String> {
+        let mut notes = Vec::new();
+        if !self.malformed_lines.is_empty() {
+            notes.push(format!("Report incomplete: {}", malformed_note(&self.malformed_lines)));
+        }
+        if self.trace_supplied && self.firings.is_empty() {
+            notes.push("Empty trace: no breadcrumb coverage.".into());
+        }
+        if self.trace_unverified {
+            notes.push("Trace has no fingerprint: cannot verify that the .Group is unchanged; only its structure was checked.".into());
+        }
+        notes
+    }
 }
 
 fn breadcrumb_match(record: &Record, trace: &TraceMap) -> Option<usize> {
@@ -615,6 +673,7 @@ pub fn replay(log: &MissionLog, group: &Il2Entity, trace: Option<&TraceMap>) -> 
         unknown_fields: log.unknown_fields,
         malformed_lines: log.malformed_lines.clone(),
         trace_supplied: trace.is_some(),
+        trace_unverified: trace.is_some_and(|t| t.group_fingerprint.is_none()),
         firings,
         timeline,
         unobserved_successors,
@@ -1076,6 +1135,9 @@ pub fn report_rows(replay: &Replay) -> ReportRows {
 
 pub fn report_markdown(replay: &Replay) -> String {
     let mut out = String::from("# Mission replay\n\n");
+    for note in replay.evidence_notes() {
+        writeln!(out, "{note}\n").unwrap();
+    }
     writeln!(
         out,
         "Log files: {}",
@@ -1103,7 +1165,7 @@ pub fn report_markdown(replay: &Replay) -> String {
         if replay.tick_rate.fitted {
             "fitted T = offset + rate * seconds"
         } else {
-            "50 ticks/s fallback (offset uncalibrated)"
+            "50 ticks/s fallback (offset +3 ticks)"
         },
         replay.tick_rate.samples
     )
@@ -1288,6 +1350,10 @@ fn cli_replay(args: &[String]) -> Result<(), String> {
     let group =
         crate::parser::parse_group_file(&text).map_err(|e| format!("{}: {e}", group.display()))?;
     let trace = trace.as_deref().map(read_trace_sidecar).transpose()?;
+    if let Some(trace) = &trace {
+        crate::trace::check_sidecar(&group, trace)?;
+        crate::trace::check_group_text(&text, trace)?;
+    }
     let log = if logs.len() == 1 && logs[0].is_dir() {
         parse_log_dir(&logs[0])?
     } else {
@@ -1327,6 +1393,25 @@ mod tests {
         log
     }
 
+    #[test]
+    fn review_fallback_tick_rate_uses_three_tick_offset() {
+        let mut group = group();
+        let map = trace_group(&mut group);
+        let logs = log("T:503 AType:8 POS(5000,0,5000)");
+        for trace in [None, Some(&map)] {
+            let replay = replay(&logs, &group, trace);
+            assert!(!replay.tick_rate.fitted);
+            assert_eq!(replay.tick_rate.rate, 50.0);
+            assert_eq!(replay.tick_rate.offset, 3.0);
+            assert_eq!(replay.tick_rate.seconds(503), 10.0);
+        }
+        for pairs in [&[][..], &[(10.0, 503.0)][..], &[(10.0, 503.0), (10.0, 503.0)][..]] {
+            let rate = fit_tick_rate(pairs);
+            assert!(!rate.fitted);
+            assert_eq!(rate.seconds(503), 10.0);
+        }
+    }
+
     fn trace_group(group: &mut Il2Entity) -> TraceMap {
         let mut map = TraceMap::default();
         instrument(
@@ -1338,7 +1423,7 @@ mod tests {
             &mut 100,
             TraceCarrier::Objective(ObjectiveStyle::default()),
             &mut map,
-        );
+        ).expect("trace indexes fit");
         map
     }
 
@@ -1359,6 +1444,17 @@ mod tests {
                 std::fs::remove_file(&self.0).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn review_parser_refuses_mixed_sessions() {
+        let a = TempFile::new("(2026-10-30_10-00-00)[0].txt");
+        let b = TempFile::new("(2026-11-01_10-00-00)[1].txt");
+        for path in [&a.0, &b.0] {
+            std::fs::write(path, "T:503 AType:0").unwrap();
+        }
+        let err = parse_log_files(&[a.0.clone(), b.0.clone()]).unwrap_err();
+        assert!(err.contains("Multiple log sessions"), "{err}");
     }
 
     #[test]
@@ -1546,7 +1642,7 @@ mod tests {
             .collect();
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].entry, *entry);
-        assert_eq!(fired[0].times_s, [0.06]);
+        assert_eq!(fired[0].times_s, [0.0]); // T:3, fallback offset +3.
         assert!(result.timeline.iter().any(|event| {
             event.t_ticks == 3
                 && event
@@ -1709,7 +1805,7 @@ mod tests {
                 downstream: vec![102]
             }
         );
-        assert_eq!(result.firings[0].times_s, [10.0]);
+        assert_eq!(result.firings[0].times_s, [9.94]); // (500 - 3) / 50.
         assert!(result.firings[1].times_s.is_empty());
         let report = report_markdown(&result);
         assert!(report.contains("## Dead links\n\nNone."));
@@ -1728,7 +1824,7 @@ mod tests {
             [DeadLink {
                 from: 100,
                 to: 101,
-                fired_s: 10.0,
+                fired_s: 9.94,
                 delay_s: 3.0
             }]
         );
@@ -1944,7 +2040,7 @@ mod tests {
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].entry, spawn_map.entries[7]);
         assert_eq!(fired[0].entry.spawn_name.as_deref(), Some("TRACE 7"));
-        assert_eq!(fired[0].times_s, [1.0]);
+        assert_eq!(fired[0].times_s, [0.94]); // (50 - 3) / 50.
         assert!(result.timeline.iter().any(|event| {
             event.t_ticks == 50
                 && event
@@ -2032,7 +2128,12 @@ mod tests {
 
         let trace = TempFile::new(".trace.json");
         let mut g = group();
-        let map = trace_group(&mut g);
+        let mut map = trace_group(&mut g);
+        let traced_group = TempFile::new(".Group");
+        let text = crate::serialize::serialize_group(&g);
+        std::fs::write(&traced_group.0, &text).unwrap();
+        map.group_fingerprint = Some(crate::trace::fingerprint(&text));
+        args[2] = traced_group.0.display().to_string();
         write_trace_sidecar(&trace.0, &map).unwrap();
         args[4] = fixture("synthetic/missionReport(synthetic)[1].txt")
             .display()
@@ -2049,6 +2150,9 @@ mod tests {
         assert!(report.contains("Breadcrumb: Replay synthetic / A"));
         assert!(report.contains("1 observed firing(s)"));
         assert!(!report.contains("No trace sidecar"));
+        std::fs::write(&traced_group.0, text.replace("Time = 2;", "Time = 3;")).unwrap();
+        assert_eq!(run_cli(&args), Some(2), "CLI also refuses a changed timer");
+        assert_eq!(std::fs::read_to_string(&out.0).unwrap(), report, "failed replay writes nothing");
         drop(out);
         assert!(!out_path.exists(), "CLI report cleaned up");
     }
@@ -2133,7 +2237,7 @@ mod tests {
         let c = "Replay synthetic / C (MCU_Timer #4)";
         assert_eq!(
             rows.dead_links,
-            [DeadLinkRow { from: a.into(), to: b.into(), fired_s: 10.0, delay_s: 3.0 }]
+            [DeadLinkRow { from: a.into(), to: b.into(), fired_s: 9.94, delay_s: 3.0 }]
         );
         assert_eq!(
             rows.unobserved,
@@ -2146,7 +2250,7 @@ mod tests {
         );
         assert_eq!((rows.never_fired_total, rows.never_fired_grouped), (2, 2));
         assert!(rows.never_fired.is_empty(), "B and C are grouped above");
-        assert_eq!(rows.fired, [FiredRow { source: a.into(), times_s: vec![10.0] }]);
+        assert_eq!(rows.fired, [FiredRow { source: a.into(), times_s: vec![9.94] }]);
         let spawned: Vec<_> = rows.never_spawned.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(spawned, ["F-80C", "Only ship", "Only train", "Only truck"]);
     }

@@ -10,6 +10,34 @@ use crate::template::{mcu, timer};
 
 pub const TRACE_X0: f64 = 5_000.0;
 pub const TRACE_Z0: f64 = 5_000.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceBand {
+    Map,
+    Group,
+    AirTasking,
+}
+
+impl TraceBand {
+    // Each band is 30 km wide in X; rows grow only along Z. Keeping Map at
+    // zero preserves every existing Map breadcrumb, even beyond row zero.
+    pub fn x_offset(self) -> f64 {
+        match self {
+            Self::Map => 0.0,
+            Self::Group => 40_000.0,
+            Self::AirTasking => 80_000.0,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Map => "map",
+            Self::Group => "group",
+            Self::AirTasking => "air_tasking",
+        }
+    }
+}
+
 /// Northern dry, open cell in the built-in Korea mask (450, 897). This is
 /// remote from the planned front, not a guarantee about imported missions.
 pub const TRACE_SPAWN_POINT: (f64, f64) = (400_000.0, 50_000.0);
@@ -92,6 +120,10 @@ pub struct TraceSource {
 pub struct TraceMap {
     pub entries: Vec<TraceEntry>,
     pub edges: Vec<TraceEdge>,
+    /// Absent in legacy sidecars, whose grid used the Map band.
+    pub band: Option<TraceBand>,
+    /// FNV-1a of the exact bytes written to the .Group, including line endings.
+    pub group_fingerprint: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -125,7 +157,7 @@ pub fn instrument(
     next_id: &mut i32,
     carrier: TraceCarrier,
     map: &mut TraceMap,
-) {
+) -> Result<(), String> {
     let mut begin_targets = HashSet::new();
     root.for_each(&mut |e| {
         if e.block_type == "MCU_TR_MissionBegin" {
@@ -143,14 +175,31 @@ pub fn instrument(
         &breadcrumbs,
         &mut sources,
     );
-    if !sources.is_empty() {
-        *next_id = (*next_id)
-            .max(root.max_index() + 1)
-            .max(breadcrumbs.iter().max().copied().unwrap_or(0) + 1);
-    }
     // Breadcrumbs never pulse a switch, so the inputs can be read once.
     let mut pulsed = HashSet::new();
     root.for_each(&mut |e| pulsed.extend(pulse_targets(e, None)));
+    sources.retain(|s| !is_switch(&s.block_type) || pulsed.contains(&s.index));
+    // Check the entire allocation before touching the tree, map or cursor.
+    // The cursor itself must remain representable after the last allocation.
+    let start = i64::from(*next_id)
+        .max(i64::from(root.max_index()) + 1)
+        .max(i64::from(breadcrumbs.iter().max().copied().unwrap_or(0)) + 1);
+    let per_source = match carrier {
+        TraceCarrier::Objective(_) => 1,
+        TraceCarrier::Spawn => 5,
+    };
+    let count = i64::try_from(sources.len())
+        .ok()
+        .and_then(|n| n.checked_mul(per_source));
+    if !sources.is_empty() {
+        if count
+            .and_then(|n| start.checked_add(n))
+            .is_none_or(|end| end > i64::from(i32::MAX))
+        {
+            return Err("Trace build exceeds the i32 index range; no files were written.".into());
+        }
+        *next_id = start as i32;
+    }
     for source in sources {
         let source_id = source.index;
         let event_type = source.event_type;
@@ -158,9 +207,6 @@ pub fn instrument(
         // never fire. Its inputs pulse the breadcrumb in the same tick instead
         // (decision 0043).
         let switch = is_switch(&source.block_type);
-        if switch && !pulsed.contains(&source_id) {
-            continue; // Nothing pulses it, so it can never fire.
-        }
         let blocks = breadcrumb(carrier, map, next_id, source);
         let id = map.entries.last().unwrap().breadcrumb_index;
         root.for_each_mut(&mut |e| {
@@ -177,6 +223,7 @@ pub fn instrument(
         root.children.extend(blocks);
     }
     rebuild_edges(root, map);
+    Ok(())
 }
 
 fn collect_sources(
@@ -304,7 +351,7 @@ pub fn breadcrumb(
 ) -> Vec<Il2Entity> {
     let n = map.entries.len();
     let grid = (
-        TRACE_X0 + 10.0 * (n % 3000) as f64,
+        TRACE_X0 + map.band.unwrap_or(TraceBand::Map).x_offset() + 10.0 * (n % 3000) as f64,
         TRACE_Z0 + 10.0 * (n / 3000) as f64,
     );
     assert!(crate::geo::on_map(grid.0, grid.1), "trace grid exhausted");
@@ -582,13 +629,33 @@ pub fn rebuild_edges(root: &Il2Entity, map: &mut TraceMap) {
         .collect();
 }
 
-/// Where the sidecar of a `.Group` lives (`<mission>.trace.json`); any other path is kept.
+/// Derive a distinct sidecar path, even for a name without a .Group extension.
 pub fn sidecar_path(path: &Path) -> PathBuf {
     if path
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("Group"))
     {
         path.with_extension("trace.json")
+    } else {
+        let mut name = path.as_os_str().to_owned();
+        name.push(".trace.json");
+        PathBuf::from(name)
+    }
+}
+
+pub fn validate_group_path(path: &Path) -> Result<(), String> {
+    if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("Group")) {
+        Ok(())
+    } else {
+        Err("Trace build requires a filename ending in .Group; no files were written.".into())
+    }
+}
+
+// Reading or explicitly writing a sidecar accepts its own path. Derivation
+// is only for .Group inputs, so sidecar_path never needs to return its input.
+fn resolve_sidecar(path: &Path) -> PathBuf {
+    if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("Group")) {
+        sidecar_path(path)
     } else {
         path.to_owned()
     }
@@ -597,12 +664,12 @@ pub fn sidecar_path(path: &Path) -> PathBuf {
 /// Accepts a .Group path (like locale::write_sidecars) or an explicit sidecar path.
 pub fn write_trace_sidecar(path: &Path, map: &TraceMap) -> Result<(), String> {
     validate_map(map)?;
-    let path = sidecar_path(path);
+    let path = resolve_sidecar(path);
     std::fs::write(&path, encode_map(map)).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 pub fn read_trace_sidecar(path: &Path) -> Result<TraceMap, String> {
-    let path = sidecar_path(path);
+    let path = resolve_sidecar(path);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     decode_map(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -636,6 +703,20 @@ pub fn check_sidecar(root: &Il2Entity, map: &TraceMap) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+pub fn fingerprint(text: &str) -> u64 {
+    text.bytes().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    })
+}
+
+pub fn check_group_text(text: &str, map: &TraceMap) -> Result<(), String> {
+    if map.group_fingerprint.is_some_and(|expected| fingerprint(text) != expected) {
+        Err("the .Group changed since its trace was written; regenerate the trace build".into())
+    } else {
+        Ok(())
+    }
 }
 
 fn validate_map(map: &TraceMap) -> Result<(), String> {
@@ -686,6 +767,13 @@ fn json_option<T: ToString>(v: Option<T>) -> String {
 }
 
 fn encode_map(map: &TraceMap) -> String {
+    let mut metadata = String::new();
+    if let Some(band) = map.band {
+        writeln!(metadata, "  \"band\":{},", quote_json(band.name())).unwrap();
+    }
+    if let Some(fingerprint) = map.group_fingerprint {
+        writeln!(metadata, "  \"group_fingerprint\":\"{fingerprint:016x}\",").unwrap();
+    }
     let entries: Vec<_> = map.entries.iter().map(|e| {
         let carrier = match e.carrier {
             TraceCarrier::Spawn => "{\"kind\":\"Spawn\"}".into(),
@@ -707,7 +795,7 @@ fn encode_map(map: &TraceMap) -> String {
         })
         .collect();
     format!(
-        "{{\n  \"entries\":[\n{}\n  ],\n  \"edges\":[\n{}\n  ]\n}}\n",
+        "{{\n{metadata}  \"entries\":[\n{}\n  ],\n  \"edges\":[\n{}\n  ]\n}}\n",
         entries.join(",\n"),
         edges.join(",\n")
     )
@@ -953,6 +1041,23 @@ fn decode_map(text: &str) -> Result<TraceMap, String> {
         return Err("trailing JSON data".into());
     }
     let mut map = TraceMap::default();
+    if let Json::Object(fields) = &json {
+        if let Some(band) = fields.get("band") {
+            map.band = Some(match band.string()? {
+                "map" => TraceBand::Map,
+                "group" => TraceBand::Group,
+                "air_tasking" => TraceBand::AirTasking,
+                _ => return Err("unknown trace band".into()),
+            });
+        }
+        if let Some(fingerprint) = fields.get("group_fingerprint") {
+            let hex = fingerprint.string()?;
+            if hex.len() != 16 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err("invalid group_fingerprint (expected 16 hexadecimal digits)".into());
+            }
+            map.group_fingerprint = Some(u64::from_str_radix(hex, 16).map_err(|e| e.to_string())?);
+        }
+    }
     for e in json.field("entries")?.array()? {
         let carrier = e.field("carrier")?;
         let carrier = match carrier.field("kind")?.string()? {
@@ -1030,6 +1135,57 @@ mod tests {
             event_type: None,
             group_path: vec!["Test".into()],
             expected_s: None,
+        }
+    }
+
+    #[test]
+    fn review_sidecar_path_never_aliases_its_input() {
+        for name in ["mission.Group", "mission.gRoUp", "mission", "mission.txt", "mission.trace.json"] {
+            let path = Path::new(name);
+            assert_ne!(sidecar_path(path), path);
+        }
+    }
+
+    #[test]
+    fn review_trace_metadata_round_trips_and_checks_exact_bytes() {
+        assert_eq!(fingerprint("hello"), 0xa430d84680aabd0b);
+        let text = "Group { MCU_Timer { Index = 1; Time = 2; } }\r\n";
+        for band in [TraceBand::Map, TraceBand::Group, TraceBand::AirTasking] {
+            let map = TraceMap {
+                band: Some(band),
+                group_fingerprint: Some(fingerprint(text)),
+                ..Default::default()
+            };
+            assert_eq!(decode_map(&encode_map(&map)).unwrap(), map);
+            assert!(check_group_text(text, &map).is_ok());
+            for changed in [text.replace("Time = 2", "Time = 3"), text.replace("\r\n", "\n")] {
+                assert!(check_group_text(&changed, &map).unwrap_err().contains("regenerate the trace build"));
+            }
+        }
+        let legacy = decode_map("{\"entries\":[],\"edges\":[]}").unwrap();
+        assert_eq!(legacy, TraceMap::default());
+        assert!(check_group_text(text, &legacy).is_ok());
+    }
+
+    #[test]
+    fn review_trace_allocation_overflow_is_atomic() {
+        for (max, start, carrier) in [
+            (i32::MAX, 1, TraceCarrier::default()),
+            (1, i32::MAX, TraceCarrier::default()),
+            (1, i32::MAX - 3, TraceCarrier::Spawn),
+        ] {
+            let mut root = parse_group_file(&format!("Group {{ MCU_Timer {{ Index = {max}; Time = 1; }} }}")).unwrap();
+            let before = serialize_group(&root);
+            let mut map = TraceMap::default();
+            let mut next = start;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                instrument(&mut root, &TraceSelect { indexes: vec![max], ..Default::default() }, &mut next, carrier, &mut map)
+            }));
+            assert!(result.is_ok(), "overflow must return an error, not panic");
+            assert!(result.unwrap().unwrap_err().contains("i32 index range"));
+            assert_eq!(serialize_group(&root), before);
+            assert_eq!(next, start);
+            assert!(map.entries.is_empty());
         }
     }
 
@@ -1121,7 +1277,7 @@ mod tests {
             &mut next,
             TraceCarrier::default(),
             &mut map,
-        );
+        ).expect("trace indexes fit");
         map
     }
 
@@ -1177,7 +1333,7 @@ mod tests {
             &mut next,
             TraceCarrier::Objective(ObjectiveStyle::default()),
             &mut map,
-        );
+        ).expect("trace indexes fit");
         assert_eq!(map.entries.len(), expected.len());
         assert_eq!(
             root.count_block_type("MCU_TR_MissionObjective")
@@ -1215,7 +1371,7 @@ mod tests {
         let mut sel = TraceSelect::decision_points();
         sel.name_prefixes.push("CUE ".into());
         let mut map = TraceMap::default();
-        instrument(&mut cues, &sel, &mut 10, TraceCarrier::default(), &mut map);
+        instrument(&mut cues, &sel, &mut 10, TraceCarrier::default(), &mut map).expect("trace indexes fit");
         assert_eq!(
             map.entries
                 .iter()
@@ -1297,7 +1453,7 @@ mod tests {
             &mut 100,
             TraceCarrier::Objective(ObjectiveStyle::default()),
             &mut map,
-        );
+        ).expect("trace indexes fit");
         assert_eq!(map.entries.len(), 1);
         assert_eq!(map.entries[0].event_type, Some(4));
         let id = map.entries[0].breadcrumb_index;
@@ -1337,7 +1493,7 @@ mod tests {
             &mut 100,
             TraceCarrier::default(),
             &mut map,
-        );
+        ).expect("trace indexes fit");
         assert_eq!(edge(&map, 1, 3).delay_s, 1.0);
         assert!(edge(&map, 1, 3).unconditional);
         let entity_crumb = map.entries[0].breadcrumb_index;
@@ -1564,7 +1720,7 @@ mod tests {
             &mut next,
             TraceCarrier::default(),
             &mut map,
-        );
+        ).expect("trace indexes fit");
         let randoms: Vec<_> = map
             .entries
             .iter()

@@ -1022,7 +1022,10 @@ impl GroupGeneratorApp {
     /// names on the Air Tasking and Map tabs. Off, the tree is untouched.
     /// Call it last, right before `serialize_group`; the write step then
     /// writes the sidecar with `write_trace` (`save_with_sidecars` does).
-    fn trace_generated(&self, root: &mut crate::ast::Il2Entity) -> Option<crate::trace::TraceMap> {
+    fn trace_generated(
+        &self,
+        root: &mut crate::ast::Il2Entity,
+    ) -> Option<Result<crate::trace::TraceMap, String>> {
         if !self.trace_build {
             return None;
         }
@@ -1030,16 +1033,30 @@ impl GroupGeneratorApp {
         if matches!(self.mode, AppMode::Map | AppMode::AirTasking) {
             select.indexes = crate::airtask::trace_role_indexes(root);
         }
-        let mut map = crate::trace::TraceMap::default();
-        let mut next_id = root.max_index() + 1;
-        crate::trace::instrument(
+        let mut map = crate::trace::TraceMap {
+            band: Some(match self.mode {
+                AppMode::Map => crate::trace::TraceBand::Map,
+                AppMode::AirTasking => crate::trace::TraceBand::AirTasking,
+                _ => crate::trace::TraceBand::Group,
+            }),
+            ..Default::default()
+        };
+        let mut next_id = 1;
+        let result = crate::trace::instrument(
             root,
             &select,
             &mut next_id,
             crate::trace::TraceCarrier::default(),
             &mut map,
         );
-        Some(map)
+        Some(result.map(|()| {
+            if map.entries.is_empty() {
+                // Preserve the frozen empty sidecar's bytes. Replay labels
+                // this legacy shape as unverified and having no coverage.
+                map.band = None;
+            }
+            map
+        }))
     }
 
     /// The header's first secondary button and Ctrl O. Fighter Pack has none.
@@ -3210,7 +3227,13 @@ impl GroupGeneratorApp {
             }
         };
         let terrain_note = self.apply_terrain(&mut generated);
-        let trace = self.trace_generated(&mut generated);
+        let trace = match self.trace_generated(&mut generated).transpose() {
+            Ok(trace) => trace,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
         let text = serialize_group(&generated);
         let suggested = format!("Exclusive_Activation_{}plan.Group", self.bomber_slots.len());
         let Some(save_path) = dialog::FileDialog::new()
@@ -3387,7 +3410,13 @@ impl GroupGeneratorApp {
             }
         };
         let terrain_note = self.apply_terrain(&mut generated);
-        let trace = self.trace_generated(&mut generated);
+        let trace = match self.trace_generated(&mut generated).transpose() {
+            Ok(trace) => trace,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
         let text = serialize_group(&generated);
         let mix = allocate_mix(&weights, self.recon_total as usize, self.recon_percent);
         let live: usize = mix.iter().map(|m| m.activate).sum();
@@ -3557,7 +3586,13 @@ impl GroupGeneratorApp {
                 }
             };
             let terrain_note = self.apply_terrain(&mut combined);
-            let trace = self.trace_generated(&mut combined);
+            let trace = match self.trace_generated(&mut combined).transpose() {
+                Ok(trace) => trace,
+                Err(err) => {
+                    self.status = Status::Error(err);
+                    return;
+                }
+            };
             let text = serialize_group(&combined);
             let suggested = format!("Ground_Units_{n}_always_on.Group");
             let Some(save_path) = dialog::FileDialog::new()
@@ -3599,7 +3634,13 @@ impl GroupGeneratorApp {
             .map(|s| wanted_winners(s.detected.unwrap_or(0), s.influence.clamp(1, 100)))
             .sum();
         let terrain_note = self.apply_terrain(&mut combined);
-        let trace = self.trace_generated(&mut combined);
+        let trace = match self.trace_generated(&mut combined).transpose() {
+            Ok(trace) => trace,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
         let text = serialize_group(&combined);
         let suggested = format!("Random_Ground_Units_{live}of{n}.Group");
         let Some(save_path) = dialog::FileDialog::new()
@@ -3642,7 +3683,13 @@ impl GroupGeneratorApp {
             self.linked_groups as usize,
         ));
         let terrain_note = self.apply_terrain(&mut generated);
-        let trace = self.trace_generated(&mut generated);
+        let trace = match self.trace_generated(&mut generated).transpose() {
+            Ok(trace) => trace,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
         let text = serialize_group(&generated);
 
         let suggested = fighter_pack_filename(self.country, self.linked_groups as usize);
@@ -3654,9 +3701,8 @@ impl GroupGeneratorApp {
             return;
         };
 
-        let written = std::fs::write(&save_path, text)
-            .map_err(|err| format!("Could not write file: {err}"))
-            .and_then(|()| write_trace(&save_path, trace.as_ref()));
+        let written = write_group(&save_path, &text, trace.as_ref())
+            .and_then(|()| write_trace(&save_path, &text, trace.as_ref()));
         match written {
             Ok(trace_note) => {
                 self.status = Status::Info(format!(
@@ -4150,13 +4196,32 @@ fn show_missing_locale_hint(ui: &mut egui::Ui, group_path: &Path) {
 /// Right after Generate wrote the `.Group`: its trace sidecar, when this was a
 /// trace build. Returns the status note (" Trace build: N breadcrumbs.") or
 /// the error; empty when there is no trace.
-fn write_trace(group_path: &Path, trace: Option<&crate::trace::TraceMap>) -> Result<String, String> {
+fn write_trace(
+    group_path: &Path,
+    text: &str,
+    trace: Option<&crate::trace::TraceMap>,
+) -> Result<String, String> {
     let Some(map) = trace else {
         return Ok(String::new());
     };
-    crate::trace::write_trace_sidecar(group_path, map)
+    let mut map = map.clone();
+    if !map.entries.is_empty() {
+        map.group_fingerprint = Some(crate::trace::fingerprint(text));
+    }
+    crate::trace::write_trace_sidecar(group_path, &map)
         .map_err(|err| format!("Wrote the group, but the trace file failed: {err}"))?;
     Ok(format!(" Trace build: {} breadcrumbs.", map.entries.len()))
+}
+
+fn write_group(
+    save_path: &Path,
+    text: &str,
+    trace: Option<&crate::trace::TraceMap>,
+) -> Result<(), String> {
+    if trace.is_some() {
+        crate::trace::validate_group_path(save_path)?;
+    }
+    std::fs::write(save_path, text).map_err(|err| format!("Could not write file: {err}"))
 }
 
 fn save_with_sidecars(
@@ -4166,10 +4231,10 @@ fn save_with_sidecars(
     summary: &str,
     trace: Option<&crate::trace::TraceMap>,
 ) -> Status {
-    if let Err(err) = std::fs::write(save_path, text) {
-        return Status::Error(format!("Could not write file: {err}"));
+    if let Err(err) = write_group(save_path, text, trace) {
+        return Status::Error(err);
     }
-    let trace_note = match write_trace(save_path, trace) {
+    let trace_note = match write_trace(save_path, text, trace) {
         Ok(note) => note,
         Err(err) => return Status::Error(err),
     };

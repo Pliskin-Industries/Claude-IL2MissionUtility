@@ -3224,7 +3224,7 @@ impl Probe {
                 &mut self.next_id,
                 carrier,
                 &mut self.map,
-            );
+            ).expect("trace indexes fit");
         } else {
             // Use the public breadcrumb builder per requested source, in tree order.
             let mut sources = Vec::new();
@@ -15624,6 +15624,9 @@ fn probe_objective_variants_replay_by_position() {
         partial.records.push(end);
         let result = replay(&partial, &root, Some(&map));
         let report = report_markdown(&result);
+        // One cue cannot fit an offset. Only this truncated case uses the
+        // game's +3 tick fallback; the synthetic multi-cue fit stays at zero.
+        let fallback_s = if count == 1 { 3.0 / 50.0 } else { 0.0 };
         let fired: Vec<_> = result
             .firings
             .iter()
@@ -15640,7 +15643,7 @@ fn probe_objective_variants_replay_by_position() {
                     .unwrap()
             );
             assert_eq!(firing.entry.pos, (x, z));
-            assert_eq!(firing.times_s, [time_s]);
+            assert_eq!(firing.times_s, [time_s - fallback_s]);
         }
         let objectives: Vec<_> = result
             .timeline
@@ -15649,6 +15652,7 @@ fn probe_objective_variants_replay_by_position() {
             .collect();
         assert_eq!(objectives.len(), count);
         for (event, &(name, time_s, pos)) in objectives.iter().zip(&expected) {
+            let time_s = time_s - fallback_s;
             assert_eq!(event.seconds, time_s);
             assert_eq!(event.pos, Some(pos));
             assert!(
@@ -15663,7 +15667,7 @@ fn probe_objective_variants_replay_by_position() {
         }
         let end = result.timeline.last().unwrap();
         assert_eq!(end.description, "Mission end");
-        assert_eq!(end.seconds, expected[count - 1].1 + 8.0);
+        assert_eq!(end.seconds, expected[count - 1].1 + 8.0 - fallback_s);
         assert!(report.contains(&format!(
             "| {:.3} | {} | Mission end |",
             end.seconds, end.t_ticks

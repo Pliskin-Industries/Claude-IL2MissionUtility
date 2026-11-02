@@ -792,7 +792,13 @@ impl super::GroupGeneratorApp {
                 }
             }
         }
-        let trace = self.trace_generated(&mut cleaned);
+        let trace = match self.trace_generated(&mut cleaned).transpose() {
+            Ok(trace) => trace,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
         let text = serialize_group(&cleaned);
         let suggested = self
             .airfield_path

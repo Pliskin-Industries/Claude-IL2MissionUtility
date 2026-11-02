@@ -1961,7 +1961,7 @@ mod tests {
             &mut next,
             trace::TraceCarrier::default(),
             &mut map,
-        );
+        ).expect("trace indexes fit");
         (mission, map)
     }
 
