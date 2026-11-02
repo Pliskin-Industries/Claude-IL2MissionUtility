@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-11-01: Astra's review of steps 8 to 12 found 12 issues; fixes are on two unpushed branches (below). Flight 2S failed 0053 in the game (a wreck that crosses out raises Left, so a kill counted twice). The user chose **0058 A**: the count is back on Left and Finished. Both branches are pushed as stacked PRs #51 and #52, waiting for the user to merge. Then flight 2N (12f) with two human pilots.
+> Last updated: 2026-11-01: The fixes from Astra's review of steps 8 to 12 are on `main` (PRs #51 and #52, merged by the user). Flight 2S failed 0053 in the game (a wreck that crosses out raises Left, so a kill counted twice); the user chose **0058 A**, so the count stays on Left and Finished. Next: flight 2N (12f) with two human pilots.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -17,18 +17,17 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 
 | Branch | Holds | State |
 |---|---|---|
-| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); standalone check L (PR #45); step 10 docs (PR #47); L's F-80 collision note and STATE (PR #48); step 12 parts 12a to 12e with flights 2M, 2P, S1, 2Q, 2R (PR #49); decisions 0001 to 0052 | `origin/main` `6f02211` |
-| `codex/review-fixes-replay-trace` (worktree `.claude/worktrees/review-fixes`) | Review fixes 1 to 9: Replay one session at a time, rescan on Run, discarded lines shown, `(T - 3) / 50` fallback, stale-trace fingerprint; trace builds refuse a non-.Group name, check index room, separate breadcrumb bands; L's base map compared byte for byte again. Decisions 0056, 0057. Non-trace and Map trace output unchanged | PR #51 (base `main`), open; 1117 passed |
-| `codex/airtask-0053-0055` (worktree `.claude/worktrees/airtask-fixes`) | Review findings A to C: 0053 tried and rejected by flight 2S, so 0058 A keeps the count on Left and Finished (as on `main`); 0054 standalone base map moves Map AI; 0055 clock gates RANDOM through AVAILABLE. Air Tasking output changes on purpose for 0054 and 0055 only; flown probes 2R, 2L and 2S keep their wiring through test-only switches | PR #52, stacked on #51 (rebased onto it; GitHub retargets it to `main` when #51's branch is deleted), open; 1127 passed |
+| `main` | v0.6.0 + upstream v0.7.0; P14 steps 1a to 9T (PRs #31 to #38); decisions 0037 A (PR #39), 0043 to 0045 with flights A2, 2K, 2L (PR #40), 0042 A (PR #41); flight A3 (PR #43); standalone check L (PR #45); step 10 docs (PR #47); L's F-80 collision note and STATE (PR #48); step 12 parts 12a to 12e with flights 2M, 2P, S1, 2Q, 2R (PR #49); review fixes 1 to 9 with decisions 0056 and 0057 (PR #51); flight 2S and decisions 0053 (superseded), 0054, 0055, 0058 A (PR #52); decisions 0001 to 0058 | `origin/main` `5da0177` |
 
-`upstream/main` has one commit not merged here (`571504a`, harvested coalition groups and ramp starts per country). Merged branches and their worktrees under `.claude/worktrees/` can be deleted once their idle sessions are archived.
+`upstream/main` has one commit not merged here (`571504a`, harvested coalition groups and ramp starts per country). PRs #51 and #52 are merged; their worktrees (`review-fixes`, `airtask-fixes`, `flight-2s` under `.claude/worktrees/`) can be deleted once their idle sessions are archived. `codex/review-fixes-replay-trace` is deleted on GitHub; `codex/airtask-0053-0055` is still there.
 
-Last recorded test run: **1127 passed, 0 failed, 42 ignored** (`cargo test`, 2026-11-01) on `codex/airtask-0053-0055` after 0058 A, rebased onto the review fixes; **1117 passed, 0 failed, 41 ignored** on `codex/review-fixes-replay-trace` `6d6187b`. Clippy 306, no new warnings. Record each new run on this line.
+Last recorded test run: **1127 passed, 0 failed, 42 ignored** (`cargo test --offline`, 2026-11-01) on `main` `5da0177`, after PRs #51 and #52. Clippy 306, no new warnings (on the merged branch). Record each new run on this line.
 
 ## P14 Air Tasking ("Wing Commander")
 
 Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user decisions U1 to U24). Flight results: `handoff/P14-probe-results.md` (flights 0 to 2S, A0 to A3, L, S1); step 12's scope and run sheets: `handoff/sessions/2026-10-31-p14-step12-scope.md` and the `2026-10-31-p14-flight-*` notes; run sheets for A3 and L: `handoff/sessions/2026-10-30-p14-acceptance-a3.md` and `2026-10-30-p14-standalone-l.md`. End-user manual for Air Tasking: `USER_MANUAL.md` (step 10). Facts that cost a flight: `docs/il2-loader-and-log-facts.md`. Step and flight notes: `handoff/sessions/`.
 
+- **Built from Astra's review** (PRs #51, #52): Replay reads one session at a time and rescans on Run; trace builds refuse a non-.Group name and check index room (0056, 0057); a standalone base map moves the Map's AI off the player countries (0054); the clock passes RANDOM's output through the AVAILABLE gate, so a paused RANDOM cannot launch twice in one slot (0055). Air Tasking output changed on purpose for 0054 and 0055 only.
 - **Built (on `main`):** steps 1a to 9T: the sortie shell, budget, threshold, clock, zone, export, the Air Tasking rail tab, the Map dock's Air tab and Map Generate, the Trace build checkbox, the Replay window and the Map's Replay layer. Also: a used copy goes quiet at `DONE HUB` (0038); the Map's own AI planes leave the player countries when Air Tasking is in the mission (0037 A); zone and clock end their timers through D11 relays, because a switched-off running timer is paused, not cancelled (0044, flight 2K); the DPRK air start and field spawns write 501 (0042 A).
 - **Flown and seen in the game:**
   - A0 (no pilot): the group loads; clock slots open on time; nothing launches over an empty area.
@@ -53,7 +52,6 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Waiting on the user
 
-**First: merge PR #51, then PR #52.** Merge #51 with its branch deleted, so #52 retargets to `main`.
 1. **Send the Air Tasking proposal to eszyman?** Draft: `handoff/upstream-air-tasking-proposal-draft.md` (decision 0026). The bar was a working concept and UI; A2 and A3 now run end to end from the app's Map Generate. Where to post it (new issue or issue #1) and when is yours.
 2. **Merge `upstream/main` `571504a`?** It touches the airfield harvest that 0042 also changed.
 3. **Three game bug reports are drafted, not posted** (`handoff/il2-bug-report-drafts.md`). The paused-timer finding (2K) may be a fourth.
@@ -62,7 +60,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Next steps
 
-1. **Merge** PR #51, then #52, when the user says so. After that, delete the `review-fixes`, `airtask-fixes` and `flight-2s` worktrees. The review-fixes worktree's uncommitted `STATE.md` is Astra's and can be discarded.
+1. **Clean up:** delete the `review-fixes`, `airtask-fixes` and `flight-2s` worktrees and the merged `codex/airtask-0053-0055` branch. The review-fixes worktree's uncommitted `STATE.md` is Astra's and can be discarded.
 2. **Flight 2N** (12f) and step 11 item 5, on the real host, once the user has a second pilot and a time. Claude first writes 2N's run sheet and mission from the step 12 note (§3). Build it as a trace build and check its logs for 0058's race (`CLEAR`, `UP 1`, then `DOWN 1` and `EMPTY` within about 12 s with no player leaving).
 3. Then the eszyman proposal, if the user wants it sent.
 
@@ -71,7 +69,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 - **Send nothing to the upstream author** (`eszyman/IL2MissionUtility`: issues, comments, files, load tests, patches) until the user says so. Pulling and merging his commits is fine. `gh` here may default to upstream: always pass `--repo Pliskin-Industries/Claude-IL2MissionUtility`.
 - **Astra writes `STATE.md` and decision records when not told otherwise:** say in every brief that Claude owns `STATE.md`. The review-fixes worktree still holds an uncommitted Astra rewrite of `STATE.md`; discard it (a hook stops Claude from doing so).
 - **IL-2 launcher:** it needs `s3.il2korea.com` (a CDN). On 2026-11-01 that host first had no IPv4 address, then failed SSL, and worked again a few hours later; the game cannot start without the launcher. Retry later; do not change this PC's DNS.
-- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0058 (0053 to 0055 and 0058 on `codex/airtask-0053-0055`, 0056 and 0057 on `codex/review-fixes-replay-trace`). Next free: **0059**.
+- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0058, all on `main`. Next free: **0059**.
 - Before generating any probe or mission file, read `docs/il2-loader-and-log-facts.md`. Each item there cost a flight attempt.
 - **Editor saves:** the Mission Editor cuts Group names to 31 characters, and the host loads a `.msnbin` that sits next to the `.Mission` (L).
 - **Timers:** switching off a running timer pauses it; switching it on resumes it (2K). Stop a timer only through a D11 relay (0044).
@@ -82,6 +80,6 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 - Nothing is pushed or merged to `main` without the user (`docs/decisions/0005`). A hook blocks `git push` (even a branch delete) while the checkout is on `main`.
 - The game here is 1.005 (`261013`). Its `MissionResaver.exe` crashes: build missions with `--no-resave`. This PC is a test bed: its load times and tick delay are not used. It allows one spawn per game session.
 - **Flying on this PC:** an air start may begin with the level-flight helper on; pressing LShift+A then switches it off (A2 run 1 crashed this way). **Never move the mouse or click in the cockpit**: it works the stick (A3 run 1 spun in). To regain keyboard focus, use PowerShell `AppActivate`. Tacview: `tacviewrecord = 1` with the game closed, then LCtrl+R in the mission.
-- Flown probe flights regenerate byte for byte from frozen inputs (`src/testdata/p14_probe_inputs/`, `handoff/p14-probes/`), except those frozen as flown (2F, 2H, 2I, A0, A1, A2, A3, L; since 0050 D changed Generate's output, the A3 and L build tests check the run-sheet facts, not a byte-for-byte match): those are checked by parse-and-links tests only. Never edit those files or re-run their writers. Flight names are never reused. The next free log folder is `src/testdata/missionlog/real_60` (`real_59` is flight 2S, on `codex/airtask-0053-0055`).
+- Flown probe flights regenerate byte for byte from frozen inputs (`src/testdata/p14_probe_inputs/`, `handoff/p14-probes/`), except those frozen as flown (2F, 2H, 2I, A0, A1, A2, A3, L; since 0050 D changed Generate's output, the A3 and L build tests check the run-sheet facts, not a byte-for-byte match): those are checked by parse-and-links tests only. Never edit those files or re-run their writers. Flight names are never reused. The next free log folder is `src/testdata/missionlog/real_60` (`real_59` is flight 2S).
 - Only one session writes `STATE.md` at a time; other sessions put their facts in a session note in `handoff/sessions/`.
 - Stage is not declared yet (the session-start check treats the repo as `prototype`); `/promote` sets it.
