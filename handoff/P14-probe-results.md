@@ -1290,6 +1290,28 @@ Four DPRK-side counts (`PCD01` to `PCD04`, 6 km) watched 601 Yak and F-80 stand-
   - two entries close together (the unsafe direction);
   - what a player who quits in flight raises (flight 2N).
 
+## Flight 2S (does the count step down once on Killed and Finished alive?) — 2026-11-01, one run, no pilot, Tacview recorded
+
+Decision 0053, review finding A. Run sheet: `handoff/sessions/2026-11-01-p14-flight-2s.md`. Built at `bedc703` (worktree `.claude/worktrees/flight-2s`) as `P14_Probe_2S`. Hosted on this PC, Claude spectating. Session `2026-11-01_15-36-24`, logs `real_59` (35 files). Tacview `handoff/tacview/P14_Probe_2S.zip.acmi` (recording began at 42 s). Left the server at 750 s.
+
+Three DPRK-side counts (`PCD01` to `PCD03`, 6 km) with 0053's wiring: Left, Killed and Finished alive step down; Finished does not. A separate diagnostic trigger per cell (`S1-CT` to `S3-CT`) logged every raw event.
+
+| Cell | Count path in the log | Predicted | Result |
+|---|---|---|---|
+| S1 outbound wreck | UP 1, 2 at 151.52, 179.80. Gate kill 251.26: KILLED and DOWN 2 at 251.28. **LEFT, DOWN 1 and EMPTY at 253.36**, the wreck crossing the ring (Tacview: about 5,708 m out at the kill, 260 m further by 253.0). No FINISHED for the wreck (removed outside at 266.1). Holder Delete at 420.02: FINISHED and FINISHED ALIVE, nothing to step. | KILLED and DOWN 2 only; EMPTY at 420 | **fails 0053**: the wreck raised Left, so the kill counted twice and the area emptied under the holder |
+| S2 busy path | UP 1 to 4 at 361.50, 389.76, 417.90, 446.24 (busy). Deletes at 520, 550, 580: FINISHED and FINISHED ALIVE, no DOWN. D killed at 604.56 (KILLED 604.58). **D's FINISHED, CLEAR and EMPTY together at 607.68** (wreck removed 3.0 s after the kill). E: UP 1 at 611.50. E's Delete: DOWN 1 and EMPTY at 720.02. | E enters after CLEAR and before the wreck's FINISHED | **inconclusive**: the wreck's FINISHED came with CLEAR, so the window under test never opened. Everything else as predicted |
+| S3 Delete inside | UP 1, 2 at 181.52, 209.80. A's Delete: FINISHED and FINISHED ALIVE and **one DOWN 2** at 480.02, no EMPTY. Holder's Delete: DOWN 1 and EMPTY at 540.02. No KILLED or LEFT. | as read | **passes** |
+
+- No count stepped on another cell's events. No other losses; the only kills were the two gate kills.
+- Entries came about 9 to 10 s before the walker's ideal times, as before.
+
+### What this changes (reading)
+
+- **0053 must not ship as built.** A wreck that crosses out of the circle after the kill raises Left about 2 s later, so Killed plus Left steps the count down twice. Decision 0058 (Accepted, A, 2026-11-01): back to Left and Finished; the gate after CLEAR (C) waits until logs show the race.
+- **Under the old wiring every removal 2R and 2S flew steps once:** a wreck inside (Finished), a wreck that crosses out (Left, then no Finished), a Delete inside (Finished).
+- **A wreck's Finished does not come at a fixed time after the kill:** 14.9 s in S1, 3.0 s in S2, 15.06 s in 2P and 2R. The cause is not known.
+- **Still unflown:** a new entry between CLEAR and an old wreck's late Finished (0053's fault itself), and what a player who quits in flight raises (flight 2N).
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.

@@ -576,7 +576,7 @@ pub(crate) mod tests {
         let mut expected = Vec::new();
         for (prefix, suffix) in [
             ("EN", "AVAILABLE"),
-            ("EN", "RANDOM"),
+            ("EN", "AVAILABLE ON"),
             ("EN", "GO"),
             ("ZN", "REARM"),
             ("ZN", "ARMED"),

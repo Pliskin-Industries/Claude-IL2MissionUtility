@@ -336,6 +336,9 @@ pub(crate) struct SideLogic {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AirPlan {
+    /// Frozen probes explicitly keep the clock they flew; absent from Generate.
+    #[cfg(test)]
+    pub(crate) clock_draw_wiring: clock::DrawWiring,
     pub library: Vec<AirSortie>, // Default is empty; the UI fills it with the built-ins (step 2)
     pub categories: Vec<String>, // decision 0031: the category list; Default is empty, the UI fills it
     pub pool: Vec<PoolEntry>,

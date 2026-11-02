@@ -14,6 +14,41 @@ use crate::template;
 const SLOT_WINDOW_CAP_S: f64 = 300.0;
 pub(crate) const WEIGHT_RANGE: std::ops::RangeInclusive<u8> = 1..=10;
 
+/// Only flown probe builders may request the pre-0055 paused RANDOM wiring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum DrawWiring {
+    #[default]
+    AvailableGate,
+    #[cfg(test)]
+    FlownPausedRandom,
+}
+
+/// RANDOM can expire at a closed gate. Trace both sides of that decision,
+/// then OUT (waterfall winner), HOT/COLD, and GO (budget request).
+pub(crate) fn traced_role(prefix: &str, role: &str, wiring: DrawWiring) -> bool {
+    match wiring {
+        DrawWiring::AvailableGate => match prefix {
+            "CLK" => matches!(
+                role.strip_prefix("D ").or_else(|| role.strip_prefix("N ")),
+                Some(
+                    "SLOT OPEN" | "NO REPEAT" | "DRAW" | "Randomizer:INPUT"
+                        | "ATTEMPT END" | "REROLL" | "SLOT CLOSE" | "WIN"
+                )
+            ),
+            "ED" | "EN" => matches!(
+                role,
+                "RANDOM" | "AVAILABLE" | "OUT" | "LAST" | "HOT" | "COLD" | "GO"
+            ),
+            _ => false,
+        },
+        #[cfg(test)]
+        DrawWiring::FlownPausedRandom => matches!(
+            (prefix, role),
+            ("CLK", "D SLOT OPEN" | "N SLOT OPEN") | ("ED" | "EN", "GO")
+        ),
+    }
+}
+
 fn clock_entries(entries: &[EntryCopies]) -> impl Iterator<Item = &EntryCopies> {
     entries
         .iter()
@@ -123,6 +158,25 @@ pub(crate) fn build_side(
     logic: &mut SideLogic,
     next_id: &mut i32,
 ) -> Result<Vec<Il2Entity>, String> {
+    #[cfg(not(test))]
+    let wiring = DrawWiring::AvailableGate;
+    #[cfg(test)]
+    let wiring = plan.clock_draw_wiring;
+    let (on_role, slot_role, switched_role, exhausted_roles) = match wiring {
+        DrawWiring::AvailableGate => (
+            "AVAILABLE ON",
+            "AVAILABLE ON",
+            "AVAILABLE",
+            ["AVAILABLE", "AVAILABLE ON", "GO"],
+        ),
+        #[cfg(test)]
+        DrawWiring::FlownPausedRandom => (
+            "RANDOM ON",
+            "AVAILABLE",
+            "RANDOM",
+            ["AVAILABLE", "RANDOM", "GO"],
+        ),
+    };
     let schedule = &plan.schedule[side.idx()];
     let eligible: Vec<_> = clock_entries(&copies.entries).collect();
     if !schedule.enabled || eligible.is_empty() {
@@ -229,7 +283,7 @@ pub(crate) fn build_side(
         let mut cell = BTreeMap::new();
         for (role, kind) in [
             ("AVAILABLE", "MCU_Timer"),
-            ("RANDOM ON", "MCU_Activate"),
+            (on_role, "MCU_Activate"),
             ("LAST", "MCU_Timer"),
             ("EXCLUDE", "MCU_Deactivate"),
             ("LAST SET", "MCU_Activate"),
@@ -280,12 +334,12 @@ pub(crate) fn build_side(
         );
         registry
             .links
-            .extend(["AVAILABLE", "RANDOM", "GO"].map(|role| (entry.exhausted, cell[role])));
+            .extend(exhausted_roles.map(|role| (entry.exhausted, cell[role])));
         entry_ids.push(cell);
     }
     let all = |role: &str| entry_ids.iter().map(|cell| cell[role]).collect::<Vec<_>>();
     let mut open = vec![ids["SLOT OPEN OFF"]];
-    open.extend(all("AVAILABLE"));
+    open.extend(all(slot_role));
     open.extend([
         ids["NO REPEAT"],
         ids["REROLL ON"],
@@ -323,9 +377,9 @@ pub(crate) fn build_side(
         by_id_mut(&mut root, ids[from]).unwrap().set_targets(to);
     }
     for (k, (entry, cell)) in entries.iter().zip(&entry_ids).enumerate() {
-        let mut random = vec![cell["OUT"]];
+        let mut outputs = vec![cell["OUT"]];
         if let Some(&closer) = cell.get("CLOSE") {
-            random.push(closer);
+            outputs.push(closer);
             by_id_mut(&mut root, closer).unwrap().set_targets(
                 entry_ids[k + 1..]
                     .iter()
@@ -337,11 +391,16 @@ pub(crate) fn build_side(
         // START activates COPY r+1. Visit it before COPY r so depth-first
         // delivery cannot consume a newly activated pointer in this same tick.
         go.extend(entry.copies.iter().rev().map(|copy| copy.pointer));
+        let (available, random) = match wiring {
+            DrawWiring::AvailableGate => (outputs, vec![cell["AVAILABLE"]]),
+            #[cfg(test)]
+            DrawWiring::FlownPausedRandom => (vec![cell[on_role]], outputs),
+        };
         for (from, to) in [
-            ("AVAILABLE", vec![cell["RANDOM ON"]]),
-            ("RANDOM ON", vec![cell["RANDOM"]]),
+            ("AVAILABLE", available),
+            (on_role, vec![cell[switched_role]]),
             ("LAST", vec![cell["EXCLUDE"]]),
-            ("EXCLUDE", vec![cell["RANDOM"]]),
+            ("EXCLUDE", vec![cell[switched_role]]),
             ("LAST SET", vec![cell["LAST"]]),
             ("RANDOM", random),
             ("OUT", vec![cell["HOT"], cell["COLD"]]),
@@ -358,10 +417,14 @@ pub(crate) fn build_side(
                 .iter()
                 .zip(&entry_ids)
                 .filter(|(entry, _)| entry.area == area)
-                .map(|(_, cell)| cell["RANDOM"])
+                .map(|(_, cell)| cell[switched_role])
                 .collect(),
         );
     }
+    // RANDOM is never switched (0055): EXCLUDE and AREA OUT close AVAILABLE,
+    // which drops the timer's pulse before OUT or CLOSE. SLOT OPEN reopens
+    // it through AVAILABLE ON. Exhaustion switches both off, plus GO, so a
+    // later slot cannot revive the entry. This reuses the old RANDOM ON MCU.
     // ATTEMPT END is never switched: switching a running timer off only
     // pauses it (flight 2K). After WIN or SLOT CLOSE it runs out into the
     // switched-off REROLL, which drops it (the D11 relay, decision 0044).
@@ -747,7 +810,9 @@ pub(crate) mod tests {
                         .collect::<Vec<_>>()
                 );
             }
-            assert_eq!(node.targets, targets);
+            let available = named(&root, &format!("EN{:02} AVAILABLE", entry.number));
+            assert_eq!(node.targets, [available.index.unwrap()]);
+            assert_eq!(available.targets, targets);
         }
         for node in &root.children {
             assert!(node.objects.is_empty());
@@ -770,6 +835,10 @@ pub(crate) mod tests {
         let h = harness(&clock_test_plan(), 60.0);
         for entry in &h.copies.entries {
             let id = |role| entry_id(&h, entry.number, role);
+            let mut outputs = vec![id("OUT")];
+            if let Some(close) = h.root.find_by_name(&format!("EN{:02} CLOSE", entry.number)) {
+                outputs.push(close.index.unwrap());
+            }
             for role in ["AVAILABLE", "LAST", "OUT", "HOT", "COLD", "GO"] {
                 let node = by_id(&h.root, id(role));
                 assert_eq!(node.block_type, "MCU_Timer");
@@ -777,10 +846,11 @@ pub(crate) mod tests {
                 assert_eq!(number(node, "Random"), Ok(100.0));
             }
             for (role, kind, targets) in [
-                ("AVAILABLE", "MCU_Timer", vec![id("RANDOM ON")]),
-                ("RANDOM ON", "MCU_Activate", vec![id("RANDOM")]),
+                ("RANDOM", "MCU_Timer", vec![id("AVAILABLE")]),
+                ("AVAILABLE", "MCU_Timer", outputs),
+                ("AVAILABLE ON", "MCU_Activate", vec![id("AVAILABLE")]),
                 ("LAST", "MCU_Timer", vec![id("EXCLUDE")]),
-                ("EXCLUDE", "MCU_Deactivate", vec![id("RANDOM")]),
+                ("EXCLUDE", "MCU_Deactivate", vec![id("AVAILABLE")]),
                 ("LAST SET", "MCU_Activate", vec![id("LAST")]),
                 ("OUT", "MCU_Timer", vec![id("HOT"), id("COLD")]),
                 ("HOT", "MCU_Timer", vec![id("GO")]),
@@ -901,12 +971,26 @@ pub(crate) mod tests {
             input
         );
         let mut open = vec![clock_id(&h, "SLOT OPEN OFF")];
-        open.extend(all("AVAILABLE"));
+        open.extend(all("AVAILABLE ON"));
         open.extend(
             ["NO REPEAT", "REROLL ON", "SLOT CLOSE", "DRAW"].map(|role| clock_id(&h, role)),
         );
         assert_eq!(by_id(&h.root, clock_id(&h, "SLOT OPEN")).targets, open);
         for entry in &h.copies.entries {
+            let random = entry_id(&h, entry.number, "RANDOM");
+            h.root.for_each(&mut |node| {
+                if matches!(node.block_type.as_str(), "MCU_Activate" | "MCU_Deactivate") {
+                    assert!(!node.targets.contains(&random), "RANDOM must never be paused: {:?}", node.name());
+                }
+            });
+            assert_eq!(
+                by_id(&h.root, clock_id(&h, &format!("AREA {:02} OUT", entry.area))).targets,
+                order.iter()
+                    .map(|&i| &h.copies.entries[i])
+                    .filter(|candidate| candidate.area == entry.area)
+                    .map(|candidate| entry_id(&h, candidate.number, "AVAILABLE"))
+                    .collect::<Vec<_>>()
+            );
             let last_set = entry_id(&h, entry.number, "LAST SET");
             assert!(
                 !by_id(&h.root, entry_id(&h, entry.number, "GO"))
@@ -926,11 +1010,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn clock_last_copy_disables_available_random_and_go() {
+    fn clock_last_copy_disables_available_its_rearm_and_go() {
         let h = harness(&clock_test_plan(), 60.0);
         for entry in &h.copies.entries {
             let targets =
-                ["AVAILABLE", "RANDOM", "GO"].map(|role| entry_id(&h, entry.number, role));
+                ["AVAILABLE", "AVAILABLE ON", "GO"].map(|role| entry_id(&h, entry.number, role));
             assert_eq!(by_id(&h.root, entry.exhausted).targets, targets);
             for target in targets {
                 assert!(h.logic.links.contains(&(entry.exhausted, target)));
@@ -1574,7 +1658,7 @@ pub(crate) mod tests {
             );
             let exhausted = launches[2].t;
             assert_eq!(times(&log, h.copies.entries[0].exhausted), [exhausted]);
-            for role in ["AVAILABLE", "RANDOM", "GO"] {
+            for role in ["AVAILABLE", "AVAILABLE ON", "GO"] {
                 assert!(!active(&log, entry_id(&h, 1, role), ticks(12000.0)));
                 assert!(
                     times(&log, entry_id(&h, 1, role))
@@ -1582,6 +1666,7 @@ pub(crate) mod tests {
                         .all(|&t| t <= exhausted)
                 );
             }
+            assert!(active(&log, entry_id(&h, 1, "RANDOM"), ticks(12000.0)));
         }
     }
 
@@ -1843,8 +1928,9 @@ pub(crate) mod tests {
             Ok(300.0)
         );
         for config in configs() {
-            // Seeds 1303/10399 delay the hot win to 390.9 s, after the slot closes at 380.1 s.
-            let seed = if config.reverse_targets { 1303 } else { 10399 };
+            // With RANDOM always rolling (0055), these seeds delay the hot
+            // win to 390.9 s, after the slot closes at 380.1 s.
+            let seed = if config.reverse_targets { 738 } else { 2718 };
             let log = run(
                 &h,
                 config,
@@ -1910,21 +1996,18 @@ pub(crate) mod tests {
                 assert_eq!(times(&log, used.copies[0].shell.start), [ticks(600.5)]);
                 assert_eq!(times(&log, used.exhausted), [ticks(600.5)]);
                 assert!(times(&log, entry_id(&h, used.number, "GO")).is_empty());
-                let expected = if deactivate == DeactivateRunningTimer::RunsOn {
-                    vec![ticks(600.9)]
-                } else {
-                    vec![]
-                };
-                assert_eq!(times(&log, entry_id(&h, used.number, "RANDOM")), expected);
+                assert_eq!(times(&log, entry_id(&h, used.number, "RANDOM")), [ticks(600.9)]);
+                assert!(times(&log, entry_id(&h, used.number, "AVAILABLE")).is_empty());
                 let launches = starts(&log, &h);
                 assert_eq!(launches.len(), 2, "{config:?}");
                 assert_ne!(start_entry(&h, launches[1].index), used.number);
                 assert_eq!(gos(&log, &h).len(), 1);
                 assert_eq!(times(&log, clock_id(&h, "WIN")), [launches[1].t]);
                 assert!(launches[1].t > ticks(600.9));
-                if deactivate == DeactivateRunningTimer::RunsOn {
-                    assert!(times(&log, clock_id(&h, "REROLL")).contains(&ticks(602.9)));
-                }
+                // The exhausted entry's pending roll cannot reach CLOSE, so
+                // a later entry wins this same draw without a reroll.
+                assert!(launches[1].t < ticks(602.9));
+                assert!(times(&log, clock_id(&h, "REROLL")).is_empty());
             }
         }
     }
@@ -2132,12 +2215,86 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn clock_paused_random_cannot_fire_out_of_turn() {
-        // Q11 (flight 2K's K4). Three entries share one area, cold in slot 1:
-        // the first RANDOM to fire takes COLD, and AREA OUT pauses the later
-        // RANDOMs mid-run. The area is hot by slot 2: RANDOM ON resumes them and
-        // DRAW re-rolls them 0.3 s later. A failed re-roll stops a running
-        // timer, so every RANDOM fires a whole delay after a draw.
+    fn clock_0055_repeated_zone_exclusions_cannot_launch_twice_in_one_slot() {
+        let mut plan = fast_plan(2, 1);
+        plan.budget.per_side[NATO] = 2;
+        for entry in &mut plan.pool {
+            entry.mode = TriggerMode::Both;
+        }
+        let order = waterfall_order(plan.seed, AirSide::Nato, 2);
+        let a = order[0] + 1;
+        let b = order[1] + 1;
+        plan.pool[a - 1].runs = 1;
+        plan.pool[b - 1].runs = 6;
+        let h = harness(&plan, 60.0);
+        let zone_id = |entry, role| {
+            named(&h.root, &format!("ZN{entry:02} {role}"))
+                .index
+                .unwrap()
+        };
+        // Script successful zone rolls through FIRE ARM/FIRE and the real
+        // copy/budget chain. Disarm PASS IN so threshold passes cannot add
+        // unsolicited rolls. The 900 s cooldown outlasts this scenario.
+        let mut pulses = vec![
+            (ticks(2.0), zone_id(a, "DISARM").into()),
+            (ticks(2.0), zone_id(b, "DISARM").into()),
+        ];
+        for (t, entry) in [(150.0, a), (200.0, b), (380.0, b), (560.0, b)] {
+            pulses.push((ticks(t), zone_id(entry, "FIRE ARM").into()));
+            pulses.push((ticks(t), zone_id(entry, "FIRE").into()));
+        }
+        let (x, z) = h.copies.areas[0];
+        for config in configs() {
+            let log = walk(
+                &h.root,
+                config,
+                &WalkerInput {
+                    seed: 2,
+                    until: ticks(850.0),
+                    tracks: vec![ScriptedTrack {
+                        country: threshold::DPRK_PLAYER_COUNTRY,
+                        coalition: 1,
+                        samples: vec![(ticks(150.0), x + 1000.0, z)],
+                    }],
+                    pulses: pulses.clone(),
+                    ..WalkerInput::default()
+                },
+            );
+            assert_slots(&h, &log, &[80.1, 260.1, 440.1, 620.1, 800.1]);
+            assert_eq!(times(&log, clock_id(&h, "AREA 01 OUT")), [ticks(80.9)]);
+            assert_eq!(times(&log, h.copies.entries[a - 1].exhausted), [ticks(150.05)]);
+            assert_eq!(
+                times(&log, entry_id(&h, b, "EXCLUDE")),
+                [260.2, 440.2, 620.2].map(ticks),
+                "three consecutive slots exclude B after its zone starts: {config:?}"
+            );
+            let b_starts: Vec<_> = starts(&log, &h)
+                .into_iter()
+                .filter(|pulse| start_entry(&h, pulse.index) == b)
+                .map(|pulse| pulse.t)
+                .collect();
+            assert_eq!(&b_starts[..3], &[200.05, 380.05, 560.05].map(ticks));
+            let in_hot_slot: Vec<_> = b_starts
+                .iter()
+                .copied()
+                .filter(|&t| t >= ticks(800.1))
+                .collect();
+            assert_eq!(
+                in_hot_slot,
+                [ticks(801.4)],
+                "B must launch once, after DRAW; old AREA OUT/EXCLUDE pauses drain its RANDOM to 0.2 s: {config:?}"
+            );
+            assert_eq!(b_starts.len(), 4, "no clock launch in an excluded slot");
+            assert_eq!(times(&log, clock_id(&h, "WIN")), [ticks(801.4)]);
+        }
+    }
+
+    #[test]
+    fn clock_cold_random_runs_out_into_closed_available() {
+        // Three entries share one area, cold in slot 1. AREA OUT closes the
+        // AVAILABLE gates; every RANDOM still runs out a whole delay after
+        // its draw. Later RANDOMs must drop before OUT and CLOSE (0055).
+        // Slot 2 reopens the gates after the area becomes hot.
         let h = harness(&fast_plan(3, 1), 60.0);
         let (x, z) = h.copies.areas[0];
         let tracks = vec![ScriptedTrack {
@@ -2158,7 +2315,7 @@ pub(crate) mod tests {
             })
             .collect();
         let longest = delays.iter().map(|&(_, delay)| delay).max().unwrap();
-        let mut paused = 0;
+        let mut dropped = 0;
         for seed in 0..40 {
             for config in configs() {
                 let input = WalkerInput {
@@ -2183,9 +2340,18 @@ pub(crate) mod tests {
                     .filter(|&&(random, _)| times(&log, random).iter().any(|&t| t < ticks(200.0)))
                     .map(|&(_, delay)| delay)
                     .min();
-                paused += usize::from(first_cold.is_some_and(|delay| delay < longest));
+                if first_cold.is_some_and(|delay| delay < longest) {
+                    dropped += 1;
+                    let cold = times(&log, clock_id(&h, "AREA 01 OUT"))[0];
+                    for entry in &h.copies.entries {
+                        for role in ["AVAILABLE", "OUT"] {
+                            assert!(times(&log, entry_id(&h, entry.number, role))
+                                .iter().all(|&t| t <= cold || t > ticks(260.1)));
+                        }
+                    }
+                }
             }
         }
-        assert!(paused > 0);
+        assert!(dropped > 0);
     }
 }

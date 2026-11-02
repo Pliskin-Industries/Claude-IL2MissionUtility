@@ -6,6 +6,8 @@
 use std::collections::BTreeMap;
 
 use super::threshold::{self, OBJECT_ENTERED, OBJECT_FINISHED, OBJECT_LEFT};
+#[cfg(test)]
+use super::threshold::{OBJECT_FINISHED_ALIVE, OBJECT_KILLED};
 use super::{AirSide, SideLogic};
 use crate::ast::Il2Entity;
 use crate::template;
@@ -19,6 +21,16 @@ const STEP_DELAY_S: f64 = 0.05;
 /// From busy to arming `CLEAR`: the fourth plane, just across the ring, is then
 /// about 280 m inside, so the zone does not miss it and clear at once.
 const CLEAR_DELAY_S: f64 = 2.0;
+
+/// The trigger events that step the count down. Generate uses Left and
+/// Finished (decision 0058 A). Only probe flight 2S builds 0053's Left, Killed
+/// and Finished alive, which 2S rejected.
+#[derive(Clone, Copy)]
+pub(crate) enum DownEvents {
+    LeftAndFinished,
+    #[cfg(test)]
+    KilledAndFinishedAlive,
+}
 
 /// Decision 0050 D (0051): a player who appears inside a trigger is not
 /// reported as entering (flight A1), so a spawn of the side an area watches,
@@ -92,8 +104,11 @@ pub(crate) fn traced_role(role: &str) -> bool {
 /// nodes and each area's `EMPTY` relay, in area order.
 ///
 /// - Entered (58) moves the count up one step; Left (60) and Finished (62) move
-///   it down. Killed (70) is not used: a kill also raises Finished when the
-///   wreck lands (flight 2P), and counting both would take two steps.
+///   it down (decision 0058 A). Killed (70) is not used: after a kill the wreck
+///   raises Finished when it is removed inside (flight 2P), or Left when it
+///   crosses out (flight 2S), so counting Killed too would take two steps.
+///   Known limit (0058): a wreck removed up to about 12 s after `CLEAR` can
+///   step down a count that `CLEAR` has just reopened.
 /// - Only the current step's `UP` and `DOWN` relays are on. A step change
 ///   switches the old step's pair off at once and the new one on a tick later
 ///   (`ON k DELAY`), so one event moves the count one step whatever order it
@@ -120,6 +135,7 @@ pub(crate) fn build_side(
     side: AirSide,
     areas: &[(f64, f64)],
     radius_m: f64,
+    down_events: DownEvents,
     logic: &mut SideLogic,
     next_id: &mut i32,
 ) -> Result<(Vec<Il2Entity>, Vec<i32>), String> {
@@ -135,7 +151,19 @@ pub(crate) fn build_side(
         }
     }
     let mut trigger = threshold::player_trigger(side, radius_m);
-    trigger.set_property("EventsFilterFinishedSimple", "1");
+    let down_events: &[i32] = match down_events {
+        DownEvents::LeftAndFinished => {
+            trigger.set_property("EventsFilterFinishedSimple", "1");
+            &[OBJECT_LEFT, OBJECT_FINISHED]
+        }
+        #[cfg(test)]
+        DownEvents::KilledAndFinishedAlive => {
+            trigger.set_property("EventsFilterKilled", "1");
+            trigger.set_property("EventsFilterFinishedAlive", "1");
+            trigger.set_property("EventsFilterFinishedSimple", "0");
+            &[OBJECT_LEFT, OBJECT_KILLED, OBJECT_FINISHED_ALIVE]
+        }
+    };
     let coalitions = threshold::enemy_coalitions(side);
     let top = COUNT_STEPS + 1; // UP {top} is the entry that turns the area busy.
     let mut result = Vec::new();
@@ -222,7 +250,7 @@ pub(crate) fn build_side(
                 for k in 1..=top {
                     template::attach_event(node, OBJECT_ENTERED, id(&format!("UP {k}")));
                 }
-                for event in [OBJECT_LEFT, OBJECT_FINISHED] {
+                for &event in down_events {
                     for k in 1..=COUNT_STEPS {
                         template::attach_event(node, event, id(&format!("DOWN {k}")));
                     }
@@ -274,7 +302,7 @@ mod tests {
         let mut next = 1;
         let mut logic = SideLogic::default();
         let (nodes, empties) =
-            build_side(AirSide::Nato, areas, RADIUS_M, &mut logic, &mut next).unwrap();
+            build_side(AirSide::Nato, areas, RADIUS_M, DownEvents::LeftAndFinished, &mut logic, &mut next).unwrap();
         let mut root = Il2Entity::new("Group");
         root.children = nodes;
         let init = emit_side_logic(
@@ -469,6 +497,7 @@ mod tests {
                 ("EventsFilterLeftSimple", "1"),
                 ("EventsFilterFinishedSimple", "1"),
                 ("EventsFilterKilled", "0"),
+                ("EventsFilterFinishedAlive", "0"),
             ] {
                 assert_eq!(trigger.property(key), Some(value), "{area} {key}");
             }
@@ -602,7 +631,7 @@ mod tests {
             let mut logic = SideLogic::default();
             let mut next = 7;
             let error =
-                build_side(AirSide::Nato, &areas, radius, &mut logic, &mut next).unwrap_err();
+                build_side(AirSide::Nato, &areas, radius, DownEvents::LeftAndFinished, &mut logic, &mut next).unwrap_err();
             assert_eq!(error, message);
             assert_eq!((next, logic.init_off.len()), (7, 0));
         }
@@ -649,6 +678,80 @@ mod tests {
                 [ticks(60.0) + WRECK_FINISHED_TICKS],
                 "{config:?}"
             );
+        }
+    }
+
+    /// Known limit (decision 0058 A): a busy area empties, `CLEAR` reopens the
+    /// count, a new player enters, and the old wreck's late Finished steps the
+    /// count to 0 under that player. The walker removes deaths at once; a
+    /// coalition-only track holds `CLEAR` for the flown 3.06 s detection lag
+    /// (3.05 s at its 20 Hz resolution). Option C of 0058 would flip this test.
+    #[test]
+    fn count_0058_known_limit_a_late_wreck_empties_a_new_entry() {
+        let h = harness(&[CENTRE]);
+        let mut input = tracks((0..4).map(|i| player(10 + 10 * i..200, 200)).collect());
+        input.tracks.push(player(108..200, 200));
+        input.tracks.push(plane(DPRK_AI_COUNTRY, CENTRE, 1..200, 200));
+        input.track_ends = vec![
+            (ticks(60.0), 0, TrackEnd::Deleted),
+            (ticks(70.0), 1, TrackEnd::Deleted),
+            (ticks(80.0), 2, TrackEnd::Deleted),
+            (ticks(100.0), 3, TrackEnd::Killed),
+            (ticks(103.05), 5, TrackEnd::Deleted),
+            (ticks(140.0), 4, TrackEnd::Deleted),
+        ];
+        let wreck = ticks(100.0) + WRECK_FINISHED_TICKS;
+        for config in configs() {
+            let log = run(&h, config.flown(), 200, input.clone());
+            assert_eq!(times(&log, id(&h, 1, "UP 4")), [ticks(40.0)]);
+            assert_eq!(times(&log, id(&h, 1, "CLEAR")), [ticks(103.05)]);
+            assert_eq!(times(&log, id(&h, 1, "UP 1")), [ticks(10.0), ticks(108.0)]);
+            assert_eq!(times(&log, id(&h, 1, "DOWN 1")), [wreck], "{config:?}");
+            assert_eq!(empties(&h, &log, 1), [ticks(103.05), wreck], "{config:?}");
+            for role in ["DOWN 2", "DOWN 3"] {
+                assert!(times(&log, id(&h, 1, role)).is_empty());
+            }
+        }
+    }
+
+    /// 0058: a kill inside steps the count down once, when the wreck's
+    /// Finished arrives, not at the kill.
+    #[test]
+    fn a_kill_steps_down_once_at_the_wreck_finished() {
+        let h = harness(&[CENTRE]);
+        let input = WalkerInput {
+            track_ends: vec![
+                (ticks(40.0), 0, TrackEnd::Killed),
+                (ticks(80.0), 1, TrackEnd::Deleted),
+            ],
+            ..tracks(vec![player(10..100, 100), player(20..100, 100)])
+        };
+        for config in configs() {
+            let log = run(&h, config.flown(), 100, input.clone());
+            assert_eq!(
+                times(&log, id(&h, 1, "DOWN 2")),
+                [ticks(40.0) + WRECK_FINISHED_TICKS],
+                "{config:?}"
+            );
+            assert_eq!(times(&log, id(&h, 1, "DOWN 1")), [ticks(80.0)]);
+            assert_eq!(empties(&h, &log, 1), [ticks(80.0)]);
+        }
+    }
+
+    /// 0058: a Delete raises Finished and Finished alive in one tick (flights
+    /// 2P and 2S). Only Finished is wired, so the count steps down once.
+    #[test]
+    fn a_delete_steps_down_once() {
+        let h = harness(&[CENTRE]);
+        let input = WalkerInput {
+            track_ends: vec![(ticks(40.0), 0, TrackEnd::Deleted)],
+            ..tracks(vec![player(10..200, 100), player(20..200, 100)])
+        };
+        for config in configs() {
+            let log = run(&h, config.flown(), 100, input.clone());
+            assert_eq!(times(&log, id(&h, 1, "DOWN 2")), [ticks(40.0)], "{config:?}");
+            assert!(times(&log, id(&h, 1, "DOWN 1")).is_empty());
+            assert!(empties(&h, &log, 1).is_empty());
         }
     }
 
