@@ -24,6 +24,7 @@
 //! * recon.rs / mapground.rs — classify + snap on park
 
 use crate::ast::Il2Entity;
+use crate::model_spec::{self, ModelClass};
 
 /// Exact script type-id (filename without `.txt`) → metres.
 /// High end of a published band (e.g. Sherman 1500–2000 → 2000).
@@ -81,6 +82,7 @@ pub enum ArmyUnitKind {
     Infantry,
     Train,
     MobileArtillery,
+    AntiAir,
 }
 
 impl ArmyUnitKind {
@@ -93,8 +95,29 @@ impl ArmyUnitKind {
             Self::Infantry => "Infantry",
             Self::Train => "Train",
             Self::MobileArtillery => "Mobile artillery",
+            Self::AntiAir => "Anti-air",
         }
     }
+}
+
+/// A battery whose vehicles are flak, with no other vehicle class mixed in.
+pub fn group_is_antiair(root: &Il2Entity) -> bool {
+    let mut flak = 0usize;
+    let mut other = 0usize;
+    root.for_each(&mut |entity| {
+        if entity.block_type != "Vehicle" && entity.block_type != "Block" {
+            return;
+        }
+        let Some(script) = entity.property("Script").filter(|s| !s.is_empty()) else {
+            return;
+        };
+        match model_spec::class_for(script) {
+            ModelClass::LightFlak | ModelClass::HeavyFlak | ModelClass::LightAaa => flak += 1,
+            ModelClass::Unknown => {}
+            _ => other += 1,
+        }
+    });
+    flak > 0 && other == 0
 }
 
 fn type_id(script: &str) -> String {
@@ -249,6 +272,9 @@ pub fn classify_army_unit(root: &Il2Entity) -> ArmyUnitKind {
     }
     if group_is_infantry(root) {
         return ArmyUnitKind::Infantry;
+    }
+    if group_is_antiair(root) {
+        return ArmyUnitKind::AntiAir;
     }
     let range = group_weapon_range(root);
     let hunts_ground = group_has_ground_attack_area(root);
@@ -472,5 +498,31 @@ mod tests {
         assert_eq!(root.children[0].property("XPos"), Some("100000.000"));
         assert_eq!(root.children[0].property("ZPos"), Some("200000.000"));
         assert_eq!(root.children[1].property("XPos"), Some("3.000"));
+    }
+
+    fn vehicle(script: &str) -> Il2Entity {
+        let mut entity = Il2Entity::new("Vehicle");
+        entity.set_property("Script", script);
+        entity
+    }
+
+    #[test]
+    fn a_flak_battery_is_anti_air() {
+        let mut root = Il2Entity::new("Group");
+        root.children.push(vehicle(
+            r"LuaScripts\WorldObjects\fixedobjects\boforsl60.txt",
+        ));
+        assert_eq!(classify_army_unit(&root), ArmyUnitKind::AntiAir);
+        assert!(group_is_antiair(&root));
+
+        let mut tank = Il2Entity::new("Group");
+        tank.children
+            .push(vehicle(r"LuaScripts\WorldObjects\vehicles\t34-85.txt"));
+        assert_ne!(classify_army_unit(&tank), ArmyUnitKind::AntiAir);
+
+        let mut mixed = Il2Entity::new("Group");
+        mixed.children.push(vehicle(r"fixedobjects\boforsl60.txt"));
+        mixed.children.push(vehicle(r"vehicles\t34-85.txt"));
+        assert!(!group_is_antiair(&mixed));
     }
 }

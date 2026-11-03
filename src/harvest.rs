@@ -690,7 +690,10 @@ pub fn place_ramp_start(
     Ok(spot)
 }
 
-fn ramp_spot(group: &Il2Entity, takeoff_heading: Option<f64>) -> Result<(AirRef, SpawnSpot), String> {
+fn ramp_spot(
+    group: &Il2Entity,
+    takeoff_heading: Option<f64>,
+) -> Result<(AirRef, SpawnSpot), String> {
     let air = find_one_airfield(group)?;
     let nodes = taxi_nodes_for(group, air.entity_id)?;
     let ends = threshold_indexes(&nodes)?;
@@ -1824,7 +1827,10 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
                 "country {country} must not copy the USA coordinate"
             );
             let (air, ent) = field_and_entity(&field);
-            assert_eq!(air.property("Country"), Some(country.to_string()).as_deref());
+            assert_eq!(
+                air.property("Country"),
+                Some(country.to_string()).as_deref()
+            );
             assert_eq!(air.property("Model"), Some(usa_model.as_str()));
             assert_eq!(air.property("Script"), Some(usa_script.as_str()));
             assert!(air.children.iter().all(|c| c.block_type != "Planes"));
@@ -1864,10 +1870,7 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
 Group\r\n{\r\n  Airfield\r\n  {\r\n    Name = \"K-22_Onchon_AF\";\r\n    Index = 1;\r\n    LinkTrId = 2;\r\n    XPos = 256140.000;\r\n    YPos = 14.214;\r\n    ZPos = 132695.000;\r\n    YOri = 0;\r\n    Country = 502;\r\n    Model = \"graphics\\airfields\\fakefield.mgm\";\r\n    Script = \"LuaScripts\\WorldObjects\\Airfields\\fakefield.txt\";\r\n  }\r\n  MCU_TR_Entity\r\n  {\r\n    Index = 2;\r\n    Name = \"Airfield entity\";\r\n    XPos = 256140.000;\r\n    YPos = 14.414;\r\n    ZPos = 132695.000;\r\n    YOri = 0;\r\n    MisObjID = 1;\r\n  }\r\n}\r\n";
         let mut root = parse_group_file(text).unwrap();
         let err = place_ramp_start(&mut root, None).unwrap_err();
-        assert!(
-            err.contains("taxi graph"),
-            "{err}"
-        );
+        assert!(err.contains("taxi graph"), "{err}");
         let (air, _) = field_and_entity(&root);
         assert_eq!(air.property("XPos"), Some("256140.000"));
         assert_eq!(air.property("ZPos"), Some("132695.000"));
@@ -1962,7 +1965,7 @@ Group\r\n{\r\n  Airfield\r\n  {\r\n    Name = \"K-22_Onchon_AF\";\r\n    Index =
         assert_eq!(plane.property("StartType"), Some("2"));
         assert_eq!(plane.property("SnapTo"), Some("2"));
         assert_eq!(plane.property("Altitude"), Some("0"));
-        assert_eq!(plane.property("Name"), Some("\"Parked - Clean\""));
+        assert_eq!(plane.property("Name"), Some("\"Parked - Long range\""));
         assert_eq!(
             air.property("Model"),
             Some(r#""graphics\airfields\fakefield_rnwspawn.mgm""#)

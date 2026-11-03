@@ -12,6 +12,7 @@
 //! * `fn default_field` / `fn default_plane` / `fn plane_paths`
 //! * `fn field_group` — one field as a `Group`
 //! * `fn combined_group` — several fields in one `Group`
+//! * `fn read_mission` / `fn is_air_start_group` / `fn merge_bank`
 //! * `COUNTRY_NATO` (601) / `COUNTRY_DPRK` (502)
 //!
 //! ## Used by
@@ -104,7 +105,7 @@ pub fn default_plane(type_id: &str) -> AirStartPlane {
         type_id: type_id.to_string(),
         ai_level: 2,
         altitude_m: 1500,
-        fuel: 0.65,
+        fuel: default_fuel(type_id),
         payload_id: 0,
         mod_mask: payloads::default_mod_mask_str(&script),
         renewable: true,
@@ -129,7 +130,16 @@ pub fn default_field(name: impl Into<String>, nato: bool) -> AirStartField {
     }
 }
 
-/// Reset payload and mods when the aircraft type changes.
+/// Fuel for a new aircraft. The F-51 stays at 65%. Every other type starts full.
+pub fn default_fuel(type_id: &str) -> f64 {
+    if type_id.eq_ignore_ascii_case("f51d") {
+        0.65
+    } else {
+        1.0
+    }
+}
+
+/// Reset payload, mods, and fuel when the aircraft type changes.
 pub fn apply_type(plane: &mut AirStartPlane, type_id: &str) {
     if plane.type_id == type_id {
         return;
@@ -138,6 +148,7 @@ pub fn apply_type(plane: &mut AirStartPlane, type_id: &str) {
     plane.type_id = fresh.type_id;
     plane.payload_id = fresh.payload_id;
     plane.mod_mask = fresh.mod_mask;
+    plane.fuel = fresh.fuel;
 }
 
 /// One field wrapped in a `Group` named after it.
@@ -346,6 +357,242 @@ fn fmt_fuel(fuel: f64) -> String {
     }
 }
 
+/// Aircraft lists read off a base map. `air_starts` are fakefields with no
+/// taxi graph. `fields` are defined airfields (a taxi graph, or the runway
+/// spawn model) that already carry a `Planes` list.
+#[derive(Clone, Debug, Default)]
+pub struct MissionAir {
+    pub air_starts: Vec<PlacedAirStart>,
+    pub fields: Vec<ImportedField>,
+}
+
+/// One defined airfield and the aircraft written on it.
+#[derive(Clone, Debug)]
+pub struct ImportedField {
+    pub group: Il2Entity,
+    pub planes: Vec<AirStartPlane>,
+}
+
+/// Air starts and defined-airfield aircraft anywhere under `root`.
+pub fn read_mission(root: &Il2Entity) -> MissionAir {
+    let mut out = MissionAir::default();
+    scan_air(root, &mut out);
+    out
+}
+
+/// True when `group` is only fakefield air starts, so a base-map import
+/// should not treat it as a ground pack or a reference airfield.
+pub fn is_air_start_group(group: &Il2Entity) -> bool {
+    let read = read_mission(group);
+    !read.air_starts.is_empty() && read.fields.is_empty() && !has_ground_unit(group)
+}
+
+/// Add placed air starts to the Airfield bank. A bank entry with the same
+/// name is replaced by the imported aircraft.
+pub fn merge_bank(bank: &mut Vec<AirStartField>, placed: &[PlacedAirStart]) {
+    for placed in placed {
+        if let Some(existing) = bank
+            .iter_mut()
+            .find(|field| field.name == placed.field.name)
+        {
+            *existing = placed.field.clone();
+        } else {
+            bank.push(placed.field.clone());
+        }
+    }
+}
+
+fn scan_air(node: &Il2Entity, out: &mut MissionAir) {
+    let nested: Vec<&Il2Entity> = node
+        .children
+        .iter()
+        .filter(|child| child.block_type == "Group" && has_block(child, "Airfield"))
+        .collect();
+    if node.block_type == "Group" && nested.is_empty() && has_block(node, "Airfield") {
+        classify_field_group(node, out);
+        return;
+    }
+    for child in nested {
+        scan_air(child, out);
+    }
+}
+
+fn classify_field_group(group: &Il2Entity, out: &mut MissionAir) {
+    let Some(air) = find_block(group, "Airfield") else {
+        return;
+    };
+    if is_pure_fakefield(air) && !has_block(group, "MCU_TR_TaxiGraph") {
+        if let Some(placed) = placed_from_airfield(air, group) {
+            out.air_starts.push(placed);
+        }
+        return;
+    }
+    let planes = planes_of(air);
+    if planes.is_empty() {
+        return;
+    }
+    out.fields.push(ImportedField {
+        group: group.clone(),
+        planes,
+    });
+}
+
+fn placed_from_airfield(air: &Il2Entity, group: &Il2Entity) -> Option<PlacedAirStart> {
+    let (x, z) = air.pos_xz().or_else(|| group.first_xz())?;
+    let country = prop_int(air, "Country").unwrap_or(COUNTRY_NATO);
+    let name = useful_name(air.name())
+        .or_else(|| useful_name(group.name()))
+        .unwrap_or_else(|| "Air start".to_string());
+    Some(PlacedAirStart {
+        field: AirStartField {
+            name,
+            nato: crate::aircraft::country_is_nato(country) != Some(false),
+            heading_deg: prop_f64(air, "YOri").unwrap_or(0.0).rem_euclid(360.0),
+            planes: planes_of(air),
+        },
+        x,
+        z,
+    })
+}
+
+fn planes_of(air: &Il2Entity) -> Vec<AirStartPlane> {
+    air.children
+        .iter()
+        .filter(|child| child.block_type == "Planes")
+        .flat_map(|list| list.children.iter().filter_map(plane_from_entry))
+        .collect()
+}
+
+fn plane_from_entry(entry: &Il2Entity) -> Option<AirStartPlane> {
+    if entry.block_type != "Plane" {
+        return None;
+    }
+    let type_id = plane_type_id(entry)?;
+    let mut plane = default_plane(&type_id);
+    if let Some(number) = prop_int(entry, "Number") {
+        plane.number = number;
+    }
+    if let Some(level) = prop_int(entry, "AILevel") {
+        plane.ai_level = level.clamp(0, 4);
+    }
+    if let Some(altitude) = prop_int(entry, "Altitude") {
+        plane.altitude_m = altitude.max(0);
+    }
+    if let Some(fuel) = prop_f64(entry, "Fuel") {
+        plane.fuel = fuel.clamp(0.0, 1.0);
+    }
+    if let Some(payload) = prop_int(entry, "PayloadId") {
+        plane.payload_id = payload;
+    }
+    if let Some(mask) = entry.property("ModMask") {
+        let mask = mask.trim().trim_matches('"');
+        if !mask.is_empty() {
+            plane.mod_mask = mask.to_string();
+        }
+    }
+    if let Some(on) = prop_bit(entry, "Renewable") {
+        plane.renewable = on;
+    }
+    if let Some(seconds) = prop_int(entry, "RenewTime") {
+        plane.renew_time_s = seconds.max(0);
+    }
+    if let Some(on) = prop_bit(entry, "LimitAmmo") {
+        plane.limit_ammo = on;
+    }
+    if let Some(on) = prop_bit(entry, "Engageable") {
+        plane.engageable = on;
+    }
+    if let Some(on) = prop_bit(entry, "Vulnerable") {
+        plane.vulnerable = on;
+    }
+    if let Some(on) = prop_bit(entry, "AIRTBDecision") {
+        plane.rtb = on;
+    }
+    let start = prop_int(entry, "StartType").unwrap_or(0);
+    let snap = prop_int(entry, "SnapTo").unwrap_or(0);
+    plane.parking_snap = snap == 2 || start == 2 || start == 3;
+    Some(plane)
+}
+
+fn plane_type_id(entry: &Il2Entity) -> Option<String> {
+    for key in ["Script", "Model"] {
+        let Some(raw) = entry.property(key) else {
+            continue;
+        };
+        let text = raw.trim().trim_matches('"').replace('/', "\\");
+        let file = text.rsplit('\\').next().unwrap_or("");
+        let stem = file
+            .strip_suffix(".txt")
+            .or_else(|| file.strip_suffix(".mgm"))
+            .unwrap_or(file);
+        if !stem.is_empty() {
+            return Some(stem.to_string());
+        }
+    }
+    None
+}
+
+fn is_pure_fakefield(air: &Il2Entity) -> bool {
+    let blob = format!(
+        "{} {}",
+        air.property("Script").unwrap_or(""),
+        air.property("Model").unwrap_or("")
+    )
+    .to_ascii_lowercase();
+    blob.contains("fakefield") && !blob.contains("rnwspawn")
+}
+
+fn useful_name(name: Option<&str>) -> Option<String> {
+    let name = name?.trim();
+    if name.is_empty()
+        || name.eq_ignore_ascii_case("airfield")
+        || name.eq_ignore_ascii_case("group")
+        || name.eq_ignore_ascii_case("airfield entity")
+    {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+fn has_block(node: &Il2Entity, block_type: &str) -> bool {
+    node.block_type == block_type
+        || node
+            .children
+            .iter()
+            .any(|child| has_block(child, block_type))
+}
+
+fn find_block<'a>(node: &'a Il2Entity, block_type: &str) -> Option<&'a Il2Entity> {
+    if node.block_type == block_type {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| find_block(child, block_type))
+}
+
+fn has_ground_unit(node: &Il2Entity) -> bool {
+    matches!(node.block_type.as_str(), "Vehicle" | "Ship" | "Train")
+        || node.children.iter().any(has_ground_unit)
+}
+
+fn prop_int(entity: &Il2Entity, key: &str) -> Option<i32> {
+    entity.property(key)?.trim().parse().ok()
+}
+
+fn prop_f64(entity: &Il2Entity, key: &str) -> Option<f64> {
+    entity.property(key)?.trim().parse().ok()
+}
+
+fn prop_bit(entity: &Il2Entity, key: &str) -> Option<bool> {
+    match entity.property(key)?.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
 /// Flyable Korea aircraft. AI-only types (F-84, bombers, transports) stay off the field.
 const FLYABLE: &[&str] = &[
     "f51d", "f80c10", "f86a5", "il10", "mig15bis", "la11", "yak9p",
@@ -525,6 +772,110 @@ mod tests {
     }
 
     #[test]
+    fn read_mission_round_trips_air_starts() {
+        let mut north = default_field("CAP North", false);
+        north.heading_deg = 45.0;
+        north.planes[0].number = 4;
+        north.planes[0].altitude_m = 2200;
+        north.planes[0].ai_level = 3;
+        north.planes[0].renewable = false;
+        north.planes[0].fuel = 0.4;
+        let south = default_field("CAP South", true);
+        let placed = vec![
+            PlacedAirStart {
+                field: north,
+                x: 120_000.0,
+                z: 240_000.0,
+            },
+            PlacedAirStart {
+                field: south,
+                x: 130_000.0,
+                z: 250_000.0,
+            },
+        ];
+        let group = combined_group(&placed, &[15.0, 20.0]);
+        let text = crate::serialize::serialize_group(&group);
+        let root = parse_group_file(&text).expect("reparse");
+        assert!(is_air_start_group(&root));
+        let read = read_mission(&root);
+        assert!(read.fields.is_empty());
+        assert_eq!(read.air_starts.len(), 2);
+        let cap = &read.air_starts[0];
+        assert_eq!(cap.field.name, "CAP North");
+        assert!(!cap.field.nato);
+        assert!((cap.x - 120_000.0).abs() < 0.01);
+        assert!((cap.z - 240_000.0).abs() < 0.01);
+        assert!((cap.field.heading_deg - 45.0).abs() < 0.01);
+        assert_eq!(cap.field.planes[0].type_id, "mig15bis");
+        assert_eq!(cap.field.planes[0].number, 4);
+        assert_eq!(cap.field.planes[0].altitude_m, 2200);
+        assert_eq!(cap.field.planes[0].ai_level, 3);
+        assert!(!cap.field.planes[0].renewable);
+        assert!((cap.field.planes[0].fuel - 0.4).abs() < 0.001);
+        assert!(!cap.field.planes[0].parking_snap);
+        assert_eq!(read.air_starts[1].field.name, "CAP South");
+        assert!(read.air_starts[1].field.nato);
+        assert_eq!(read.air_starts[1].field.planes[0].type_id, "f51d");
+
+        let mut bank = vec![default_field("CAP North", true)];
+        merge_bank(&mut bank, &read.air_starts);
+        assert_eq!(bank.len(), 2);
+        assert!(!bank[0].nato);
+        assert_eq!(bank[0].planes[0].type_id, "mig15bis");
+        merge_bank(&mut bank, &read.air_starts);
+        assert_eq!(bank.len(), 2);
+    }
+
+    #[test]
+    fn read_mission_keeps_defined_airfields_with_their_aircraft() {
+        let mut field = default_field("ImportField", true);
+        field.planes[0] = default_plane("f86a5");
+        field.planes[0].parking_snap = true;
+        field.planes[0].payload_id = 2;
+        let mut group = field_group(&field, 1_000.0, 2_000.0, 10.0);
+        let air = group
+            .children
+            .iter_mut()
+            .find(|child| child.block_type == "Airfield")
+            .unwrap();
+        air.set_property("Model", r#""graphics\airfields\fakefield_rnwspawn.mgm""#);
+        air.set_property(
+            "Script",
+            r#""LuaScripts\WorldObjects\Airfields\fakefield_rnwspawn.txt""#,
+        );
+        let plane = air
+            .children
+            .iter_mut()
+            .find(|child| child.block_type == "Planes")
+            .unwrap()
+            .children
+            .get_mut(0)
+            .unwrap();
+        plane.set_property("StartType", "2");
+        plane.set_property("SnapTo", "2");
+        plane.set_property("Altitude", "0");
+        group.children.push(Il2Entity::new("MCU_TR_TaxiGraph"));
+
+        let text = crate::serialize::serialize_group(&group);
+        let root = parse_group_file(&text).expect("reparse");
+        assert!(!is_air_start_group(&root));
+        let read = read_mission(&root);
+        assert!(read.air_starts.is_empty());
+        assert_eq!(read.fields.len(), 1);
+        assert_eq!(read.fields[0].planes[0].type_id, "f86a5");
+        assert!(read.fields[0].planes[0].parking_snap);
+        assert_eq!(read.fields[0].planes[0].payload_id, 2);
+        assert_eq!(read.fields[0].planes[0].altitude_m, 0);
+
+        let mut parked = field_group(&default_field("Suwon", false), 3.0, 4.0, 0.0);
+        parked.children.push(Il2Entity::new("MCU_TR_TaxiGraph"));
+        let parked = read_mission(&parked);
+        assert!(parked.air_starts.is_empty());
+        assert_eq!(parked.fields.len(), 1);
+        assert_eq!(parked.fields[0].planes[0].type_id, "mig15bis");
+    }
+
+    #[test]
     fn changing_type_resets_loadout() {
         let mut plane = default_plane("f51d");
         plane.payload_id = 4;
@@ -535,5 +886,16 @@ mod tests {
         assert_ne!(plane.mod_mask, "999");
         apply_type(&mut plane, "f86a5");
         assert_eq!(plane.payload_id, 0);
+        assert!((plane.fuel - 1.0).abs() < 1e-9);
+        apply_type(&mut plane, "f51d");
+        assert!((plane.fuel - 0.65).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fuel_defaults_full_except_the_f51() {
+        assert!((default_plane("f51d").fuel - 0.65).abs() < 1e-9);
+        assert!((default_plane("mig15bis").fuel - 1.0).abs() < 1e-9);
+        assert!((default_plane("f86a5").fuel - 1.0).abs() < 1e-9);
+        assert!((default_plane("f80c10").fuel - 1.0).abs() < 1e-9);
     }
 }

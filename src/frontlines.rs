@@ -1430,11 +1430,15 @@ pub fn generate_front(opts: &FrontOptions) -> Result<FrontPack, String> {
     }
 
     if !opts.ref_groups.is_empty() {
-        let (group, n) = place_ref_groups(&opts.ref_groups, place, &mut next_id);
+        let (landscape, airfields, n) = place_ref_groups(&opts.ref_groups, place, &mut next_id);
         icon_count += n;
-        if n > 0 {
+        if let Some(group) = landscape {
             children.push(group);
-        } else {
+        }
+        if let Some(group) = airfields {
+            children.push(group);
+        }
+        if n == 0 {
             notes.push("No reference groups fall in the selected area (plus 10 km).".into());
         }
     }
@@ -1516,6 +1520,7 @@ const MAP_LAYER_NAMES: &[&str] = &[
     "Attack arrows",
     "Areas of influence",
     "Reference groups",
+    "Airfields",
     "AO outline",
     "Battles",
     "Troop buildups",
@@ -1532,6 +1537,7 @@ pub fn looks_like_base_map(root: &Il2Entity) -> bool {
 }
 
 /// Read AO, front, attack arrows, fighter packs, and unit packs from an exported base map.
+/// Fakefield air-start groups are left out; [`crate::airstart::read_mission`] restores them.
 pub fn inspect_base_map(root: &Il2Entity) -> Result<ImportedBaseMap, String> {
     if !looks_like_base_map(root) {
         return Err(
@@ -1572,6 +1578,9 @@ pub fn inspect_base_map(root: &Il2Entity) -> Result<ImportedBaseMap, String> {
         if MAP_LAYER_NAMES.iter().any(|n| *n == name) {
             continue;
         }
+        if crate::airstart::is_air_start_group(child) {
+            continue;
+        }
         if looks_like_fighter_pack(child) {
             let spots = fighter_group_spots(child);
             if spots.is_empty() {
@@ -1599,7 +1608,7 @@ pub fn inspect_base_map(root: &Il2Entity) -> Result<ImportedBaseMap, String> {
     let mut refs = Vec::new();
     if let Some(g) = root.find_by_name("Reference groups") {
         for (i, child) in g.children.iter().enumerate() {
-            if child.block_type != "Group" {
+            if child.block_type != "Group" || crate::airstart::is_air_start_group(child) {
                 continue;
             }
             let label = child
@@ -2198,21 +2207,77 @@ fn place_ref_groups(
     groups: &[MapRefGroup],
     place: WorldAabb,
     next_id: &mut i32,
-) -> (Il2Entity, usize) {
-    let mut g = named_group("Reference groups", next_id);
+) -> (Option<Il2Entity>, Option<Il2Entity>, usize) {
+    let mut landscape = named_group("Reference groups", next_id);
+    let mut dprk = named_group("DPRK", next_id);
+    let mut nato = named_group("NATO", next_id);
     let mut n = 0usize;
     for src in groups {
         let mut entity = src.entity.clone();
+        if anchored_outside(&entity, place) {
+            continue;
+        }
         strip_catalog_waypoints(&mut entity);
         prune_to_aabb(&mut entity, place);
         if !spatially_relevant(&entity, place) {
             continue;
         }
         let (clone, _) = duplicate_template(&entity, next_id);
-        g.children.push(clone);
+        if group_is_airfield(&clone) {
+            if airfield_is_nato(&clone) {
+                nato.children.push(clone);
+            } else {
+                dprk.children.push(clone);
+            }
+        } else {
+            landscape.children.push(clone);
+        }
         n += 1;
     }
-    (g, n)
+    let landscape = (!landscape.children.is_empty()).then_some(landscape);
+    let mut airfields = named_group("Airfields", next_id);
+    if !dprk.children.is_empty() {
+        airfields.children.push(dprk);
+    }
+    if !nato.children.is_empty() {
+        airfields.children.push(nato);
+    }
+    let airfields = (!airfields.children.is_empty()).then_some(airfields);
+    (landscape, airfields, n)
+}
+
+/// An airfield group belongs at its `Airfield` position. Outside the area,
+/// the whole group stays out, including logic blocks that have no position.
+pub fn anchored_outside(entity: &Il2Entity, aabb: WorldAabb) -> bool {
+    let mut pos = None;
+    entity.for_each(&mut |child| {
+        if pos.is_none() && child.block_type == "Airfield" {
+            pos = child.pos_xz();
+        }
+    });
+    pos.is_some_and(|(x, z)| !aabb.contains(x, z))
+}
+
+fn group_is_airfield(entity: &Il2Entity) -> bool {
+    let mut found = false;
+    entity.for_each(&mut |child| {
+        if child.block_type == "Airfield" {
+            found = true;
+        }
+    });
+    found
+}
+
+fn airfield_is_nato(entity: &Il2Entity) -> bool {
+    let mut country: Option<i32> = None;
+    entity.for_each(&mut |child| {
+        if country.is_none() && child.block_type == "Airfield" {
+            country = child
+                .property("Country")
+                .and_then(|value| value.parse().ok());
+        }
+    });
+    matches!(country, Some(code) if code / 100 == 6)
 }
 
 fn stamp_rooted_packs<'a, I>(packs: I, next_id: &mut i32) -> Vec<Il2Entity>
@@ -2245,7 +2310,7 @@ fn prune_to_aabb(entity: &mut Il2Entity, aabb: WorldAabb) {
 
 fn spatially_relevant(entity: &Il2Entity, aabb: WorldAabb) -> bool {
     if let Some((x, z)) = entity.pos_xz() {
-        return aabb.contains(x, z) || !entity.children.is_empty();
+        return aabb.contains(x, z);
     }
     !entity.children.is_empty() || entity.block_type != "Group"
 }
@@ -3144,7 +3209,8 @@ mod tests {
         })
         .unwrap();
         assert!(pack.root.find_by_name("K13 AFB").is_some());
-        assert!(pack.root.find_by_name("Airfields").is_none());
+        let airfields = pack.root.find_by_name("Airfields").expect("airfield group");
+        assert!(airfields.find_by_name("K13 AFB").is_some());
         assert!(pack.root.find_by_name("Buildings").is_none());
         let text = serialize_group(&pack.root);
         assert!(!text.contains("IconId = 102;"), "no building town icons");
@@ -3643,4 +3709,67 @@ mod tests {
         assert!((imported.fighters[0].spots[0].0 - 110_000.0).abs() < 2.0);
         assert!((imported.fighters[0].spots[1].0 - 130_000.0).abs() < 2.0);
     }
+
+    #[test]
+    fn inspect_base_map_does_not_treat_air_starts_as_units() {
+        let mut field = crate::airstart::default_field("CAP North", false);
+        field.heading_deg = 45.0;
+        let placed = vec![crate::airstart::PlacedAirStart {
+            field,
+            x: 120_000.0,
+            z: 240_000.0,
+        }];
+        let starts = crate::airstart::combined_group(&placed, &[15.0]);
+        let mut root = Il2Entity::new("Group");
+        root.set_name("Korea Base Map Custom");
+        root.children.push(starts);
+        let imported = inspect_base_map(&root).expect("inspect");
+        assert!(imported.armies.is_empty());
+        assert!(imported.refs.is_empty());
+        let read = crate::airstart::read_mission(&root);
+        assert_eq!(read.air_starts.len(), 1);
+        assert_eq!(read.air_starts[0].field.name, "CAP North");
+        assert!(!read.air_starts[0].field.nato);
+    }
+
+    #[test]
+    fn an_airfield_outside_the_area_is_left_out() {
+        let inside = super::parked_airfield("K-23_Pyongyang_AF", 502, 120_000.0, 180_000.0);
+        let outside = super::parked_airfield("K-13_Suwon_AF", 601, 70_000.0, 288_000.0);
+        let pack = generate_front(&FrontOptions {
+            aabb: WorldAabb::from_corners(100_000.0, 160_000.0, 160_000.0, 220_000.0),
+            ref_groups: vec![
+                MapRefGroup {
+                    path: PathBuf::from("K-23.Group"),
+                    entity: inside,
+                },
+                MapRefGroup {
+                    path: PathBuf::from("K-13.Group"),
+                    entity: outside,
+                },
+            ],
+            ..FrontOptions::default()
+        })
+        .unwrap();
+        let airfields = pack.root.find_by_name("Airfields").expect("airfields");
+        assert!(airfields.find_by_name("K-23_Pyongyang_AF").is_some());
+        assert!(pack.root.find_by_name("K-13_Suwon_AF").is_none());
+        assert!(airfields.find_by_name("DPRK").is_some());
+    }
+}
+
+fn parked_airfield(name: &str, country: i32, x: f64, z: f64) -> Il2Entity {
+    let mut root = Il2Entity::new("Group");
+    root.set_name(name);
+    let mut air = Il2Entity::new("Airfield");
+    air.set_name(name);
+    air.set_property("XPos", format!("{x:.3}"));
+    air.set_property("ZPos", format!("{z:.3}"));
+    air.set_property("Country", country.to_string());
+    air.children.push(Il2Entity::new("Planes"));
+    root.children.push(air);
+    let mut timer = Il2Entity::new("MCU_Timer");
+    timer.set_name("Logic");
+    root.children.push(timer);
+    root
 }

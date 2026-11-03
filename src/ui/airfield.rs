@@ -4,9 +4,10 @@
 //! page: load and export panels, the harvest section, the field-spawn
 //! aircraft list, and the air-start bank. The two aircraft lists are
 //! separate. Harvested airfields from the database folder are listed
-//! together; each one keeps its own field-spawn aircraft. The list splits
-//! airbases inside the map area from the rest, then by DPRK or NATO side of
-//! the front, and marks a field with no runway group as data required.
+//! together; each one keeps its own field-spawn aircraft. Instructions sit
+//! at the top of the right column. The list then splits airbases and every
+//! air start inside the map area from the rest, then by DPRK or NATO, and
+//! marks a field with no runway group as data required.
 //!
 //! `ui.rs` is the anchor. It owns the app struct (the `airfield_*` /
 //! `air_start*` / `harvest_*` fields), the mode rail, and the shortcuts,
@@ -26,7 +27,6 @@ use std::path::{Path, PathBuf};
 use eframe::egui::{self, Align, Align2, FontId, Layout, RichText, Sense, Stroke, Vec2};
 
 use crate::aircraft::{COUNTRIES, country_is_nato};
-use crate::korea_fields::{self, HarvestHit};
 use crate::airfield::{
     EASTERN_PLANE_COALITIONS, WESTERN_PLANE_COALITIONS, clean_airfield, inspect_airfield,
 };
@@ -35,6 +35,7 @@ use crate::ast::Il2Entity;
 use crate::frontlines::PLACE_MARGIN;
 use crate::harvest::{GenWatcher, HarvestOutcome, find_gen_file, harvest_file, place_field_spawn};
 use crate::help::HelpTopic;
+use crate::korea_fields::{self, HarvestHit};
 use crate::mapclip::{WorldAabb, on_dprk_side};
 use crate::parser::parse_il2_document;
 use crate::provisions::{self, guess_nato};
@@ -70,6 +71,40 @@ pub(super) struct AirbaseSlot {
     pub planes: Vec<AirStartPlane>,
     /// False when the user loaded a file that is not in the database folder.
     pub from_folder: bool,
+}
+
+fn same_imported_field(slot: &AirbaseSlot, imported: &provisions::AirfieldIdentity) -> bool {
+    let id = provisions::airfield_identity(&slot.root, &slot.path);
+    if id.key != imported.key {
+        return false;
+    }
+    match (id.country, imported.country) {
+        (Some(left), Some(right)) => left == right,
+        _ => true,
+    }
+}
+
+fn slot_from_imported(imported: &crate::airstart::ImportedField) -> AirbaseSlot {
+    let id = provisions::airfield_identity(&imported.group, Path::new("field.Group"));
+    let country = id
+        .country
+        .map(|code| format!("_{code}"))
+        .unwrap_or_default();
+    let path = PathBuf::from(format!(
+        "{}{country}.Group",
+        crate::airstart::file_stem(&id.key)
+    ));
+    let nato = guess_nato(&imported.group, &path);
+    let info = inspect_airfield(&imported.group);
+    AirbaseSlot {
+        path,
+        root: imported.group.clone(),
+        info,
+        western: nato,
+        nato,
+        planes: imported.planes.clone(),
+        from_folder: false,
+    }
 }
 
 impl AirbaseSlot {
@@ -203,8 +238,7 @@ impl super::GroupGeneratorApp {
                 self.load_airfield();
             }
             ui.add_space(16.0);
-            self.field_spawn_panel(ui);
-            self.air_starts_panel(ui);
+            self.field_editors(ui);
             self.harvest_log_panel(ui);
             return;
         };
@@ -275,9 +309,22 @@ impl super::GroupGeneratorApp {
             "Still required after export: add planes to fly and set the starting location.",
         );
         ui.add_space(16.0);
-        self.field_spawn_panel(ui);
-        self.air_starts_panel(ui);
+        self.field_editors(ui);
         self.harvest_log_panel(ui);
+    }
+
+    fn field_editors(&mut self, ui: &mut egui::Ui) {
+        if self.air_start_focus && self.air_start_open() {
+            self.air_start_editor(ui);
+            return;
+        }
+        self.field_spawn_panel(ui);
+    }
+
+    fn air_start_open(&self) -> bool {
+        self.air_start_placed
+            .is_some_and(|i| i < self.placed_air_starts.len())
+            || self.air_start_edit < self.air_starts.len()
     }
 
     fn field_spawn_panel(&mut self, ui: &mut egui::Ui) {
@@ -288,7 +335,7 @@ impl super::GroupGeneratorApp {
         );
         shell::hint(
             ui,
-            "Add planes to the selected airbase. This list is not an air start. A base map writes these planes onto that airfield.",
+            "Add planes to the selected airbase. Copy aircraft or Copy all, then Paste onto another airfield. A base map writes these planes onto that airfield.",
             false,
         );
         shell::segmented(
@@ -299,14 +346,25 @@ impl super::GroupGeneratorApp {
         ui.add_space(4.0);
         let mut add_plane = false;
         let mut remove_plane: Option<usize> = None;
+        let mut copy_plane: Option<usize> = None;
         for pi in 0..self.field_planes.len() {
             let summary = plane_summary(&self.field_planes[pi], true);
             let mut remove = false;
+            let mut copy = false;
             egui::CollapsingHeader::new(summary)
                 .id_salt(("field_spawn_plane", pi))
                 .default_open(false)
                 .show(ui, |ui| {
                     plane_card(ui, &mut self.field_planes[pi], &format!("field_{pi}"), true);
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 28.0],
+                            egui::Button::new("Copy aircraft"),
+                        )
+                        .clicked()
+                    {
+                        copy = true;
+                    }
                     if ui
                         .add_sized(
                             [ui.available_width(), 28.0],
@@ -317,10 +375,32 @@ impl super::GroupGeneratorApp {
                         remove = true;
                     }
                 });
+            if copy {
+                copy_plane = Some(pi);
+            }
             if remove {
                 remove_plane = Some(pi);
             }
         }
+        let mut copy_all = false;
+        let mut paste = false;
+        ui.add_enabled_ui(!self.field_planes.is_empty(), |ui| {
+            if ui
+                .add_sized([ui.available_width(), 28.0], egui::Button::new("Copy all"))
+                .clicked()
+            {
+                copy_all = true;
+            }
+        });
+        ui.add_enabled_ui(!self.plane_clip.is_empty(), |ui| {
+            if ui
+                .add_sized([ui.available_width(), 28.0], egui::Button::new("Paste"))
+                .on_hover_text("Add the copied aircraft to this airfield.")
+                .clicked()
+            {
+                paste = true;
+            }
+        });
         if ui
             .add_sized(
                 [ui.available_width(), 28.0],
@@ -330,6 +410,11 @@ impl super::GroupGeneratorApp {
         {
             add_plane = true;
         }
+        if let Some(pi) = copy_plane {
+            self.copy_planes(vec![self.field_planes[pi].clone()]);
+        } else if copy_all {
+            self.copy_planes(self.field_planes.clone());
+        }
         if let Some(pi) = remove_plane {
             self.field_planes.remove(pi);
         }
@@ -337,6 +422,24 @@ impl super::GroupGeneratorApp {
             self.field_planes
                 .push(new_field_plane(self.field_spawn_nato));
         }
+        if paste {
+            let clip = self.plane_clip.clone();
+            let n = clip.len();
+            self.field_planes.extend(clip);
+            self.status = Status::Info(format!("Pasted {n} aircraft."));
+        }
+    }
+
+    fn copy_planes(&mut self, planes: Vec<AirStartPlane>) {
+        if planes.is_empty() {
+            self.status = Status::Error("There are no aircraft to copy.".into());
+            return;
+        }
+        let n = planes.len();
+        self.plane_clip = planes;
+        self.status = Status::Info(format!(
+            "Copied {n} aircraft. Paste them onto another airfield."
+        ));
     }
 
     fn add_air_start(&mut self) {
@@ -344,6 +447,8 @@ impl super::GroupGeneratorApp {
         self.air_starts
             .push(airstart::default_field(format!("Air start {n}"), true));
         self.air_start_edit = self.air_starts.len() - 1;
+        self.air_start_placed = None;
+        self.air_start_focus = true;
     }
 
     fn export_air_starts_one(&mut self) {
@@ -399,118 +504,126 @@ impl super::GroupGeneratorApp {
         ));
     }
 
-    fn air_starts_panel(&mut self, ui: &mut egui::Ui) {
-        shell::section_title(
+    fn air_start_editor(&mut self, ui: &mut egui::Ui) {
+        let placed = self
+            .air_start_placed
+            .filter(|i| *i < self.placed_air_starts.len());
+        let count = self.placed_air_starts.len().max(self.air_starts.len());
+        shell::section_title(ui, "Air starts", Some(&count.to_string()));
+        shell::hint(
             ui,
-            "Air starts",
-            Some(&format!("{}", self.air_starts.len())),
+            "Each air start keeps its own aircraft. Copy aircraft or Copy all, then Paste onto another airfield.",
+            false,
         );
-        shell::hint(ui, "Place and turn copies on the Map tab.", false);
-        if self.air_starts.is_empty() {
+        if placed.is_none() && self.air_starts.is_empty() {
             shell::hint(ui, "Add an air start on the left.", false);
             return;
         }
-        if self.air_start_edit >= self.air_starts.len() {
+        if placed.is_none() && self.air_start_edit >= self.air_starts.len() {
             self.air_start_edit = self.air_starts.len() - 1;
         }
-        let mut pick = self.air_start_edit;
-        ui.horizontal_wrapped(|ui| {
-            for (i, field) in self.air_starts.iter().enumerate() {
-                let label = format!("{} · {}", field.name, field.side_label());
-                if ui.selectable_label(i == pick, label).clicked() {
-                    pick = i;
-                }
-            }
-        });
-        self.air_start_edit = pick;
-        ui.add_space(6.0);
-
-        let edit = self.air_start_edit;
-        let mut remove_field = false;
-        let mut add_plane = false;
-        let mut remove_plane: Option<usize> = None;
-        {
-            let field = &mut self.air_starts[edit];
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::TextEdit::singleline(&mut field.name)
-                        .desired_width(ui.available_width() - 132.0)
-                        .min_size(Vec2::new(80.0, 28.0)),
-                );
-                shell::segmented(ui, &mut field.nato, &[(true, "NATO"), (false, "DPRK")]);
-            });
-            ui.add_space(4.0);
-            for pi in 0..field.planes.len() {
-                let summary = plane_summary(&field.planes[pi], false);
-                let mut remove = false;
-                egui::CollapsingHeader::new(summary)
-                    .id_salt(("air_start_plane", edit, pi))
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        plane_card(
-                            ui,
-                            &mut field.planes[pi],
-                            &format!("air_{edit}_{pi}"),
-                            false,
-                        );
-                        if ui
-                            .add_sized(
-                                [ui.available_width(), 28.0],
-                                egui::Button::new("Remove aircraft"),
-                            )
-                            .clicked()
-                        {
-                            remove = true;
-                        }
-                    });
-                if remove {
-                    remove_plane = Some(pi);
-                }
-            }
-            if ui
-                .add_sized(
-                    [ui.available_width(), 28.0],
-                    egui::Button::new("Add aircraft"),
-                )
-                .clicked()
-            {
-                add_plane = true;
-            }
-            ui.add_space(6.0);
-            if ui
-                .add_sized(
-                    [ui.available_width(), 28.0],
-                    egui::Button::new("Remove air start"),
-                )
-                .clicked()
-            {
-                remove_field = true;
-            }
+        let salt = match placed {
+            Some(i) => format!("placed_{i}"),
+            None => format!("bank_{}", self.air_start_edit),
+        };
+        let can_paste = !self.plane_clip.is_empty();
+        let edit = if let Some(i) = placed {
+            air_start_form(ui, &mut self.placed_air_starts[i].field, &salt, can_paste)
+        } else {
+            let i = self.air_start_edit;
+            air_start_form(ui, &mut self.air_starts[i], &salt, can_paste)
+        };
+        let copied = if let Some(pi) = edit.copy_plane {
+            self.edited_air_start()
+                .and_then(|field| field.planes.get(pi).cloned())
+                .map(|plane| vec![plane])
+        } else if edit.copy_all {
+            self.edited_air_start().map(|field| field.planes.clone())
+        } else {
+            None
+        };
+        if let Some(planes) = copied {
+            self.copy_planes(planes);
         }
-        if let Some(pi) = remove_plane {
-            self.air_starts[edit].planes.remove(pi);
+        if let Some(pi) = edit.remove_plane {
+            self.edited_air_start()
+                .expect("air start")
+                .planes
+                .remove(pi);
         }
-        if add_plane {
-            let nato = self.air_starts[edit].nato;
+        if edit.add_plane {
+            let nato = self.edited_air_start().expect("air start").nato;
             let id = if nato { "f51d" } else { "mig15bis" };
-            self.air_starts[edit]
+            self.edited_air_start()
+                .expect("air start")
                 .planes
                 .push(airstart::default_plane(id));
         }
-        if remove_field {
-            self.air_starts.remove(edit);
-            if self.air_start_edit >= self.air_starts.len() && !self.air_starts.is_empty() {
-                self.air_start_edit = self.air_starts.len() - 1;
+        if edit.paste {
+            let clip = self.plane_clip.clone();
+            let n = clip.len();
+            if let Some(field) = self.edited_air_start() {
+                field.planes.extend(clip);
             }
-            if self
-                .air_start_place
-                .is_some_and(|i| i == edit || i >= self.air_starts.len())
-            {
-                self.air_start_place = None;
-                if self.map_drawing_mode == MapDrawingMode::PlaceAirStart {
-                    self.map_drawing_mode = MapDrawingMode::None;
+            self.status = Status::Info(format!("Pasted {n} aircraft."));
+        }
+        if edit.remove_field {
+            self.remove_edited_air_start();
+        }
+    }
+
+    fn edited_air_start(&mut self) -> Option<&mut airstart::AirStartField> {
+        if let Some(i) = self.air_start_placed
+            && i < self.placed_air_starts.len()
+        {
+            return Some(&mut self.placed_air_starts[i].field);
+        }
+        self.air_starts.get_mut(self.air_start_edit)
+    }
+
+    fn remove_edited_air_start(&mut self) {
+        if let Some(i) = self.air_start_placed {
+            if i < self.placed_air_starts.len() {
+                self.placed_air_starts.remove(i);
+                let fix = |slot: &mut Option<usize>| {
+                    if let Some(n) = *slot {
+                        if n == i {
+                            *slot = None;
+                        } else if n > i {
+                            *slot = Some(n - 1);
+                        }
+                    }
+                };
+                fix(&mut self.air_start_drag);
+                fix(&mut self.air_start_heading_drag);
+                self.air_start_placed = None;
+                if !self.placed_air_starts.is_empty() {
+                    self.air_start_placed = Some(i.min(self.placed_air_starts.len() - 1));
+                } else if self.air_starts.is_empty() {
+                    self.air_start_focus = false;
                 }
             }
+            return;
+        }
+        let edit = self.air_start_edit;
+        if edit >= self.air_starts.len() {
+            return;
+        }
+        self.air_starts.remove(edit);
+        if self.air_start_edit >= self.air_starts.len() && !self.air_starts.is_empty() {
+            self.air_start_edit = self.air_starts.len() - 1;
+        }
+        if self
+            .air_start_place
+            .is_some_and(|i| i == edit || i >= self.air_starts.len())
+        {
+            self.air_start_place = None;
+            if self.map_drawing_mode == MapDrawingMode::PlaceAirStart {
+                self.map_drawing_mode = MapDrawingMode::None;
+            }
+        }
+        if self.air_starts.is_empty() {
+            self.air_start_focus = false;
         }
     }
 
@@ -524,30 +637,209 @@ impl super::GroupGeneratorApp {
         crate::frontlines::densify(&raw, 4_000.0)
     }
 
+    pub(super) fn airbase_dup_dialog(&mut self, ctx: &egui::Context) {
+        let Some(dup) = self.next_airbase_duplicate() else {
+            return;
+        };
+        let mut remove = None;
+        let mut keep = false;
+        let keep_label = if dup.copies.len() > 2 {
+            "Keep all"
+        } else {
+            "Keep both"
+        };
+        egui::Window::new("Airbase loaded twice")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_max_width(420.0);
+                ui.label(format!(
+                    "{} is loaded more than once. Remove one copy, or keep them.",
+                    dup.title
+                ));
+                ui.add_space(8.0);
+                for (i, copy) in dup.copies.iter().enumerate() {
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 28.0],
+                            egui::Button::new(format!("Remove {}", copy.label)),
+                        )
+                        .clicked()
+                    {
+                        remove = Some(i);
+                    }
+                }
+                if ui
+                    .add_sized([ui.available_width(), 28.0], egui::Button::new(keep_label))
+                    .clicked()
+                {
+                    keep = true;
+                }
+            });
+        if keep {
+            self.airbase_dup_kept.push(dup.key);
+        } else if let Some(i) = remove {
+            self.hide_air_copy(&dup.copies[i]);
+        }
+    }
+
+    fn next_airbase_duplicate(&self) -> Option<AirDup> {
+        let area = self.front_aabb.expanded(PLACE_MARGIN);
+        let mut buckets: Vec<(String, Vec<AirCopy>)> = Vec::new();
+        let mut push = |key: String, copy: AirCopy| {
+            if self.airbase_dup_kept.iter().any(|kept| kept == &key) {
+                return;
+            }
+            if let Some((_, copies)) = buckets.iter_mut().find(|(name, _)| name == &key) {
+                copies.push(copy);
+            } else {
+                buckets.push((key, vec![copy]));
+            }
+        };
+        for slot in &self.airbases {
+            if !airbase_in_area(&slot.root, area) {
+                continue;
+            }
+            let id = provisions::airfield_identity(&slot.root, &slot.path);
+            let key = korea_fields::k_code(&id.key).unwrap_or(id.key);
+            let country = id.country.unwrap_or(0);
+            push(
+                key,
+                AirCopy {
+                    label: format!("{} · {}", country_name(country), airbase_label(slot)),
+                    path: Some(slot.path.clone()),
+                    catalog_file: None,
+                },
+            );
+        }
+        for record in &self.airbase_index {
+            if !area.contains(record.x, record.z) {
+                continue;
+            }
+            if self.catalog_hidden.iter().any(|file| file == &record.file)
+                || self
+                    .airbase_hidden
+                    .iter()
+                    .any(|path| same_airbase_file(path, &record.file))
+                || self
+                    .airbases
+                    .iter()
+                    .any(|slot| same_airbase_file(&slot.path, &record.file))
+            {
+                continue;
+            }
+            let key = korea_fields::k_code(&record.name).unwrap_or_else(|| record.name.clone());
+            push(
+                key,
+                AirCopy {
+                    label: format!("{} · {}", country_name(record.country), record.name),
+                    path: None,
+                    catalog_file: Some(record.file.clone()),
+                },
+            );
+        }
+        let (key, copies) = buckets.into_iter().find(|(_, copies)| copies.len() >= 2)?;
+        let title = key.to_ascii_uppercase();
+        Some(AirDup { key, title, copies })
+    }
+
+    fn hide_air_copy(&mut self, copy: &AirCopy) {
+        if let Some(path) = &copy.path {
+            if !self.airbase_hidden.iter().any(|hidden| hidden == path) {
+                self.airbase_hidden.push(path.clone());
+            }
+            self.airbases.retain(|slot| &slot.path != path);
+            self.map_refs.retain(|group| &group.path != path);
+            if self.airfield_path.as_ref() == Some(path) {
+                self.airfield_path = None;
+                self.airfield_root = None;
+                self.airfield_info = None;
+            }
+        }
+        if let Some(file) = &copy.catalog_file
+            && !self.catalog_hidden.iter().any(|hidden| hidden == file)
+        {
+            self.catalog_hidden.push(file.clone());
+        }
+        self.airbase_scan_dir.clear();
+        self.provisions_loaded_for.clear();
+    }
+
+    /// Harvested airfields for the list and the base map. A copy the user
+    /// removed stays out. If that was the coalition this side of the front
+    /// would have used, the copy they kept is placed instead.
+    pub(super) fn airfields_for_map(
+        &self,
+        groups: Vec<crate::frontlines::MapRefGroup>,
+    ) -> provisions::AirfieldPlacement {
+        let dropped = |path: &Path| {
+            self.airbase_hidden.iter().any(|hidden| hidden == path)
+                || self
+                    .catalog_hidden
+                    .iter()
+                    .any(|file| same_airbase_file(path, file))
+        };
+        let (hidden_groups, visible): (Vec<_>, Vec<_>) =
+            groups.into_iter().partition(|group| dropped(&group.path));
+        let mut placed = self.place_harvested_airfields(visible.clone());
+        let mut have: Vec<String> = placed.groups.iter().map(airfield_key).collect();
+        let hidden_keys: Vec<String> = hidden_groups.iter().map(airfield_key).collect();
+        for group in visible {
+            let key = airfield_key(&group);
+            if have.iter().any(|kept| kept == &key) || !hidden_keys.iter().any(|hid| hid == &key) {
+                continue;
+            }
+            have.push(key);
+            placed.groups.push(group);
+        }
+        placed
+    }
+
+    fn show_air_start(&mut self, row: &StartRow) {
+        self.air_start_focus = true;
+        match row.kind {
+            StartKind::Bank(i) => {
+                self.air_start_placed = None;
+                self.air_start_edit = i;
+            }
+            StartKind::Placed(i) => {
+                self.air_start_placed = Some(i);
+            }
+        }
+    }
+
     fn airbase_side_block(
         &mut self,
         ui: &mut egui::Ui,
         title: &str,
         slots: &[usize],
         gaps: &[AreaGap],
+        starts: &[StartRow],
+        mark_data: bool,
         pick: &mut Option<usize>,
+        remove: &mut Option<usize>,
+        start_pick: &mut Option<usize>,
     ) {
-        let count = slots.len() + gaps.len();
-        shell::section_title(ui, title, Some(&count.to_string()));
+        let count = slots.len() + gaps.len() + starts.len();
         if count == 0 {
-            shell::hint(ui, "None on this side of the front.", false);
             return;
         }
+        shell::section_title(ui, title, Some(&count.to_string()));
         for &i in slots {
             let slot = &self.airbases[i];
-            let selected = self.airfield_path.as_ref() == Some(&slot.path);
-            if airbase_button(
+            let selected = !self.air_start_focus && self.airfield_path.as_ref() == Some(&slot.path);
+            let (clicked, removed) = airbase_remove_row(
                 ui,
                 &airbase_label(slot),
                 selected,
-                airbase_needs_data(&slot.root),
-            ) {
+                mark_data && airbase_needs_data(&slot.root),
+            );
+            if clicked {
                 *pick = Some(i);
+            }
+            if removed {
+                *remove = Some(i);
             }
         }
         for gap in gaps {
@@ -557,14 +849,81 @@ impl super::GroupGeneratorApp {
             );
             ui.label(RichText::new("Data required").color(c::WARN_TEXT));
         }
+        for row in starts {
+            let selected = self.air_start_focus && self.start_row_selected(row);
+            if airbase_button(ui, &row.label, selected, false) {
+                *start_pick = Some(row.source);
+            }
+        }
+    }
+
+    fn start_row_selected(&self, row: &StartRow) -> bool {
+        match row.kind {
+            StartKind::Bank(i) => self.air_start_placed.is_none() && i == self.air_start_edit,
+            StartKind::Placed(i) => self.air_start_placed == Some(i),
+        }
+    }
+
+    fn start_rows(&self) -> Vec<StartRow> {
+        let mut represented = vec![false; self.air_starts.len()];
+        let mut rows = Vec::new();
+        for (i, placed) in self.placed_air_starts.iter().enumerate() {
+            if let Some(bank) = self
+                .air_starts
+                .iter()
+                .position(|field| field.name == placed.field.name)
+            {
+                represented[bank] = true;
+            }
+            rows.push(StartRow {
+                source: rows.len(),
+                kind: StartKind::Placed(i),
+                nato: placed.field.nato,
+                label: format!(
+                    "{} · {:.0}°",
+                    placed.field.name,
+                    placed.field.heading_deg.rem_euclid(360.0)
+                ),
+            });
+        }
+        for (i, field) in self.air_starts.iter().enumerate() {
+            if represented[i] {
+                continue;
+            }
+            rows.push(StartRow {
+                source: rows.len(),
+                kind: StartKind::Bank(i),
+                nato: field.nato,
+                label: format!("{} · {}", field.name, field.side_label()),
+            });
+        }
+        let mut seen = Vec::new();
+        for row in &mut rows {
+            let n = seen
+                .iter()
+                .filter(|label: &&String| *label == &row.label)
+                .count();
+            seen.push(row.label.clone());
+            if n > 0 {
+                row.label = format!("{} ({})", row.label, n + 1);
+            }
+        }
+        rows
     }
 
     fn airfield_right_panel(&mut self, ui: &mut egui::Ui) {
-        let count = self.airbases.len();
+        let area = self.front_aabb.expanded(PLACE_MARGIN);
+        let starts = self.start_rows();
+        let listed = self
+            .airbases
+            .iter()
+            .filter(|slot| airbase_in_area(&slot.root, area))
+            .count();
+        let count = listed + starts.len();
         shell::section_title(ui, "Airbases", Some(&count.to_string()));
         shell::hint(
             ui,
-            "Airbases in the map area are split by the front: DPRK to the north, NATO to the south. Data required means that field has no runway group to place aircraft on.",
+            "DPRK is north of the front and NATO is south. Data required means that field has no runway group. Air starts are listed on the same side. Korea fields, under the list, are the sites in this area that still need a harvest.",
             false,
         );
         if self.front_aabb == WorldAabb::full_map() {
@@ -584,31 +943,47 @@ impl super::GroupGeneratorApp {
             self.airbase_scan_dir.clear();
             self.provisions_loaded_for.clear();
         }
-        let area = self.front_aabb.expanded(PLACE_MARGIN);
+        if ui
+            .add_sized(
+                [ui.available_width(), 28.0],
+                egui::Button::new("Restore preloaded"),
+            )
+            .on_hover_text("Put removed preloaded airbases back on the list.")
+            .clicked()
+        {
+            self.restore_preloaded_airbases();
+        }
+        if ui
+            .add_sized(
+                [ui.available_width(), 28.0],
+                egui::Button::new("Add airbase…"),
+            )
+            .on_hover_text("Load one airbase group onto the list.")
+            .clicked()
+        {
+            self.add_airbase_file();
+        }
         let front = self.front_for_sides();
         let mut inside = Vec::new();
-        let mut outside = Vec::new();
         for (i, slot) in self.airbases.iter().enumerate() {
             if airbase_in_area(&slot.root, area) {
                 inside.push(i);
-            } else {
-                outside.push(i);
             }
         }
-        let gaps = uncovered_in_area(
+        let mut gaps = uncovered_in_area(
             &self.airbase_index,
             &self.airbases,
             area,
             &front,
             &self.salients,
         );
-        if self.airbases.is_empty() && gaps.is_empty() {
+        gaps.retain(|gap| !self.catalog_hidden.iter().any(|file| file == &gap.file));
+        if inside.is_empty() && gaps.is_empty() && starts.is_empty() {
             shell::hint(ui, "None yet. Harvest airfields, or load a file.", false);
         } else {
-            let in_count = inside.len() + gaps.len();
-            shell::section_title(ui, "In the area", Some(&in_count.to_string()));
-            if in_count == 0 {
-                shell::hint(ui, "No airbases in the map area.", false);
+            let in_count = inside.len() + gaps.len() + starts.len();
+            if in_count > 0 {
+                shell::section_title(ui, "In the area", Some(&in_count.to_string()));
             }
             let mut dprk_slots = Vec::new();
             let mut nato_slots = Vec::new();
@@ -630,22 +1005,38 @@ impl super::GroupGeneratorApp {
                     nato_gaps.push(gap);
                 }
             }
+            let dprk_starts: Vec<_> = starts.iter().filter(|row| !row.nato).cloned().collect();
+            let nato_starts: Vec<_> = starts.iter().filter(|row| row.nato).cloned().collect();
             let mut pick: Option<usize> = None;
-            if in_count > 0 {
-                self.airbase_side_block(ui, "DPRK", &dprk_slots, &dprk_gaps, &mut pick);
-                self.airbase_side_block(ui, "NATO", &nato_slots, &nato_gaps, &mut pick);
-            }
-            if !outside.is_empty() {
-                shell::section_title(ui, "Outside the area", Some(&outside.len().to_string()));
-                for i in outside {
-                    let slot = &self.airbases[i];
-                    let selected = self.airfield_path.as_ref() == Some(&slot.path);
-                    if airbase_button(ui, &airbase_label(slot), selected, false) {
-                        pick = Some(i);
-                    }
-                }
-            }
-            if let Some(i) = pick {
+            let mut remove: Option<usize> = None;
+            let mut start_pick: Option<usize> = None;
+            self.airbase_side_block(
+                ui,
+                "DPRK",
+                &dprk_slots,
+                &dprk_gaps,
+                &dprk_starts,
+                true,
+                &mut pick,
+                &mut remove,
+                &mut start_pick,
+            );
+            self.airbase_side_block(
+                ui,
+                "NATO",
+                &nato_slots,
+                &nato_gaps,
+                &nato_starts,
+                true,
+                &mut pick,
+                &mut remove,
+                &mut start_pick,
+            );
+            if let Some(i) = remove {
+                self.remove_listed_airbase(i);
+            } else if let Some(i) = start_pick {
+                self.show_air_start(&starts[i]);
+            } else if let Some(i) = pick {
                 self.show_airbase(i);
             }
         }
@@ -934,7 +1325,75 @@ impl super::GroupGeneratorApp {
         slot.planes = self.field_planes.clone();
     }
 
+    fn restore_preloaded_airbases(&mut self) {
+        self.airbase_hidden.clear();
+        self.catalog_hidden.clear();
+        self.airbase_scan_dir.clear();
+        self.provisions_loaded_for.clear();
+        self.status = Status::Info("Restored the preloaded airbases.".into());
+    }
+
+    fn add_airbase_file(&mut self) {
+        let Some(path) = dialog::FileDialog::new()
+            .add_filter("IL-2 Group", &["Group", "group"])
+            .pick_file()
+        else {
+            return;
+        };
+        self.airbase_hidden.retain(|hidden| hidden != &path);
+        if let Some(i) = self.airbases.iter().position(|slot| slot.path == path) {
+            self.show_airbase(i);
+            self.status = Status::Info(format!("{} is already on the list.", path.display()));
+            return;
+        }
+        let root = match provisions::load_group(&path) {
+            Ok(group) => group.entity,
+            Err(err) => {
+                self.status = Status::Error(err);
+                return;
+            }
+        };
+        let outside = !airbase_in_area(&root, self.front_aabb.expanded(PLACE_MARGIN));
+        let mut slot = AirbaseSlot::scanned(path.clone(), root);
+        slot.from_folder = false;
+        self.airbases.push(slot);
+        let index = self.airbases.len() - 1;
+        if outside {
+            self.status = Status::Info(format!(
+                "Added {}. It is outside this area, so it stays off the list.",
+                path.display()
+            ));
+            return;
+        }
+        self.show_airbase(index);
+        self.status = Status::Info(format!("Added {}.", path.display()));
+    }
+
+    fn remove_listed_airbase(&mut self, index: usize) {
+        let Some(slot) = self.airbases.get(index) else {
+            return;
+        };
+        let path = slot.path.clone();
+        let name = airbase_label(slot);
+        if !self.airbase_hidden.iter().any(|hidden| hidden == &path) {
+            self.airbase_hidden.push(path.clone());
+        }
+        if self.airfield_path.as_ref() == Some(&path) {
+            self.airfield_path = None;
+            self.airfield_root = None;
+            self.airfield_info = None;
+        }
+        self.airbases.retain(|slot| slot.path != path);
+        self.map_refs.retain(|group| group.path != path);
+        self.provisions_loaded_for.clear();
+        self.status = Status::Info(format!(
+            "Removed {name} from the list. The file is still in the folder."
+        ));
+    }
+
     fn show_airbase(&mut self, index: usize) {
+        self.air_start_focus = false;
+        self.air_start_placed = None;
         self.remember_airbase_edits();
         let Some(slot) = self.airbases.get(index).cloned() else {
             return;
@@ -992,13 +1451,24 @@ impl super::GroupGeneratorApp {
         self.airfield_path = Some(path);
     }
 
-    fn sync_airbases(&mut self) {
+    /// Fill the airbase list from the harvest folder once per folder choice.
+    /// Does not select a field. Map export uses this so it places the same
+    /// airfields the Airfield tab lists.
+    pub(super) fn ensure_airbase_list(&mut self) {
         if !self.airbase_scan_dir.is_empty() {
             return;
         }
         let dir = self.harvest_db_dir.trim().to_string();
         self.rescan_airbases(Path::new(&dir));
         self.airbase_scan_dir = dir;
+    }
+
+    fn sync_airbases(&mut self) {
+        let first = self.airbase_scan_dir.is_empty();
+        self.ensure_airbase_list();
+        if !first {
+            return;
+        }
         if self.airfield_path.is_none() && !self.airbases.is_empty() {
             self.show_airbase(0);
         } else if let Some(path) = self.airfield_path.clone() {
@@ -1013,12 +1483,87 @@ impl super::GroupGeneratorApp {
         }
     }
 
+    pub(super) fn adopt_imported_air(&mut self, read: crate::airstart::MissionAir) {
+        self.placed_air_starts = read.air_starts.clone();
+        crate::airstart::merge_bank(&mut self.air_starts, &read.air_starts);
+        self.air_start_drag = None;
+        self.air_start_heading_drag = None;
+        self.air_start_place = None;
+        self.imported_fields = read.fields;
+        if self.airbase_scan_dir.is_empty() {
+            let dir = self.harvest_db_dir.trim().to_string();
+            self.rescan_airbases(Path::new(&dir));
+            self.airbase_scan_dir = dir;
+        }
+        self.apply_imported_field_spawns(true);
+    }
+
+    /// Copy aircraft from the last base-map load onto matching airbases.
+    /// `overwrite` replaces a list the user already edited. A scan uses
+    /// `false`, so a later refresh keeps those edits and still fills a
+    /// field that has none.
+    fn apply_imported_field_spawns(&mut self, overwrite: bool) {
+        let pending = self.imported_fields.clone();
+        let mut filled_folder = Vec::new();
+        for imported in &pending {
+            let imported_id =
+                provisions::airfield_identity(&imported.group, Path::new("field.Group"));
+            let folder_idx = self
+                .airbases
+                .iter()
+                .position(|slot| slot.from_folder && same_imported_field(slot, &imported_id));
+            let idx = folder_idx.or_else(|| {
+                self.airbases
+                    .iter()
+                    .position(|slot| same_imported_field(slot, &imported_id))
+            });
+            if let Some(i) = idx {
+                if overwrite || self.airbases[i].planes.is_empty() {
+                    self.airbases[i].planes = imported.planes.clone();
+                    if self.airfield_path.as_ref() == Some(&self.airbases[i].path) {
+                        self.field_planes = imported.planes.clone();
+                        self.field_spawn_nato = self.airbases[i].nato;
+                    }
+                }
+                if self.airbases[i].from_folder {
+                    filled_folder.push((imported_id.key, imported_id.country));
+                }
+            } else {
+                self.airbases.push(slot_from_imported(imported));
+            }
+        }
+        if !filled_folder.is_empty() {
+            self.airbases.retain(|slot| {
+                if slot.from_folder {
+                    return true;
+                }
+                let id = provisions::airfield_identity(&slot.root, &slot.path);
+                !filled_folder.iter().any(|(key, country)| {
+                    id.key == *key
+                        && match (id.country, *country) {
+                            (Some(a), Some(b)) => a == b,
+                            _ => true,
+                        }
+                })
+            });
+        }
+        if self
+            .airfield_path
+            .as_ref()
+            .is_some_and(|path| self.airbases.iter().all(|slot| &slot.path != path))
+        {
+            self.airfield_path = None;
+            self.airfield_root = None;
+            self.airfield_info = None;
+        }
+    }
+
     fn rescan_airbases(&mut self, dir: &Path) {
         let loaded: Vec<_> = provisions::harvested_airfield_paths(dir)
             .into_iter()
             .filter_map(|path| provisions::load_group(&path).ok())
             .collect();
-        let placed = self.place_harvested_airfields(loaded);
+        let placed = self.airfields_for_map(loaded);
         self.airfield_coalition_notes = placed.notes;
         let old = std::mem::take(&mut self.airbases);
         let mut next = Vec::new();
@@ -1038,7 +1583,9 @@ impl super::GroupGeneratorApp {
                 next.push(slot);
             }
         }
+        next.retain(|slot| !self.airbase_hidden.iter().any(|path| path == &slot.path));
         self.airbases = next;
+        self.apply_imported_field_spawns(false);
         self.airbase_index = crate::harvest::read_catalog(&dir.join("catalog.Group"))
             .unwrap_or_default()
             .into_iter()
@@ -1072,16 +1619,15 @@ impl super::GroupGeneratorApp {
         ui.add_space(8.0);
         ui.separator();
         shell::section_title(ui, "Korea fields", Some(&report.inside.len().to_string()));
-        shell::hint(
-            ui,
-            "Listed fields inside the map area. A harvest for the other coalition still counts as missing.",
-            false,
-        );
         if report.inside.is_empty() {
             shell::hint(ui, "No listed Korea fields in this area.", false);
         }
         for row in &report.inside {
-            let state = if row.harvested { "Harvested" } else { "Missing" };
+            let state = if row.harvested {
+                "Harvested"
+            } else {
+                "Missing"
+            };
             let text = format!("{} · {} · {state}", row.name, row.coalition);
             let color = if row.harvested { c::TEXT } else { c::WARN_TEXT };
             ui.label(RichText::new(text).color(color))
@@ -1237,12 +1783,149 @@ impl super::GroupGeneratorApp {
     }
 }
 
+struct AirStartForm {
+    remove_field: bool,
+    add_plane: bool,
+    remove_plane: Option<usize>,
+    copy_plane: Option<usize>,
+    copy_all: bool,
+    paste: bool,
+}
+
+fn air_start_form(
+    ui: &mut egui::Ui,
+    field: &mut airstart::AirStartField,
+    salt: &str,
+    can_paste: bool,
+) -> AirStartForm {
+    let mut remove_field = false;
+    let mut add_plane = false;
+    let mut remove_plane = None;
+    let mut copy_plane = None;
+    let mut copy_all = false;
+    let mut paste = false;
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut field.name)
+                .desired_width(ui.available_width() - 132.0)
+                .min_size(Vec2::new(80.0, 28.0)),
+        );
+        shell::segmented(ui, &mut field.nato, &[(true, "NATO"), (false, "DPRK")]);
+    });
+    ui.add_space(4.0);
+    for pi in 0..field.planes.len() {
+        let summary = plane_summary(&field.planes[pi], false);
+        let mut remove = false;
+        let mut copy = false;
+        egui::CollapsingHeader::new(summary)
+            .id_salt(("air_start_plane", salt, pi))
+            .default_open(false)
+            .show(ui, |ui| {
+                plane_card(
+                    ui,
+                    &mut field.planes[pi],
+                    &format!("air_{salt}_{pi}"),
+                    false,
+                );
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 28.0],
+                        egui::Button::new("Copy aircraft"),
+                    )
+                    .clicked()
+                {
+                    copy = true;
+                }
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 28.0],
+                        egui::Button::new("Remove aircraft"),
+                    )
+                    .clicked()
+                {
+                    remove = true;
+                }
+            });
+        if copy {
+            copy_plane = Some(pi);
+        }
+        if remove {
+            remove_plane = Some(pi);
+        }
+    }
+    ui.add_enabled_ui(!field.planes.is_empty(), |ui| {
+        if ui
+            .add_sized([ui.available_width(), 28.0], egui::Button::new("Copy all"))
+            .clicked()
+        {
+            copy_all = true;
+        }
+    });
+    ui.add_enabled_ui(can_paste, |ui| {
+        if ui
+            .add_sized([ui.available_width(), 28.0], egui::Button::new("Paste"))
+            .on_hover_text("Add the copied aircraft to this airfield.")
+            .clicked()
+        {
+            paste = true;
+        }
+    });
+    if ui
+        .add_sized(
+            [ui.available_width(), 28.0],
+            egui::Button::new("Add aircraft"),
+        )
+        .clicked()
+    {
+        add_plane = true;
+    }
+    ui.add_space(6.0);
+    if ui
+        .add_sized(
+            [ui.available_width(), 28.0],
+            egui::Button::new("Remove air start"),
+        )
+        .clicked()
+    {
+        remove_field = true;
+    }
+    AirStartForm {
+        remove_field,
+        add_plane,
+        remove_plane,
+        copy_plane,
+        copy_all,
+        paste,
+    }
+}
+
+fn airbase_remove_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    selected: bool,
+    data_required: bool,
+) -> (bool, bool) {
+    let mut clicked = false;
+    let mut removed = false;
+    ui.horizontal(|ui| {
+        let remove_w = 72.0;
+        let name_w = (ui.available_width() - remove_w - 4.0).max(28.0);
+        let button = egui::Button::selectable(selected, label).min_size(Vec2::new(name_w, 28.0));
+        clicked = ui.add_sized([name_w, 28.0], button).clicked();
+        removed = ui
+            .add_sized([remove_w, 28.0], egui::Button::new("Remove"))
+            .clicked();
+    });
+    if data_required {
+        ui.label(RichText::new("Data required").color(c::WARN_TEXT));
+    }
+    (clicked, removed)
+}
+
 fn airbase_button(ui: &mut egui::Ui, label: &str, selected: bool, data_required: bool) -> bool {
-    let button = egui::Button::selectable(selected, label)
-        .min_size(Vec2::new(ui.available_width(), 28.0));
-    let clicked = ui
-        .add_sized([ui.available_width(), 28.0], button)
-        .clicked();
+    let button =
+        egui::Button::selectable(selected, label).min_size(Vec2::new(ui.available_width(), 28.0));
+    let clicked = ui.add_sized([ui.available_width(), 28.0], button).clicked();
     if data_required {
         ui.label(RichText::new("Data required").color(c::WARN_TEXT));
     }
@@ -1251,13 +1934,15 @@ fn airbase_button(ui: &mut egui::Ui, label: &str, selected: bool, data_required:
 
 /// The map keeps a reference group when any of its objects falls inside the
 /// area box plus 10 km. An airbase is in the area on that same rule.
-fn airbase_in_area(root: &Il2Entity, area: WorldAabb) -> bool {
+pub(super) fn airbase_in_area(root: &Il2Entity, area: WorldAabb) -> bool {
     if let Some((x, z)) = root.pos_xz()
         && area.contains(x, z)
     {
         return true;
     }
-    root.children.iter().any(|child| airbase_in_area(child, area))
+    root.children
+        .iter()
+        .any(|child| airbase_in_area(child, area))
 }
 
 /// A field spawn needs one airfield and two runway thresholds. Without those
@@ -1282,6 +1967,11 @@ fn airbase_needs_data(root: &Il2Entity) -> bool {
     airfields != 1 || ends < 2
 }
 
+fn airfield_key(group: &crate::frontlines::MapRefGroup) -> String {
+    let id = provisions::airfield_identity(&group.entity, &group.path);
+    korea_fields::k_code(&id.key).unwrap_or(id.key)
+}
+
 fn same_airbase_file(path: &Path, file: &str) -> bool {
     let want = Path::new(file)
         .file_name()
@@ -1292,8 +1982,36 @@ fn same_airbase_file(path: &Path, file: &str) -> bool {
         .is_some_and(|name| name.eq_ignore_ascii_case(want))
 }
 
+#[derive(Clone, Copy)]
+enum StartKind {
+    Bank(usize),
+    Placed(usize),
+}
+
+#[derive(Clone)]
+struct StartRow {
+    /// Index into the row list from [`super::GroupGeneratorApp::start_rows`].
+    source: usize,
+    kind: StartKind,
+    nato: bool,
+    label: String,
+}
+
+struct AirCopy {
+    label: String,
+    path: Option<PathBuf>,
+    catalog_file: Option<String>,
+}
+
+struct AirDup {
+    key: String,
+    title: String,
+    copies: Vec<AirCopy>,
+}
+
 struct AreaGap {
     name: String,
+    file: String,
     x: f64,
     z: f64,
 }
@@ -1327,6 +2045,7 @@ fn uncovered_in_area(
             true
         })
         .map(|record| AreaGap {
+            file: record.file.clone(),
             name: if record.name.is_empty() {
                 Path::new(&record.file)
                     .file_stem()

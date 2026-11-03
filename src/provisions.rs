@@ -1,10 +1,9 @@
-//! provisions.rs — scenery and harvested airfields stamped onto every base map
+//! provisions.rs — scenery loaded for a base map, and the harvested-airfield list
 //!
-//! The Map tab used to import these by hand as reference groups. This module
-//! loads a fixed set of landscape groups from a template folder the user
-//! picks, and every airfield group in the harvested database folder
-//! (`Template\MP Airfields`). `catalog.Group` is the harvest index, not a
-//! field, so it is left out.
+//! The Map tab imports a fixed set of landscape groups from a template folder
+//! the user picks. Harvested airfields stay in the Airfield tab: that list is
+//! what a base map places. `catalog.Group` is the harvest index, not a field,
+//! so it is left out.
 //!
 //! ## Public API
 //! * `LANDSCAPE_FILES` / `DEFAULT_TEMPLATE_DIR`
@@ -238,7 +237,11 @@ fn stem_key(stem: &str) -> String {
     let stem = stem.strip_suffix("_running").unwrap_or(stem);
     match stem.rsplit_once('_') {
         Some((base, suffix))
-            if suffix.parse::<i32>().ok().and_then(country_is_nato).is_some() =>
+            if suffix
+                .parse::<i32>()
+                .ok()
+                .and_then(country_is_nato)
+                .is_some() =>
         {
             base.to_string()
         }
@@ -285,7 +288,11 @@ fn keep_rank(country: i32, want_nato: bool, key: &str, path: &Path) -> (i32, i32
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string();
-    let canonical = if stem == format!("{key}_{country}") { 0 } else { 1 };
+    let canonical = if stem == format!("{key}_{country}") {
+        0
+    } else {
+        1
+    };
     (rank, canonical, stem)
 }
 
@@ -346,6 +353,50 @@ pub fn pick_coalition_airfields(groups: Vec<MapRefGroup>, want_nato: bool) -> Ai
         groups: kept,
         notes,
     }
+}
+
+/// True when two loaded groups are the same scenery file or the same airfield.
+/// A second copy in a saved base map is the one to drop.
+pub fn same_loaded_ref(a: &MapRefGroup, b: &MapRefGroup) -> bool {
+    let an = a.entity.name().unwrap_or("").trim();
+    let bn = b.entity.name().unwrap_or("").trim();
+    if !an.is_empty() && an.eq_ignore_ascii_case(bn) {
+        return true;
+    }
+    if !group_has_airfield(&a.entity) || !group_has_airfield(&b.entity) {
+        return false;
+    }
+    airfield_identity(&a.entity, &a.path)
+        .key
+        .eq_ignore_ascii_case(&airfield_identity(&b.entity, &b.path).key)
+}
+
+/// `manual` with provision copies and repeated names removed. Order is kept.
+pub fn without_duplicates(
+    manual: Vec<MapRefGroup>,
+    provisions: &[MapRefGroup],
+) -> Vec<MapRefGroup> {
+    let mut out = Vec::new();
+    for group in manual {
+        let seen = provisions
+            .iter()
+            .chain(out.iter())
+            .any(|kept| same_loaded_ref(kept, &group));
+        if !seen {
+            out.push(group);
+        }
+    }
+    out
+}
+
+pub fn group_has_airfield(root: &Il2Entity) -> bool {
+    let mut found = false;
+    root.for_each(&mut |entity: &Il2Entity| {
+        if entity.block_type == "Airfield" {
+            found = true;
+        }
+    });
+    found
 }
 
 /// One group per field. The side comes from `nato_at` (the front). The other
@@ -507,7 +558,10 @@ mod tests {
         let missing = pick_coalition_airfields(vec![usa.clone()], false);
         assert!(missing.groups.is_empty());
         assert!(
-            missing.notes.iter().any(|note| note.contains("no DPRK harvest")),
+            missing
+                .notes
+                .iter()
+                .any(|note| note.contains("no DPRK harvest")),
             "{:?}",
             missing.notes
         );
@@ -515,18 +569,45 @@ mod tests {
         let both_dprk = pick_coalition_airfields(vec![dprk, prc], false);
         assert_eq!(both_dprk.groups.len(), 1, "one field, one group");
         assert!(
-            both_dprk.groups[0].path.ends_with("K-23_Pyongyang_AF_502.Group"),
+            both_dprk.groups[0]
+                .path
+                .ends_with("K-23_Pyongyang_AF_502.Group"),
             "DPRK 502 is kept ahead of PRC 503"
         );
 
-        let placed = place_matching_coalition(vec![usa, country_file("K-23_Pyongyang_AF", 503)], |x, _| {
-            x < 200_000.0
-        });
+        let placed =
+            place_matching_coalition(vec![usa, country_file("K-23_Pyongyang_AF", 503)], |x, _| {
+                x < 200_000.0
+            });
         assert_eq!(placed.groups.len(), 1);
         assert!(
             placed.groups[0]
                 .path
                 .ends_with("K-23_Pyongyang_AF_503.Group")
         );
+    }
+
+    #[test]
+    fn a_saved_base_map_does_not_keep_a_second_copy() {
+        let provision = country_file("K-23_Pyongyang_AF", 503);
+        let mut tunnels = Il2Entity::new("Group");
+        tunnels.set_name("TUNNELS");
+        let loaded = vec![
+            country_file("K-23_Pyongyang_AF", 601),
+            country_file("K-23_Pyongyang_AF", 503),
+            MapRefGroup {
+                path: PathBuf::from("TUNNELS.Group"),
+                entity: tunnels.clone(),
+            },
+            MapRefGroup {
+                path: PathBuf::from("TUNNELS-again.Group"),
+                entity: tunnels,
+            },
+            country_file("Hand_Added", 601),
+        ];
+        let kept = without_duplicates(loaded, &[provision]);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].entity.name(), Some("TUNNELS"));
+        assert_eq!(kept[1].entity.name(), Some("Hand_Added"));
     }
 }

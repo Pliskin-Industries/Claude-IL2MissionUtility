@@ -58,6 +58,7 @@ pub enum GroundKind {
     Artillery,
     Infantry,
     Train,
+    AntiAir,
 }
 
 impl GroundKind {
@@ -68,6 +69,7 @@ impl GroundKind {
             GroundKind::Artillery => "Artillery",
             GroundKind::Infantry => "Infantry",
             GroundKind::Train => "Train",
+            GroundKind::AntiAir => "Anti-air",
         }
     }
 }
@@ -81,6 +83,8 @@ pub struct GroundJob {
     pub range_m: Option<f64>,
     pub route: Option<RouteLayout>,
     pub wp_ahead: Vec<f64>,
+    /// Park in a clearing around this point instead of on the front band.
+    pub anchor: Option<(f64, f64)>,
 }
 
 impl GroundJob {
@@ -90,6 +94,7 @@ impl GroundJob {
             range_m,
             route: None,
             wp_ahead: Vec::new(),
+            anchor: None,
         }
     }
 }
@@ -660,6 +665,48 @@ pub fn place_ground_jobs(
             }
             pending_issue = issue;
         }
+        if let Some(anchor) = job.anchor {
+            let spacing = 400.0;
+            if let Some((x, z, in_ao)) = pick_clearing_around(
+                anchor,
+                &side,
+                aabb,
+                terrain,
+                &used,
+                spacing,
+                opts.seed.wrapping_add(i as u64),
+            ) {
+                used.push((x, z));
+                let d = (x - anchor.0).hypot(z - anchor.1);
+                if d < AAA_INNER_M || d > AAA_OUTER_M {
+                    pending_issue = Some(format!(
+                        "no clearing in the ring around the point — parked {:.1} km away.",
+                        d / 1000.0
+                    ));
+                }
+                spots.push(GroundSpot {
+                    x,
+                    z,
+                    in_ao,
+                    heading_deg: heading_toward_nearest((x, z), &[anchor]).unwrap_or(0.0),
+                    kind: job.kind,
+                    objective: Some(anchor),
+                    network: None,
+                    waypoints: Vec::new(),
+                    wp_ahead: Vec::new(),
+                    issue: pending_issue,
+                });
+            } else {
+                warnings.push(format!(
+                    "{} {}: no clearing around {:.0}, {:.0}.",
+                    i + 1,
+                    job.kind.label(),
+                    anchor.0,
+                    anchor.1
+                ));
+            }
+            continue;
+        }
         let assigned = hashed_pick(opts.favor, opts.seed, i as u64).copied();
         let ranged = job.range_m.filter(|r| *r > 0.0).zip(assigned);
         let picked = if let Some((radius, obj)) = ranged {
@@ -862,6 +909,67 @@ fn pick_front_open(
         }
     }
     points
+}
+
+const AAA_INNER_M: f64 = 600.0;
+const AAA_OUTER_M: f64 = 2_200.0;
+
+/// Open ground in a ring around `anchor`: close enough to defend it, not on top of it.
+fn pick_clearing_around(
+    anchor: (f64, f64),
+    side: &LandSide,
+    aabb: WorldAabb,
+    terrain: &TerrainMap,
+    occupied: &[(f64, f64)],
+    spacing: f64,
+    seed: u64,
+) -> Option<(f64, f64, bool)> {
+    let pool = clearing_ring(
+        anchor,
+        side,
+        aabb,
+        terrain,
+        occupied,
+        spacing,
+        AAA_INNER_M,
+        AAA_OUTER_M,
+    );
+    let pool = if pool.is_empty() {
+        clearing_ring(
+            anchor, side, aabb, terrain, occupied, spacing, 300.0, 4_000.0,
+        )
+    } else {
+        pool
+    };
+    if pool.is_empty() {
+        return pick_closest_open(anchor, side, aabb, terrain, occupied, spacing);
+    }
+    let (x, z) = pool[(seed as usize) % pool.len()];
+    Some((x, z, aabb.contains(x, z)))
+}
+
+fn clearing_ring(
+    anchor: (f64, f64),
+    side: &LandSide,
+    aabb: WorldAabb,
+    terrain: &TerrainMap,
+    occupied: &[(f64, f64)],
+    spacing: f64,
+    inner: f64,
+    outer: f64,
+) -> Vec<(f64, f64)> {
+    let mut cand = sample_open_near(terrain, 250.0, side, &[anchor], outer);
+    cand.retain(|&(x, z)| {
+        let d = (x - anchor.0).hypot(z - anchor.1);
+        d >= inner && d <= outer
+    });
+    cand = drop_near(cand, occupied, spacing);
+    let inside: Vec<(f64, f64)> = cand
+        .iter()
+        .copied()
+        .filter(|&(x, z)| aabb.contains(x, z))
+        .collect();
+    if inside.is_empty() { cand } else { inside }
 }
 
 fn pick_near_objectives(
@@ -1098,7 +1206,7 @@ fn sample_terrain(
         let mut z = z0;
         while z < z1 {
             let ok = match filter {
-                TerrainFilter::Open => terrain.is_open_xz(x, z),
+                TerrainFilter::Open => open_ground(terrain, x, z),
                 TerrainFilter::Dry => terrain.is_land_xz(x, z),
             };
             if ok && allowed(side, x, z) {
@@ -1109,6 +1217,21 @@ fn sample_terrain(
         x += step;
     }
     out
+}
+
+/// Coarse open ground, refined by the editor tiles when a capture is installed
+/// and the caller has entered a cover guard. Water stays closed. Woods close a
+/// cell the coarse mask called open. A beige field opens dry land the coarse
+/// mask left closed. No tile reading keeps the coarse answer.
+fn open_ground(terrain: &TerrainMap, x: f64, z: f64) -> bool {
+    if terrain.is_water_xz(x, z) {
+        return false;
+    }
+    match crate::editormap::placement_cover(x, z) {
+        Some(crate::editormap::Cover::Wood) => false,
+        Some(crate::editormap::Cover::Field) => terrain.is_land_xz(x, z),
+        None => terrain.is_open_xz(x, z),
+    }
 }
 
 /// When `prefer_cover` is set, keep non-open dry cells if there are enough of them.
@@ -1124,7 +1247,7 @@ fn apply_cover_preference(
     let cover: Vec<(f64, f64)> = pts
         .iter()
         .copied()
-        .filter(|&(x, z)| !terrain.is_open_xz(x, z))
+        .filter(|&(x, z)| !open_ground(terrain, x, z))
         .collect();
     if cover.len() >= need { cover } else { pts }
 }
@@ -1777,6 +1900,7 @@ mod tests {
             range_m: None,
             route: Some(route),
             wp_ahead: Vec::new(),
+            anchor: None,
         }];
         let layout = place_ground_jobs(
             true,
@@ -1865,6 +1989,7 @@ mod tests {
             range_m: None,
             route: None,
             wp_ahead: vec![4_000.0],
+            anchor: None,
         }];
         let layout = place_ground_jobs(
             true,
@@ -1890,6 +2015,45 @@ mod tests {
         assert!((s.waypoints[0].1 - expected.1).abs() < 1.0);
         let aim = heading_toward_front((s.x, s.z), &front).unwrap();
         assert!((s.heading_deg - aim).abs() < 0.5);
+    }
+
+    #[test]
+    fn anti_air_parks_in_a_clearing_around_the_anchor() {
+        let terrain = all_open();
+        let aabb = WorldAabb::from_corners(80_000.0, 80_000.0, 250_000.0, 250_000.0);
+        let front = vec![(140_000.0, 80_000.0), (140_000.0, 250_000.0)];
+        let anchor = (180_000.0, 160_000.0);
+        let jobs = [GroundJob {
+            kind: GroundKind::AntiAir,
+            range_m: None,
+            route: None,
+            wp_ahead: Vec::new(),
+            anchor: Some(anchor),
+        }];
+        let layout = place_ground_jobs(
+            true,
+            &jobs,
+            &front,
+            aabb,
+            &[],
+            true,
+            &terrain,
+            PlaceOpts {
+                front_band: Some(10_000.0),
+                favor: &[],
+                seed: 7,
+                occupied: &[],
+            },
+        )
+        .unwrap();
+        assert_eq!(layout.spots.len(), 1);
+        let spot = &layout.spots[0];
+        assert_eq!(spot.kind, GroundKind::AntiAir);
+        let d = (spot.x - anchor.0).hypot(spot.z - anchor.1);
+        assert!(
+            (300.0..=4_000.0).contains(&d),
+            "parked {d:.0} m from the anchor, want a clearing in the ring"
+        );
     }
 
     fn assert_min_spacing(pts: &[(f64, f64)], min_d: f64) {

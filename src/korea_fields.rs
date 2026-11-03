@@ -172,7 +172,7 @@ fn names_match(list_name: &str, harvest_name: &str) -> bool {
     }
 }
 
-fn k_code(name: &str) -> Option<String> {
+pub fn k_code(name: &str) -> Option<String> {
     let lower = name.to_ascii_lowercase();
     let bytes = lower.as_bytes();
     let mut i = 0;

@@ -175,8 +175,10 @@ top-level `*.Group` files in the harvest database and skips `catalog.Group`.
 to that field's side of the front (600-series NATO, 500-series DPRK). The
 other country's copy is left on disk. `guess_nato` reads an `Airfield`
 Country, then a `_601` / `_502` / `_503` file suffix.
-The Map tab stamps the kept airfields with the landscape groups. Each of
-those airfields, whatever its country, is moved to the hold-short on its own
+A base map places landscape groups from the template folder. It places an
+airfield only when that airfield is on the Airfield tab list, inside the
+area. Reference groups loaded with a base map do not add a second airfield.
+Each placed airfield, whatever its country, is moved to the hold-short on its own
 taxi graph (`place_ramp_start`: `fakefield_rnwspawn` model and script, nose
 toward the strip). A field with no taxi graph, or without two runway ends,
 stays where it is and is listed as missing a ramp start. The Airfield
@@ -199,7 +201,13 @@ Facing is set on the map: the field icon stays upright and `direction.svg`
 points along `YOri` (0 = north). `field_group` writes one field;
 `combined_group` writes several. `plane_entry` writes one aircraft at a
 chosen `StartType` and `SnapTo`. An air start always passes `StartType` 0,
-`SnapTo` 0, and `fakefield.mgm`. **Airfield mode, Map mode, harvest.rs.**
+`SnapTo` 0, and `fakefield.mgm`. `read_mission` pulls those fakefields back
+out of a base map (position, facing, aircraft) and, separately, the aircraft
+lists on defined airfields (taxi graph or runway-spawn model). Map load
+skips an air-start group so it is not treated as a ground unit, places the
+fakefields, and adds both lists to the Airfield tab. On that tab the air
+starts are listed with the airbases; selecting one edits it in the center.
+A base map writes them into `Airfields` under DPRK or NATO. **Airfield mode, Map mode, harvest.rs.**
 
 ### `bombers.rs` — Exclusive Activation
 Detects plans in template groups (`inspect_plan`, `BomberPlanInfo`:
@@ -212,8 +220,7 @@ in-place keep-positions). Triggering a plan also starts `{n} WINDOW`
 (`MISSION_WINDOW_S`, 3 hours) in NodeGates. The window pulses that plan's
 end timer; the end timer deactivates `{n} WINDOW OFF` so a finished plan
 cannot fire the window later. Multiple `Zone IN` MCUs in one template count
-as a single plan. Map export calls the same linker, positions kept, when more
-than one strike is placed. `SUGGESTED_TRIGGER_NAMES` / `SUGGESTED_END_NAMES`.
+as a single plan. Map export splits a file that already holds several strike plans, then calls the same linker, positions kept, when more than one plan is on the map. A start zone named like `Zone In 1` and an end timer named like `Mission Complete` are accepted on that path. `SUGGESTED_TRIGGER_NAMES` / `SUGGESTED_END_NAMES`.
 **Exclusive mode, Map.**
 
 ### `duplicate.rs` — duplication engine & country overrides
@@ -258,7 +265,14 @@ aircraft per period, `snapshot_front_xz` / `timeline_preview` /
 user AABB, paints influence / salients / attack arrows / battle marks,
 and stamps fighter/ship/ground packs plus user reference groups
 (`FrontOptions`, `FrontPack`, `MapFighterPack` / `MapShipPack` /
-`MapGroundPack` / `MapRefGroup`). `inspect_base_map` / `ImportedBaseMap`
+`MapGroundPack` / `MapRefGroup`). Landscape stays in `Reference groups`.
+Airfields the Airfield tab kept, and placed air starts, go in `Airfields`,
+under `DPRK` or `NATO`. The map does not add a harvested airfield on its own.
+An airfield whose position is outside the area (plus 10 km) is left out,
+including its unpositioned logic. A saved base map does not import a second
+copy of a group that is already provisioned, and it does not import airfields
+back in as reference groups.
+`inspect_base_map` / `ImportedBaseMap`
 split a previously generated Korea base map back into AO, front,
 attack arrows, fighter packs, and unit packs. Constants: `ARROW_TAIL_WIDTH`,
 `PLACE_MARGIN` (10 km), `AOI_GAP` (5 km). **Map mode.**
@@ -321,7 +335,7 @@ split the spots evenly; optional AO fill at Zone In spacing; 8-pack cap).
 
 ### `mapground.rs` — ground unit placement
 `place_ground` / `place_ground_jobs` park armor/supply/artillery on
-dry open terrain, infantry on any dry land (not water), and trains/columns on roads or rails (`mapnet`). Truck columns prefer a stretch at least 10 km inside the AO when one fits.
+dry open terrain, infantry on any dry land (not water), trains/columns on roads or rails (`mapnet`), and anti-air in a clearing around `GroundJob.anchor` when that point is set. Truck columns prefer a stretch at least 10 km inside the AO when one fits.
 `GroundKind`, `GroundJob` (optional `RouteLayout` + weapon range),
 `GroundSpot` (pos, heading, network pose, hashed objective, in-AO,
 soft `issue`), `MapGroundLayout`, `START_DELAY_S` / `GROUP_DELAY_S`,
@@ -358,7 +372,8 @@ parking (2.5 km `NETWORK_SPACING`, AO bias, `prefer` hook), interactive
 snapping (`snap_lead_to_pointer`, `snap_waypoint_to_pointer` — a WP may
 sit on another branch or behind the column — `align_heading_to_path`),
 two-WP Zone IN straddle logic (`column_waypoint_dists`,
-`sample_network`), `park_route_copy` (writes column positions into
+`sample_network`; a dead end stops one hop at the spur and runs the
+other to the Zone OUT rim along a connected road), `park_route_copy` (writes column positions into
 the group, preserving decimal precision), `inspect_path_waypoints` /
 `park_path_waypoints` for off-road Goto WP hops, and
 `inspect_visual_heading` / `inspect_waypoint_xz` / `inspect_parked_network`
@@ -565,8 +580,9 @@ effective). `range_for_script`, `group_weapon_range`,
 `shortest_range_m` / `area_exceeds_range` (Template Builder
 AttackArea sizing, capped at 3000 m in the GUI), `ArmyUnitKind` +
 `classify_army_unit` (Ship / Train / Artillery / MobileArtillery /
-Armor / Supply / Infantry — used by Map and Army), `snap_ground_attack_areas`.
+Armor / Supply / Infantry / AntiAir — used by Map and Army), `snap_ground_attack_areas`.
 `is_infantry_script` / `group_is_infantry` detect squads.
+`group_is_antiair` is a battery of flak or light AAA with no other vehicle class.
 Fallbacks: `UNKNOWN_ARTILLERY_M` = 15 km, `UNKNOWN_ARMOR_M` = 2 km,
 `ARTILLERY_RANGE_MIN_M` = 4.5 km. **Template, Map, Army Generator.**
 
@@ -613,6 +629,15 @@ apart). A land-tile file is 100 m spacing inside one 224-node tile (about
 22.3 km west-east and 100 m north-south). `--chunk 61000` is about 14.5 MB,
 roughly 78 km by 499 km, and is not either of those files.
 **Command line (`--height-run`, `--height-merge`).**
+
+### `editormap.rs` — editor map tiles
+The mission-editor photographs in `References/MapCapture` (one PNG per
+view, not the stitched TIFF). `EditorMap` places each tile on the Korea
+square. The Map tab draws the tiles that cross the current view once zoom
+passes 8×, up to 48×. `classify_rgb` reads beige as a field and olive as
+woods. Ground placement uses that only inside `CoverGuard`: woods are not
+open, a field is dry land, and water stays on the coarse mask.
+**Map mode.**
 
 ### `watermap.rs` — water/terrain queries
 Packed Korea terrain mask from `assets/combined_terrain.bin`
