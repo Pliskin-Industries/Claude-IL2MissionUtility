@@ -1,6 +1,6 @@
 # 0026. Air Tasking schedules and budgets upstream's strikes and CAPs instead of placing its own
 
-- **Status:** Accepted (option A, proposed to the upstream author before any integration)
+- **Status:** Superseded in part by [0060](0060-air-tasking-beside-exclusive-activation.md) (2026-11-05): Exclusive Activation stays beside Air Tasking, and the proposal explains how Air Tasking could replace it instead of asking for that. Points 1 and 2 (upstream's Strike and CAP as sortie templates, his target types) stand.
 - **Date:** 2026-10-18
 - **Decided by:** the user, 2026-10-28 ("our method of automating targets and the flights with trigger zones makes better sense. I'm ok adopting his targets. Let's propose that and see what he has to say."). Options and recommendation by Claude, from the upstream merge plan (`handoff/sessions/2026-10-18-upstream-merge.md`).
 
