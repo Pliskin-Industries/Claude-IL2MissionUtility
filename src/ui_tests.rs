@@ -5965,3 +5965,313 @@ fn standalone_l_build_matches_a3() {
     a3_air.children.extend(crumbs);
     crate::airtask::testkit::assert_same_up_to_indexes(&a3_air, &air, crate::airtask::testkit::Renumbering::default());
 }
+
+// ---------------------------------------------------------------------------
+// Flight A4 (solo, one NATO player): a Yak copy and a DPRK-side extension.
+// ---------------------------------------------------------------------------
+
+/// A4: one NATO player in an F-51D orbits a DPRK area while a Yak-9P raid
+/// flies its on-station time, gets its one extension (the area is still HOT),
+/// and is sent home. Built by Map Generate as a trace build.
+const A4_STEM: &str = "P14_Acceptance_A4";
+/// The DPRK area: 2N's area B, about 32 km south of the front. It watches
+/// NATO players.
+const A4_AREA: (f64, f64) = (110_000.0, 250_000.0);
+/// 2N's NATO air start: 2.5 km south of the area and 22 km west of it, heading
+/// east, outside the 20 km count circle (decision 0051). Load-tested in 2N.
+const A4_AIR_START: &str = "P14 A4 NATO air start";
+const A4_SPAWN: (f64, f64) = (107_500.0, 228_000.0);
+const A4_HEADING: f64 = 90.0;
+/// 4,500 m: about 1,450 m above the Yaks' 3,050 m, out of their way.
+const A4_ALTITUDE_M: i32 = 4_500;
+const A4_RADIUS_M: f64 = 16_000.0;
+const A4_COUNT_RADIUS_M: f64 = 20_000.0;
+const A4_CHANCE: u8 = 100;
+const A4_COOLDOWN_MIN: f64 = 5.0;
+const A4_SORTIE: &str = "1950_DPRK_Yak_AirfieldRaid_2plus2.Group";
+
+/// The A4 inputs, set on the app as in `n2_inputs`: one DPRK area, one NATO
+/// air start (an F-51D on 601), one Zone entry (the Yak raid), N = 1.
+fn a4_inputs(h: &mut Harness) {
+    use crate::airtask::{self, AirSide, PoolEntry, TargetRef, TriggerMode};
+    h.tab("Map");
+    h.wait_for_map();
+    h.app.terrain_use_builtin = true;
+    h.app.nato_objectives.clear();
+    h.app.east_objectives = vec![A4_AREA];
+    h.app.attack_arrows.clear();
+    h.app.air_plan.seed = 7;
+    let mut start = n2_air_start(A4_AIR_START, true, "f51d", A4_SPAWN, A4_ALTITUDE_M);
+    start.field.heading_deg = A4_HEADING;
+    h.app.placed_air_starts = vec![start];
+    h.settle();
+    h.app.air_plan.pool.clear();
+    let mut entry = PoolEntry::new(
+        format!("builtin:{A4_SORTIE}"),
+        TargetRef::Objective {
+            side: AirSide::Dprk,
+            xz: A4_AREA,
+        },
+    );
+    entry.mode = TriggerMode::Zone;
+    airtask::add_entry(&mut h.app.air_plan, entry);
+    assert_eq!(h.app.air_plan.pool.len(), 1, "one Zone entry");
+    let threshold = &mut h.app.air_plan.threshold;
+    assert_eq!(threshold.players_n, 1, "N = 1 by default");
+    threshold.radius_m = A4_RADIUS_M;
+    threshold.count_radius_m = A4_COUNT_RADIUS_M;
+    h.app.air_plan.zone.chance_pct = A4_CHANCE;
+    h.app.air_plan.zone.cooldown_min = A4_COOLDOWN_MIN;
+    assert_eq!(h.app.air_plan.budget.per_side, [2, 2], "the default budget");
+    assert!(h.app.air_plan.include_in_base_map);
+    h.app.trace_build = true;
+    h.settle();
+}
+
+fn build_a4(h: &mut Harness) -> (crate::ast::Il2Entity, Vec<(String, String)>) {
+    a4_inputs(h);
+    assert!(
+        map_air_check(h).is_some_and(|c| c.ok),
+        "the Air Tasking check fails"
+    );
+    assert!(!h.find("Generate Base Map").disabled);
+    generate_map(h, &format!("{A4_STEM}.Group"))
+}
+
+#[test]
+#[ignore = "writes target/p14/P14_Acceptance_A4.Group, locale and trace sidecars"]
+fn write_p14_acceptance_a4() {
+    let mut h = Harness::new("p14_acceptance_a4_write");
+    build_a4(&mut h);
+    copy_flight_files(&h, A4_STEM);
+    println!("{}", h.status());
+}
+
+/// A timer's `Time` and `Random` in an Air Tasking build.
+fn timer_time_random(air: &crate::ast::Il2Entity, name: &str) -> (f64, u32) {
+    let node = air.find_by_name(name).unwrap_or_else(|| panic!("{name}"));
+    let time = node
+        .property("Time")
+        .and_then(|t| t.parse().ok())
+        .unwrap_or_else(|| panic!("{name} Time"));
+    let random = node.property("Random").and_then(|r| r.parse().ok()).unwrap_or(100);
+    (time, random)
+}
+
+/// The facts the A4 run sheet relies on.
+fn check_a4_build(root: &crate::ast::Il2Entity, countries: &[(String, String)]) {
+    let air = root.find_by_name("Air Tasking").expect("Air Tasking group");
+    let mut trees: Vec<_> = air.children.iter().filter_map(|c| c.name()).collect();
+    trees.sort_unstable();
+    assert_eq!(trees, ["Air Tasking DPRK Logic", "Air Tasking DPRK Sorties"], "DPRK only");
+    assert!(air.find_by_name("Clock").is_none(), "no clock: the one entry is Zone");
+    // The area watches NATO players: an 8 km entry trigger (R 16 km), N = 1.
+    let trigger = air.find_by_name("THD01 TRIGGER").expect("THD01 TRIGGER");
+    assert_eq!(trigger.pos_xz(), Some(A4_AREA));
+    assert_eq!(
+        (trigger.property("Radius"), trigger.property("Country")),
+        (Some("8000"), Some("601"))
+    );
+    assert!(air.find_by_name("THD02 TRIGGER").is_none(), "one area");
+    for (name, time, random) in [
+        ("THD01 DWELL", 80.0, 100),
+        ("THD01 HOLD", 160.0, 100),
+        ("ZD01 CHANCE", 0.1, 100),
+        ("ZD01 COOLDOWN", 300.0, 100),
+        // The Yak raid's own 5 min over the target, then one 10 min extension.
+        ("SD01 ON STATION", 300.0, 100),
+        ("SD01 EXTEND", 600.0, 100),
+        ("SD01 HARD STOP", 1716.0, 100),
+        ("SD01 DELETE DELAY", 0.5, 100),
+    ] {
+        let (t, r) = timer_time_random(air, name);
+        assert!((t - time).abs() < 1e-6 && r == random, "{name}: {t} s, {r} %");
+    }
+    // Three Yak copies: 2 + 2 Yak-9P at 3,050 m, 30 km from the area, on
+    // 503, a country the area does not count (decision 0050 D).
+    let sorties = air.find_by_name("Air Tasking DPRK Sorties").unwrap();
+    let mut planes = Vec::new();
+    sorties.for_each(&mut |node| {
+        if node.block_type == "Plane" {
+            planes.push((
+                node.property("Country").map(str::to_string),
+                node.property("Model").unwrap_or("").to_string(),
+                node.pos_xz(),
+            ));
+        }
+    });
+    assert_eq!(planes.len(), 12, "three copies of four");
+    for (country, model, xz) in &planes {
+        assert_eq!(country.as_deref(), Some("503"));
+        assert!(model.contains("yak9p"), "a Yak-9P: {model}");
+        let (x, z) = xz.unwrap();
+        let d = ((x - A4_AREA.0).powi(2) + (z - A4_AREA.1).powi(2)).sqrt();
+        assert!((29_900.0..30_700.0).contains(&d), "{d:.0} m from the area");
+    }
+    // The one air start: an F-51D on 601, 22 km out.
+    let mut fields = Vec::new();
+    root.for_each(&mut |node| {
+        if node.block_type == "Airfield" {
+            fields.push((
+                node.name().map(str::to_string),
+                node.property("Country").map(str::to_string),
+                node.pos_xz(),
+            ));
+        }
+    });
+    assert_eq!(
+        fields,
+        [(
+            Some(A4_AIR_START.to_string()),
+            Some("601".to_string()),
+            Some(A4_SPAWN)
+        )],
+        "one air start"
+    );
+    let mut outside: Vec<_> = countries
+        .iter()
+        .filter(|(block, _)| block == "Plane" || block == "Airfield")
+        .collect();
+    outside.sort();
+    assert_eq!(
+        outside,
+        [&("Airfield".to_string(), "601".to_string())],
+        "no AI aircraft outside Air Tasking"
+    );
+}
+
+/// Not flown yet: the build matches the frozen files byte for byte.
+#[test]
+fn a4_map_build_matches_the_run_sheet() {
+    let frozen = repo("handoff/p14-probes/flight-a4");
+    let mut h = Harness::new("p14_acceptance_a4");
+    let (root, countries) = build_a4(&mut h);
+    check_a4_build(&root, &countries);
+    for file in [
+        format!("{A4_STEM}.Group"),
+        format!("{A4_STEM}.eng"),
+        format!("{A4_STEM}.trace.json"),
+    ] {
+        let built = std::fs::read(h.dir.join(&file)).unwrap();
+        let kept = std::fs::read(frozen.join(&file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+        assert!(built == kept, "{file} differs from the frozen copy");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Flight 2T (no pilot): the quiet roll and the jitter steps, measured.
+// ---------------------------------------------------------------------------
+
+/// 2T: both clocks run fast (a slot a minute) for an hour with nobody flying,
+/// so about 120 slots roll and the quiet rate can be counted from the log. No
+/// area goes HOT, so nothing launches. Built by Map Generate as a trace build.
+const T2_STEM: &str = "P14_Probe_2T";
+/// One area per side, far from each other and from the front.
+const T2_AREA_NATO: (f64, f64) = (190_000.0, 280_000.0);
+const T2_AREA_DPRK: (f64, f64) = (110_000.0, 250_000.0);
+/// The defaults except the times: first slot 1 min, period 1 min, jitter
+/// steps of 15 s. Quiet 20 %, 3 steps, as shipped.
+const T2_FIRST_MIN: f64 = 1.0;
+const T2_PERIOD_MIN: f64 = 1.0;
+const T2_JITTER_STEP_MIN: f64 = 0.25;
+const T2_NATO_SORTIE: &str = "1950_US_F80_HVAR_Strike_4ship.Group";
+const T2_DPRK_SORTIE: &str = "1950_DPRK_Il10_KimpoAttack_2x4.Group";
+
+fn t2_inputs(h: &mut Harness) {
+    use crate::airtask::{self, AirSide, PoolEntry, TargetRef, TriggerMode};
+    h.tab("Map");
+    h.wait_for_map();
+    h.app.terrain_use_builtin = true;
+    h.app.nato_objectives = vec![T2_AREA_NATO];
+    h.app.east_objectives = vec![T2_AREA_DPRK];
+    h.app.attack_arrows.clear();
+    h.app.air_plan.seed = 7;
+    h.app.placed_air_starts.clear();
+    h.settle();
+    h.app.air_plan.pool.clear();
+    for (file, side, xz) in [
+        (T2_NATO_SORTIE, AirSide::Nato, T2_AREA_NATO),
+        (T2_DPRK_SORTIE, AirSide::Dprk, T2_AREA_DPRK),
+    ] {
+        let mut entry =
+            PoolEntry::new(format!("builtin:{file}"), TargetRef::Objective { side, xz });
+        entry.mode = TriggerMode::Clock;
+        airtask::add_entry(&mut h.app.air_plan, entry);
+    }
+    assert_eq!(h.app.air_plan.pool.len(), 2, "one Clock entry per side");
+    for side in [AirSide::Dprk, AirSide::Nato] {
+        let clock = &mut h.app.air_plan.schedule[side.idx()];
+        assert!(clock.enabled && clock.quiet_pct == 20 && clock.jitter_steps == 3);
+        clock.first_slot_min = T2_FIRST_MIN;
+        clock.period_min = T2_PERIOD_MIN;
+        clock.jitter_step_min = T2_JITTER_STEP_MIN;
+    }
+    assert!(h.app.air_plan.include_in_base_map);
+    h.app.trace_build = true;
+    h.settle();
+}
+
+fn build_t2(h: &mut Harness) -> (crate::ast::Il2Entity, Vec<(String, String)>) {
+    t2_inputs(h);
+    assert!(
+        map_air_check(h).is_some_and(|c| c.ok),
+        "the Air Tasking check fails: {}",
+        h.status()
+    );
+    assert!(!h.find("Generate Base Map").disabled);
+    generate_map(h, &format!("{T2_STEM}.Group"))
+}
+
+#[test]
+#[ignore = "writes target/p14/P14_Probe_2T.Group, locale and trace sidecars"]
+fn write_p14_probe_2t() {
+    let mut h = Harness::new("p14_probe_2t_write");
+    build_t2(&mut h);
+    copy_flight_files(&h, T2_STEM);
+    println!("{}", h.status());
+}
+
+/// The facts the 2T run sheet relies on: each clock ticks every 60 s from
+/// 60 s; its three jitter timers start 15 s apart and pass 27, 36 and 57 % of
+/// the time, so about 20 % of slots stay quiet.
+fn check_t2_build(root: &crate::ast::Il2Entity) {
+    let air = root.find_by_name("Air Tasking").expect("Air Tasking group");
+    for side in ["D", "N"] {
+        for (role, time, random) in [
+            ("FIRST", 60.0, 100),
+            ("PERIOD", 60.0, 100),
+            ("JITTER 1", 0.1, 27),
+            ("JITTER 2", 15.1, 36),
+            ("JITTER 3", 30.1, 57),
+            ("SLOT CLOSE", 16.5, 100),
+        ] {
+            let name = format!("CLK {side} {role}");
+            let (t, r) = timer_time_random(air, &name);
+            assert!((t - time).abs() < 1e-6 && r == random, "{name}: {t} s, {r} %");
+        }
+        assert!(air.find_by_name(&format!("CLK {side} JITTER 4")).is_none());
+    }
+    let quiet: f64 = [27.0_f64, 36.0, 57.0].iter().map(|p| 1.0 - p / 100.0).product();
+    assert!((quiet - 0.20).abs() < 0.005, "quiet {quiet:.3}");
+    let mut fields = 0;
+    root.for_each(&mut |node| fields += usize::from(node.block_type == "Airfield"));
+    assert_eq!(fields, 0, "no pilot: no air start");
+}
+
+/// Not flown yet: the build matches the frozen files byte for byte.
+#[test]
+fn t2_map_build_matches_the_run_sheet() {
+    let frozen = repo("handoff/p14-probes/flight-2t");
+    let mut h = Harness::new("p14_probe_2t");
+    let (root, _) = build_t2(&mut h);
+    check_t2_build(&root);
+    for file in [
+        format!("{T2_STEM}.Group"),
+        format!("{T2_STEM}.eng"),
+        format!("{T2_STEM}.trace.json"),
+    ] {
+        let built = std::fs::read(h.dir.join(&file)).unwrap();
+        let kept = std::fs::read(frozen.join(&file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+        assert!(built == kept, "{file} differs from the frozen copy");
+    }
+}

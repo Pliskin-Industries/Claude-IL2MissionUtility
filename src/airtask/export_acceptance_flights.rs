@@ -359,6 +359,26 @@ fn frozen_2n_files_parse_and_links_resolve() {
     }
 }
 
+/// Flights A4 and 2T: built by the Map tab as trace builds (run sheet
+/// `handoff/sessions/2026-11-05-p14-flights-a4-2t.md`). Their writers and
+/// byte and facts checks are UI tests (`ui_tests::write_p14_acceptance_a4`,
+/// `write_p14_probe_2t`, `a4_map_build_matches_the_run_sheet`,
+/// `t2_map_build_matches_the_run_sheet`).
+#[test]
+fn frozen_a4_and_2t_files_parse_and_links_resolve() {
+    let probes = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes");
+    for (dir, stem, fields) in [
+        ("flight-a4", "P14_Acceptance_A4", 1),
+        ("flight-2t", "P14_Probe_2T", 0),
+    ] {
+        let root =
+            crate::airtask::testkit::assert_frozen_files_resolve(&probes.join(dir).join(stem));
+        let mut airfields = 0;
+        root.for_each(&mut |node| airfields += usize::from(node.block_type == "Airfield"));
+        assert_eq!(airfields, fields, "{stem}: air starts");
+    }
+}
+
 #[test]
 #[ignore = "writes target/p14/P14_Acceptance_A1.Group, locale, trace and spawn sidecars"]
 fn write_p14_acceptance_a1() {
