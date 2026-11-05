@@ -5553,6 +5553,295 @@ fn a3_map_build_matches_the_run_sheet() {
     assert_eq!(blocks, [&("Airfield".to_string(), "501".to_string())]);
 }
 
+// ---- P14 flight 2N (run sheet: handoff/sessions/2026-11-02-p14-flight-2n.md) ----
+
+/// Up to four human pilots on eszyman's server (decision 0059): a DPRK pair
+/// over NATO area A and a NATO pair over DPRK area B, 85 km apart, flying the
+/// same cues. Pilot 1 orbits alone (N = 2: nothing starts), pilot 2 joins (HOT,
+/// a sortie starts), then they leave the count circle one at a time and the
+/// copy ends on the second. Built by Map Generate twice from the same inputs: a
+/// trace build to fly and a clean build to share.
+const N2_STEM: &str = "P14_Flight_2N";
+const N2_CLEAN_STEM: &str = "P14_Flight_2N_Clean";
+/// A: the NATO area, A3's (27 km north of the front). It watches DPRK players.
+const N2_AREA_A: (f64, f64) = (190_000.0, 280_000.0);
+/// B: the DPRK area, about 32 km south of the front. It watches NATO players.
+const N2_AREA_B: (f64, f64) = (110_000.0, 250_000.0);
+/// Each side's air start: 2.5 km south of its area and 22 km west of it,
+/// heading east (YOri 90 is +Z), so the area passes 2.5 km to the left, as in
+/// A3. 22.1 km out: outside the 20 km count circle (decision 0051).
+const N2_DPRK_AIR_START: &str = "P14 2N DPRK air start";
+const N2_NATO_AIR_START: &str = "P14 2N NATO air start";
+const N2_DPRK_SPAWN: (f64, f64) = (187_500.0, 258_000.0);
+const N2_NATO_SPAWN: (f64, f64) = (107_500.0, 228_000.0);
+const N2_HEADING: f64 = 90.0;
+/// The DPRK pair flies at 2,000 m, as in A3 (the F-80 copies fly at 3,050 m).
+/// The NATO pair flies at 3,000 m, well above the Il-10 copies' 1,500 m and
+/// their rear gunners.
+const N2_DPRK_ALTITUDE_M: i32 = 2_000;
+const N2_NATO_ALTITUDE_M: i32 = 3_000;
+/// The run sheet's Air Tasking settings.
+const N2_PLAYERS: u8 = 2;
+const N2_RADIUS_M: f64 = 16_000.0;
+const N2_COUNT_RADIUS_M: f64 = 20_000.0;
+const N2_CHANCE: u8 = 100;
+const N2_COOLDOWN_MIN: f64 = 5.0;
+/// One Zone entry per area. Neither carries air-to-air orders, so the AI
+/// leaves the players alone.
+const N2_NATO_SORTIE: &str = "1950_US_F80_HVAR_Strike_4ship.Group";
+const N2_DPRK_SORTIE: &str = "1950_DPRK_Il10_KimpoAttack_2x4.Group";
+
+fn n2_air_start(
+    name: &str,
+    nato: bool,
+    type_id: &str,
+    xz: (f64, f64),
+    altitude_m: i32,
+) -> crate::airstart::PlacedAirStart {
+    let mut field = crate::airstart::default_field(name, nato);
+    field.heading_deg = N2_HEADING;
+    let plane = &mut field.planes[0];
+    crate::airstart::apply_type(plane, type_id);
+    plane.altitude_m = altitude_m;
+    plane.fuel = 1.0;
+    crate::airstart::PlacedAirStart {
+        field,
+        x: xz.0,
+        z: xz.1,
+    }
+}
+
+/// The 2N inputs, set on the app directly as in `a3_inputs`: Map tab at its
+/// default date, no fighter pack, one area per side, one air start per side
+/// (a Yak-9P on 501, an F-51D on 601), one Zone entry per area, the settings
+/// above. No entry is on the clock, so neither side builds one.
+fn n2_inputs(h: &mut Harness, trace: bool) {
+    use crate::airtask::{self, AirSide, PoolEntry, TargetRef, TriggerMode};
+    h.tab("Map");
+    h.wait_for_map();
+    h.app.terrain_use_builtin = true;
+    h.app.nato_objectives = vec![N2_AREA_A];
+    h.app.east_objectives = vec![N2_AREA_B];
+    h.app.attack_arrows.clear();
+    h.app.air_plan.seed = 7;
+    h.app.placed_air_starts = vec![
+        n2_air_start(N2_DPRK_AIR_START, false, "yak9p", N2_DPRK_SPAWN, N2_DPRK_ALTITUDE_M),
+        n2_air_start(N2_NATO_AIR_START, true, "f51d", N2_NATO_SPAWN, N2_NATO_ALTITUDE_M),
+    ];
+    h.settle();
+    h.app.air_plan.pool.clear();
+    for (file, side, xz) in [
+        (N2_NATO_SORTIE, AirSide::Nato, N2_AREA_A),
+        (N2_DPRK_SORTIE, AirSide::Dprk, N2_AREA_B),
+    ] {
+        let mut entry =
+            PoolEntry::new(format!("builtin:{file}"), TargetRef::Objective { side, xz });
+        entry.mode = TriggerMode::Zone;
+        airtask::add_entry(&mut h.app.air_plan, entry);
+    }
+    assert_eq!(h.app.air_plan.pool.len(), 2, "one Zone entry per area");
+    let threshold = &mut h.app.air_plan.threshold;
+    threshold.players_n = N2_PLAYERS;
+    threshold.radius_m = N2_RADIUS_M;
+    threshold.count_radius_m = N2_COUNT_RADIUS_M;
+    h.app.air_plan.zone.chance_pct = N2_CHANCE;
+    h.app.air_plan.zone.cooldown_min = N2_COOLDOWN_MIN;
+    assert_eq!(h.app.air_plan.budget.per_side, [2, 2], "the default budget");
+    assert!(h.app.air_plan.include_in_base_map);
+    h.app.trace_build = trace;
+    h.settle();
+}
+
+/// A 2N base map: `n2_inputs`, then Generate Base Map.
+fn build_n2(h: &mut Harness, trace: bool) -> (crate::ast::Il2Entity, Vec<(String, String)>) {
+    n2_inputs(h, trace);
+    assert!(
+        map_air_check(h).is_some_and(|c| c.ok),
+        "the Air Tasking check fails"
+    );
+    assert!(!h.find("Generate Base Map").disabled);
+    let stem = if trace { N2_STEM } else { N2_CLEAN_STEM };
+    generate_map(h, &format!("{stem}.Group"))
+}
+
+#[test]
+#[ignore = "writes target/p14/P14_Flight_2N(_Clean).Group, locale and trace sidecars"]
+fn write_p14_flight_2n() {
+    for (trace, stem) in [(true, N2_STEM), (false, N2_CLEAN_STEM)] {
+        let mut h = Harness::new(&format!("p14_flight_2n_write_{trace}"));
+        build_n2(&mut h, trace);
+        copy_flight_files(&h, stem);
+        println!("{}", h.status());
+    }
+}
+
+/// The facts the 2N run sheet relies on, for one build.
+fn check_n2_build(root: &crate::ast::Il2Entity, countries: &[(String, String)], trace: bool) {
+    let air = root.find_by_name("Air Tasking").expect("Air Tasking group");
+    let named = |name: &str| air.find_by_name(name).unwrap_or_else(|| panic!("{name}"));
+    let mut trees: Vec<_> = air.children.iter().filter_map(|c| c.name()).collect();
+    trees.sort_unstable();
+    assert_eq!(
+        trees,
+        [
+            "Air Tasking DPRK Logic",
+            "Air Tasking DPRK Sorties",
+            "Air Tasking NATO Logic",
+            "Air Tasking NATO Sorties"
+        ],
+        "both sides"
+    );
+    // Each area watches the other side's players: an 8 km entry trigger that
+    // counts to N = 2, and the 20 km player count.
+    for (side, area, country) in [("N", N2_AREA_A, "501"), ("D", N2_AREA_B, "601")] {
+        let trigger = named(&format!("TH{side}01 TRIGGER"));
+        assert_eq!(trigger.pos_xz(), Some(area));
+        assert_eq!(
+            (trigger.property("Radius"), trigger.property("Country")),
+            (Some("8000"), Some(country))
+        );
+        assert_eq!(
+            named(&format!("TH{side}01 COUNT")).property("Counter"),
+            Some("2"),
+            "N = 2"
+        );
+        assert!(
+            air.find_by_name(&format!("TH{side}02 TRIGGER")).is_none(),
+            "one area per side"
+        );
+        let count = named(&format!("PC{side}01 TRIGGER"));
+        assert_eq!(count.pos_xz(), Some(area));
+        assert_eq!(
+            (count.property("Radius"), count.property("Country")),
+            (Some("20000"), Some(country))
+        );
+        assert_eq!(
+            named(&format!("Z{side}01 CHANCE")).property("Random"),
+            Some("100")
+        );
+        assert_eq!(
+            named(&format!("Z{side}01 COOLDOWN")).property("Time"),
+            Some("300")
+        );
+        let mut clock = 0;
+        air.for_each(&mut |node| {
+            clock += usize::from(node.name().is_some_and(|n| n.starts_with("CLK ")))
+        });
+        assert_eq!(clock, 0, "no clock");
+    }
+    // Each side's copies are the one entry's sortie, flown by its AI country,
+    // and each ends on its own area's count (0050 D).
+    for (side, script, ai_country) in [("NATO", "f80c10", "602"), ("DPRK", "il10", "503")] {
+        let sorties = named(&format!("Air Tasking {side} Sorties"));
+        assert!(!sorties.children.is_empty(), "{side} copies");
+        let tag = &side[..1];
+        for copy in &sorties.children {
+            let name = copy.name().unwrap();
+            copy.for_each(&mut |node| {
+                if node.block_type == "Plane" {
+                    assert!(
+                        node.property("Script")
+                            .unwrap()
+                            .to_lowercase()
+                            .contains(script),
+                        "{name}"
+                    );
+                    assert_eq!(node.property("Country"), Some(ai_country), "{name}");
+                }
+            });
+            let prefix = name.split(' ').next().unwrap();
+            let empty_in = copy
+                .find_by_name(&format!("{prefix} EMPTY IN"))
+                .unwrap()
+                .index
+                .unwrap();
+            assert!(
+                named(&format!("PC{tag}01 EMPTY"))
+                    .targets
+                    .contains(&empty_in),
+                "{name}"
+            );
+        }
+    }
+    // The two air starts: each on the country the other side's area watches,
+    // outside its count circle.
+    for (name, area, xz, country, type_id, altitude) in [
+        (N2_DPRK_AIR_START, N2_AREA_A, N2_DPRK_SPAWN, "501", "yak9p", N2_DPRK_ALTITUDE_M),
+        (N2_NATO_AIR_START, N2_AREA_B, N2_NATO_SPAWN, "601", "f51d", N2_NATO_ALTITUDE_M),
+    ] {
+        let field = root.find_by_name(name).unwrap_or_else(|| panic!("{name}"));
+        let airfield = field
+            .children
+            .iter()
+            .find(|c| c.block_type == "Airfield")
+            .expect("its Airfield");
+        assert_eq!(airfield.property("Country"), Some(country), "{name}");
+        assert_eq!(airfield.pos_xz(), Some(xz), "{name}");
+        assert_eq!(airfield.property("YOri"), Some("90.000"), "{name}");
+        assert!(
+            (xz.0 - area.0).hypot(xz.1 - area.1) > N2_COUNT_RADIUS_M,
+            "{name} is inside the count circle"
+        );
+        let mut planes = Vec::new();
+        airfield.for_each(&mut |node| {
+            if node.block_type == "Plane" {
+                planes.push(["Script", "StartType", "Altitude", "Fuel", "Number"].map(|key| node.property(key).unwrap_or("").to_string()));
+            }
+        });
+        let script = format!("\"{}\"", crate::airstart::plane_paths(type_id).1);
+        assert_eq!(
+            planes,
+            [[script, "0".into(), altitude.to_string(), "1".into(), "-1".into()]],
+            "{name}: one air-start type, any number of players"
+        );
+    }
+    let mut fields: Vec<_> = countries
+        .iter()
+        .filter(|(block, _)| block == "Plane" || block == "Airfield")
+        .collect();
+    fields.sort();
+    assert_eq!(
+        fields,
+        [
+            &("Airfield".to_string(), "501".to_string()),
+            &("Airfield".to_string(), "601".to_string())
+        ],
+        "no AI aircraft outside Air Tasking"
+    );
+    // Breadcrumbs (mission objectives) only in the trace build.
+    let mut crumbs = 0;
+    root.for_each(&mut |node| crumbs += usize::from(node.block_type == "MCU_TR_MissionObjective"));
+    if trace {
+        assert!(crumbs > 0, "the trace build carries breadcrumbs");
+    } else {
+        assert_eq!(crumbs, 0, "the clean build carries no breadcrumbs");
+    }
+}
+
+/// The 2N build, as the run sheet describes it: both builds have the same Air
+/// Tasking, and only the trace build carries breadcrumbs.
+#[test]
+fn n2_map_builds_match_the_run_sheet() {
+    let frozen = repo("handoff/p14-probes/flight-2n");
+    let mut h = Harness::new("p14_flight_2n");
+    let (root, countries) = build_n2(&mut h, true);
+    check_n2_build(&root, &countries, true);
+    let mut clean = Harness::new("p14_flight_2n_clean");
+    let (clean_root, clean_countries) = build_n2(&mut clean, false);
+    check_n2_build(&clean_root, &clean_countries, false);
+    // Not flown yet: the build matches the frozen files byte for byte.
+    for (dir, file) in [
+        (&h.dir, format!("{N2_STEM}.Group")),
+        (&h.dir, format!("{N2_STEM}.eng")),
+        (&h.dir, format!("{N2_STEM}.trace.json")),
+        (&clean.dir, format!("{N2_CLEAN_STEM}.Group")),
+        (&clean.dir, format!("{N2_CLEAN_STEM}.eng")),
+    ] {
+        let built = std::fs::read(dir.join(&file)).unwrap();
+        let kept = std::fs::read(frozen.join(&file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+        assert!(built == kept, "{file} differs from the frozen copy");
+    }
+}
 // ---- P14 step 11 item 4: the standalone file (risk l; run sheet: handoff/sessions/2026-10-30-p14-standalone-l.md) ----
 
 /// The base map the editor imports the standalone file into.

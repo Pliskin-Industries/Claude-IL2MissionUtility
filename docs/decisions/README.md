@@ -94,5 +94,6 @@ What this makes easier, harder or necessary.
 | [0056](0056-review-replay-and-trace-safety.md) | Replay reads one log session and rescans on Run, shows discarded lines, falls back to (T - 3) / 50, refuses a .Group changed since its trace; trace builds check the name and index room first and give each file its own breadcrumb band | Accepted |
 | [0057](0057-empty-trace-metadata.md) | An empty trace keeps its old metadata format, so L's frozen base files stay byte-identical | Accepted |
 | [0058](0058-count-down-events-after-flight-2s.md) | The player count steps down on Left and Finished again (A). A wreck removed just after CLEAR can still empty a reopened count; a gate after CLEAR (C) is built only if logs show that | Accepted (A) |
+| [0059](0059-flight-2n-four-pilots-on-eszymans-server.md) | Flight 2N: up to four pilots, a DPRK pair and a NATO pair on separate areas, hosted on eszyman's server; a trace build to fly and a clean build to share | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

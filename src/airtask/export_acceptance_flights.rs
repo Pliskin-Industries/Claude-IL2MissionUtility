@@ -329,6 +329,36 @@ fn frozen_a3_files_parse_and_links_resolve() {
     assert_areas_watch_dprk_from_outside(&root, *spawn, 1, "A3");
 }
 
+/// Flight 2N: built by the Map tab, a trace build to fly and a clean build of
+/// the same inputs (run sheet `handoff/sessions/2026-11-02-p14-flight-2n.md`).
+/// Its writer and its byte and facts check are UI tests
+/// (`ui_tests::write_p14_flight_2n`, `n2_map_builds_match_the_run_sheet`).
+#[test]
+fn frozen_2n_files_parse_and_links_resolve() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("handoff/p14-probes/flight-2n");
+    for stem in ["P14_Flight_2N", "P14_Flight_2N_Clean"] {
+        let root = if stem.ends_with("_Clean") {
+            // No trace sidecar: indexes and links only.
+            let text = std::fs::read_to_string(dir.join(format!("{stem}.Group"))).unwrap();
+            let root = crate::parser::parse_group_file(&text).unwrap();
+            crate::airtask::testkit::assert_indexes_unique_and_links_resolve(&root, stem);
+            root
+        } else {
+            crate::airtask::testkit::assert_frozen_files_resolve(&dir.join(stem))
+        };
+        // One air start per side, each on the player country the other
+        // side's area watches.
+        let mut airfields = Vec::new();
+        root.for_each(&mut |node| {
+            if node.block_type == "Airfield" {
+                airfields.push(node.property("Country").unwrap_or("").to_string());
+            }
+        });
+        airfields.sort();
+        assert_eq!(airfields, ["501", "601"], "{stem}: one air start per side");
+    }
+}
+
 #[test]
 #[ignore = "writes target/p14/P14_Acceptance_A1.Group, locale, trace and spawn sidecars"]
 fn write_p14_acceptance_a1() {
