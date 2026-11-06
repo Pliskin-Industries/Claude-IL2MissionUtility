@@ -6573,19 +6573,65 @@ fn n2_map_builds_match_the_run_sheet() {
     let mut clean = Harness::new("p14_flight_2n_clean");
     let (clean_root, clean_countries) = build_n2(&mut clean, false);
     check_n2_build(&clean_root, &clean_countries, false);
-    // Not flown yet: the build matches the frozen files byte for byte.
-    for (dir, file) in [
-        (&h.dir, format!("{N2_STEM}.Group")),
-        (&h.dir, format!("{N2_STEM}.eng")),
-        (&h.dir, format!("{N2_STEM}.trace.json")),
-        (&clean.dir, format!("{N2_CLEAN_STEM}.Group")),
-        (&clean.dir, format!("{N2_CLEAN_STEM}.eng")),
-    ] {
-        let built = std::fs::read(dir.join(&file)).unwrap();
-        let kept = std::fs::read(frozen.join(&file)).unwrap_or_else(|e| panic!("{file}: {e}"));
-        assert!(built == kept, "{file} differs from the frozen copy");
+    // The frozen files are the ones sent to eszyman (issue #3) and stay as
+    // sent; since decision 0062 the build differs only in the air-start groups.
+    assert_frozen_but_air_start_groups(&h.dir, &frozen, N2_STEM);
+    assert_frozen_but_air_start_groups(&clean.dir, &frozen, N2_CLEAN_STEM);
+}
+/// Upstream `fee0a79` (merged 2026-11-06, decision 0062) exports air starts
+/// under `Airfields` / `DPRK` or `NATO` instead of one `Air starts` group:
+/// one more Group, so every later index moves. This puts a built base map back
+/// in the old layout, so a frozen file from before the merge can be compared
+/// with it block by block (`assert_same_up_to_indexes`).
+fn air_starts_as_before_fee0a79(root: &mut crate::ast::Il2Entity) {
+    let at = root
+        .children
+        .iter()
+        .position(|c| c.block_type == "Group" && c.name() == Some("Airfields"))
+        .expect("an Airfields group");
+    let airfields = &mut root.children[at];
+    let mut fields = Vec::new();
+    for side in std::mem::take(&mut airfields.children) {
+        assert!(
+            side.block_type == "Group" && matches!(side.name(), Some("DPRK" | "NATO")),
+            "Airfields holds only the DPRK and NATO groups"
+        );
+        fields.extend(side.children);
+    }
+    assert!(
+        fields
+            .iter()
+            .all(|f| f.block_type == "Group" && f.children.iter().any(|c| c.block_type == "Airfield")),
+        "one group per air start"
+    );
+    airfields.set_name("Air starts");
+    airfields.children = fields;
+}
+
+/// A base map built since decision 0062 is the frozen file from before it,
+/// up to the air-start regrouping and index renumbering; its locale files are
+/// byte for byte the same.
+fn assert_frozen_but_air_start_groups(dir: &Path, frozen: &Path, stem: &str) {
+    let read = |path: PathBuf| {
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        crate::parser::parse_group_file(&text).unwrap()
+    };
+    let kept = read(frozen.join(format!("{stem}.Group")));
+    let mut built = read(dir.join(format!("{stem}.Group")));
+    air_starts_as_before_fee0a79(&mut built);
+    crate::airtask::testkit::assert_same_up_to_indexes(
+        &kept,
+        &built,
+        crate::airtask::testkit::Renumbering::default(),
+    );
+    for ext in ["eng", "chs", "fra", "ger", "rus", "spa"] {
+        let file = format!("{stem}.{ext}");
+        if let Ok(expected) = std::fs::read(frozen.join(&file)) {
+            assert!(std::fs::read(dir.join(&file)).unwrap() == expected, "{file} differs from the frozen copy");
+        }
     }
 }
+
 // ---- P14 step 11 item 4: the standalone file (risk l; run sheet: handoff/sessions/2026-10-30-p14-standalone-l.md) ----
 
 /// The base map the editor imports the standalone file into.
@@ -6600,19 +6646,9 @@ fn map_generate_0054_standalone_l_base_bytes_unchanged() {
     a3_inputs(&mut h);
     h.app.air_plan.include_in_base_map = false;
     generate_map_from_button(&mut h, &format!("{L_BASE_STEM}.Group"));
+    // Since decision 0062 only the air-start groups differ.
     let frozen = repo("handoff/p14-probes/standalone-l");
-    let mut compared = 0;
-    for file in std::fs::read_dir(frozen).unwrap() {
-        let file = file.unwrap();
-        let name = file.file_name().to_string_lossy().into_owned();
-        if name.starts_with(&format!("{L_BASE_STEM}.")) {
-            let actual = std::fs::read(h.out(&name)).unwrap();
-            let expected = std::fs::read(file.path()).unwrap();
-            assert!(actual == expected, "{name}: L's base map bytes changed");
-            compared += 1;
-        }
-    }
-    assert_eq!(compared, 8, "Group, six locales and trace sidecar");
+    assert_frozen_but_air_start_groups(&h.dir, &frozen, L_BASE_STEM);
 }
 
 /// A3's inputs (`a3_inputs`) with "Include in base map" off. Map Generate
@@ -6669,12 +6705,8 @@ fn standalone_l_build_matches_a3() {
         names
     };
     assert_eq!(stem_files(&h.dir), stem_files(&frozen), "the build writes the frozen file set");
-    for name in stem_files(&frozen).into_iter().filter(|n| n.starts_with(&format!("{L_BASE_STEM}."))) {
-        let expected = std::fs::read(frozen.join(&name)).unwrap();
-        let actual = std::fs::read(h.dir.join(&name)).unwrap();
-        let first = expected.iter().zip(&actual).position(|(a, b)| a != b);
-        assert!(actual == expected, "{name}: first differing byte {:?}; expected {} bytes, got {}", first.or(Some(expected.len().min(actual.len()))), expected.len(), actual.len());
-    }
+    // Since decision 0062 the base map differs only in the air-start groups.
+    assert_frozen_but_air_start_groups(&h.dir, &frozen, L_BASE_STEM);
 
     // The base map: the air start, no Air Tasking, indexes from 1.
     assert!(base.find_by_name("Air Tasking").is_none());
@@ -6884,22 +6916,15 @@ fn check_a4_build(root: &crate::ast::Il2Entity, countries: &[(String, String)]) 
     );
 }
 
-/// Not flown yet: the build matches the frozen files byte for byte.
+/// A4 was flown on 2026-11-06 and its frozen files stay as flown; since
+/// decision 0062 the build differs from them only in the air-start groups.
 #[test]
 fn a4_map_build_matches_the_run_sheet() {
     let frozen = repo("handoff/p14-probes/flight-a4");
     let mut h = Harness::new("p14_acceptance_a4");
     let (root, countries) = build_a4(&mut h);
     check_a4_build(&root, &countries);
-    for file in [
-        format!("{A4_STEM}.Group"),
-        format!("{A4_STEM}.eng"),
-        format!("{A4_STEM}.trace.json"),
-    ] {
-        let built = std::fs::read(h.dir.join(&file)).unwrap();
-        let kept = std::fs::read(frozen.join(&file)).unwrap_or_else(|e| panic!("{file}: {e}"));
-        assert!(built == kept, "{file} differs from the frozen copy");
-    }
+    assert_frozen_but_air_start_groups(&h.dir, &frozen, A4_STEM);
 }
 
 // ---------------------------------------------------------------------------

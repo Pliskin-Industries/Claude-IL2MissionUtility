@@ -95,7 +95,9 @@ What this makes easier, harder or necessary.
 | [0057](0057-empty-trace-metadata.md) | An empty trace keeps its old metadata format, so L's frozen base files stay byte-identical | Accepted |
 | [0058](0058-count-down-events-after-flight-2s.md) | The player count steps down on Left and Finished again (A). A wreck removed just after CLEAR can still empty a reopened count; a gate after CLEAR (C) is built only if logs show that | Accepted (A) |
 | [0059](0059-flight-2n-four-pilots-on-eszymans-server.md) | Flight 2N: up to four pilots, a DPRK pair and a NATO pair on separate areas, hosted on eszyman's server; a trace build to fly and a clean build to share | Accepted |
-| [0060](0060-air-tasking-beside-exclusive-activation.md) | Air Tasking runs beside upstream's Exclusive Activation (two modes); the proposal explains how Air Tasking could replace it, with the one gap (no always-on area) | Accepted |
+| [0060](0060-air-tasking-beside-exclusive-activation.md) | Air Tasking runs beside upstream's Exclusive Activation (two modes); the proposal explains how Air Tasking could replace it, with the one gap (no always-on area) | Accepted; timing superseded by 0063 |
 | [0061](0061-solo-checks-then-alpha.md) | Flight 2N waits; solo flights A4 (Yak copy, DPRK-side extension) and 2T (quiet roll rate) next; then an alpha whose trace-built operations stand in for 2N | Accepted |
+| [0062](0062-merge-upstream-571504a-fee0a79.md) | Merge upstream `571504a` and `fee0a79` before the alpha; DPRK stays 501; their air-start regrouping changes Map Generate's output, and the 2N, A4 and L checks compare up to it | Accepted |
+| [0063](0063-send-alpha-and-proposal-to-eszyman.md) | Send eszyman a v0.8-Alpha build and the Air Tasking proposal now, in one issue; tag and post at the user's word | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

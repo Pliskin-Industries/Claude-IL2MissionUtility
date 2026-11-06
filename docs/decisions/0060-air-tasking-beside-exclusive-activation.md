@@ -1,6 +1,6 @@
 # 0060. Air Tasking runs beside upstream's Exclusive Activation; the proposal explains how it could replace it
 
-- **Status:** Accepted
+- **Status:** Accepted; its timing (send after real-operation logs) superseded by [0063](0063-send-alpha-and-proposal-to-eszyman.md) (2026-11-06)
 - **Date:** 2026-11-05
 - **Decided by:** the user, 2026-11-05 ("Let's keep B but offer an explanation of how air tasking could replace all of it"). Options and recommendation by Claude.
 - **Supersedes:** [0026](0026-air-tasking-and-upstream-strikes-and-caps.md), in its third point (Air Tasking replaces Map › Missions and Exclusive Activation) and in how the proposal is framed. 0026's other points stand, and so does [0028](0028-upstream-air-groups-feed-the-pool.md).
