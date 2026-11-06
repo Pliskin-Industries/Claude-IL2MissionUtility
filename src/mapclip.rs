@@ -15,7 +15,7 @@
 //! * Influence: `influence_polygons(_in/_stretched)`,
 //!   `influence_minus_salients`, `influence_fill_quads(_ex)`
 //! * Salients: `SalientPatch`, `apply_salients`, `detached_salient_patch`
-//! * Front: `snap_to_front`, `point_north_of_front`, `FRONT_PLACE_BAND`,
+//! * Front: `snap_to_front`, `point_north_of_front`, `on_dprk_side`, `FRONT_PLACE_BAND`,
 //!   `can_extend_salient`, `can_extend_west_east`, `prepare_front`
 //! * `stroke_self_intersects` / `ring_self_intersects`
 //!
@@ -23,7 +23,7 @@
 //! * ui.rs (Map) — drawing, salient/front edit constraints
 //! * frontlines.rs, mapfighters.rs, mapground.rs, mapshipping.rs
 
-use geo::{BooleanOps, Coord, LineString, Polygon, Rect};
+use geo::{BooleanOps, Contains, Coord, LineString, Point, Polygon, Rect};
 use geo_types::MultiPolygon;
 
 use crate::geo::{MAP_MAX, MAP_MIN, yalu_x_at_z};
@@ -984,6 +984,36 @@ pub fn point_north_of_front(front: &[(f64, f64)], x: f64, z: f64) -> bool {
     x > front_x_at_z(front, z)
 }
 
+/// DPRK holds the north side of `front`. `front` is the base line (densified).
+/// An attached salient is already folded into that line by [`apply_salients`].
+/// A detached pocket is held by the side the bulge cuts into.
+pub fn on_dprk_side(front: &[(f64, f64)], salients: &[Vec<(f64, f64)>], x: f64, z: f64) -> bool {
+    if front.len() < 2 {
+        return true;
+    }
+    let (composite, patches) = apply_salients(front.to_vec(), salients);
+    for patch in &patches {
+        if !patch.attached && ring_contains_xz(&patch.ring, x, z) {
+            return !patch.cuts_north;
+        }
+    }
+    point_north_of_front(&composite, x, z)
+}
+
+fn ring_contains_xz(ring: &[(f64, f64)], x: f64, z: f64) -> bool {
+    if ring.len() < 3 {
+        return false;
+    }
+    let mut coords: Vec<Coord> = ring
+        .iter()
+        .map(|&(px, pz)| Coord { x: px, y: pz })
+        .collect();
+    if coords.first().map(|c| (c.x, c.y)) != coords.last().map(|c| (c.x, c.y)) {
+        coords.push(coords[0]);
+    }
+    Polygon::new(LineString(coords), Vec::new()).contains(&Point::new(x, z))
+}
+
 fn front_x_at_z(front: &[(f64, f64)], z: f64) -> f64 {
     if front.is_empty() {
         return 0.0;
@@ -1097,6 +1127,40 @@ pub fn format_clip_preview(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn north_of_a_flat_front_is_dprk() {
+        let front = vec![(100.0, 0.0), (100.0, 200.0)];
+        assert!(on_dprk_side(&front, &[], 150.0, 50.0));
+        assert!(!on_dprk_side(&front, &[], 50.0, 50.0));
+    }
+
+    #[test]
+    fn detached_pocket_uses_the_side_that_holds_it() {
+        let front = vec![(100.0, 0.0), (100.0, 400.0)];
+        let north_pocket = vec![
+            (150.0, 50.0),
+            (180.0, 50.0),
+            (180.0, 150.0),
+            (150.0, 150.0),
+            (150.0, 50.0),
+        ];
+        let south_pocket = vec![
+            (40.0, 50.0),
+            (70.0, 50.0),
+            (70.0, 150.0),
+            (40.0, 150.0),
+            (40.0, 50.0),
+        ];
+        assert!(
+            !on_dprk_side(&front, &[north_pocket], 165.0, 100.0),
+            "a pocket north of the front is NATO"
+        );
+        assert!(
+            on_dprk_side(&front, &[south_pocket], 55.0, 100.0),
+            "a pocket south of the front is DPRK"
+        );
+    }
 
     #[test]
     fn strict_contains_drops_boundary() {

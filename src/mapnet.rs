@@ -34,6 +34,8 @@
 //! * `sample_network` — recomputes unit + waypoint world positions from a
 //!   `NetworkSpot`; `column_waypoint_dists` — a two-WP column straddles the
 //!   Zone IN circle (one hop near each rim) when the path is long enough.
+//!   When one side is a dead end, that hop stops at the end of the spur and
+//!   the other hop runs to the Zone OUT rim along any connected road.
 //! * `park_route_copy` — writes final world positions back into the group:
 //!   vehicles, their LinkTrId targets, and MCU_Waypoints (ascending Index),
 //!   preserving the original XPos/ZPos/YOri decimal precision. A train's
@@ -64,6 +66,7 @@
 
 mod ini;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use crate::ast::Il2Entity;
@@ -222,6 +225,8 @@ pub struct RouteLayout {
     pub wp_ahead: Vec<f64>,
     /// Zone IN radius (metres). Two-WP columns try to straddle this circle.
     pub zone_in_m: f64,
+    /// Zone OUT radius (metres). A dead-end column's long hop stays inside it.
+    pub zone_out_m: f64,
 }
 
 /// Live pose of a group parked on a polyline.
@@ -234,6 +239,7 @@ pub struct NetworkSpot {
     pub behind: Vec<f64>,
     pub wp_ahead: Vec<f64>,
     pub zone_in_m: f64,
+    pub zone_out_m: f64,
     pub unit_xz: Vec<(f64, f64)>,
     pub waypoints: Vec<(f64, f64)>,
 }
@@ -374,11 +380,13 @@ pub fn inspect_route(root: &Il2Entity) -> Option<RouteLayout> {
     let (behind, _) = column_gaps(&units);
     let wp_ahead = waypoint_ahead(root, &units);
     let zone_in_m = inspect_zone_in(root).unwrap_or(if rail { 19_000.0 } else { 10_000.0 });
+    let zone_out_m = inspect_zone_out(root).unwrap_or(0.0);
     Some(RouteLayout {
         rail,
         behind,
         wp_ahead,
         zone_in_m,
+        zone_out_m,
     })
 }
 
@@ -478,6 +486,7 @@ pub fn inspect_parked_network(root: &Il2Entity) -> Option<NetworkSpot> {
         behind,
         wp_ahead: waypoint_ahead(root, &units),
         zone_in_m: inspect_zone_in(root).unwrap_or(if rail { 19_000.0 } else { 10_000.0 }),
+        zone_out_m: inspect_zone_out(root).unwrap_or(0.0),
         unit_xz,
         waypoints: inspect_waypoint_xz(root),
     })
@@ -500,6 +509,23 @@ fn inspect_zone_in(root: &Il2Entity) -> Option<f64> {
         .and_then(|z| z.property("Zone"))
         .and_then(|s| s.parse::<f64>().ok())
         .filter(|r| *r > 0.0)
+}
+
+fn inspect_zone_out(root: &Il2Entity) -> Option<f64> {
+    let mut found = None;
+    root.for_each(&mut |entity| {
+        if found.is_some() || entity.block_type != "MCU_CheckZone" {
+            return;
+        }
+        let Some(name) = entity.name() else { return };
+        if name.eq_ignore_ascii_case("zone out") {
+            found = entity
+                .property("Zone")
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|r| *r > 0.0);
+        }
+    });
+    found
 }
 
 struct RouteUnit {
@@ -640,12 +666,316 @@ fn route_need(route: &RouteLayout) -> (f64, f64) {
     (behind, ahead)
 }
 
+/// Roads (or rails) that share a vertex. Built once for the Korea networks.
+struct JunctionGraph {
+    /// `links[line][vertex]` lists other polylines that meet this point.
+    links: Vec<Vec<Vec<(usize, usize)>>>,
+}
+
+const JOIN_CELL_M: f64 = 10.0;
+const JOIN_M: f64 = 8.0;
+
+impl JunctionGraph {
+    fn build(net: &Network) -> Self {
+        let mut buckets: HashMap<(i32, i32), Vec<(usize, usize)>> = HashMap::new();
+        for (li, line) in net.lines.iter().enumerate() {
+            for (vi, &(x, z)) in line.pts.iter().enumerate() {
+                let key = (
+                    (x / JOIN_CELL_M).round() as i32,
+                    (z / JOIN_CELL_M).round() as i32,
+                );
+                buckets.entry(key).or_default().push((li, vi));
+            }
+        }
+        let mut links: Vec<Vec<Vec<(usize, usize)>>> = net
+            .lines
+            .iter()
+            .map(|line| vec![Vec::new(); line.pts.len()])
+            .collect();
+        for (&(cx, cz), verts) in &buckets {
+            let mut near = Vec::new();
+            for dx in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(cell) = buckets.get(&(cx + dx, cz + dz)) {
+                        near.extend(cell.iter().copied());
+                    }
+                }
+            }
+            for &(li, vi) in verts {
+                let (x, z) = net.lines[li].pts[vi];
+                for &(oi, ov) in &near {
+                    if oi == li {
+                        continue;
+                    }
+                    let (ox, oz) = net.lines[oi].pts[ov];
+                    if (x - ox).hypot(z - oz) > JOIN_M {
+                        continue;
+                    }
+                    let slot = &mut links[li][vi];
+                    if !slot.contains(&(oi, ov)) {
+                        slot.push((oi, ov));
+                    }
+                }
+            }
+        }
+        Self { links }
+    }
+}
+
+fn road_junctions() -> &'static JunctionGraph {
+    static G: OnceLock<JunctionGraph> = OnceLock::new();
+    G.get_or_init(|| JunctionGraph::build(roads()))
+}
+
+fn rail_junctions() -> &'static JunctionGraph {
+    static G: OnceLock<JunctionGraph> = OnceLock::new();
+    G.get_or_init(|| JunctionGraph::build(railroads()))
+}
+
+fn with_junctions<R>(net: &Network, f: impl FnOnce(&JunctionGraph) -> R) -> R {
+    if std::ptr::eq(net, roads()) {
+        f(road_junctions())
+    } else if std::ptr::eq(net, railroads()) {
+        f(rail_junctions())
+    } else {
+        f(&JunctionGraph::build(net))
+    }
+}
+
+fn inside_radius(line: &PolyLine, dist: f64, origin: (f64, f64), radius: f64) -> bool {
+    let Some((x, z, _)) = line.at(dist) else {
+        return false;
+    };
+    (x - origin.0).hypot(z - origin.1) <= radius
+}
+
+/// Last point on the segment from `from` toward `to` that is still inside the circle.
+fn last_inside(line: &PolyLine, from: f64, to: f64, origin: (f64, f64), radius: f64) -> f64 {
+    if !inside_radius(line, from, origin, radius) {
+        return from;
+    }
+    if inside_radius(line, to, origin, radius) {
+        return to;
+    }
+    let mut lo = from;
+    let mut hi = to;
+    for _ in 0..28 {
+        let mid = (lo + hi) * 0.5;
+        if inside_radius(line, mid, origin, radius) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+fn spur_end(line: &PolyLine, dist: f64, dir: i8, origin: (f64, f64), radius: f64) -> (f64, f64) {
+    let end = if dir > 0 { line.len() } else { 0.0 };
+    let hit = last_inside(line, dist, end, origin, radius);
+    line.at(hit).map(|(x, z, _)| (x, z)).unwrap_or(origin)
+}
+
+fn next_vertex(line: &PolyLine, dist: f64, dir: i8) -> Option<usize> {
+    if dir > 0 {
+        line.cum
+            .iter()
+            .enumerate()
+            .find(|(_, c)| **c > dist + 0.5)
+            .map(|(i, _)| i)
+    } else {
+        line.cum
+            .iter()
+            .enumerate()
+            .rfind(|(_, c)| **c < dist - 0.5)
+            .map(|(i, _)| i)
+    }
+}
+
+struct SideWalk {
+    line: usize,
+    dist: f64,
+    dir: i8,
+    arc: f64,
+    path: HashSet<(usize, usize)>,
+}
+
+/// Longest road (or rail) walk from the lead in `dir` that stays inside `radius`.
+fn farthest_on_side(
+    net: &Network,
+    graph: &JunctionGraph,
+    line_i: usize,
+    start_dist: f64,
+    dir: i8,
+    origin: (f64, f64),
+    radius: f64,
+) -> (f64, f64) {
+    let line = &net.lines[line_i];
+    let end = if dir > 0 { line.len() } else { 0.0 };
+    let spur_hit = last_inside(line, start_dist, end, origin, radius);
+    let mut best = line.at(spur_hit).map(|(x, z, _)| (x, z)).unwrap_or(origin);
+    let mut best_arc = (spur_hit - start_dist).abs();
+    let mut stack = vec![SideWalk {
+        line: line_i,
+        dist: start_dist,
+        dir,
+        arc: 0.0,
+        path: HashSet::new(),
+    }];
+    let mut budget = 4_000i32;
+    while let Some(mut walk) = stack.pop() {
+        loop {
+            if budget <= 0 || walk.arc > radius * 6.0 {
+                break;
+            }
+            budget -= 1;
+            let line = &net.lines[walk.line];
+            let Some(vi) = next_vertex(line, walk.dist, walk.dir) else {
+                break;
+            };
+            let vend = line.cum[vi];
+            let hit = last_inside(line, walk.dist, vend, origin, radius);
+            let arc_here = walk.arc + (hit - walk.dist).abs();
+            if let Some((x, z, _)) = line.at(hit) {
+                if arc_here > best_arc + 0.5 {
+                    best_arc = arc_here;
+                    best = (x, z);
+                }
+            }
+            if (hit - vend).abs() > 1.0 {
+                break;
+            }
+            if walk.path.len() > 256 || !walk.path.insert((walk.line, vi)) {
+                break;
+            }
+            if let Some(exits) = graph.links.get(walk.line).and_then(|row| row.get(vi)) {
+                for &(ol, ov) in exits {
+                    if walk.path.contains(&(ol, ov)) {
+                        continue;
+                    }
+                    let other = &net.lines[ol];
+                    let od = other.cum[ov];
+                    if ov + 1 < other.pts.len() {
+                        stack.push(SideWalk {
+                            line: ol,
+                            dist: od,
+                            dir: 1,
+                            arc: arc_here,
+                            path: walk.path.clone(),
+                        });
+                    }
+                    if ov > 0 {
+                        stack.push(SideWalk {
+                            line: ol,
+                            dist: od,
+                            dir: -1,
+                            arc: arc_here,
+                            path: walk.path.clone(),
+                        });
+                    }
+                }
+            }
+            walk.dist = vend;
+            walk.arc = arc_here;
+        }
+    }
+    best
+}
+
+/// World positions for a column's waypoints.
+///
+/// Two hops straddle the Zone IN rim when that path exists on this polyline.
+/// Otherwise each side follows connected roads to the Zone OUT rim (or Zone
+/// IN, when the group has no Zone OUT). A side that ends inside the circle,
+/// while the other side still reaches the rim, stops at the end of its spur.
+fn route_waypoints(net: &Network, line: &PolyLine, pose: &NetworkSpot) -> Vec<(f64, f64)> {
+    let total = line.len();
+    let dists = column_waypoint_dists(
+        pose.zone_in_m,
+        &pose.wp_ahead,
+        pose.lead_dist,
+        pose.reverse,
+        total,
+    );
+    let edge = (pose.zone_in_m - 200.0).max(500.0);
+    let ahead_at = if pose.reverse {
+        pose.lead_dist - edge
+    } else {
+        pose.lead_dist + edge
+    };
+    let behind_at = if pose.reverse {
+        pose.lead_dist + edge
+    } else {
+        pose.lead_dist - edge
+    };
+    let straddles = pose.wp_ahead.len() == 2
+        && pose.zone_in_m > 500.0
+        && dists.len() == 2
+        && (dists[0] - ahead_at).abs() < 1.0
+        && (dists[1] - behind_at).abs() < 1.0;
+    if straddles || pose.wp_ahead.len() != 2 || pose.zone_in_m <= 500.0 {
+        return dists
+            .iter()
+            .filter_map(|&d| line.at(d).map(|(x, z, _)| (x, z)))
+            .collect();
+    }
+    let Some(origin) = line.at(pose.lead_dist).map(|(x, z, _)| (x, z)) else {
+        return Vec::new();
+    };
+    let limit_m = if pose.zone_out_m > 500.0 {
+        pose.zone_out_m
+    } else {
+        pose.zone_in_m
+    };
+    let limit = (limit_m - 200.0).max(500.0);
+    let ahead_dir: i8 = if pose.reverse { -1 } else { 1 };
+    let behind_dir = -ahead_dir;
+    let on_rim = |point: (f64, f64)| (point.0 - origin.0).hypot(point.1 - origin.1) >= limit - 5.0;
+    with_junctions(net, |graph| {
+        let ahead_far = farthest_on_side(
+            net,
+            graph,
+            pose.line,
+            pose.lead_dist,
+            ahead_dir,
+            origin,
+            limit,
+        );
+        let behind_far = farthest_on_side(
+            net,
+            graph,
+            pose.line,
+            pose.lead_dist,
+            behind_dir,
+            origin,
+            limit,
+        );
+        // A side that dies inside the circle, while the other side can still
+        // reach the rim, stops at the end of this spur. The open side keeps
+        // the longest connected road that stays inside the circle.
+        let ahead_open = on_rim(ahead_far);
+        let behind_open = on_rim(behind_far);
+        let ahead = if !ahead_open && behind_open {
+            spur_end(line, pose.lead_dist, ahead_dir, origin, limit)
+        } else {
+            ahead_far
+        };
+        let behind = if !behind_open && ahead_open {
+            spur_end(line, pose.lead_dist, behind_dir, origin, limit)
+        } else {
+            behind_far
+        };
+        vec![ahead, behind]
+    })
+}
+
 /// Distances along the polyline for each authored waypoint.
 ///
 /// A single-column group with exactly two waypoints tries to sit one hop near
 /// the Zone IN rim ahead of the lead and the other near the opposite rim
 /// behind, when both points fall on the path. Otherwise hops stay in order
-/// ahead of the lead (the authored offsets).
+/// ahead of the lead (the authored offsets). `sample_network` replaces that
+/// fallback with a dead-end spur and a connected-road run out to Zone OUT.
 pub fn column_waypoint_dists(
     zone_in_m: f64,
     authored_ahead: &[f64],
@@ -720,18 +1050,7 @@ pub fn sample_network(net: &Network, pose: &mut NetworkSpot) -> Option<(f64, f64
     }
     pose.unit_xz = unit_xz;
     if !pin_wps {
-        let mut waypoints = Vec::new();
-        for d in column_waypoint_dists(
-            pose.zone_in_m,
-            &pose.wp_ahead,
-            pose.lead_dist,
-            pose.reverse,
-            total,
-        ) {
-            let p = line.at(d)?;
-            waypoints.push((p.0, p.1));
-        }
-        pose.waypoints = waypoints;
+        pose.waypoints = route_waypoints(net, line, pose);
     }
     Some((lead.0, lead.1, heading))
 }
@@ -912,6 +1231,7 @@ fn place_route_filtered(
             behind: route.behind.clone(),
             wp_ahead: route.wp_ahead.clone(),
             zone_in_m: route.zone_in_m,
+            zone_out_m: route.zone_out_m,
             unit_xz: Vec::new(),
             waypoints: Vec::new(),
         };
@@ -1215,6 +1535,7 @@ mod tests {
             behind: vec![40.0],
             wp_ahead: vec![400.0],
             zone_in_m: 0.0,
+            zone_out_m: 0.0,
         };
         let aabb = WorldAabb::from_corners(80_000.0, 80_000.0, 300_000.0, 300_000.0);
         let ((px, pz, _, _), pose) =
@@ -1250,6 +1571,7 @@ mod tests {
         assert!(route.wp_ahead[0] > 4_000.0);
         assert!(route.wp_ahead[1] > route.wp_ahead[0]);
         assert!((route.zone_in_m - 12_000.0).abs() < 0.5);
+        assert!((route.zone_out_m - 18_000.0).abs() < 0.5);
         assert_eq!(inspect_path_waypoints(&root), route.wp_ahead);
     }
 
@@ -1288,6 +1610,7 @@ mod tests {
             behind: Vec::new(),
             wp_ahead: vec![2_000.0],
             zone_in_m: 0.0,
+            zone_out_m: 0.0,
         };
         let ((x, z, heading, in_ao), pose) =
             place_route(&route, aabb, 7, 0, &[], |x, z| aabb.contains(x, z)).expect("rail spot");
@@ -1404,6 +1727,7 @@ mod tests {
             behind: Vec::new(),
             wp_ahead: vec![2_000.0],
             zone_in_m: 0.0,
+            zone_out_m: 0.0,
         };
         let mut picked = None;
         for seed in 0..40 {
@@ -1463,6 +1787,7 @@ mod tests {
             behind: vec![80.0],
             wp_ahead: vec![1_200.0],
             zone_in_m: 0.0,
+            zone_out_m: 0.0,
         };
         let (_, mut pose) =
             place_route(&route, aabb, 5, 0, &[], |x, z| aabb.contains(x, z)).expect("column");
@@ -1524,6 +1849,47 @@ mod tests {
     }
 
     #[test]
+    fn dead_end_spur_keeps_one_hop_and_runs_the_other_to_zone_out() {
+        // The long side of this spur is a dead end. The short side meets
+        // another road, which is the only way to reach the Zone OUT rim.
+        let spur = PolyLine::from_pts(vec![(0.0, 0.0), (1_500.0, 0.0), (3_000.0, 0.0)]).unwrap();
+        let cross = PolyLine::from_pts(vec![(0.0, 0.0), (0.0, 30_000.0)]).unwrap();
+        let net = Network {
+            lines: vec![spur, cross],
+        };
+        let mut pose = NetworkSpot {
+            rail: false,
+            line: 0,
+            lead_dist: 400.0,
+            reverse: false,
+            behind: vec![40.0],
+            wp_ahead: vec![50.0, 100.0],
+            zone_in_m: 10_000.0,
+            zone_out_m: 15_000.0,
+            unit_xz: Vec::new(),
+            waypoints: Vec::new(),
+        };
+        sample_network(&net, &mut pose).expect("pose");
+        assert_eq!(pose.waypoints.len(), 2);
+        let ahead = pose.waypoints[0];
+        let behind = pose.waypoints[1];
+        assert!(
+            (ahead.0 - 3_000.0).abs() < 2.0 && ahead.1.abs() < 2.0,
+            "dead-end hop should sit at the end of the spur, got {ahead:?}"
+        );
+        let lead = pose.unit_xz[0];
+        let d = (behind.0 - lead.0).hypot(behind.1 - lead.1);
+        assert!(
+            (d - 14_800.0).abs() < 40.0,
+            "the other hop should reach the Zone OUT rim, got {behind:?} ({d:.0} m)"
+        );
+        assert!(
+            behind.1 > 1_000.0,
+            "the long hop should leave the spur onto the connected road, got {behind:?}"
+        );
+    }
+
+    #[test]
     fn sample_network_straddles_two_wps_on_a_long_road() {
         let net = roads();
         let (li, line) = net
@@ -1540,6 +1906,7 @@ mod tests {
             behind: vec![80.0],
             wp_ahead: vec![1_200.0, 2_400.0],
             zone_in_m: 10_000.0,
+            zone_out_m: 0.0,
             unit_xz: Vec::new(),
             waypoints: Vec::new(),
         };
@@ -1693,6 +2060,7 @@ mod tests {
             behind: vec![40.0],
             wp_ahead: vec![400.0],
             zone_in_m: 0.0,
+            zone_out_m: 0.0,
         };
         let ((x, z, placed_h, _), pose) =
             place_route(&route, aabb, 3, 1, &[], |px, pz| aabb.contains(px, pz))

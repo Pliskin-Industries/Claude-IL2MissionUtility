@@ -667,6 +667,8 @@ const THRESHOLD_SLACK_M: f64 = 12.0;
 /// Engine off, parking writes `StartType` 2 and `SnapTo` 2 and leaves the
 /// field on that same hold-short. A field with no Type 3 nodes still
 /// exports. `country`, when set, is written on the airfield (NATO 601 / DPRK 501).
+/// The hold-short itself does not depend on country: 501, 502, 503, and 601
+/// use this same rule on that field's own taxi graph.
 pub fn place_field_spawn(
     group: &mut Il2Entity,
     planes: &[AirStartPlane],
@@ -676,6 +678,29 @@ pub fn place_field_spawn(
     if planes.is_empty() {
         return Err("Add an aircraft before placing the field.".into());
     }
+    let (air, spot) = ramp_spot(group, takeoff_heading)?;
+    write_spawn(group, air.index, air.entity_id, &spot, planes, country)?;
+    Ok(spot)
+}
+
+/// Move the fakefield to the hold-short and write the engine-running model.
+///
+/// Same geometry as [`place_field_spawn`], without an aircraft list. Country
+/// and any existing `Planes` block stay as they are. A field with no taxi
+/// graph, or without two `RunwayEnd` nodes, is left where it is.
+pub fn place_ramp_start(
+    group: &mut Il2Entity,
+    takeoff_heading: Option<f64>,
+) -> Result<SpawnSpot, String> {
+    let (air, spot) = ramp_spot(group, takeoff_heading)?;
+    write_ramp(group, air.index, air.entity_id, &spot)?;
+    Ok(spot)
+}
+
+fn ramp_spot(
+    group: &Il2Entity,
+    takeoff_heading: Option<f64>,
+) -> Result<(AirRef, SpawnSpot), String> {
     let air = find_one_airfield(group)?;
     let nodes = taxi_nodes_for(group, air.entity_id)?;
     let ends = threshold_indexes(&nodes)?;
@@ -689,8 +714,7 @@ pub fn place_field_spawn(
         z: nodes[spot_i].z,
         heading_deg: heading_toward_runway(&nodes[spot_i], depart, far_node),
     };
-    write_spawn(group, air.index, air.entity_id, &spot, planes, country)?;
-    Ok(spot)
+    Ok((air, spot))
 }
 
 struct AirRef {
@@ -896,6 +920,41 @@ fn heading_between(from: &TaxiNode, to: &TaxiNode) -> f64 {
 fn heading_delta(a: f64, b: f64) -> f64 {
     let d = (a - b).rem_euclid(360.0);
     d.min(360.0 - d)
+}
+
+fn write_ramp(
+    group: &mut Il2Entity,
+    air_index: i32,
+    entity_id: i32,
+    spot: &SpawnSpot,
+) -> Result<(), String> {
+    let x = format!("{:.3}", spot.x);
+    let z = format!("{:.3}", spot.z);
+    let heading = format!("{:.3}", spot.heading_deg.rem_euclid(360.0));
+    let mut wrote_air = false;
+    let mut wrote_entity = false;
+    group.for_each_mut(&mut |e| {
+        let is_air = e.block_type == "Airfield" && e.index == Some(air_index);
+        let is_entity = e.block_type == "MCU_TR_Entity" && e.index == Some(entity_id);
+        if !is_air && !is_entity {
+            return;
+        }
+        e.set_property("XPos", x.clone());
+        e.set_property("ZPos", z.clone());
+        e.set_property("YOri", heading.clone());
+        if is_air {
+            wrote_air = true;
+            e.set_property("Model", format!("\"{RUNWAY_SPAWN_MODEL}\""));
+            e.set_property("Script", format!("\"{RUNWAY_SPAWN_SCRIPT}\""));
+        }
+        if is_entity {
+            wrote_entity = true;
+        }
+    });
+    if !wrote_air || !wrote_entity {
+        return Err("The airfield entity link is broken.".into());
+    }
+    Ok(())
 }
 
 fn write_spawn(
@@ -1633,6 +1692,31 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
         e.children.iter().find_map(|c| find_block(c, pred))
     }
 
+    fn shift_xz(e: &mut Il2Entity, dx: f64, dz: f64) {
+        for key in ["X", "Z", "XPos", "ZPos"] {
+            let Some(raw) = e.property(key) else {
+                continue;
+            };
+            let Ok(n) = raw.parse::<f64>() else {
+                continue;
+            };
+            let shifted = if key.starts_with('X') { n + dx } else { n + dz };
+            e.set_property(key, format!("{shifted:.3}"));
+        }
+        for child in &mut e.children {
+            shift_xz(child, dx, dz);
+        }
+    }
+
+    fn set_airfield_country(e: &mut Il2Entity, country: i32) {
+        if e.block_type == "Airfield" {
+            e.set_property("Country", country.to_string());
+        }
+        for child in &mut e.children {
+            set_airfield_country(child, country);
+        }
+    }
+
     fn field_and_entity(root: &Il2Entity) -> (&Il2Entity, &Il2Entity) {
         let air = find_block(root, &|e| e.block_type == "Airfield").expect("airfield");
         let link = int_prop(air, "LinkTrId").unwrap();
@@ -1721,6 +1805,89 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
         assert!(toward > 0.0, "nose faces the runway");
     }
 
+    /// A PRC or DPRK field uses the same hold-short on its own taxi graph.
+    /// The USA spot stays the K-13 numbers above; these copies are shifted
+    /// so a borrowed USA coordinate would fail.
+    #[test]
+    fn prc_and_dprk_fields_get_the_same_ramp_start_as_usa() {
+        let planes = vec![crate::airstart::default_plane("f51d")];
+        let mut usa = k13();
+        let usa_spot = place_field_spawn(&mut usa, &planes, None, Some(601)).unwrap();
+        assert!(
+            (usa_spot.x - 72007.346).abs() < 0.001 && (usa_spot.z - 287796.226).abs() < 0.001,
+            "{usa_spot:?}"
+        );
+        let (usa_air, _) = field_and_entity(&usa);
+        let usa_model = usa_air.property("Model").unwrap().to_string();
+        let usa_script = usa_air.property("Script").unwrap().to_string();
+
+        for (country, dx, dz) in [(503, 50_000.0, -30_000.0), (502, 12_000.0, 8_000.0)] {
+            let mut field = k13();
+            shift_xz(&mut field, dx, dz);
+            set_airfield_country(&mut field, country);
+            let (before, _) = field_and_entity(&field);
+            let before_x = before.property("XPos").unwrap().to_string();
+            let before_z = before.property("ZPos").unwrap().to_string();
+            let spot = place_ramp_start(&mut field, None).unwrap();
+            assert!(
+                (spot.x - usa_spot.x).abs() > 1_000.0,
+                "country {country} must not copy the USA coordinate"
+            );
+            let (air, ent) = field_and_entity(&field);
+            assert_eq!(
+                air.property("Country"),
+                Some(country.to_string()).as_deref()
+            );
+            assert_eq!(air.property("Model"), Some(usa_model.as_str()));
+            assert_eq!(air.property("Script"), Some(usa_script.as_str()));
+            assert!(air.children.iter().all(|c| c.block_type != "Planes"));
+            for obj in [air, ent] {
+                let x: f64 = obj.property("XPos").unwrap().parse().unwrap();
+                let z: f64 = obj.property("ZPos").unwrap().parse().unwrap();
+                let h: f64 = obj.property("YOri").unwrap().parse().unwrap();
+                assert!((x - spot.x).abs() < 0.001 && (z - spot.z).abs() < 0.001);
+                assert!((h - spot.heading_deg).abs() < 0.001);
+                assert!(obj.property("XPos") != Some(before_x.as_str()));
+                assert!(obj.property("ZPos") != Some(before_z.as_str()));
+            }
+            let nw_x = 71948.326 + dx;
+            let nw_z = 287712.612 + dz;
+            let se_x = 69788.467 + dx;
+            let se_z = 289281.835 + dz;
+            let northwest = dist2(spot.x, spot.z, nw_x, nw_z).sqrt();
+            let southeast = dist2(spot.x, spot.z, se_x, se_z).sqrt();
+            assert!(
+                northwest < southeast,
+                "country {country} spawn should be its own northwest hold-short"
+            );
+            assert!(
+                northwest < 120.0,
+                "country {country} hold-short {northwest:.0} m from its threshold"
+            );
+            let nose = spot.heading_deg.to_radians();
+            let toward = nose.cos() * (nw_x - spot.x) + nose.sin() * (nw_z - spot.z);
+            assert!(toward > 0.0, "country {country} nose faces its runway");
+            assert!((heading_delta(spot.heading_deg, usa_spot.heading_deg)).abs() < 0.2);
+        }
+    }
+
+    #[test]
+    fn field_without_a_taxi_graph_is_not_moved() {
+        let text = "\
+Group\r\n{\r\n  Airfield\r\n  {\r\n    Name = \"K-22_Onchon_AF\";\r\n    Index = 1;\r\n    LinkTrId = 2;\r\n    XPos = 256140.000;\r\n    YPos = 14.214;\r\n    ZPos = 132695.000;\r\n    YOri = 0;\r\n    Country = 502;\r\n    Model = \"graphics\\airfields\\fakefield.mgm\";\r\n    Script = \"LuaScripts\\WorldObjects\\Airfields\\fakefield.txt\";\r\n  }\r\n  MCU_TR_Entity\r\n  {\r\n    Index = 2;\r\n    Name = \"Airfield entity\";\r\n    XPos = 256140.000;\r\n    YPos = 14.414;\r\n    ZPos = 132695.000;\r\n    YOri = 0;\r\n    MisObjID = 1;\r\n  }\r\n}\r\n";
+        let mut root = parse_group_file(text).unwrap();
+        let err = place_ramp_start(&mut root, None).unwrap_err();
+        assert!(err.contains("taxi graph"), "{err}");
+        let (air, _) = field_and_entity(&root);
+        assert_eq!(air.property("XPos"), Some("256140.000"));
+        assert_eq!(air.property("ZPos"), Some("132695.000"));
+        assert_eq!(air.property("Country"), Some("502"));
+        assert!(
+            !air.property("Model").unwrap().contains("rnwspawn"),
+            "a missing graph must not gain the runway-spawn model"
+        );
+    }
+
     #[test]
     fn preferred_heading_picks_the_into_wind_threshold() {
         let planes = vec![crate::airstart::default_plane("f51d")];
@@ -1805,7 +1972,7 @@ Airfield\r\n{\r\n  Name = \"K-27_Yonpo_AF\";\r\n  Index = 2;\r\n  XPos = 0.000;\
         assert_eq!(plane.property("StartType"), Some("2"));
         assert_eq!(plane.property("SnapTo"), Some("2"));
         assert_eq!(plane.property("Altitude"), Some("0"));
-        assert_eq!(plane.property("Name"), Some("\"Parked - Clean\""));
+        assert_eq!(plane.property("Name"), Some("\"Parked - Long range\""));
         assert_eq!(
             air.property("Model"),
             Some(r#""graphics\airfields\fakefield_rnwspawn.mgm""#)
