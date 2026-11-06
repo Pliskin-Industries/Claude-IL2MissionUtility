@@ -61,7 +61,7 @@ What this makes easier, harder or necessary.
 | [0023](0023-step-4-threshold-one-complex-trigger-per-area.md) | Step 4 threshold: one Complex Trigger per area, re-activated as the presence check | Accepted |
 | [0024](0024-threshold-presence-check-is-a-pulsed-check-zone.md) | The threshold's presence check is a pulsed check zone (ZonePulse), after flight 2J | Accepted |
 | [0025](0025-remove-trigger-reactivate.md) | Remove the TriggerReactivate presence check from the code | Accepted |
-| [0026](0026-air-tasking-and-upstream-strikes-and-caps.md) | Air Tasking schedules and budgets upstream's strikes and CAPs instead of placing its own | Accepted (A) |
+| [0026](0026-air-tasking-and-upstream-strikes-and-caps.md) | Air Tasking schedules and budgets upstream's strikes and CAPs instead of placing its own | Accepted (A); superseded in part by 0060 |
 | [0027](0027-air-tasking-rail-tab-design.md) | The Air Tasking rail tab (step 8): layout, adding entries, behaviour before step 7 | Accepted |
 | [0028](0028-upstream-air-groups-feed-the-pool.md) | Upstream's air-group builders feed the pool, as their own step after the upstream merge | Accepted |
 | [0029](0029-step-5-clock-lean-design.md) | Step 5 clock: a leaner build of plan §3.7 on flown facts | Accepted |
@@ -94,5 +94,8 @@ What this makes easier, harder or necessary.
 | [0056](0056-review-replay-and-trace-safety.md) | Replay reads one log session and rescans on Run, shows discarded lines, falls back to (T - 3) / 50, refuses a .Group changed since its trace; trace builds check the name and index room first and give each file its own breadcrumb band | Accepted |
 | [0057](0057-empty-trace-metadata.md) | An empty trace keeps its old metadata format, so L's frozen base files stay byte-identical | Accepted |
 | [0058](0058-count-down-events-after-flight-2s.md) | The player count steps down on Left and Finished again (A). A wreck removed just after CLEAR can still empty a reopened count; a gate after CLEAR (C) is built only if logs show that | Accepted (A) |
+| [0059](0059-flight-2n-four-pilots-on-eszymans-server.md) | Flight 2N: up to four pilots, a DPRK pair and a NATO pair on separate areas, hosted on eszyman's server; a trace build to fly and a clean build to share | Accepted |
+| [0060](0060-air-tasking-beside-exclusive-activation.md) | Air Tasking runs beside upstream's Exclusive Activation (two modes); the proposal explains how Air Tasking could replace it, with the one gap (no always-on area) | Accepted |
+| [0061](0061-solo-checks-then-alpha.md) | Flight 2N waits; solo flights A4 (Yak copy, DPRK-side extension) and 2T (quiet roll rate) next; then an alpha whose trace-built operations stand in for 2N | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

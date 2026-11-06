@@ -1312,6 +1312,37 @@ Three DPRK-side counts (`PCD01` to `PCD03`, 6 km) with 0053's wiring: Left, Kill
 - **A wreck's Finished does not come at a fixed time after the kill:** 14.9 s in S1, 3.0 s in S2, 15.06 s in 2P and 2R. The cause is not known.
 - **Still unflown:** a new entry between CLEAR and an old wreck's late Finished (0053's fault itself), and what a player who quits in flight raises (flight 2N).
 
+## Flight A4 (a Yak copy and a DPRK-side extension, one NATO player) — 2026-11-06, two runs, Tacview recorded
+
+Decision 0061. Run sheet: `handoff/sessions/2026-11-05-p14-flights-a4-2t.md` (full results there). Built by Map Generate (`ui_tests::build_a4`), frozen in `handoff/p14-probes/flight-a4/`, hosted on this PC and flown by Claude by keyboard from the F-51D air start at 4,500 m. Run 1 (session `2026-11-06_15-31-28`, logs `real_63`) crashed when the level-flight helper dropped out in a long turn; run 2 (session `2026-11-06_15-46-54`, logs `real_61`) flew the whole cycle. Tacview `handoff/tacview/P14_Acceptance_A4_run1.zip.acmi` and `_run2.zip.acmi`. Replay: no dead links in either run.
+
+| What | Log (run 2) | Result |
+|---|---|---|
+| **A Yak copy** (first in the game) | `SD01 START` 224.10 at B's HOT; four Yak-9Ps activated 30 km north-east at 3,050 m, over B at 406 to 410 s, `SD01 ON STATION` 715.76 (300.0 s after `ON STATION IN`) | **passes** |
+| **A DPRK-side extension** (first) | no `SD01 COLD`; **`SD01 EXTEND` and `SD01 DONE HUB` at 1,315.76**, ON STATION + 600.00; `SD01 DELETE DELAY` 1,376.36 (+60.60) | **passes** |
+| Zone shut while the copy flies | five later `THD01 INNER`s, no `ZD01 CHANCE`; no second copy | passes |
+| Leaving | `THD01 CLOSE DELAY` 1,486.90; `PCD01 DOWN 1` and `EMPTY` 1,515.54 at 20.4 km; `ZD01 COOLDOWN` and `ARM` 1,615.76 (DH + 300.00), no `CHANCE` | passes |
+| The last player killed inside (run 1) | crash 481.9 inside the circle: `PCD01 DOWN 1`, `EMPTY`, `SD01 EMPTY IN`, `SD01 DONE HUB` in one tick (485.08), `DELETE DELAY` +60.60 | passes (0050 D) |
+
+- The Yaks strafed the empty AttackArea down to about 270 m for 15 minutes, about 2 km from B, and left the F-51 at 4,150 m alone. At DONE HUB they climbed away toward home and were deleted 8 km out.
+- `BUD D COUNT` logs only when a side's second copy starts; the run sheet's Q1 was wrong to expect it with one copy.
+- Not seen: `HARD STOP` (the extension ends first by design).
+
+## Flight 2T (the 20 % quiet roll and the jitter steps, counted) — 2026-11-06, one run, no pilot
+
+Decision 0061. Run sheet: `handoff/sessions/2026-11-05-p14-flights-a4-2t.md`. Built by Map Generate (`ui_tests::build_t2`), frozen in `handoff/p14-probes/flight-2t/`: both clocks as shipped (quiet 20 %, 3 jitter steps) but a slot a minute, 15 s steps, no area HOT. Session `2026-11-06_16-20-27`, logs `real_62`; counted with `tools/p14/flight2t_quiet_rate.py`.
+
+| What | Count (120 slots) | Expected (95 % range) | Result |
+|---|---|---|---|
+| **Quiet slots** | **28 (23.3 %)** | 24 (15 to 33) | **passes** |
+| Opens at step 1 / 2 / 3 | 21 / 40 / 31 | 32 each (22 to 42) | step 1 just low |
+| `JITTER 1` / `2` / `3` passes | 21 / 47 / 62 | 32 / 43 / 68 | JITTER 1 just low (17.5 % for 27 %) |
+| Opens off a step, or twice in a slot | 0 | 0 | passes |
+| `GO`, copy `START`, `INNER` | 0 | 0 | passes |
+
+- The game's Random % rolls each time a timer is triggered (as flight 0 found), and the clock leaves about one slot in five quiet.
+- `JITTER 1` (Random 27, Time 0.1 s) passed 2.3 standard deviations below its rate. One more 2T run would tell chance from a bias; nothing is changed.
+
 ## Load test on the upstream author's server — 2026-10-14, session `2026-10-14_22-10-00`
 
 Run by eszyman on his dedicated server (https://github.com/eszyman/IL2MissionUtility/issues/2; his logs: the zip on that issue, read here as data). The file was **`P14_Load_2_20261014`**, built before decision 0018: 24 copies per side, 240 aircraft, **one** check zone per copy (48). The current shell has two per copy; the rebuilt `P14_Load_3_20261014` was not the one run.

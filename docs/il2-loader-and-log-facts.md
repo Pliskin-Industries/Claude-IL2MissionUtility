@@ -308,3 +308,13 @@ Player counts with 0053's wiring and a diagnostic Complex Trigger per cell, 601 
 - **When the last plane in a check zone dies, the zone's ALL-out check can fire in the same tick as the wreck's Finished** (S2: both at 607.68, 3.1 s after the kill).
 - **A Delete inside raises Finished (62) and Finished alive (63) in the same tick** (S3, and the Deletes in S2), as in flight 2P.
 - Tacview: the recording's `ReferenceTime` is the mission time when LCtrl+R was pressed (here 42 s after the start).
+
+## Found on 2026-11-06 (flight A4, game 1.005)
+
+An F-51D air start at 4,500 m, flown by keyboard on this PC. Logs `real_63` (run 1) and `real_61` (run 2), Tacview `handoff/tacview/P14_Acceptance_A4_run1.zip.acmi` and `_run2.zip.acmi`.
+
+- **Holding LAlt+Z for more than a few seconds switches the level-flight helper off.** In the F-51D at 4,500 m (throttle 37 % in run 1, 79 % in run 2) a 20 to 30 s hold rolled the aircraft into a spiral dive, and the helper's icon (first in the right-hand column) was gone. Run 1 crashed this way. A Yak-9P at 2,000 m held a long LAlt+Z in A3.
+- **Turn in 3 s LAlt+Z (or LAlt+X) bursts with 0.4 s gaps.** The helper stays on and holds the height to the metre, at about 1.9°/s. At about 445 km/h indicated (66 % throttle, 4,150 m) that orbit has a radius of about 4 to 5 km, so begin it with the area 4 km off the inside wing.
+- **If the helper drops out, LShift+A switches it back on** ("Helper enabled: Level flight") and levels at the height it has then. Check the icon column before pressing it: a press with the helper on switches it off.
+- **The game's mouse cursor can stop following input while a RustDesk session is connected to this PC:** clicks land where the game's cursor was left. With the remote mouse left still, the game followed the local input again.
+- **The launcher can fail with "wget: unable to resolve host address 's3.il2korea.com'"** even when the host resolves from PowerShell. Closing the launcher (a window-close request) and starting it again cleared it; Restart in the error box did not.
