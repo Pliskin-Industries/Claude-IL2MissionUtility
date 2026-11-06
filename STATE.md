@@ -1,7 +1,7 @@
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-11-05: Flight 2N is built and load-tested but **pending, with no date** (decision 0061). The solo flights **A4** (Yak copy, DPRK-side extension) and **2T** (quiet roll rate) are built and frozen on `claude/p14-flight-2n`, run sheet `handoff/sessions/2026-11-05-p14-flights-a4-2t.md`; Claude flies them on this PC. If 2N has not flown when they are read, an alpha goes live and trace-built operations stand in for it. Decision 0060: Air Tasking runs beside upstream's Exclusive Activation; the proposal draft is rewritten, not sent.
+> Last updated: 2026-11-06: **Flights A4 and 2T flown on this PC** (run sheet `handoff/sessions/2026-11-05-p14-flights-a4-2t.md`): the Yak copy and the DPRK-side extension work in the game (A4 run 2, Replay: no dead links), and the quiet roll leaves 28 of 120 slots quiet (2T; JITTER 1 passed a little under its rate). Flight 2N is still pending with no date, so by decision 0061 the alpha is next, at the user's word. Nothing pushed.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -22,7 +22,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 
 `upstream/main` has two commits not merged here: `571504a` (harvested coalition groups and ramp starts per country) and `fee0a79` (2026-11-02: the Airfield tab owns base-map fields and air starts, Map strikes wrapped in Exclusive Activation, anti-air in clearings). The `airtask-fixes` worktree holds this session; it goes when the session is archived. Older worktrees from earlier sessions (`p14-acceptance-*`, `p14-followup-1012`, `p14-shell-quiet-*`, `sad-cannon-*`) are unchecked.
 
-Last recorded test run: **1132 passed, 0 failed, 45 ignored** (`cargo test --offline`, 2026-11-05) on `claude/p14-flight-2n` (main `7f5329d` plus the 2N, A4 and 2T checks and their ignored writers). Clippy 306, none in the new code. Record each new run on this line.
+Last recorded test run: **1132 passed, 0 failed, 45 ignored** (`cargo test --offline`, 2026-11-06) on `claude/p14-flight-2n` (main `7f5329d` plus the 2N, A4 and 2T checks and their ignored writers; the manual test now counts the quiet roll as flown). Clippy 306, none in the new code. Record each new run on this line.
 
 ## P14 Air Tasking ("Wing Commander")
 
@@ -46,7 +46,8 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
   - **Flown, no pilot:** 2M (Zone Out is ALL-out; a kill or a Delete raises no Left); 2P (Killed is event 70); S1 and 2Q (AI on sides 3 and 4 attacks both real sides, so 0050 A failed; check zones do not see side 3); 2R (0050 D's count works as built); 2S (a wreck that crosses out of the circle raises Left, so 0053 failed and 0058 A went back to Left and Finished; a wreck's Finished comes 3 to 15 s after the kill).
 - **Still open from the step 11 list** (plan §8 "Step 11"; items 1 to 3 done by A3, item 4 by L):
   5. Load time and tick delay next to `validate`'s totals: only on the real host, not this PC.
-  - Also unseen: a Yak copy, a player who lands inside an area (0040: no change needed), a DPRK-side extension.
+  - A4 (2026-11-06, one NATO player, logs `real_61`, run 1 `real_63`): **a Yak copy** and **a DPRK-side extension** (EXTEND + DONE HUB at ON STATION + 600.00); a copy ends when its last player is killed inside the circle (run 1). 2T (no pilot, `real_62`): **28 of 120 slots quiet** (20 % expected, range 15 to 33); `JITTER 1` passed 21 of 120 (17.5 % for 27 %, 2.3 sd low; a second 2T run would tell chance from bias).
+  - Also unseen: a player who lands inside an area (0040: no change needed).
 - **Formations:** AI losses in flights 2C to 2I were wingmen crossing their leader, a game bug (0021). Workarounds: Safe density (0019), Pairs at Loose (0020 A) except a Cover flight (0022 A2). Flight L lost one F-80 of a 4-ship Wedge at Safe to the steady-turn crossing; no formation setting removes that kind, so the user decided (2026-10-31) to change nothing and fly no probe. It waits for a game fix.
 - **Built: step 10** (docs, PR #47): the Air Tasking manual, a Help topic "Trace builds and replay", `docs/src-guide.md` for every file. The manual covers step 12; its UNVERIFIED line lists the real-host timings, the 20 % quiet roll, and everything with two or more human players.
 - **Remaining:** 12f, flight 2N, built (run sheet `handoff/sessions/2026-11-02-p14-flight-2n.md`, decision 0059): up to four pilots on eszyman's server, **pending, no date** (if it has not flown when A4 and 2T are read, the alpha goes live and trace-built operations stand in for it). Two areas 85 km apart: a DPRK pair over NATO area A, a NATO pair over DPRK area B, the same cues for both. Missions in `C:\Machine Intelligence\P14 Flight 2N\mission\` (trace build to fly, clean build to share); both load-tested on this PC on 2026-11-03 (run sheet, Files). Zip of both plus the run sheet: `C:\Machine Intelligence\P14 Flight 2N\P14_Flight_2N_20261102.zip`. Step 11 item 5 is measured on his server in the same session. Upstream integration (0026: Template Builder's Strike/CAP as sorties, his target types) waits for eszyman's answer to the proposal.
@@ -61,8 +62,8 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Next steps
 
-1. **Fly A4 and 2T on this PC** (run sheet `handoff/sessions/2026-11-05-p14-flights-a4-2t.md`): ask the user that the screen is free first. Logs to `real_61` and `real_62`; results into the run sheet and `handoff/P14-probe-results.md`.
-2. If 2N has not flown by then: the alpha (decision 0061): `/promote` audit for "shared", a decision on upstream `571504a` and `fee0a79`, version 0.8.0, release notes, `v0.8-Alpha` tag, each at the user's word.
+1. **Alpha (decision 0061), each step at the user's word:** the `/promote` audit for "shared"; a decision on upstream `571504a` and `fee0a79`; version 0.8.0; release notes with the UNVERIFIED list (`USER_MANUAL.md`); the `v0.8-Alpha` tag. Missions in operations are trace builds.
+2. Optional: fly 2T again (same frozen files, a new log folder) to tell whether JITTER 1's low rate is chance.
 3. Push `claude/p14-flight-2n` and open its PR when the user says so.
 4. **Flight 2N, whenever it flies.** Claude copies the logs to `src/testdata/missionlog/real_60/`, reads them with Replay against `P14_Flight_2N.trace.json`, and records the load time and tick numbers (step 11 item 5). If the logs show 0058's race, 0058 C is built.
 5. To build (decision 0060): a plan check that warns when a map has both Map missions under Exclusive Activation and Air Tasking.
@@ -84,6 +85,6 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 - Nothing is pushed or merged to `main` without the user (`docs/decisions/0005`). A hook blocks `git push` (even a branch delete) while the checkout is on `main`.
 - The game here is 1.005 (`261013`). Its `MissionResaver.exe` crashes: build missions with `--no-resave`. This PC is a test bed: its load times and tick delay are not used. It allows one spawn per game session.
 - **Flying on this PC:** an air start may begin with the level-flight helper on; pressing LShift+A then switches it off (A2 run 1 crashed this way). **Never move the mouse or click in the cockpit**: it works the stick (A3 run 1 spun in). To regain keyboard focus, use PowerShell `AppActivate`. Tacview: `tacviewrecord = 1` with the game closed, then LCtrl+R in the mission.
-- Flown probe flights regenerate byte for byte from frozen inputs (`src/testdata/p14_probe_inputs/`, `handoff/p14-probes/`), except those frozen as flown (2F, 2H, 2I, A0, A1, A2, A3, L; since 0050 D changed Generate's output, the A3 and L build tests check the run-sheet facts, not a byte-for-byte match): those are checked by parse-and-links tests only. Never edit those files or re-run their writers. Flight names are never reused. Log folders: `real_60` is reserved for flight 2N, `real_61` for A4 and `real_62` for 2T (`real_59` is flight 2S); the next free is `real_63`.
+- Flown probe flights regenerate byte for byte from frozen inputs (`src/testdata/p14_probe_inputs/`, `handoff/p14-probes/`), except those frozen as flown (2F, 2H, 2I, A0, A1, A2, A3, L; since 0050 D changed Generate's output, the A3 and L build tests check the run-sheet facts, not a byte-for-byte match): those are checked by parse-and-links tests only. Never edit those files or re-run their writers. Flight names are never reused. Log folders: `real_60` is reserved for flight 2N; `real_61` is A4 run 2, `real_62` is 2T, `real_63` is A4 run 1; the next free is `real_64`.
 - Only one session writes `STATE.md` at a time; other sessions put their facts in a session note in `handoff/sessions/`.
 - Stage is not declared yet (the session-start check treats the repo as `prototype`); `/promote` sets it.
