@@ -596,14 +596,14 @@ Every end goes through the copy's `DONE HUB` once. It switches off the copy's ot
 
 ### What has been flown
 
-These flights were hosted on a test PC, 2026-10-27 to 2026-10-30, with one player (none in A0). The logs and results are in `handoff/P14-probe-results.md`.
+These flights were hosted on a test PC, 2026-10-27 to 2026-11-06, with one player (none in A0 and 2T). The logs and results are in `handoff/P14-probe-results.md`.
 - **A0** (no pilot): the whole Air Tasking group for both sides (84 aircraft, 1,092 MCUs, 40 check zones) loads; the default clock's slots open on time or on a later jitter step, a later step opens nothing, and nothing launches.
 - **A1** (a NATO player over a DPRK area): HOT and the presence check, a zone start and a clock start, the budget at two, a quiet slot, Zone Out when the player was shot down, and deletion.
 - **A2** (a DPRK player through three NATO areas; the first mission made by Map Generate): COLD and HOT at the end of the on-station time, the one extension, a refusal by the budget, a start after a deletion, and a used copy kept quiet.
 - **A3** (the Map's own DPRK air start): the player on 501 seen by a NATO area, a NATO clock launch, two sorties on one target ending in one tick and deleted together, the zone re-arm after one cooldown, a later start on that side, and a quiet slot by the no back-to-back rule.
 - **Check L:** the Air Tasking tab's own file imported in the mission editor and saved, then one clock slot flown from the editor's `.msnbin`, at A3's times to the tick.
-
-Not seen in an acceptance flight: a Yak sortie and an extension on the DPRK side.
+- **A4** (a NATO player over a DPRK area): a Yak copy flies its on-station time and its one extension on the DPRK side, is deleted, and the zone re-arms with no new start; a copy ends when its last player is killed inside the circle.
+- **2T** (no pilot, both clocks at a slot a minute for an hour): 28 of 120 slots quiet, for the 20 % quiet roll.
 
 ### Known issues
 
