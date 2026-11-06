@@ -500,7 +500,6 @@ mod tests {
         for open in [
             "load time",
             "tick delay",
-            "20 % quiet roll",
             "two or more players",
         ] {
             assert!(unverified.contains(open), "UNVERIFIED misses {open:?}");
@@ -513,6 +512,7 @@ mod tests {
             "re-arm",
             "kill events",
             "clock launch",
+            "quiet roll",
         ] {
             assert!(
                 !unverified.contains(flown),

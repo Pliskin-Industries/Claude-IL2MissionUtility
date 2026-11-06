@@ -587,7 +587,8 @@ Every end goes through the copy's `DONE HUB` once. It switches off the copy's ot
 - **A slot can stay quiet with an entry available:** draws that pick nobody are random, and the slot is open for a limited time. In the worst simple case (three entries, the only one that can pass first in the waterfall) about 0.5 % of slots go quiet; more can with many entries.
 - **Zone re-arm for a Both entry:** a clock copy that ends first can re-arm the zone while the zone's own copy is still flying.
 - **The totals** Air Tasking adds (aircraft, MCUs, check zones) are shown in the right panel. Generate warns above 240 aircraft, 2,300 MCUs or 48 check zones: the size that loaded and ran idle at 50 SPS on the upstream author's dedicated server (decision 0032).
-- **UNVERIFIED:** the mission's load time and the tick delay on a real dedicated server with sorties flying; whether the 20 % quiet roll leaves about one slot in five quiet in the game (flight A1 saw one quiet slot, too few to measure a rate); and anything with two or more players: the N ≥ 2 threshold with people (flown so far with AI stand-ins, flight 2M), and the player count with people (what a player who quits in flight counts as).
+- **UNVERIFIED:** the mission's load time and the tick delay on a real dedicated server with sorties flying; and anything with two or more players: the N ≥ 2 threshold with people (flown so far with AI stand-ins, flight 2M), and the player count with people (what a player who quits in flight counts as).
+- **Seen in the game since:** the quiet roll leaves about one slot in five quiet (flight 2T: 28 of 120 slots); a Yak copy and a DPRK-side extension (flight A4).
 
 ### What has been flown
 
