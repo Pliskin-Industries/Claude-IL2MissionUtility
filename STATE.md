@@ -1,3 +1,5 @@
+Stage: shared
+
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
@@ -87,4 +89,4 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 - **Flying on this PC:** an air start may begin with the level-flight helper on; pressing LShift+A then switches it off (A2 run 1 crashed this way). **Never move the mouse or click in the cockpit**: it works the stick (A3 run 1 spun in). To regain keyboard focus, use PowerShell `AppActivate`. Tacview: `tacviewrecord = 1` with the game closed, then LCtrl+R in the mission.
 - Flown probe flights regenerate byte for byte from frozen inputs (`src/testdata/p14_probe_inputs/`, `handoff/p14-probes/`), except those frozen as flown (2F, 2H, 2I, A0, A1, A2, A3, L; since 0050 D changed Generate's output, the A3 and L build tests check the run-sheet facts, not a byte-for-byte match): those are checked by parse-and-links tests only. Never edit those files or re-run their writers. Flight names are never reused. Log folders: `real_60` is reserved for flight 2N; `real_61` is A4 run 2, `real_62` is 2T, `real_63` is A4 run 1; the next free is `real_64`.
 - Only one session writes `STATE.md` at a time; other sessions put their facts in a session note in `handoff/sessions/`.
-- Stage is not declared yet (the session-start check treats the repo as `prototype`); `/promote` sets it.
+- **Stage: shared** since 2026-11-06 (the first line; written by `/promote`): the alpha goes to another person (decision 0063). The shared checklist needs `.github/dependabot.yml`, the gitleaks job (`.github/workflows/secret-scan.yml`), `.pre-commit-config.yaml` (activate per clone: `pip install pre-commit`, `pre-commit install`) and `docs/BACKUP.md`. Only `/promote` changes the stage line.

@@ -1,0 +1,14 @@
+# Weekly version-update pull requests. Security updates are switched on in the
+# repository settings as well. Nothing is merged without the owner (decision 0005).
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
