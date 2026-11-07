@@ -3,7 +3,7 @@ Stage: shared
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-11-06: **v0.8.0 is on `main`, ready to tag** (decision 0063). Merged: PR #54 (2N built and pending; flights A4 and 2T flown), #55 (upstream `571504a` and `fee0a79`, decision 0062), #56 (stage **shared**), #57 (version 0.8.0, release notes and the eszyman issue drafts). Next, each at the user's word: push the `v0.8-Alpha` tag, swap in the release notes, post the issue to eszyman.
+> Last updated: 2026-11-07: **v0.8-Alpha is released and sent** (decision 0063). The prerelease is on the fork ([release](https://github.com/Pliskin-Industries/Claude-IL2MissionUtility/releases/tag/v0.8-Alpha), notes from `handoff/release-notes-v0.8-Alpha.md`), and the issue is posted at the user's word as [eszyman/IL2MissionUtility#4](https://github.com/eszyman/IL2MissionUtility/issues/4) (text `handoff/upstream-air-tasking-proposal-draft.md`, after a Codex review that found 5 blockers, all fixed). Waiting for his answer; flight 2N (#3) still pending.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -56,7 +56,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Waiting on the user
 
-1. **Tag and send (decision 0063):** push `v0.8-Alpha` on `main` (the release workflow publishes the exe as a prerelease); then Claude replaces the generated notes with `handoff/release-notes-v0.8-Alpha.md` (`gh release edit v0.8-Alpha --notes-file`); then the issue `handoff/upstream-air-tasking-proposal-draft.md` is posted on `eszyman/IL2MissionUtility`. Each step at the user's word; the user reads both drafts first.
+1. **eszyman's answer to #4** (try the build; whether the two joining pieces or Air Tasking as a second mode belong upstream). Claude reads replies and drafts answers; each reply is posted only at the user's word.
 2. **Pre-commit hooks** are configured (`.pre-commit-config.yaml`) but run only after `pip install pre-commit` and `pre-commit install` in a clone.
 3. **Three game bug reports are drafted, not posted** (`handoff/il2-bug-report-drafts.md`). The paused-timer finding (2K) may be a fourth.
 4. **The six built-in sorties** still carry the old Delete list in their files; Air Tasking replaces it on the copies it places (0017).
@@ -64,7 +64,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Next steps
 
-1. **The alpha (decision 0063):** tag, notes, issue, as in Waiting item 1.
+1. **Answer eszyman on #4** when he replies, at the user's word. If he tries it, read his logs with Replay.
 2. **Flight 2N, whenever it flies.** Claude copies the logs to `src/testdata/missionlog/real_60/`, reads them with Replay against `P14_Flight_2N.trace.json`, and records the load time and tick numbers (step 11 item 5). If the logs show 0058's race, 0058 C is built. Real operations with trace builds stand in until then (0061).
 3. eszyman's answer to the issue decides the integration work (0028: his Strike and CAP as Air Tasking sorties, his target types).
 4. To build (decision 0060): a plan check that warns when a map has both Map missions under Exclusive Activation and Air Tasking.
@@ -72,7 +72,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 
 ## Traps
 
-- **Send nothing to the upstream author** (`eszyman/IL2MissionUtility`: issues, comments, files, patches) unless the user says so for that send. On 2026-11-03 the user asked Claude to post flight 2N (issue #3); that covers only that post. The v0.8-Alpha issue (decision 0063) also needs the user's word for the post itself. Pulling and merging his commits is fine. `gh` here may default to upstream: always pass `--repo Pliskin-Industries/Claude-IL2MissionUtility`.
+- **Send nothing to the upstream author** (`eszyman/IL2MissionUtility`: issues, comments, files, patches) unless the user says so for that send. On 2026-11-03 the user asked Claude to post flight 2N (issue #3); that covers only that post. The v0.8-Alpha issue (#4, 2026-11-07) was posted at the user's word; each reply there needs the user's word too. Pulling and merging his commits is fine. `gh` here may default to upstream: always pass `--repo Pliskin-Industries/Claude-IL2MissionUtility`.
 - **Astra writes `STATE.md` and decision records when not told otherwise:** say in every brief that Claude owns `STATE.md`. The review-fixes worktree still holds an uncommitted Astra rewrite of `STATE.md`; discard it (a hook stops Claude from doing so).
 - **IL-2 launcher:** it needs `s3.il2korea.com` (a CDN). On 2026-11-01 that host first had no IPv4 address, then failed SSL, and worked again a few hours later; the game cannot start without the launcher. Retry later; do not change this PC's DNS.
 - **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0063. Next free: **0064**.
