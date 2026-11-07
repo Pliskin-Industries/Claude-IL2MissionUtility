@@ -187,16 +187,18 @@ enum UnitKind {
     Artillery,
     Infantry,
     Train,
+    AntiAir,
 }
 
 impl UnitKind {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Ship,
         Self::Armor,
         Self::Supply,
         Self::Artillery,
         Self::Infantry,
         Self::Train,
+        Self::AntiAir,
     ];
 
     fn label(self) -> &'static str {
@@ -207,6 +209,7 @@ impl UnitKind {
             Self::Artillery => "Artillery",
             Self::Infantry => "Infantry",
             Self::Train => "Train",
+            Self::AntiAir => "AA",
         }
     }
 
@@ -215,6 +218,7 @@ impl UnitKind {
             Self::Ship => "water",
             Self::Train => "railroad",
             Self::Infantry => "dry land",
+            Self::AntiAir => "clearing around a target",
             Self::Armor | Self::Supply | Self::Artillery => "open ground or road column",
         }
     }
@@ -227,6 +231,7 @@ impl UnitKind {
             Self::Artillery => 3,
             Self::Infantry => 4,
             Self::Train => 5,
+            Self::AntiAir => 6,
         }
     }
 
@@ -242,6 +247,7 @@ impl UnitKind {
             ArmyUnitKind::Artillery | ArmyUnitKind::MobileArtillery => Self::Artillery,
             ArmyUnitKind::Infantry => Self::Infantry,
             ArmyUnitKind::Train => Self::Train,
+            ArmyUnitKind::AntiAir => Self::AntiAir,
         }
     }
 
@@ -253,6 +259,7 @@ impl UnitKind {
             Self::Artillery => Some(GroundKind::Artillery),
             Self::Infantry => Some(GroundKind::Infantry),
             Self::Train => Some(GroundKind::Train),
+            Self::AntiAir => Some(GroundKind::AntiAir),
         }
     }
 }
@@ -312,9 +319,14 @@ struct GroupGeneratorApp {
     /// Planes for a harvested airfield. Separate from `air_starts`.
     field_spawn_nato: bool,
     field_planes: Vec<AirStartPlane>,
+    /// Aircraft copied from one airfield, ready to paste onto another.
+    plane_clip: Vec<AirStartPlane>,
     /// Fake-field air starts edited on the Airfield tab and placed on the map.
     air_starts: Vec<AirStartField>,
     air_start_edit: usize,
+    /// Set while the center editor is a placed air start, not a bank template.
+    /// Each placement keeps its own aircraft.
+    air_start_placed: Option<usize>,
     placed_air_starts: Vec<PlacedAirStart>,
     /// Bank index while the map tool is placing an air start.
     air_start_place: Option<usize>,
@@ -356,9 +368,45 @@ struct GroupGeneratorApp {
     map_lo_tex: Option<TextureHandle>,
     map_hi_tex: Option<TextureHandle>,
     map_rx: Option<std::sync::mpsc::Receiver<KoreaMapLayer>>,
+    /// Editor-tile index has been looked for. Textures load as the view needs them.
+    editor_map_tried: bool,
+    editor_map_on: bool,
+    editor_tex: HashMap<(i32, i32), TextureHandle>,
+    editor_miss: std::collections::HashSet<(i32, i32)>,
     map_zoom: f32,
     map_pan: Pos2,
     map_refs: Vec<MapRefGroup>,
+    /// Template folder that holds the landscape groups imported into every map.
+    map_template_dir: String,
+    /// Landscape groups from the template folder. Airfields are not included;
+    /// the Airfield tab decides which of those are placed.
+    map_provisions: Vec<MapRefGroup>,
+    map_provision_missing: Vec<String>,
+    map_provision_errors: Vec<String>,
+    /// Empty until the next Map frame should read the folders again.
+    provisions_loaded_for: String,
+    /// Harvested airfields, each with its own field-spawn list.
+    airbases: Vec<airfield::AirbaseSlot>,
+    /// Defined-airfield aircraft from the last base-map load. Applied again
+    /// when the database folder is scanned.
+    imported_fields: Vec<crate::airstart::ImportedField>,
+    /// Harvest files the user removed from a double load. Kept out of the
+    /// list and the next base map.
+    airbase_hidden: Vec<PathBuf>,
+    /// Catalog files hidden the same way, when that copy was not a loaded group.
+    catalog_hidden: Vec<String>,
+    /// Field keys where the user chose to keep both copies.
+    airbase_dup_kept: Vec<String>,
+    /// The center editor shows the selected air start. The list is on the right.
+    air_start_focus: bool,
+    /// Catalog rows, so a field in the map area with no group file can still be named.
+    airbase_index: Vec<airfield::IndexedAirbase>,
+    /// Empty until the Airfield tab should read the database folder again.
+    airbase_scan_dir: String,
+    /// Harvested copies left out because they belong to the other coalition.
+    airfield_coalition_notes: Vec<String>,
+    /// Harvested airfields that could not be moved to a hold-short.
+    ramp_start_notes: Vec<String>,
     drawing_custom_front: bool,
     custom_front_xz: Vec<(f64, f64)>,
     map_drawing_mode: MapDrawingMode,
@@ -420,6 +468,8 @@ struct GroupGeneratorApp {
     train_tex_nato: Option<TextureHandle>,
     infantry_tex_east: Option<TextureHandle>,
     infantry_tex_nato: Option<TextureHandle>,
+    aa_tex_east: Option<TextureHandle>,
+    aa_tex_nato: Option<TextureHandle>,
     east_objectives: Vec<(f64, f64)>,
     nato_objectives: Vec<(f64, f64)>,
     objective_drag: Option<(bool, usize)>,
@@ -615,8 +665,10 @@ impl Default for GroupGeneratorApp {
                 plane.altitude_m = 0;
                 plane
             }],
+            plane_clip: Vec::new(),
             air_starts: Vec::new(),
             air_start_edit: 0,
+            air_start_placed: None,
             placed_air_starts: Vec::new(),
             air_start_place: None,
             air_start_drag: None,
@@ -646,9 +698,28 @@ impl Default for GroupGeneratorApp {
             map_lo_tex: None,
             map_hi_tex: None,
             map_rx: None,
+            editor_map_tried: false,
+            editor_map_on: false,
+            editor_tex: HashMap::new(),
+            editor_miss: std::collections::HashSet::new(),
             map_zoom: 1.0,
             map_pan: Pos2::new(0.5, 0.5),
             map_refs: Vec::new(),
+            map_template_dir: crate::provisions::DEFAULT_TEMPLATE_DIR.to_string(),
+            map_provisions: Vec::new(),
+            map_provision_missing: Vec::new(),
+            map_provision_errors: Vec::new(),
+            provisions_loaded_for: String::new(),
+            airbases: Vec::new(),
+            imported_fields: Vec::new(),
+            airbase_hidden: Vec::new(),
+            catalog_hidden: Vec::new(),
+            airbase_dup_kept: Vec::new(),
+            air_start_focus: false,
+            airbase_index: Vec::new(),
+            airbase_scan_dir: String::new(),
+            airfield_coalition_notes: Vec::new(),
+            ramp_start_notes: Vec::new(),
             drawing_custom_front: false,
             custom_front_xz: Vec::new(),
             map_drawing_mode: MapDrawingMode::None,
@@ -700,6 +771,8 @@ impl Default for GroupGeneratorApp {
             train_tex_nato: None,
             infantry_tex_east: None,
             infantry_tex_nato: None,
+            aa_tex_east: None,
+            aa_tex_nato: None,
             east_objectives: Vec::new(),
             nato_objectives: Vec::new(),
             objective_drag: None,
@@ -825,6 +898,7 @@ impl GroupGeneratorApp {
             AppMode::AirTasking => self.air_page(ctx),
         }
         self.confirm_dialogs(ctx);
+        self.airbase_dup_dialog(ctx);
         help::show_window(ctx, &mut self.help_open, &mut self.help_topic);
         self.replay_window(ctx);
         self.settle_undo();
@@ -1212,7 +1286,7 @@ impl GroupGeneratorApp {
                 AppMode::Map => {
                     load = ui
                         .button("Load base map…")
-                        .on_hover_text("Reload a previously generated Korea_BaseMap_*.Group: AO, front, attack arrows, and unit/fighter placement. Objectives are not stored in the file.  (Ctrl O)")
+                        .on_hover_text("Reload a previously generated Korea base map: AO, front, attack arrows, units, fighters, air starts, and airfield aircraft. Objectives are not stored in the file.  (Ctrl O)")
                         .clicked();
                 }
                 }
@@ -2933,7 +3007,7 @@ impl GroupGeneratorApp {
         );
     }
 
-    fn type_icons(&self, eastern: bool) -> [Option<TextureHandle>; 6] {
+    fn type_icons(&self, eastern: bool) -> [Option<TextureHandle>; 7] {
         if eastern {
             [
                 self.ship_tex_east.clone(),
@@ -2942,6 +3016,7 @@ impl GroupGeneratorApp {
                 self.arty_tex_east.clone(),
                 self.infantry_tex_east.clone(),
                 self.train_tex_east.clone(),
+                self.aa_tex_east.clone(),
             ]
         } else {
             [
@@ -2951,14 +3026,15 @@ impl GroupGeneratorApp {
                 self.arty_tex_nato.clone(),
                 self.infantry_tex_nato.clone(),
                 self.train_tex_nato.clone(),
+                self.aa_tex_nato.clone(),
             ]
         }
     }
 
-    /// "Import new templates as": one row of six 36 × 28 type buttons.
+    /// "Import new templates as": one row of 36 × 28 type buttons.
     fn unit_kind_picker(&mut self, ui: &mut egui::Ui) {
         let icons = self.type_icons(self.recon_eastern);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for kind in UnitKind::ALL {
                 if unit_kind_icon_button(
@@ -3280,6 +3356,8 @@ impl GroupGeneratorApp {
             UnitKind::Train
         } else if crate::weapon_range::group_is_infantry(&entity) {
             UnitKind::Infantry
+        } else if crate::weapon_range::group_is_antiair(&entity) {
+            UnitKind::AntiAir
         } else {
             self.recon_import_kind
         };
@@ -4009,7 +4087,7 @@ fn recon_slot_list(
     ui: &mut egui::Ui,
     slots: &mut [ReconSlot],
     influence_label: Option<&str>,
-    kind_icons: Option<[Option<TextureHandle>; 6]>,
+    kind_icons: Option<[Option<TextureHandle>; 7]>,
     side: shell::Side,
 ) -> Option<usize> {
     let mut remove = None;
@@ -4047,7 +4125,7 @@ fn recon_slot_list(
             }
             ui.label(RichText::new(meta).small().color(c::NEUTRAL_700));
             if let Some(icons) = &kind_icons {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     for k in UnitKind::ALL {
                         if unit_kind_icon_button(

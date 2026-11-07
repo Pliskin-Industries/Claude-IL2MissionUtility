@@ -85,6 +85,26 @@ pub const COUNTRIES: &[(i32, &str)] = &[
     (601, "601  USA"),
 ];
 
+/// NATO for a 600-series country (USA 601). DPRK for a 500-series country
+/// (USSR 501, DPRK 502, PRC 503). Other codes are neither.
+pub fn country_is_nato(country: i32) -> Option<bool> {
+    match country / 100 {
+        6 => Some(true),
+        5 => Some(false),
+        _ => None,
+    }
+}
+
+/// Nation word from [`COUNTRIES`] (`USA`, `PRC`, …). Unknown codes stay numeric.
+pub fn country_nation(country: i32) -> String {
+    COUNTRIES
+        .iter()
+        .find(|(id, _)| *id == country)
+        .and_then(|(_, label)| label.split_whitespace().last())
+        .map(str::to_string)
+        .unwrap_or_else(|| country.to_string())
+}
+
 /// Short nation tag for pack titles and export filenames (`USSR`, `USA`, …).
 pub fn country_pack_tag(country: i32) -> &'static str {
     COUNTRIES
@@ -271,6 +291,13 @@ mod tests {
         assert_eq!(plane_coalitions_for_country(502), "[2]");
         assert_eq!(plane_coalitions_for_country(503), "[2]");
         assert_eq!(plane_coalitions_for_country(601), "[1]");
+        assert_eq!(country_is_nato(501), Some(false));
+        assert_eq!(country_is_nato(502), Some(false));
+        assert_eq!(country_is_nato(503), Some(false));
+        assert_eq!(country_is_nato(601), Some(true));
+        assert_eq!(country_is_nato(0), None);
+        assert_eq!(country_nation(503), "PRC");
+        assert_eq!(country_nation(601), "USA");
     }
 
     #[test]

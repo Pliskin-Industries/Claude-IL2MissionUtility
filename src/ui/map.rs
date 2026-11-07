@@ -22,7 +22,7 @@
 //! Presentation only. Group text is built by [`crate::frontlines`] and the
 //! other map modules. Heights come from [`crate::terrain::open_store`].
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{
     self, Align, Align2, Color32, ColorImage, FontFamily, FontId, Layout, Pos2, Rect, RichText,
@@ -45,6 +45,7 @@ use crate::frontlines::{
     timeline_index, timeline_preview,
 };
 use crate::geo::{self, MAP_MAX, MAP_MIN};
+use crate::harvest::{place_field_spawn, place_ramp_start};
 use crate::heightprobe;
 use crate::help::HelpTopic;
 use crate::locale::{LANG_EXTS, merge_template_sidecars, write_sidecars};
@@ -71,6 +72,7 @@ use crate::pack::{
 };
 use crate::parser::{parse_group_file, parse_il2_document};
 use crate::placement::PlaceOpts;
+use crate::provisions::{self, is_landscape_file, landscape_label};
 use crate::recon::{
     ArmyCopyInfo, ReconBuild, ReconInput, allocate_copies, generate_recon_ex, inspect_army_copies,
     park_army_mixed, park_recon_copies_headed, park_recon_copies_spots,
@@ -996,21 +998,111 @@ fn exclusive_pack(groups: &[crate::ast::Il2Entity]) -> Result<crate::ast::Il2Ent
     for (i, group) in groups.iter().enumerate() {
         let n = i + 1;
         let info = inspect_plan(group).map_err(|err| format!("mission {n}: {err}"))?;
-        if info.suggested_triggers.is_empty() {
+        let triggers = if info.suggested_triggers.is_empty() {
+            zone_in_fallback(group)
+        } else {
+            info.suggested_triggers
+        };
+        if triggers.is_empty() {
             return Err(format!("mission {n} has no Zone IN"));
         }
         let completion = info
             .suggested_completion
+            .or_else(|| end_timer_fallback(group))
             .ok_or_else(|| format!("mission {n} has no end timer"))?;
         plans.push(BomberInput {
             label: group.name().unwrap_or("Mission").to_string(),
             source_key: String::new(),
             root: group.clone(),
-            trigger_zone_ids: info.suggested_triggers,
+            trigger_zone_ids: triggers,
             completion_timer_id: completion,
         });
     }
     link_bomber_plans_with(&plans, true)
+}
+
+/// Checkzones whose name is a start zone, including "Zone In 1".
+fn zone_in_fallback(group: &crate::ast::Il2Entity) -> Vec<i32> {
+    let mut ids = Vec::new();
+    group.for_each(&mut |entity| {
+        if entity.block_type != "MCU_CheckZone" {
+            return;
+        }
+        let name = entity.name().unwrap_or("").to_ascii_lowercase();
+        if name.contains("zone in") && !name.contains("out") && !name.contains("reactivat") {
+            if let Some(id) = entity.index {
+                ids.push(id);
+            }
+        }
+    });
+    ids
+}
+
+/// An end timer when the strict names (END, MISSION END) are absent.
+fn assign_aaa_anchors(jobs: &mut [GroundJob], anchors: &[(f64, f64)]) {
+    if anchors.is_empty() {
+        return;
+    }
+    for (i, job) in jobs.iter_mut().enumerate() {
+        job.anchor = Some(anchors[i % anchors.len()]);
+        job.range_m = None;
+    }
+}
+
+fn dedupe_points(pts: &[(f64, f64)], min_d: f64) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    for &p in pts {
+        if out
+            .iter()
+            .any(|q: &(f64, f64)| (p.0 - q.0).hypot(p.1 - q.1) < min_d)
+        {
+            continue;
+        }
+        out.push(p);
+    }
+    out
+}
+
+fn friendly_clusters(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    const NEIGHBOR_M: f64 = 4_000.0;
+    let mut raw = Vec::new();
+    for &(x, z) in points {
+        let neigh: Vec<(f64, f64)> = points
+            .iter()
+            .copied()
+            .filter(|&(px, pz)| (px - x).hypot(pz - z) <= NEIGHBOR_M)
+            .collect();
+        if neigh.len() < 3 {
+            continue;
+        }
+        let n = neigh.len() as f64;
+        let cx = neigh.iter().map(|p| p.0).sum::<f64>() / n;
+        let cz = neigh.iter().map(|p| p.1).sum::<f64>() / n;
+        raw.push((cx, cz));
+    }
+    dedupe_points(&raw, 1_500.0)
+}
+
+fn end_timer_fallback(group: &crate::ast::Il2Entity) -> Option<i32> {
+    let mut mission_end = None;
+    let mut complete = None;
+    let mut last = None;
+    group.for_each(&mut |entity| {
+        if entity.block_type != "MCU_Timer" {
+            return;
+        }
+        let Some(id) = entity.index else {
+            return;
+        };
+        last = Some(id);
+        let name = entity.name().unwrap_or("").to_ascii_lowercase();
+        if name.contains("mission end") && !name.contains("orders") {
+            mission_end.get_or_insert(id);
+        } else if name.contains("mission complete") {
+            complete.get_or_insert(id);
+        }
+    });
+    mission_end.or(complete).or(last)
 }
 
 fn attack_flag_on(entity: &crate::ast::Il2Entity, key: &str) -> bool {
@@ -1785,7 +1877,7 @@ fn draw_map_label(painter: &egui::Painter, pos: Pos2, text: &str, color: Color32
 }
 
 fn army_mix_label(copies: &[ArmyCopyInfo]) -> String {
-    let mut counts = [0usize; 7];
+    let mut counts = [0usize; 8];
     for c in copies {
         let i = match c.kind {
             ArmyUnitKind::Ship => 0,
@@ -1795,6 +1887,7 @@ fn army_mix_label(copies: &[ArmyCopyInfo]) -> String {
             ArmyUnitKind::Infantry => 4,
             ArmyUnitKind::Train => 5,
             ArmyUnitKind::MobileArtillery => 6,
+            ArmyUnitKind::AntiAir => 7,
         };
         counts[i] += 1;
     }
@@ -1807,6 +1900,7 @@ fn army_mix_label(copies: &[ArmyCopyInfo]) -> String {
         (ArmyUnitKind::Infantry, counts[4]),
         (ArmyUnitKind::Train, counts[5]),
         (ArmyUnitKind::MobileArtillery, counts[6]),
+        (ArmyUnitKind::AntiAir, counts[7]),
     ] {
         if n > 0 {
             parts.push(format!("{}×{n}", kind.label()));
@@ -1838,6 +1932,24 @@ fn fighter_layout_summary(layout: &MapFighterLayout) -> String {
     } else {
         format!("{side}: {n} groups in {} packs", packs.len())
     }
+}
+
+fn ensure_direct_group(parent: &mut crate::ast::Il2Entity, name: &str, next_id: &mut i32) -> usize {
+    if let Some(i) = parent
+        .children
+        .iter()
+        .position(|child| child.block_type == "Group" && child.name() == Some(name))
+    {
+        return i;
+    }
+    let mut group = crate::ast::Il2Entity::new("Group");
+    group.set_name(name);
+    group.index = Some(*next_id);
+    group.set_property("Index", next_id.to_string());
+    *next_id += 1;
+    group.set_property("Desc", "\"\"");
+    parent.children.push(group);
+    parent.children.len() - 1
 }
 
 impl super::GroupGeneratorApp {
@@ -2546,6 +2658,10 @@ impl super::GroupGeneratorApp {
     /// Map tab (README §5.6): tool palette, the map with a front-date strip,
     /// and a right dock with Period / Forces / References.
     pub(super) fn map_page(&mut self, ctx: &egui::Context) {
+        if self.provisions_loaded_for.is_empty() {
+            self.reload_map_provisions();
+        }
+        self.ensure_airbase_list();
         self.ensure_map_assets(ctx);
         egui::SidePanel::left("map_tools")
             .exact_width(shell::TOOL_PALETTE_W)
@@ -2748,7 +2864,8 @@ impl super::GroupGeneratorApp {
     }
 
     fn map_dock_panel(&mut self, ui: &mut egui::Ui) {
-        shell::dock_tabs(ui, &mut self.map_dock, &MapDock::tabs(self.map_refs.len()));
+        let refs = self.map_ref_sources().len();
+        shell::dock_tabs(ui, &mut self.map_dock, &MapDock::tabs(refs));
         ui.add_space(4.0);
         self.map_air_note(ui);
         egui::ScrollArea::vertical()
@@ -3331,7 +3448,7 @@ impl super::GroupGeneratorApp {
         shell::settings_section(ui, "map_missions", "Missions", &summary, n > 0, |ui| {
             shell::hint(
                 ui,
-                "Add mission puts the flight on the next unused target of the Snap target type inside the AO. A group with more than one flight and more than one AttackArea can aim each later flight at its own target; the spawn, IP, and waypoints stay one plan. Two or more missions share Exclusive Activation on Generate, so only one runs at a time. Hold Shift and drag a target to snap it.",
+                "Add mission puts the flight on the next unused target of the Snap target type inside the AO. A file that already holds several plans is split, one plan per target. A group with more than one flight and more than one AttackArea can aim each later flight at its own target; the spawn, IP, and waypoints stay one plan. Two or more missions share Exclusive Activation on Generate, so only one runs at a time. Hold Shift and drag a target to snap it.",
                 false,
             );
             ui.label("Snap target");
@@ -3437,22 +3554,56 @@ impl super::GroupGeneratorApp {
             .unwrap_or("Strike")
             .to_string();
         let eastern = !western;
-        let Some(target) = self.pick_unused_target(eastern) else {
+        let plans = match take_strike_missions(root) {
+            Ok(imported) => imported.groups,
+            Err(entity) => vec![entity],
+        };
+        let many = plans.len() > 1;
+        let total = plans.len();
+        let mut placed = 0usize;
+        let mut claimed = Vec::new();
+        let mut last_label = String::new();
+        for (i, plan) in plans.into_iter().enumerate() {
+            let Some(target) = self.pick_unused_target_beside(eastern, &claimed) else {
+                break;
+            };
+            claimed.push((target.x, target.z));
+            last_label = target.label.clone();
+            let plan_name = if many {
+                format!("{name} {}", i + 1)
+            } else {
+                name.clone()
+            };
+            self.place_strike_on(plan_name, eastern, plan, target);
+            placed += 1;
+        }
+        if placed == 0 {
             self.status = Status::Error(format!(
                 "No unused enemy {} inside the AO to put {name} on. Choose another Snap target.",
                 self.map_strike_focus.snap_noun()
             ));
             return;
-        };
-        let label = target.label.clone();
-        self.place_strike_on(name.clone(), eastern, root, target);
+        }
         let extra = self
             .map_missions
             .last()
             .map(|m| m.attacks.len())
             .unwrap_or(0);
-        let mut msg = format!("{name} is on {label}.");
-        if extra > 0 {
+        let mut msg = if many {
+            format!(
+                "{placed} plans from {name} are on separate targets. Generate writes Exclusive Activation so only one runs at a time."
+            )
+        } else {
+            format!("{name} is on {last_label}.")
+        };
+        if placed < total {
+            let left = total - placed;
+            msg.push_str(&format!(
+                " {left} plan{} had no unused target left.",
+                if left == 1 { "" } else { "s" }
+            ));
+        }
+        if extra > 0 && !many {
             msg.push_str(&format!(
                 " {extra} more flight{} can attack another area.",
                 if extra == 1 { "" } else { "s" }
@@ -3546,7 +3697,7 @@ impl super::GroupGeneratorApp {
                 (*z as i64).hash(&mut h);
             }
         }
-        for group in &self.map_refs {
+        for group in self.map_ref_sources() {
             group.path.to_string_lossy().hash(&mut h);
         }
         fn hash_layout(h: &mut DefaultHasher, layout: Option<&MapGroundLayout>) {
@@ -3628,7 +3779,7 @@ impl super::GroupGeneratorApp {
         let mut out = Vec::new();
         if focus.is_fixed() {
             let holdings = self.enemy_holdings(enemy_eastern);
-            for group in &self.map_refs {
+            for group in self.map_ref_sources() {
                 let stem = group
                     .path
                     .file_stem()
@@ -3912,12 +4063,148 @@ impl super::GroupGeneratorApp {
 
     fn map_references_tab(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
-        if ui.button("Add reference groups…").clicked() {
+        shell::section_title(ui, "Template folder", None);
+        shell::hint(
+            ui,
+            "Every base map imports the landscape groups from this folder (tunnels, stations, mines, camps, ports, dams, cities, road bridges, rail bridges). Airfields are placed only from the Airfield tab. Browse or Refresh after changing the path.",
+            false,
+        );
+        ui.label(
+            RichText::new("Template folder")
+                .small()
+                .color(c::NEUTRAL_700),
+        );
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 28.0),
+            Layout::right_to_left(Align::Center),
+            |ui| {
+                if ui.button("Browse…").clicked()
+                    && let Some(dir) = dialog::FileDialog::new().pick_folder()
+                {
+                    self.map_template_dir = dir.display().to_string();
+                    self.provisions_loaded_for.clear();
+                }
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.map_template_dir)
+                        .desired_width(ui.available_width())
+                        .min_size(Vec2::new(0.0, 28.0)),
+                );
+            },
+        );
+        if ui
+            .add_sized([ui.available_width(), 28.0], egui::Button::new("Refresh"))
+            .clicked()
+        {
+            self.provisions_loaded_for.clear();
+        }
+        let template = Path::new(self.map_template_dir.trim());
+        if !self.map_template_dir.trim().is_empty() && !template.is_dir() {
+            ui.label(
+                RichText::new("That template folder was not found.")
+                    .small()
+                    .color(c::NEUTRAL_700),
+            );
+        } else if self.map_provision_missing.is_empty() && !self.map_provisions.is_empty() {
+            ui.label(
+                RichText::new("All 9 landscape groups are included.")
+                    .small()
+                    .color(c::NEUTRAL_700),
+            );
+        } else if !self.map_provision_missing.is_empty() {
+            let names = self
+                .map_provision_missing
+                .iter()
+                .map(|file| landscape_label(file))
+                .collect::<Vec<_>>()
+                .join(", ");
+            ui.label(
+                RichText::new(format!("Not in the folder: {names}"))
+                    .small()
+                    .color(c::NEUTRAL_700),
+            );
+        }
+        if !self.map_provision_errors.is_empty() {
+            ui.label(
+                RichText::new(self.map_provision_errors.join(" "))
+                    .small()
+                    .color(c::WARN),
+            );
+        }
+        let area = self.front_aabb.expanded(PLACE_MARGIN);
+        let mut in_area = 0usize;
+        let mut outside_area = 0usize;
+        for slot in &self.airbases {
+            if super::airfield::airbase_in_area(&slot.root, area) {
+                in_area += 1;
+            } else {
+                outside_area += 1;
+            }
+        }
+        ui.label(
+            RichText::new(format!(
+                "{in_area} airfield(s) from the Airfield tab are placed on this base map. {outside_area} sit outside this area and are left out."
+            ))
+            .small()
+            .color(c::NEUTRAL_700),
+        );
+        if !self.airfield_coalition_notes.is_empty() {
+            ui.label(
+                RichText::new(format!(
+                    "{} group(s) left out so the other coalition is not placed on the same field.",
+                    self.airfield_coalition_notes.len()
+                ))
+                .color(c::WARN_TEXT),
+            );
+        }
+        for note in &self.ramp_start_notes {
+            ui.label(RichText::new(note).color(c::WARN_TEXT));
+        }
+        self.korea_fields_panel(ui);
+        ui.add_space(6.0);
+        if !self.map_provisions.is_empty() {
+            shell::section_title(ui, "Automatic", None);
+            let area = self.front_aabb.expanded(PLACE_MARGIN);
+            for g in &self.map_provisions {
+                let label = g
+                    .path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("group");
+                let outside = crate::frontlines::anchored_outside(&g.entity, area);
+                shell::card(ui, false, |ui| {
+                    ui.label(
+                        egui::RichText::new(label).font(FontId::new(13.0, theme::bold_family())),
+                    );
+                    ui.label(
+                        RichText::new(if outside {
+                            "Outside this area — left out of the base map"
+                        } else {
+                            "Included in this base map"
+                        })
+                        .small()
+                        .color(if outside {
+                            c::WARN_TEXT
+                        } else {
+                            c::NEUTRAL_700
+                        }),
+                    );
+                });
+                ui.add_space(4.0);
+            }
+        }
+        ui.add_space(4.0);
+        if ui
+            .add_sized(
+                [ui.available_width(), 28.0],
+                egui::Button::new("Add reference groups…"),
+            )
+            .clicked()
+        {
             self.add_map_refs();
         }
         shell::hint(
             ui,
-            "Airfields, blocks and entities are stamped at their saved spots, trimmed to the AO plus 10 km. Landscape MCU_Waypoint marks show as nested dots but are not exported.",
+            "Extra groups are stamped at their saved spots, trimmed to the AO plus 10 km. Landscape MCU_Waypoint marks show as nested dots but are not exported.",
             false,
         );
         ui.add_space(4.0);
@@ -3963,7 +4250,7 @@ impl super::GroupGeneratorApp {
             self.record_map_undo(format!("Removed {name}"));
             self.map_refs.remove(i);
         }
-        if self.map_refs.is_empty() {
+        if self.map_refs.is_empty() && self.map_provisions.is_empty() {
             ui.label(RichText::new("No reference groups loaded.").color(c::NEUTRAL_700));
         }
     }
@@ -4328,6 +4615,20 @@ impl super::GroupGeneratorApp {
                 egui::TextureOptions::LINEAR,
             ));
         }
+        if self.aa_tex_east.is_none() {
+            self.aa_tex_east = Some(ctx.load_texture(
+                "eastern_aa",
+                load_side_svg(include_bytes!("../../assets/EasternAA.svg"), true),
+                egui::TextureOptions::LINEAR,
+            ));
+        }
+        if self.aa_tex_nato.is_none() {
+            self.aa_tex_nato = Some(ctx.load_texture(
+                "nato_aa",
+                load_side_svg(include_bytes!("../../assets/NATOAA.svg"), false),
+                egui::TextureOptions::LINEAR,
+            ));
+        }
         if self.map_rx.is_some() {
             let mut disconnected = false;
             while let Some(rx) = self.map_rx.as_ref() {
@@ -4377,9 +4678,104 @@ impl super::GroupGeneratorApp {
         }
     }
 
+    fn map_zoom_max(&mut self) -> f32 {
+        self.ensure_editor_map();
+        if self.editor_map_on { 48.0 } else { 12.0 }
+    }
+
+    fn ensure_editor_map(&mut self) {
+        if self.editor_map_tried {
+            return;
+        }
+        self.editor_map_tried = true;
+        if let Some(map) = crate::editormap::EditorMap::load_default() {
+            crate::editormap::install(map);
+            self.editor_map_on = true;
+        }
+    }
+
+    /// Editor photographs for the close zoom. The stock image stays underneath
+    /// until a tile has been decoded. A few tiles load each frame.
+    fn paint_editor_tiles(&mut self, ui: &mut egui::Ui, widget: Rect) {
+        if self.map_zoom < 8.0 || !self.editor_map_on {
+            return;
+        }
+        let view = self.map_view_uv();
+        let (north, west) = uv_to_world(view.min);
+        let (south, east) = uv_to_world(view.max);
+        let x0 = south.min(north);
+        let x1 = south.max(north);
+        let z0 = west.min(east);
+        let z1 = west.max(east);
+        let tiles = crate::editormap::with_installed(|map| {
+            map.tiles_touching(x0, x1, z0, z1)
+                .into_iter()
+                .map(|tile| {
+                    let bounds = map.tile_bounds(tile);
+                    (tile.row, tile.col, tile.path.clone(), bounds)
+                })
+                .collect::<Vec<_>>()
+        });
+        let Some(tiles) = tiles else {
+            return;
+        };
+        let mut decoded = 0;
+        for (row, col, path, _) in &tiles {
+            let key = (*row, *col);
+            if self.editor_tex.contains_key(&key) || self.editor_miss.contains(&key) {
+                continue;
+            }
+            if decoded >= 3 {
+                ui.ctx().request_repaint();
+                break;
+            }
+            decoded += 1;
+            match image::open(path) {
+                Ok(img) => {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let color = egui::ColorImage::from_rgba_unmultiplied(
+                        [w as usize, h as usize],
+                        rgba.as_raw(),
+                    );
+                    let tex = ui.ctx().load_texture(
+                        format!("editor_tile_{row}_{col}"),
+                        color,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    self.editor_tex.insert(key, tex);
+                }
+                Err(_) => {
+                    self.editor_miss.insert(key);
+                }
+            }
+        }
+        if self.editor_tex.len() > 48 {
+            let live: std::collections::HashSet<(i32, i32)> =
+                tiles.iter().map(|(row, col, _, _)| (*row, *col)).collect();
+            self.editor_tex.retain(|key, _| live.contains(key));
+        }
+        let map_full = map_screen_rect(widget, view);
+        let painter = ui.painter().with_clip_rect(widget);
+        for (row, col, _, (south_x, north_x, west_z, east_z)) in &tiles {
+            let Some(tex) = self.editor_tex.get(&(*row, *col)) else {
+                continue;
+            };
+            let top_left = world_to_pos(map_full, *north_x, *west_z);
+            let bottom_right = world_to_pos(map_full, *south_x, *east_z);
+            painter.image(
+                tex.id(),
+                Rect::from_two_pos(top_left, bottom_right),
+                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+    }
+
     fn bump_map_zoom(&mut self, factor: f32, toward_uv: Option<Pos2>) {
         let old = self.map_zoom;
-        self.map_zoom = (self.map_zoom * factor).clamp(1.0, 12.0);
+        let max_zoom = self.map_zoom_max();
+        self.map_zoom = (self.map_zoom * factor).clamp(1.0, max_zoom);
         if let Some(uv) = toward_uv {
             if old > 1.0 || self.map_zoom > 1.0 {
                 let t = 1.0 - old / self.map_zoom;
@@ -4430,6 +4826,7 @@ impl super::GroupGeneratorApp {
             lo
         };
         ui.put(rect, egui::Image::new((tex.id(), img_size)).uv(view));
+        self.paint_editor_tiles(ui, rect);
 
         let map_rect = map_screen_rect(rect, view);
 
@@ -5218,7 +5615,10 @@ impl super::GroupGeneratorApp {
 
         // 7. Draw Reference Groups
         let place = self.front_aabb.expanded(PLACE_MARGIN);
-        for g in &self.map_refs {
+        for g in self.map_ref_sources() {
+            if provisions::group_has_airfield(&g.entity) {
+                continue;
+            }
             for dot in preview_dots(&g.entity, 2500) {
                 if dot.kind == PreviewKind::Airfield {
                     continue;
@@ -5231,8 +5631,11 @@ impl super::GroupGeneratorApp {
                 painter.circle_filled(world_to_pos(map_rect, dot.x, dot.z), radius, color);
             }
         }
-        for g in &self.map_refs {
-            for dot in preview_dots(&g.entity, 2500) {
+        for slot in &self.airbases {
+            if !super::airfield::airbase_in_area(&slot.root, place) {
+                continue;
+            }
+            for dot in preview_dots(&slot.root, 2500) {
                 if dot.kind != PreviewKind::Airfield {
                     continue;
                 }
@@ -5708,6 +6111,8 @@ impl super::GroupGeneratorApp {
             (false, UnitKind::Infantry) => self.infantry_tex_nato.as_ref(),
             (true, UnitKind::Train) => self.train_tex_east.as_ref(),
             (false, UnitKind::Train) => self.train_tex_nato.as_ref(),
+            (true, UnitKind::AntiAir) => self.aa_tex_east.as_ref(),
+            (false, UnitKind::AntiAir) => self.aa_tex_nato.as_ref(),
         }
     }
 
@@ -5729,6 +6134,7 @@ impl super::GroupGeneratorApp {
             (GroundKind::Artillery, UnitKind::Artillery),
             (GroundKind::Infantry, UnitKind::Infantry),
             (GroundKind::Train, UnitKind::Train),
+            (GroundKind::AntiAir, UnitKind::AntiAir),
         ] {
             for (slot, n) in self.recon_slots.iter().zip(copies.iter()) {
                 if slot.kind != ukind || *n == 0 {
@@ -5742,6 +6148,7 @@ impl super::GroupGeneratorApp {
                             behind: Vec::new(),
                             wp_ahead: Vec::new(),
                             zone_in_m: TRAIN_ZONE_IN_M as f64,
+                            zone_out_m: 0.0,
                         }),
                     }
                 } else {
@@ -5754,6 +6161,7 @@ impl super::GroupGeneratorApp {
                     slot.info.weapon_range_m.or(match gkind {
                         GroundKind::Artillery => Some(ARTY_OBJECTIVE_RADIUS),
                         GroundKind::Armor => Some(crate::weapon_range::UNKNOWN_ARMOR_M),
+                        GroundKind::AntiAir => None,
                         GroundKind::Supply | GroundKind::Train | GroundKind::Infantry => None,
                     })
                 };
@@ -5768,6 +6176,7 @@ impl super::GroupGeneratorApp {
                         range_m,
                         route,
                         wp_ahead,
+                        anchor: None,
                     })
                     .take(*n),
                 );
@@ -5776,11 +6185,11 @@ impl super::GroupGeneratorApp {
         jobs
     }
 
-    fn recon_copy_split(&self) -> (usize, [usize; 5]) {
+    fn recon_copy_split(&self) -> (usize, [usize; 6]) {
         let weights: Vec<u32> = self.recon_slots.iter().map(|s| s.influence).collect();
         let copies = allocate_copies(&weights, self.recon_total as usize);
         let mut ships = 0usize;
-        let mut ground = [0usize; 5];
+        let mut ground = [0usize; 6];
         for (slot, n) in self.recon_slots.iter().zip(copies) {
             match slot.kind {
                 UnitKind::Ship => ships += n,
@@ -5789,6 +6198,7 @@ impl super::GroupGeneratorApp {
                 UnitKind::Artillery => ground[2] += n,
                 UnitKind::Infantry => ground[3] += n,
                 UnitKind::Train => ground[4] += n,
+                UnitKind::AntiAir => ground[5] += n,
             }
         }
         (ships, ground)
@@ -5814,6 +6224,7 @@ impl super::GroupGeneratorApp {
             (GroundKind::Artillery, ground[2]),
             (GroundKind::Infantry, ground[3]),
             (GroundKind::Train, ground[4]),
+            (GroundKind::AntiAir, ground[5]),
         ] {
             if n > 0 {
                 parts.push(if self.recon_strip_randomizer {
@@ -5844,6 +6255,7 @@ impl super::GroupGeneratorApp {
             GroundKind::Artillery => UnitKind::Artillery,
             GroundKind::Infantry => UnitKind::Infantry,
             GroundKind::Train => UnitKind::Train,
+            GroundKind::AntiAir => UnitKind::AntiAir,
         };
         self.unit_tex(eastern, unit)
     }
@@ -6242,12 +6654,18 @@ impl super::GroupGeneratorApp {
         }
         let (ship_n, _) = self.recon_copy_split();
         let ground_jobs = self.recon_ground_jobs();
-        if ship_n == 0 && ground_jobs.is_empty() {
+        let (mut aaa_jobs, rest): (Vec<GroundJob>, Vec<GroundJob>) = ground_jobs
+            .into_iter()
+            .partition(|job| job.kind == GroundKind::AntiAir);
+        let anchors_ready = !self.aaa_anchors(eastern, &[]).is_empty()
+            && !self.recon_slots_of(UnitKind::AntiAir).is_empty();
+        if ship_n == 0 && rest.is_empty() && aaa_jobs.is_empty() && !anchors_ready {
             self.status = Status::Error(
                 "Set influence above 0 on at least one Army Generator template.".into(),
             );
             return;
         }
+        self.ensure_editor_map();
         let objectives = if eastern {
             self.east_objectives.as_slice()
         } else {
@@ -6330,10 +6748,11 @@ impl super::GroupGeneratorApp {
             occupied: &ground_occupied,
         };
 
-        if !ground_jobs.is_empty() {
+        if !rest.is_empty() {
+            let _cover = crate::editormap::CoverGuard::enter();
             match place_ground_jobs(
                 eastern,
-                &ground_jobs,
+                &rest,
                 &raw_base,
                 self.front_aabb,
                 &[],
@@ -6360,8 +6779,7 @@ impl super::GroupGeneratorApp {
                             "{open_n} {side} ground groups facing their hashed objective."
                         ));
                     }
-                    let mut ranges: Vec<f64> =
-                        ground_jobs.iter().filter_map(|j| j.range_m).collect();
+                    let mut ranges: Vec<f64> = rest.iter().filter_map(|j| j.range_m).collect();
                     ranges.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                     ranges.dedup();
                     if !ranges.is_empty() && !objectives.is_empty() {
@@ -6408,11 +6826,181 @@ impl super::GroupGeneratorApp {
             }
         }
 
+        let friendly = self.friendly_ground_spots(eastern);
+        let occupied = self.occupied_unit_xz();
+        let aaa_spots = self.place_aaa_jobs(
+            eastern,
+            &mut aaa_jobs,
+            &friendly,
+            &raw_base,
+            stretch_east,
+            &terrain,
+            seed,
+            &occupied,
+            true,
+            &mut notes,
+            &mut warnings,
+        );
+        if !aaa_spots.is_empty() {
+            let layout = if eastern {
+                &mut self.map_ground_east
+            } else {
+                &mut self.map_ground_nato
+            };
+            if let Some(old) = layout {
+                old.spots.extend(aaa_spots);
+            } else {
+                *layout = Some(MapGroundLayout {
+                    eastern,
+                    spots: aaa_spots,
+                    warnings: Vec::new(),
+                });
+            }
+        }
+
         notes.push("Left-drag to move, right-drag to set heading. Click a WP, then click a road, rail, or dry land to place it.".into());
         self.wp_drag = None;
         self.wp_selected = None;
         self.route_focus = None;
         self.set_place_status(notes, warnings);
+    }
+
+    /// Enemy objectives and enemy strike targets inside the AO. A friendly
+    /// cluster is used only when neither of those exists.
+    fn aaa_anchors(&self, eastern: bool, friendly: &[(f64, f64)]) -> Vec<(f64, f64)> {
+        let area = self.front_aabb;
+        let enemy = if eastern {
+            self.nato_objectives.as_slice()
+        } else {
+            self.east_objectives.as_slice()
+        };
+        let mut raw = Vec::new();
+        for &(x, z) in enemy {
+            if area.contains(x, z) {
+                raw.push((x, z));
+            }
+        }
+        for mission in &self.map_missions {
+            if mission.eastern == eastern {
+                continue;
+            }
+            if area.contains(mission.target_x, mission.target_z) {
+                raw.push((mission.target_x, mission.target_z));
+            }
+        }
+        let anchors = dedupe_points(&raw, 1_500.0);
+        if !anchors.is_empty() {
+            return anchors;
+        }
+        friendly_clusters(friendly)
+    }
+
+    fn friendly_ground_spots(&self, eastern: bool) -> Vec<(f64, f64)> {
+        let mut pts = Vec::new();
+        let layout = if eastern {
+            self.map_ground_east.as_ref()
+        } else {
+            self.map_ground_nato.as_ref()
+        };
+        if let Some(layout) = layout {
+            pts.extend(
+                layout
+                    .spots
+                    .iter()
+                    .filter(|spot| spot.kind != GroundKind::AntiAir)
+                    .map(|spot| (spot.x, spot.z)),
+            );
+        }
+        for army in &self.map_armies {
+            if army.eastern != eastern {
+                continue;
+            }
+            if let Some(layout) = &army.ground {
+                pts.extend(
+                    layout
+                        .spots
+                        .iter()
+                        .filter(|spot| spot.kind != GroundKind::AntiAir)
+                        .map(|spot| (spot.x, spot.z)),
+                );
+            }
+        }
+        pts
+    }
+
+    /// Park anti-air in a clearing around each anchor. `synthesize` adds up to
+    /// six batteries when a template exists and influence is still zero.
+    fn place_aaa_jobs(
+        &self,
+        eastern: bool,
+        jobs: &mut Vec<GroundJob>,
+        friendly: &[(f64, f64)],
+        front_xz: &[(f64, f64)],
+        stretch_east: bool,
+        terrain: &crate::watermap::TerrainMap,
+        seed: u64,
+        occupied: &[(f64, f64)],
+        synthesize: bool,
+        notes: &mut Vec<String>,
+        warnings: &mut Vec<String>,
+    ) -> Vec<GroundSpot> {
+        let anchors = self.aaa_anchors(eastern, friendly);
+        if jobs.is_empty() {
+            if !synthesize
+                || anchors.is_empty()
+                || self.recon_slots_of(UnitKind::AntiAir).is_empty()
+            {
+                return Vec::new();
+            }
+            let n = anchors.len().min(6);
+            *jobs = anchors
+                .iter()
+                .take(n)
+                .map(|&anchor| GroundJob {
+                    kind: GroundKind::AntiAir,
+                    range_m: None,
+                    route: None,
+                    wp_ahead: Vec::new(),
+                    anchor: Some(anchor),
+                })
+                .collect();
+        } else {
+            assign_aaa_anchors(jobs, &anchors);
+        }
+        let opts = PlaceOpts {
+            front_band: Some(FRONT_PLACE_BAND),
+            favor: &[],
+            seed,
+            occupied,
+        };
+        let _cover = crate::editormap::CoverGuard::enter();
+        match place_ground_jobs(
+            eastern,
+            jobs,
+            front_xz,
+            self.front_aabb,
+            &[],
+            stretch_east,
+            terrain,
+            opts,
+        ) {
+            Ok(layout) => {
+                warnings.extend(skip_only_warnings(&layout.warnings));
+                warnings.extend(numbered_ground_issues(&layout.spots));
+                if !layout.spots.is_empty() {
+                    let side = if eastern { "DPRK" } else { "NATO" };
+                    notes.push(format!(
+                        "{} {side} anti-air groups in clearings around enemy objectives, strike targets, or friendly concentrations.",
+                        layout.spots.len()
+                    ));
+                }
+                layout.spots
+            }
+            Err(err) => {
+                warnings.push(err);
+                Vec::new()
+            }
+        }
     }
 
     fn occupied_unit_xz(&self) -> Vec<(f64, f64)> {
@@ -6469,7 +7057,7 @@ impl super::GroupGeneratorApp {
             if self.map_armies.iter().any(|a| a.path == path) {
                 continue;
             }
-            if self.map_refs.iter().any(|g| g.path == path) {
+            if self.map_ref_sources().iter().any(|g| g.path == path) {
                 errors.push(format!(
                     "{} is already a reference group — remove it there first to load it as an army.",
                     path.file_stem().and_then(|s| s.to_str()).unwrap_or("group")
@@ -6625,6 +7213,7 @@ impl super::GroupGeneratorApp {
                     c.range_m.or(match gkind {
                         GroundKind::Artillery => Some(ARTY_OBJECTIVE_RADIUS),
                         GroundKind::Armor => Some(weapon_range::UNKNOWN_ARMOR_M),
+                        GroundKind::AntiAir => None,
                         GroundKind::Supply | GroundKind::Train | GroundKind::Infantry => None,
                     })
                 };
@@ -6638,6 +7227,7 @@ impl super::GroupGeneratorApp {
                     range_m,
                     route,
                     wp_ahead,
+                    anchor: None,
                 })
             })
             .collect();
@@ -6708,7 +7298,12 @@ impl super::GroupGeneratorApp {
             }
         }
 
-        if !ground_jobs.is_empty() {
+        let (mut aaa_jobs, rest): (Vec<GroundJob>, Vec<GroundJob>) = ground_jobs
+            .into_iter()
+            .partition(|job| job.kind == GroundKind::AntiAir);
+        if !rest.is_empty() {
+            self.ensure_editor_map();
+            let _cover = crate::editormap::CoverGuard::enter();
             let opts = PlaceOpts {
                 front_band: Some(FRONT_PLACE_BAND),
                 favor: &objectives,
@@ -6717,7 +7312,7 @@ impl super::GroupGeneratorApp {
             };
             match place_ground_jobs(
                 eastern,
-                &ground_jobs,
+                &rest,
                 &raw_base,
                 self.front_aabb,
                 &[],
@@ -6738,6 +7333,27 @@ impl super::GroupGeneratorApp {
                 }
             }
         }
+
+        let friendly: Vec<(f64, f64)> = placed_ground
+            .iter()
+            .filter(|spot| spot.kind != GroundKind::AntiAir)
+            .map(|spot| (spot.x, spot.z))
+            .collect();
+        occupied.extend(friendly.iter().copied());
+        let aaa_spots = self.place_aaa_jobs(
+            eastern,
+            &mut aaa_jobs,
+            &friendly,
+            &raw_base,
+            stretch_east,
+            terrain,
+            seed,
+            &occupied,
+            false,
+            &mut notes,
+            &mut warnings,
+        );
+        placed_ground.extend(aaa_spots);
 
         if let Some(slot) = self.map_armies.get_mut(idx) {
             slot.ships = if placed_ships.is_empty() {
@@ -6899,6 +7515,7 @@ impl super::GroupGeneratorApp {
             (GroundKind::Artillery, UnitKind::Artillery),
             (GroundKind::Infantry, UnitKind::Infantry),
             (GroundKind::Train, UnitKind::Train),
+            (GroundKind::AntiAir, UnitKind::AntiAir),
         ];
         let mut inputs = Vec::new();
         for (gkind, ukind) in kinds {
@@ -7451,7 +8068,10 @@ impl super::GroupGeneratorApp {
                 StrikeArmNote::None => {}
             }
             clone.set_name(&mission.name);
-            clones.push(clone);
+            match take_strike_missions(clone) {
+                Ok(imported) => clones.extend(imported.groups),
+                Err(entity) => clones.push(entity),
+            }
         }
         let nudged = separate_zone_ins(&mut clones);
         if nudged > 0 {
@@ -7604,7 +8224,7 @@ impl super::GroupGeneratorApp {
                 }
             }
         }
-        for group in &self.map_refs {
+        for group in self.map_ref_sources() {
             let mut marks = Vec::new();
             group.entity.for_each(&mut |e| {
                 let Some((x, z)) = e.pos_xz() else {
@@ -7651,6 +8271,7 @@ impl super::GroupGeneratorApp {
     }
 
     /// Fake-field air starts placed on the map, at the measured ground height.
+    /// They sit in `Airfields`, under DPRK or NATO, with the harvested fields.
     fn stamp_air_starts(&mut self, root: &mut crate::ast::Il2Entity) {
         if self.placed_air_starts.is_empty() {
             return;
@@ -7663,10 +8284,16 @@ impl super::GroupGeneratorApp {
         } else {
             vec![0.0; xs.len()]
         };
-        let group = airstart::combined_group(&self.placed_air_starts, &ys);
         let mut next = root.max_index().saturating_add(1);
-        let (clone, _) = duplicate_template(&group, &mut next);
-        root.children.push(clone);
+        let air_i = ensure_direct_group(root, "Airfields", &mut next);
+        for (i, placed) in self.placed_air_starts.iter().enumerate() {
+            let y = ys.get(i).copied().unwrap_or(0.0);
+            let group = airstart::field_group(&placed.field, placed.x, placed.z, y);
+            let (clone, _) = duplicate_template(&group, &mut next);
+            let side = if placed.field.nato { "NATO" } else { "DPRK" };
+            let side_i = ensure_direct_group(&mut root.children[air_i], side, &mut next);
+            root.children[air_i].children[side_i].children.push(clone);
+        }
     }
 
     pub(super) fn generate_front_file(&mut self) {
@@ -7719,6 +8346,8 @@ impl super::GroupGeneratorApp {
         } else {
             crate::airtask::sidecar_paths(&self.air_plan)
         };
+        let (ref_groups, mut spawn_notes) = self.ref_groups_for_export();
+        let ref_paths: Vec<PathBuf> = ref_groups.iter().map(|g| g.path.clone()).collect();
         let opts = FrontOptions {
             year: self.front_year,
             season: self.front_season,
@@ -7730,7 +8359,7 @@ impl super::GroupGeneratorApp {
             attacks: false,
             naval: false,
             influence: true,
-            ref_groups: self.map_refs.clone(),
+            ref_groups,
             battle_focus: self.front_focus,
             timeline_idx: Some(self.front_t.round() as usize),
             custom_front: if self.custom_front_xz.is_empty() {
@@ -7753,7 +8382,7 @@ impl super::GroupGeneratorApp {
             }
         };
         self.stamp_air_starts(&mut pack.root);
-        let strike_notes = self.stamp_missions(&mut pack.root);
+        let mut strike_notes = self.stamp_missions(&mut pack.root);
         // Decisions 0037 A and 0054: Map AI must not start embedded or
         // standalone Air Tasking cycles.
         if with_air || self.air_plan.is_standalone() {
@@ -7787,7 +8416,7 @@ impl super::GroupGeneratorApp {
                 return;
             }
         };
-        let mut paths: Vec<PathBuf> = self.map_refs.iter().map(|g| g.path.clone()).collect();
+        let mut paths = ref_paths;
         paths.extend(self.recon_slots.iter().map(|s| s.path.clone()));
         paths.extend(self.map_armies.iter().map(|a| a.path.clone()));
         paths.extend(air_sidecars);
@@ -7826,6 +8455,7 @@ impl super::GroupGeneratorApp {
                         .join(", "),
                     pack.clip_preview.replace('\n', " "),
                 ));
+                strike_notes.append(&mut spawn_notes);
                 if !strike_notes.is_empty() {
                     if let Status::Info(lead) = std::mem::replace(&mut self.status, Status::Idle) {
                         self.status = Status::Warn {
@@ -8053,7 +8683,13 @@ impl super::GroupGeneratorApp {
             self.map_fighters = Some(MapFighterLayout { eastern, spots });
         }
         self.fighter_drag = None;
-        self.map_refs = imported.refs;
+        self.reload_map_provisions();
+        self.map_refs = provisions::without_duplicates(imported.refs, &self.map_provisions)
+            .into_iter()
+            .filter(|group| !provisions::group_has_airfield(&group.entity))
+            .collect();
+        let recovered = airstart::read_mission(&entity);
+        self.adopt_imported_air(recovered);
 
         let mut parts = Vec::new();
         if imported.aabb.is_some() {
@@ -8093,6 +8729,17 @@ impl super::GroupGeneratorApp {
         if !self.map_refs.is_empty() {
             parts.push(format!("{} reference group(s)", self.map_refs.len()));
         }
+        if !self.placed_air_starts.is_empty() {
+            let n = self.placed_air_starts.len();
+            parts.push(format!("{n} air start{}", if n == 1 { "" } else { "s" }));
+        }
+        if !self.imported_fields.is_empty() {
+            let n = self.imported_fields.len();
+            parts.push(format!(
+                "{n} airfield aircraft list{}",
+                if n == 1 { "" } else { "s" }
+            ));
+        }
         let extra = if imported.notes.is_empty() {
             String::new()
         } else {
@@ -8123,6 +8770,136 @@ impl super::GroupGeneratorApp {
         };
     }
 
+    /// Automatic provisions first, then groups added by hand. A path counts once.
+    fn map_ref_sources(&self) -> Vec<&MapRefGroup> {
+        let mut seen = std::collections::HashSet::new();
+        self.map_provisions
+            .iter()
+            .chain(self.map_refs.iter())
+            .filter(|g| seen.insert(g.path.as_path()))
+            .collect()
+    }
+
+    /// Hold-short for every harvested airfield, on that field's own taxi graph.
+    /// A group with no graph, or without two runway ends, stays where it is.
+    fn stamp_harvested_ramps(groups: &mut [MapRefGroup]) -> Vec<String> {
+        let mut notes = Vec::new();
+        for group in groups.iter_mut() {
+            if place_ramp_start(&mut group.entity, None).is_ok() {
+                continue;
+            }
+            let name = provisions::airfield_identity(&group.entity, &group.path).key;
+            notes.push(format!("{name} is missing a ramp start"));
+        }
+        notes
+    }
+
+    fn airfield_country(root: &crate::ast::Il2Entity) -> Option<i32> {
+        let mut country = None;
+        root.for_each(&mut |entity| {
+            if country.is_none() && entity.block_type == "Airfield" {
+                country = entity
+                    .property("Country")
+                    .and_then(|value| value.parse().ok());
+            }
+        });
+        country
+    }
+
+    fn reload_map_provisions(&mut self) {
+        let template = PathBuf::from(self.map_template_dir.trim());
+        let landscape = provisions::load_named_groups(&template, provisions::LANDSCAPE_FILES);
+        self.map_provision_missing = landscape.missing;
+        self.map_provision_errors = landscape.errors;
+        self.map_provisions = landscape.groups;
+        self.provisions_loaded_for = format!(
+            "{}\n{}",
+            self.map_template_dir.trim(),
+            self.harvest_db_dir.trim()
+        );
+    }
+
+    /// Landscape from the template folder, plus the airfields on the Airfield
+    /// tab. A reference group that contains an airfield is left out: that tab
+    /// is the only place an airfield is added or removed.
+    fn ref_groups_for_export(&mut self) -> (Vec<MapRefGroup>, Vec<String>) {
+        self.reload_map_provisions();
+        let (airfields, notes) = self.airfields_for_export();
+        let area = self.front_aabb.expanded(PLACE_MARGIN);
+        let mut groups = Vec::new();
+        for src in self.map_provisions.clone() {
+            if !is_landscape_file(&src.path) && provisions::group_has_airfield(&src.entity) {
+                continue;
+            }
+            if crate::frontlines::anchored_outside(&src.entity, area) {
+                continue;
+            }
+            groups.push(src);
+        }
+        groups.extend(airfields);
+        for g in self.map_refs.clone() {
+            if provisions::group_has_airfield(&g.entity) {
+                continue;
+            }
+            if crate::frontlines::anchored_outside(&g.entity, area) {
+                continue;
+            }
+            if groups
+                .iter()
+                .any(|kept| kept.path == g.path || provisions::same_loaded_ref(kept, &g))
+            {
+                continue;
+            }
+            groups.push(g);
+        }
+        (groups, notes)
+    }
+
+    /// Airfields the Airfield tab is listing inside this area, with hold-short
+    /// ramps and any aircraft the user set. Removing one there leaves it out.
+    fn airfields_for_export(&mut self) -> (Vec<MapRefGroup>, Vec<String>) {
+        self.ensure_airbase_list();
+        self.remember_airbase_edits();
+        let area = self.front_aabb.expanded(PLACE_MARGIN);
+        let spawns: Vec<(PathBuf, Vec<crate::airstart::AirStartPlane>, String)> = self
+            .airbases
+            .iter()
+            .filter(|slot| !slot.planes.is_empty())
+            .map(|slot| {
+                (
+                    slot.path.clone(),
+                    slot.planes.clone(),
+                    slot.info.name.clone(),
+                )
+            })
+            .collect();
+        let mut groups: Vec<MapRefGroup> = self
+            .airbases
+            .iter()
+            .filter(|slot| super::airfield::airbase_in_area(&slot.root, area))
+            .map(|slot| MapRefGroup {
+                path: slot.path.clone(),
+                entity: slot.root.clone(),
+            })
+            .collect();
+        self.ramp_start_notes = Self::stamp_harvested_ramps(&mut groups);
+        let mut notes = self.airfield_coalition_notes.clone();
+        notes.extend(self.ramp_start_notes.iter().cloned());
+        for group in &mut groups {
+            let Some((_, planes, name)) = spawns.iter().find(|(path, _, _)| path == &group.path)
+            else {
+                continue;
+            };
+            let country = Self::airfield_country(&group.entity);
+            let source = group.entity.clone();
+            if let Err(err) = place_field_spawn(&mut group.entity, planes, None, country) {
+                notes.push(format!("{name}: field spawn was not written ({err})"));
+                group.entity = source;
+            }
+        }
+        (groups, notes)
+    }
+
     fn add_map_refs(&mut self) {
         let Some(paths) = dialog::FileDialog::new()
             .add_filter("IL-2 Group", &["Group", "group"])
@@ -8133,7 +8910,7 @@ impl super::GroupGeneratorApp {
         let mut added = 0usize;
         let mut errors = Vec::new();
         for path in paths {
-            if self.map_refs.iter().any(|g| g.path == path) {
+            if self.map_ref_sources().iter().any(|g| g.path == path) {
                 continue;
             }
             match std::fs::read_to_string(&path) {
@@ -8214,6 +8991,64 @@ mod tests {
         assert!((xs[0] - 10_000.0).abs() < 1.0, "{xs:?}");
         assert!((xs[1] - 40_000.0).abs() < 1.0, "{xs:?}");
         assert!(exclusive_pack(&[plan_shell("Only", 1_000.0)]).is_err());
+    }
+
+    #[test]
+    fn strike_profiles_export_an_exclusive_activation_group() {
+        let text = include_str!(
+            "../../TemplateExamples/Historical1950/1950_US_F80_HVAR_Strike_4ship.Group"
+        );
+        let first = crate::parser::parse_group_file(text).expect("f80");
+        let mut second = first.clone();
+        second.set_name("Second strike");
+        let pack = exclusive_pack(&[first.clone(), second]).expect("two profiles");
+        assert_eq!(pack.name(), Some("Exclusive Activation"));
+        assert!(pack.children.iter().any(|c| c.name() == Some("NodeGates")));
+
+        let mut loose_a = plan_shell("Loose A", 20_000.0);
+        let mut loose_b = plan_shell("Loose B", 60_000.0);
+        rename_zone_and_end(&mut loose_a, "Zone In 1", "Mission Complete 1");
+        rename_zone_and_end(&mut loose_b, "Zone In 2", "Mission Complete 2");
+        let loose = exclusive_pack(&[loose_a, loose_b]).expect("fallback names");
+        assert_eq!(loose.name(), Some("Exclusive Activation"));
+
+        let mission = |name: &str, root: Il2Entity| super::PlacedMission {
+            name: name.to_string(),
+            eastern: false,
+            root,
+            target_x: 150_000.0,
+            target_z: 160_000.0,
+            start_x: 140_000.0,
+            start_z: 150_000.0,
+            ip_x: 145_000.0,
+            ip_z: 155_000.0,
+            target_label: "Tanks".into(),
+            target_class: None,
+            attacks: Vec::new(),
+        };
+        let mut app = super::super::GroupGeneratorApp::default();
+        app.map_missions = vec![
+            mission("One", first),
+            mission("Two", crate::parser::parse_group_file(text).unwrap()),
+        ];
+        let mut root = Il2Entity::new("Group");
+        let notes = app.stamp_missions(&mut root);
+        assert!(
+            root.children
+                .iter()
+                .any(|c| c.name() == Some("Exclusive Activation")),
+            "{notes:?}"
+        );
+    }
+
+    fn rename_zone_and_end(root: &mut Il2Entity, zone: &str, end: &str) {
+        root.for_each_mut(&mut |entity| {
+            if entity.block_type == "MCU_CheckZone" {
+                entity.set_name(zone);
+            } else if entity.block_type == "MCU_Timer" {
+                entity.set_name(end);
+            }
+        });
     }
 
     fn plan_shell(name: &str, x: f64) -> Il2Entity {
