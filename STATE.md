@@ -3,7 +3,7 @@ Stage: shared
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-11-15: an **Air Tasking quick start** for new mission makers is written (manual section and Help topic, decision 0064) on `claude/air-tasking-quick-start`, committed, not pushed. Before that, 2026-11-07: **v0.8-Alpha is released and sent** (decision 0063). The prerelease is on the fork ([release](https://github.com/Pliskin-Industries/Claude-IL2MissionUtility/releases/tag/v0.8-Alpha), notes from `handoff/release-notes-v0.8-Alpha.md`), and the issue is posted at the user's word as [eszyman/IL2MissionUtility#4](https://github.com/eszyman/IL2MissionUtility/issues/4) (text `handoff/upstream-air-tasking-proposal-draft.md`, after a Codex review that found 5 blockers, all fixed). Waiting for his answer; flight 2N (#3) still pending.
+> Last updated: 2026-11-15: an **Air Tasking quick start** for new mission makers is written (manual section and Help topic, decision 0064) on `claude/air-tasking-quick-start`, PR #61, not merged. Before that, 2026-11-07: **v0.8-Alpha is released and sent** (decision 0063). The prerelease is on the fork ([release](https://github.com/Pliskin-Industries/Claude-IL2MissionUtility/releases/tag/v0.8-Alpha), notes from `handoff/release-notes-v0.8-Alpha.md`), and the issue is posted at the user's word as [eszyman/IL2MissionUtility#4](https://github.com/eszyman/IL2MissionUtility/issues/4) (text `handoff/upstream-air-tasking-proposal-draft.md`, after a Codex review that found 5 blockers, all fixed). Waiting for his answer; flight 2N (#3) still pending.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -20,7 +20,7 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 | Branch | Holds | State |
 |---|---|---|
 | `main` | Everything through PR #60 (`922ff3c`): v0.6.0, upstream v0.7.0 and its commits through `fee0a79` (decision 0062), P14 Air Tasking steps 1a to 12e and all flights through A4 and 2T, version 0.8.0, stage shared, decisions 0001 to 0063 | `origin/main` `922ff3c` |
-| `claude/air-tasking-quick-start` | Air Tasking quick start (`USER_MANUAL.md`, `HelpTopic::AirTaskingQuickStart`, its test), decision 0064, this STATE | committed, not pushed |
+| `claude/air-tasking-quick-start` | Air Tasking quick start (`USER_MANUAL.md`, `HelpTopic::AirTaskingQuickStart`, its test), decision 0064, this STATE | PR #61, not merged |
 
 `upstream/main` is fully merged through `fee0a79` (decision 0062). His `COUNTRY_DPRK` 502 stays 501 here (0042 A); his air starts export under `Airfields` / `DPRK` or `NATO`, and the 2N, A4 and L checks compare frozen files up to that regrouping. The `airtask-fixes` worktree holds this session; older worktrees from earlier sessions are unchecked.
 
