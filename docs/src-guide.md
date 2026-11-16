@@ -467,8 +467,9 @@ projection). **Map mode.** Distinct from `placement::MAP_MIN` (parking).
 Egui code outside `ui.rs`, like `shell.rs` and `theme.rs`. Embeds `USER_MANUAL.md`, splits it
 by `##` heading (`section_for`), and opens a decorated native viewport
 (`show_window`) with a topic combo. `HelpTopic` covers every mode plus
-Trace builds and replay / Language / Import / Troubleshooting. Does not
-touch the AST.
+Air Tasking quick start / Trace builds and replay / Language / Import /
+Troubleshooting. A test checks that every control the quick start names
+still appears in the UI code. Does not touch the AST.
 **All modes.**
 
 ### `locale.rs` — translation sidecars

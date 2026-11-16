@@ -523,7 +523,34 @@ After import, generate again with a different box if you need a tighter AO.
 
 ---
 
+## Air Tasking quick start
+
+One base map with Air Tasking, from an empty Map tab to a mission you can host. The defaults make a good first mission. The next topic, **Air Tasking**, explains every setting.
+
+1. **Pick the date and the area.** Open **Map** (**Ctrl 6**). On the **Period** tab, set the year, season and **Front date**. With **Select AO / move units** (key **1**), drag a box over the part of the front you want. The date also decides which sorties you can use.
+2. **Mark the targets.** Place objectives with **DPRK objective** (key **5**) and **NATO objective** (key **6**), or draw an **Attack arrow** (key **4**). Each one becomes an **area**. A DPRK objective is where DPRK sorties fly; NATO players who fly into its area call them up. A NATO objective works the other way round.
+3. **Give players a place to start.** Open **Airfield** (**Ctrl 5**). Select an airbase and set its **Field spawn** aircraft, or click **Add air start**. Then, on Map's **Forces** tab, under **Air starts**, click **Place** and click the map. These spawns put players on the countries Air Tasking watches: 601 (NATO) and 501 (DPRK).
+4. **Fill the pool.** Open **Air Tasking** (**Ctrl 7**) and click **Auto-fill from objectives**. It adds every valid sortie for each objective and arrow, on both sides. To add one by hand, pick a library sortie and its target, then click **Add to pool**.
+5. **Check the pool rows.** Each row has an on/off switch, a **Weight** (how often the clock picks it, default 5), a mode and **Runs** (how many times it can fly, default 3). New rows start on **Clock**, whose first slot is at 10 min. Set a row to **Zone** or **Both** to let it start a few minutes after a player arrives. Switch off rows you do not want.
+6. **Check the right panel.** The defaults:
+  - **Budget**: at most 2 sorties in the air per side.
+  - **Threshold**, **Players** 1: one enemy player inside an area turns it HOT. Only a HOT area gets sorties.
+  - **Player count**, **Count radius** 50 km: a sortie on station goes home when no enemy player is left in this circle.
+7. **Look at the plan on the map.** On Map's **Air** tab, **Show** draws the threshold rings, count circles, spawn points and approach lines. **Timeline** shows each side's clock slots. Keep every player spawn outside the count circles: Generate refuses a Map air start inside one. Move the spawn, or lower **Count radius**.
+8. **Generate.** On the Air Tasking tab, tick **Include in base map** (under **Output**). On Map, click **Generate Base Map** (**Ctrl G**). It stays disabled until the header says **Ready**; until then, click **to do** in the header to see what is left. Generate writes `Korea_BaseMap_YYYY-MM-DD.Group` and its language files.
+9. **Build the mission.** In the mission editor, open the Korea landscape for the season and year shown in Map's header. Import the `.Group` (File › Import From File) with its language files next to it, and save. The base map is already at its real position, so do not move it.
+10. **Fly it.** Host the mission and fly into an enemy objective's area. About a minute later the area turns HOT. A **Zone** row may then start a sortie at you; a **Clock** row waits for the next slot. Fly out, and the sorties on station go home.
+
+Tips:
+- Generate in the same session as steps 1 to 7. **Load base map…** does not bring back the objectives or the pool.
+- Generate checks only the Map's air starts against the count circles. Field spawns and spawns added in the mission editor are not checked, so keep them outside the circles too.
+- To find out why a sortie did or did not start, tick **Trace build** before you generate. See **Trace builds and replay**.
+
+---
+
 ## Air Tasking
+
+New to Air Tasking? Start with **Air Tasking quick start** above (also in Help).
 
 Air Tasking adds AI sorties that fly against players during a multiplayer mission. Each sortie is a copy of a library template, parked and switched off until something starts it. A sortie starts only over an area where a player of the other side is flying, and only while that side has room in its budget.
 
