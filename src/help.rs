@@ -6,8 +6,9 @@
 //!
 //! ## Public API
 //! * `MANUAL` — the raw markdown
-//! * `enum HelpTopic` — Overview, Keyboard shortcuts, each mode, Trace builds
-//!   and replay, Language, Import, Troubleshooting (`title`, `ALL`)
+//! * `enum HelpTopic` — Overview, Keyboard shortcuts, each mode, Air Tasking
+//!   quick start, Trace builds and replay, Language, Import, Troubleshooting
+//!   (`title`, `ALL`)
 //! * `fn show_window` — immediate viewport; no-op while `open` is false;
 //!   Esc or the window's close button closes it
 //! * `fn section_for` — markdown slice for a topic
@@ -30,6 +31,7 @@ pub enum HelpTopic {
     Recon,
     Airfield,
     Front,
+    AirTaskingQuickStart,
     AirTasking,
     TraceReplay,
     Language,
@@ -38,7 +40,7 @@ pub enum HelpTopic {
 }
 
 impl HelpTopic {
-    pub const ALL: [HelpTopic; 13] = [
+    pub const ALL: [HelpTopic; 14] = [
         HelpTopic::Overview,
         HelpTopic::Shortcuts,
         HelpTopic::Template,
@@ -47,6 +49,7 @@ impl HelpTopic {
         HelpTopic::Exclusive,
         HelpTopic::Airfield,
         HelpTopic::Front,
+        HelpTopic::AirTaskingQuickStart,
         HelpTopic::AirTasking,
         HelpTopic::TraceReplay,
         HelpTopic::Language,
@@ -64,6 +67,7 @@ impl HelpTopic {
             HelpTopic::Recon => "Army Generator",
             HelpTopic::Airfield => "Airfield",
             HelpTopic::Front => "Map",
+            HelpTopic::AirTaskingQuickStart => "Air Tasking quick start",
             HelpTopic::AirTasking => "Air Tasking",
             HelpTopic::TraceReplay => "Trace builds and replay",
             HelpTopic::Language => "Language files",
@@ -545,5 +549,67 @@ mod tests {
             );
         }
         assert!(!section_for(HelpTopic::Troubleshooting).contains("Trace build"));
+    }
+
+    #[test]
+    fn air_tasking_quick_start_names_real_controls() {
+        // Each control the quick start names in bold must still be in the UI
+        // code, so a renamed button fails here rather than misleading a reader.
+        let ui_code = [
+            include_str!("ui.rs"),
+            include_str!("ui/air.rs"),
+            include_str!("ui/airfield.rs"),
+            include_str!("ui/map.rs"),
+            include_str!("shell.rs"),
+        ]
+        .concat();
+        let s = section_for(HelpTopic::AirTaskingQuickStart);
+        for label in [
+            "Period",
+            "Front date",
+            "Select AO / move units",
+            "DPRK objective",
+            "NATO objective",
+            "Attack arrow",
+            "Field spawn",
+            "Add air start",
+            "Forces",
+            "Air starts",
+            "Place",
+            "Auto-fill from objectives",
+            "Add to pool",
+            "Weight",
+            "Runs",
+            "Clock",
+            "Zone",
+            "Both",
+            "Budget",
+            "Threshold",
+            "Players",
+            "Player count",
+            "Count radius",
+            "Show",
+            "Timeline",
+            "Include in base map",
+            "Output",
+            "Generate Base Map",
+            "Ready",
+            "to do",
+            "Load base map…",
+            "Trace build",
+        ] {
+            assert!(
+                s.contains(&format!("**{label}**")),
+                "Air Tasking quick start misses **{label}**"
+            );
+            assert!(
+                ui_code.contains(label),
+                "Air Tasking quick start names {label:?}, which the UI no longer shows"
+            );
+        }
+        assert!(
+            section_for(HelpTopic::AirTasking).contains("**Air Tasking quick start**"),
+            "the Air Tasking topic should point to the quick start"
+        );
     }
 }

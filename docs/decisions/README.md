@@ -99,5 +99,6 @@ What this makes easier, harder or necessary.
 | [0061](0061-solo-checks-then-alpha.md) | Flight 2N waits; solo flights A4 (Yak copy, DPRK-side extension) and 2T (quiet roll rate) next; then an alpha whose trace-built operations stand in for 2N | Accepted |
 | [0062](0062-merge-upstream-571504a-fee0a79.md) | Merge upstream `571504a` and `fee0a79` before the alpha; DPRK stays 501; their air-start regrouping changes Map Generate's output, and the 2N, A4 and L checks compare up to it | Accepted |
 | [0063](0063-send-alpha-and-proposal-to-eszyman.md) | Send eszyman a v0.8-Alpha build and the Air Tasking proposal now, in one issue; tag and post at the user's word | Accepted |
+| [0064](0064-air-tasking-quick-start.md) | An Air Tasking quick start for new mission makers in the manual, also a Help topic; a test keeps its control names in step with the UI | Accepted |
 
 **P14 Air Tasking decisions U1 to U24** are kept in `handoff/P14-air-tasking.md` §2.1 and are not repeated here. New P14 decisions go in this folder.

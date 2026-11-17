@@ -3,7 +3,7 @@ Stage: shared
 # STATE — IL-2 Mission Utility (Pliskin-Industries fork)
 
 > Read this first. It is **overwritten** at the end of every session and stays one page.
-> Last updated: 2026-11-07: **v0.8-Alpha is released and sent** (decision 0063). The prerelease is on the fork ([release](https://github.com/Pliskin-Industries/Claude-IL2MissionUtility/releases/tag/v0.8-Alpha), notes from `handoff/release-notes-v0.8-Alpha.md`), and the issue is posted at the user's word as [eszyman/IL2MissionUtility#4](https://github.com/eszyman/IL2MissionUtility/issues/4) (text `handoff/upstream-air-tasking-proposal-draft.md`, after a Codex review that found 5 blockers, all fixed). Waiting for his answer; flight 2N (#3) still pending.
+> Last updated: 2026-11-15: an **Air Tasking quick start** for new mission makers is written (manual section and Help topic, decision 0064) on `claude/air-tasking-quick-start`, PR #61, not merged. Before that, 2026-11-07: **v0.8-Alpha is released and sent** (decision 0063). The prerelease is on the fork ([release](https://github.com/Pliskin-Industries/Claude-IL2MissionUtility/releases/tag/v0.8-Alpha), notes from `handoff/release-notes-v0.8-Alpha.md`), and the issue is posted at the user's word as [eszyman/IL2MissionUtility#4](https://github.com/eszyman/IL2MissionUtility/issues/4) (text `handoff/upstream-air-tasking-proposal-draft.md`, after a Codex review that found 5 blockers, all fixed). Waiting for his answer; flight 2N (#3) still pending.
 > Rules for keeping it current: `CLAUDE.md`. History: `handoff/archive/` and git log.
 
 ## What this is
@@ -19,12 +19,12 @@ A Windows desktop tool (Rust, egui) that builds IL-2 Great Battles **Korea** mis
 
 | Branch | Holds | State |
 |---|---|---|
-| `main` | Everything through PR #57 (`9bab63b`): v0.6.0, upstream v0.7.0 and its commits through `fee0a79` (decision 0062), P14 Air Tasking steps 1a to 12e and all flights through A4 and 2T, version 0.8.0, stage shared, decisions 0001 to 0063 | `origin/main` `9bab63b` |
-| `claude/state-after-pr57` | This STATE refresh | PR, not merged |
+| `main` | Everything through PR #60 (`922ff3c`): v0.6.0, upstream v0.7.0 and its commits through `fee0a79` (decision 0062), P14 Air Tasking steps 1a to 12e and all flights through A4 and 2T, version 0.8.0, stage shared, decisions 0001 to 0063 | `origin/main` `922ff3c` |
+| `claude/air-tasking-quick-start` | Air Tasking quick start (`USER_MANUAL.md`, `HelpTopic::AirTaskingQuickStart`, its test), decision 0064, this STATE | PR #61, not merged |
 
 `upstream/main` is fully merged through `fee0a79` (decision 0062). His `COUNTRY_DPRK` 502 stays 501 here (0042 A); his air starts export under `Airfields` / `DPRK` or `NATO`, and the 2N, A4 and L checks compare frozen files up to that regrouping. The `airtask-fixes` worktree holds this session; older worktrees from earlier sessions are unchecked.
 
-Last recorded test run: **1167 passed, 0 failed, 45 ignored** (`cargo test --offline`, 2026-11-06) on `claude/v0.8-alpha` (now `main`). Clippy 314 (306 before the upstream merge; the 8 new are in upstream code). The release build starts and its Map, Air Tasking and Airfield tabs draw (checked on screen 2026-11-06). Record each new run on this line.
+Last recorded test run: **1168 passed, 0 failed, 45 ignored** (`cargo test --offline`, 2026-11-15) on `claude/air-tasking-quick-start` (main plus the quick start and its test); release build finished. Clippy 314, unchanged (306 before the upstream merge; the 8 new are in upstream code). The release build starts and its Map, Air Tasking and Airfield tabs draw (checked on screen 2026-11-06). Record each new run on this line.
 
 ## P14 Air Tasking ("Wing Commander")
 
@@ -51,7 +51,7 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
   - A4 (2026-11-06, one NATO player, logs `real_61`, run 1 `real_63`): **a Yak copy** and **a DPRK-side extension** (EXTEND + DONE HUB at ON STATION + 600.00); a copy ends when its last player is killed inside the circle (run 1). 2T (no pilot, `real_62`): **28 of 120 slots quiet** (20 % expected, range 15 to 33); `JITTER 1` passed 21 of 120 (17.5 % for 27 %, 2.3 sd low; a second 2T run would tell chance from bias).
   - Also unseen: a player who lands inside an area (0040: no change needed).
 - **Formations:** AI losses in flights 2C to 2I were wingmen crossing their leader, a game bug (0021). Workarounds: Safe density (0019), Pairs at Loose (0020 A) except a Cover flight (0022 A2). Flight L lost one F-80 of a 4-ship Wedge at Safe to the steady-turn crossing; no formation setting removes that kind, so the user decided (2026-10-31) to change nothing and fly no probe. It waits for a game fix.
-- **Built: step 10** (docs, PR #47): the Air Tasking manual, a Help topic "Trace builds and replay", `docs/src-guide.md` for every file. The manual covers step 12; its UNVERIFIED line lists the real-host timings, the 20 % quiet roll, and everything with two or more human players.
+- **Built: step 10** (docs, PR #47): the Air Tasking manual, a Help topic "Trace builds and replay", `docs/src-guide.md` for every file. **Quick start** (0064): ten steps from an empty Map tab to a hosted mission, in the manual and as a Help topic; a test checks its control names against the UI code. The manual covers step 12; its UNVERIFIED line lists the real-host timings, the 20 % quiet roll, and everything with two or more human players.
 - **Remaining:** 12f, flight 2N, built (run sheet `handoff/sessions/2026-11-02-p14-flight-2n.md`, decision 0059): up to four pilots on eszyman's server, **pending, no date** (if it has not flown when A4 and 2T are read, the alpha goes live and trace-built operations stand in for it). Two areas 85 km apart: a DPRK pair over NATO area A, a NATO pair over DPRK area B, the same cues for both. Missions in `C:\Machine Intelligence\P14 Flight 2N\mission\` (trace build to fly, clean build to share); both load-tested on this PC on 2026-11-03 (run sheet, Files). Zip of both plus the run sheet: `C:\Machine Intelligence\P14 Flight 2N\P14_Flight_2N_20261102.zip`. Step 11 item 5 is measured on his server in the same session. Upstream integration (0026: Template Builder's Strike/CAP as sorties, his target types) waits for eszyman's answer to the proposal.
 
 ## Waiting on the user
@@ -69,13 +69,15 @@ Plan: `handoff/P14-air-tasking.md` (§8 steps, §10 build order, §2.1 user deci
 3. eszyman's answer to the issue decides the integration work (0028: his Strike and CAP as Air Tasking sorties, his target types).
 4. To build (decision 0060): a plan check that warns when a map has both Map missions under Exclusive Activation and Air Tasking.
 5. Optional: fly 2T again (same frozen files, a new log folder) to tell whether JITTER 1's low rate is chance.
+6. **Field spawns are not checked against the count circles** (found writing 0064). Since the upstream merge (0062) airbases come from the Airfield tab (`airfields_for_export` in `src/ui/map.rs`), not from `map_refs`, so `air_player_spawns` in `src/ui/air.rs` never sees them; decision 0051 meant player airfields to be checked. A field spawn inside a circle goes uncounted. Needs the user's word to fix (Generate would refuse more maps).
+7. The Map section of the manual still describes an **Editor map** label (the recommended landscape) that the app no longer shows.
 
 ## Traps
 
 - **Send nothing to the upstream author** (`eszyman/IL2MissionUtility`: issues, comments, files, patches) unless the user says so for that send. On 2026-11-03 the user asked Claude to post flight 2N (issue #3); that covers only that post. The v0.8-Alpha issue (#4, 2026-11-07) was posted at the user's word; each reply there needs the user's word too. Pulling and merging his commits is fine. `gh` here may default to upstream: always pass `--repo Pliskin-Industries/Claude-IL2MissionUtility`.
 - **Astra writes `STATE.md` and decision records when not told otherwise:** say in every brief that Claude owns `STATE.md`. The review-fixes worktree still holds an uncommitted Astra rewrite of `STATE.md`; discard it (a hook stops Claude from doing so).
 - **IL-2 launcher:** it needs `s3.il2korea.com` (a CDN). On 2026-11-01 that host first had no IPv4 address, then failed SSL, and worked again a few hours later; the game cannot start without the launcher. Retry later; do not change this PC's DNS.
-- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0063. Next free: **0064**.
+- **Decision numbers:** sessions write records in parallel. Before writing one, check `main` **and** every open branch (`git ls-tree --name-only <branch> docs/decisions/`). Taken: 0001 to 0064. Next free: **0065**.
 - Before generating any probe or mission file, read `docs/il2-loader-and-log-facts.md`. Each item there cost a flight attempt.
 - **Editor saves:** the Mission Editor cuts Group names to 31 characters, and the host loads a `.msnbin` that sits next to the `.Mission` (L).
 - **Timers:** switching off a running timer pauses it; switching it on resumes it (2K). Stop a timer only through a D11 relay (0044).
